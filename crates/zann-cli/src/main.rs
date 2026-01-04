@@ -15,9 +15,7 @@ use crate::modules::auth::{handle_login_command, handle_logout};
 use crate::modules::system::http::fetch_system_info;
 use crate::modules::system::CommandContext;
 use crate::modules::system::{handle_config_command, load_config, save_config};
-use crate::modules::system::{
-    handle_generate_command, handle_run_command, handle_server_command, handle_types_command,
-};
+use crate::modules::system::{handle_run_command, handle_server_command, handle_types_command};
 use tracing_subscriber::EnvFilter;
 
 pub(crate) const DEFAULT_ADDR: &str = "http://127.0.0.1:8080";
@@ -87,9 +85,6 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Types(_args) => {
             handle_types_command();
-        }
-        Command::Generate(args) => {
-            handle_generate_command(args)?;
         }
         command => {
             let context_name = context_arg.or_else(|| config.current_context.clone());

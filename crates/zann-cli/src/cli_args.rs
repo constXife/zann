@@ -48,7 +48,6 @@ pub enum Command {
     Config(ConfigArgs),
     Login(LoginArgs),
     Logout(LogoutArgs),
-    Generate(GenerateArgs),
     Rotate(RotateArgs),
     Get(GetArgs),
 }

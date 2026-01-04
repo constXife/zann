@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use rand::seq::SliceRandom;
 use reqwest::Method;
 use serde::Deserialize;
 use tracing::{debug, info};
@@ -117,71 +116,6 @@ pub(crate) async fn fetch_system_info(
 ) -> anyhow::Result<crate::modules::system::SystemInfoResponse> {
     let url = format!("{}/v1/system/info", addr.trim_end_matches('/'));
     fetch_json(client, &url).await
-}
-
-pub(crate) fn generate_password(policy: Option<&str>) -> anyhow::Result<String> {
-    let policy = policy.unwrap_or("default");
-    let mut rng = rand::thread_rng();
-    let password = match policy {
-        "default" => {
-            let length = 24;
-            let upper = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
-            let lower = b"abcdefghijkmnopqrstuvwxyz";
-            let digits = b"23456789";
-            let symbols = b"!@#$%^&*_-+=?";
-            let mut chars = Vec::with_capacity(length);
-            chars.push(
-                *upper
-                    .choose(&mut rng)
-                    .ok_or_else(|| anyhow::anyhow!("invalid policy"))? as char,
-            );
-            chars.push(
-                *lower
-                    .choose(&mut rng)
-                    .ok_or_else(|| anyhow::anyhow!("invalid policy"))? as char,
-            );
-            chars.push(
-                *digits
-                    .choose(&mut rng)
-                    .ok_or_else(|| anyhow::anyhow!("invalid policy"))? as char,
-            );
-            chars.push(
-                *symbols
-                    .choose(&mut rng)
-                    .ok_or_else(|| anyhow::anyhow!("invalid policy"))? as char,
-            );
-            let mut all =
-                Vec::with_capacity(upper.len() + lower.len() + digits.len() + symbols.len());
-            all.extend_from_slice(upper);
-            all.extend_from_slice(lower);
-            all.extend_from_slice(digits);
-            all.extend_from_slice(symbols);
-            for _ in chars.len()..length {
-                chars.push(
-                    *all.choose(&mut rng)
-                        .ok_or_else(|| anyhow::anyhow!("invalid policy"))?
-                        as char,
-                );
-            }
-            chars.shuffle(&mut rng);
-            chars.into_iter().collect()
-        }
-        "alnum" => {
-            let length = 24;
-            let charset = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-            let mut chars = Vec::with_capacity(length);
-            for _ in 0..length {
-                let ch = *charset
-                    .choose(&mut rng)
-                    .ok_or_else(|| anyhow::anyhow!("invalid policy"))?
-                    as char;
-                chars.push(ch);
-            }
-            chars.into_iter().collect()
-        }
-        _ => return Err(anyhow::anyhow!("invalid policy")),
-    };
-    Ok(password)
 }
 
 pub(crate) fn parse_rfc3339(value: &str) -> Option<DateTime<Utc>> {

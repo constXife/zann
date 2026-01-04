@@ -92,20 +92,3 @@ pub struct RemoveTokenArgs {
     #[arg(long)]
     pub context: Option<String>,
 }
-
-#[derive(Args)]
-pub struct GenerateArgs {
-    #[command(subcommand)]
-    pub command: GenerateCommand,
-}
-
-#[derive(Subcommand)]
-pub enum GenerateCommand {
-    Password(GeneratePasswordArgs),
-}
-
-#[derive(Args)]
-pub struct GeneratePasswordArgs {
-    #[arg(long)]
-    pub policy: Option<String>,
-}

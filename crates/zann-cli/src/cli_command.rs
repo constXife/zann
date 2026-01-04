@@ -36,7 +36,7 @@ pub(crate) async fn handle_command(
         Command::Item(args) => handle_item(args, ctx).await?,
         Command::Server(_) | Command::Run(_) => {}
         Command::Types(_) => {}
-        Command::Config(_) | Command::Login(_) | Command::Logout(_) | Command::Generate(_) => {
+        Command::Config(_) | Command::Login(_) | Command::Logout(_) => {
             unreachable!()
         }
     }

@@ -1,5 +1,3 @@
-use std::io::{self, Write};
-
 use crate::cli_args::*;
 use crate::modules::auth::{
     exchange_service_account_token, load_service_token, verify_server_fingerprint,
@@ -8,7 +6,7 @@ use crate::modules::shared::{
     fetch_shared_item, flatten_payload, is_valid_env_key, resolve_path_for_context,
     resolve_shared_item_id,
 };
-use crate::modules::system::http::{fetch_system_info, generate_password};
+use crate::modules::system::http::fetch_system_info;
 use crate::modules::system::resolve_addr;
 use crate::modules::system::CliConfig;
 use crate::{DEFAULT_ADDR, SERVICE_ACCOUNT_PREFIX};
@@ -126,15 +124,4 @@ pub(crate) fn handle_types_command() {
     println!("identity   Personal information");
     println!("api        API keys and tokens");
     println!("kv         Generic key/value payload");
-}
-
-pub(crate) fn handle_generate_command(args: GenerateArgs) -> anyhow::Result<()> {
-    match args.command {
-        GenerateCommand::Password(args) => {
-            let password = generate_password(args.policy.as_deref())?;
-            print!("{password}");
-            io::stdout().flush()?;
-        }
-    }
-    Ok(())
 }
