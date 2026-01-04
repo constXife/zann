@@ -31,6 +31,7 @@ jobs:
       TEST_DATABASE_URL: postgres://zann:zann@127.0.0.1:5432/zann
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: /home/runner/.cache/sccache
+      SCCACHE_LOG: info
     services:
       postgres:
         image: docker.io/library/postgres:16
