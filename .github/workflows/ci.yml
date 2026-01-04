@@ -83,6 +83,32 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Cargo deny
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses
+
+  licenses-js:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+      - name: Install JS deps
+        working-directory: apps/desktop
+        run: bun install --frozen-lockfile
+      - name: Check JS licenses
+        working-directory: apps/desktop
+        run: bunx license-checker --production --summary --onlyAllow "MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,Unicode-DFS-2016,Unlicense,CC0-1.0,0BSD,MPL-2.0"
+
   docker:
     runs-on: ubuntu-latest
     if: github.event_name == 'push'

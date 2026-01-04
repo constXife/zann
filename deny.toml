@@ -1,0 +1,18 @@
+[advisories]
+version = 2
+vulnerability = "deny"
+
+[licenses]
+version = 2
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-DFS-2016",
+  "Unlicense",
+  "CC0-1.0",
+  "0BSD",
+  "MPL-2.0",
+]
