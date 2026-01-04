@@ -1,0 +1,63 @@
+name: Bug report
+description: Report a defect or regression
+title: "[bug] "
+labels: ["type/bug"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - desktop
+        - cli
+        - server
+        - core
+        - db
+        - keystore
+        - ci
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What is broken and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide minimal, repeatable steps.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit SHA
+      description: Include the commit SHA or release version.
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant logs or screenshots (if any).
+    validations:
+      required: false

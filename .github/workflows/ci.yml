@@ -9,7 +9,52 @@ permissions:
   actions: write
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.filter.outputs.docs }}
+      rust: ${{ steps.filter.outputs.rust }}
+      server: ${{ steps.filter.outputs.server }}
+      docker: ${{ steps.filter.outputs.docker }}
+      js: ${{ steps.filter.outputs.js }}
+      ci: ${{ steps.filter.outputs.ci }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Detect changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            docs:
+              - '**/*.md'
+              - '.github/pull_request_template.md'
+              - '.github/ISSUE_TEMPLATE/**'
+            rust:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'deny.toml'
+              - 'rust-toolchain.toml'
+            server:
+              - 'crates/zann-server/**'
+              - 'config/**'
+              - 'compose.yaml'
+            docker:
+              - 'crates/zann-server/Dockerfile'
+              - '.dockerignore'
+              - 'compose.yaml'
+            js:
+              - 'apps/desktop/**'
+              - 'bun.lockb'
+            ci:
+              - '.github/workflows/**'
+
   fmt:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,6 +69,8 @@ jobs:
         run: cargo fmt --check
 
   test:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     env:
       ZANN_CONFIG_PATH: config/ci.yaml
@@ -74,6 +121,8 @@ jobs:
         run: sccache --show-stats
 
   audit:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -84,6 +133,8 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
   licenses:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -94,6 +145,8 @@ jobs:
           command: check licenses
 
   licenses-js:
+    needs: changes
+    if: needs.changes.outputs.js == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -111,7 +164,8 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && (needs.changes.outputs.server == 'true' || needs.changes.outputs.docker == 'true' || needs.changes.outputs.ci == 'true')
+    needs: changes
     env:
       DOCKERHUB_HOST: docker.io
       DOCKER_IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/zann-server
