@@ -32,6 +32,7 @@ jobs:
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: /home/runner/.cache/sccache
       SCCACHE_LOG: debug
+      CARGO_INCREMENTAL: "0"
     services:
       postgres:
         image: docker.io/library/postgres:16
