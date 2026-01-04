@@ -18,7 +18,7 @@ use crate::modules::system::{handle_config_command, load_config, save_config};
 use crate::modules::system::{handle_run_command, handle_server_command, handle_types_command};
 use tracing_subscriber::EnvFilter;
 
-pub(crate) const DEFAULT_ADDR: &str = "http://127.0.0.1:8080";
+pub(crate) const DEFAULT_ADDR: &str = "https://127.0.0.1:8080";
 pub(crate) const REFRESH_SKEW_SECONDS: i64 = 30;
 pub(crate) const TOKEN_SESSION: &str = "session";
 pub(crate) const TOKEN_OIDC: &str = "oidc";
@@ -146,6 +146,7 @@ async fn main() -> anyhow::Result<()> {
             let mut ctx = CommandContext {
                 client: &client,
                 addr: &addr,
+                allow_insecure: cli.insecure,
                 access_token,
                 context_name,
                 token_name,

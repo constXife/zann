@@ -50,6 +50,7 @@ pub struct SystemInfoResponse {
 pub struct CommandContext<'a> {
     pub client: &'a reqwest::Client,
     pub addr: &'a str,
+    pub allow_insecure: bool,
     pub access_token: String,
     pub context_name: Option<String>,
     pub token_name: Option<String>,

@@ -52,6 +52,9 @@ pub(crate) async fn send_request_once(
     url: &str,
     payload: Option<serde_json::Value>,
 ) -> anyhow::Result<reqwest::Response> {
+    if url.starts_with("http://") && !ctx.allow_insecure {
+        anyhow::bail!("refusing to use http:// without --insecure");
+    }
     let headers = auth_headers(&ctx.access_token)?;
     let method_clone = method.clone();
     let builder = ctx.client.request(method, url).headers(headers);

@@ -149,6 +149,7 @@ mod tests {
         crate::modules::system::CommandContext {
             client,
             addr,
+            allow_insecure: true,
             access_token: "token".to_string(),
             context_name: None,
             token_name: None,
