@@ -47,6 +47,7 @@ pub fn ensure_context<'a>(config: &'a mut CliConfig, name: &str, addr: &str) -> 
         .or_insert_with(|| CliContext {
             addr: addr.to_string(),
             needs_salt_update: false,
+            server_id: None,
             server_fingerprint: None,
             expected_master_key_fp: None,
             tokens: std::collections::HashMap::new(),

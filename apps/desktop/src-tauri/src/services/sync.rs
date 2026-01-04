@@ -83,7 +83,12 @@ pub async fn remote_sync(
     .await?;
     save_config(&state.root, &config).map_err(|err| err.to_string())?;
 
-    let system_info = fetch_system_info(&client, &addr).await.ok();
+    let system_info = match fetch_system_info(&client, &addr).await {
+        Ok(info) => Some(info),
+        Err(err) => {
+            return Ok(ApiResponse::err("system_info_failed", &err));
+        }
+    };
     let storage_repo = LocalStorageRepo::new(&state.pool);
     let existing_storage = storage_repo
         .get(storage_uuid)

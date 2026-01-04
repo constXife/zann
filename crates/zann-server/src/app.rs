@@ -9,6 +9,7 @@ use crate::domains::auth::core::oidc::OidcJwksCache;
 use crate::domains::secrets::policies::PasswordPolicy;
 use crate::infra::usage::UsageTracker;
 use std::sync::Arc;
+use ed25519_dalek::SigningKey;
 use zann_core::crypto::SecretKey;
 use zann_core::SecurityProfileRegistry;
 use zann_db::PgPool;
@@ -20,6 +21,7 @@ pub struct AppState {
     pub password_pepper: String,
     pub token_pepper: String,
     pub server_master_key: Option<Arc<SecretKey>>,
+    pub identity_key: Arc<SigningKey>,
     pub access_token_ttl_seconds: i64,
     pub refresh_token_ttl_seconds: i64,
     pub argon2_semaphore: Arc<Semaphore>,

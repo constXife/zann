@@ -10,3 +10,17 @@ pub fn storage_name_from_url(url: &str) -> String {
         .and_then(|u| u.host_str().map(|h| h.to_string()))
         .unwrap_or_else(|| url.to_string())
 }
+
+pub fn context_name_from_url(url: &str) -> String {
+    let Ok(parsed) = reqwest::Url::parse(url) else {
+        return url.to_string();
+    };
+    let Some(host) = parsed.host_str() else {
+        return url.to_string();
+    };
+    let mut value = format!("{}://{}", parsed.scheme(), host);
+    if let Some(port) = parsed.port() {
+        value.push_str(&format!(":{port}"));
+    }
+    value
+}

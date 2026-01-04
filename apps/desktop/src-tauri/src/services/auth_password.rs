@@ -5,11 +5,12 @@ use uuid::Uuid;
 use crate::constants::TOKEN_SESSION;
 use crate::infra::remote::{fetch_prelogin, fetch_system_info};
 use crate::services::auth::{
-    apply_login_context, empty_oidc_config, empty_oidc_discovery, fingerprint_change_for_context,
-    insert_pending_login,
+    apply_login_context, context_name_for_server_id, empty_oidc_config, empty_oidc_discovery,
+    fingerprint_change_for_context, insert_pending_login,
 };
 use crate::state::{AppState, PendingLogin, PendingLoginResult};
 use crate::types::ApiResponse;
+use crate::util::context_name_from_url;
 
 #[derive(Serialize)]
 pub struct PasswordAuthResponse {
@@ -108,6 +109,10 @@ pub(crate) async fn password_login(
     password: String,
     state: &State<'_, AppState>,
 ) -> Result<ApiResponse<PasswordAuthResponse>, String> {
+    println!(
+        "[auth] password_login_request server_url={} email={}",
+        server_url, email
+    );
     if server_url.trim().is_empty() {
         return Ok(ApiResponse::err("invalid_server_url", "server_url is required"));
     }
@@ -151,8 +156,14 @@ pub(crate) async fn password_login(
         token_name: TOKEN_SESSION.to_string(),
     };
 
+    let context_name = context_name_from_url(&server_url);
+    let fingerprint_context = info
+        .server_id
+        .as_deref()
+        .and_then(|server_id| context_name_for_server_id(state, server_id))
+        .unwrap_or_else(|| context_name.clone());
     if let Some(existing) =
-        fingerprint_change_for_context(state, "desktop", &info.server_fingerprint)
+        fingerprint_change_for_context(state, &fingerprint_context, &info.server_fingerprint)
     {
         let login_id = Uuid::now_v7().to_string();
         let pending = PendingLogin {
@@ -186,6 +197,10 @@ pub(crate) async fn password_register(
     full_name: Option<String>,
     state: &State<'_, AppState>,
 ) -> Result<ApiResponse<PasswordAuthResponse>, String> {
+    println!(
+        "[auth] password_register_request server_url={} email={}",
+        server_url, email
+    );
     if server_url.trim().is_empty() {
         return Ok(ApiResponse::err("invalid_server_url", "server_url is required"));
     }
@@ -238,8 +253,14 @@ pub(crate) async fn password_register(
         token_name: TOKEN_SESSION.to_string(),
     };
 
+    let context_name = context_name_from_url(&server_url);
+    let fingerprint_context = info
+        .server_id
+        .as_deref()
+        .and_then(|server_id| context_name_for_server_id(state, server_id))
+        .unwrap_or_else(|| context_name.clone());
     if let Some(existing) =
-        fingerprint_change_for_context(state, "desktop", &info.server_fingerprint)
+        fingerprint_change_for_context(state, &fingerprint_context, &info.server_fingerprint)
     {
         let login_id = Uuid::now_v7().to_string();
         let pending = PendingLogin {

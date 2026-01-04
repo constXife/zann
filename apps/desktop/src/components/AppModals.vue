@@ -16,6 +16,7 @@ import DeleteStorageModal from "./DeleteStorageModal.vue";
 import ConfirmModal from "./ConfirmModal.vue";
 import AuthMethodModal from "./AuthMethodModal.vue";
 import PasswordLoginModal from "./PasswordLoginModal.vue";
+import SecurityAlertModal from "./SecurityAlertModal.vue";
 
 type Translator = (key: string, params?: { [key: string]: unknown }) => string;
 
@@ -157,6 +158,9 @@ type AppModalsProps = {
   confirmInputLabel: unknown;
   confirmInputPlaceholder: unknown;
   handleConfirm: unknown;
+  identityAlertOpen: unknown;
+  identityAlertTitle: unknown;
+  identityAlertMessage: unknown;
   authMethodOpen: unknown;
   availableMethods: unknown;
   handleSelectPassword: unknown;
@@ -220,9 +224,23 @@ const createVaultCachePolicy = modelRef<unknown>("createVaultCachePolicy");
 const createVaultDefault = modelRef<unknown>("createVaultDefault");
 const showFolderSuggestions = modelRef<unknown>("showFolderSuggestions");
 const renameFolderModalOpen = modelRef<unknown>("renameFolderModalOpen");
+
+const onPasswordSubmit = (payload: {
+  mode: "login" | "register";
+  email: string;
+  password: string;
+  fullName?: string | null;
+}) => {
+  console.info("[auth] password_modal_submit", payload);
+  const handler = props.handlePasswordAuth as unknown as (value: typeof payload) => void;
+  if (handler) {
+    handler(payload);
+  }
+};
 const renameFolderNewName = modelRef<unknown>("renameFolderNewName");
 const deleteStorageOpen = modelRef<unknown>("deleteStorageOpen");
 const confirmOpen = modelRef<unknown>("confirmOpen");
+const identityAlertOpen = modelRef<unknown>("identityAlertOpen");
 const authMethodOpen = modelRef<unknown>("authMethodOpen");
 const passwordLoginOpen = modelRef<unknown>("passwordLoginOpen");
 
@@ -232,6 +250,8 @@ const passwordLoginError = valueRef<unknown>("passwordLoginError");
 const confirmInputExpected = valueRef<unknown>("confirmInputExpected");
 const confirmInputLabel = valueRef<unknown>("confirmInputLabel");
 const confirmInputPlaceholder = valueRef<unknown>("confirmInputPlaceholder");
+const identityAlertTitle = valueRef<unknown>("identityAlertTitle");
+const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
 </script>
 
 <template>
@@ -441,6 +461,13 @@ const confirmInputPlaceholder = valueRef<unknown>("confirmInputPlaceholder");
     @confirm="handleConfirm"
   />
 
+  <SecurityAlertModal
+    v-model:open="identityAlertOpen"
+    :title="identityAlertTitle"
+    :message="identityAlertMessage"
+    :t="t"
+  />
+
   <AuthMethodModal
     v-model:open="authMethodOpen"
     :server-url="connectServerUrl"
@@ -456,6 +483,6 @@ const confirmInputPlaceholder = valueRef<unknown>("confirmInputPlaceholder");
     :busy="passwordLoginBusy"
     :error="passwordLoginError"
     :t="t"
-    @submit="handlePasswordAuth"
+    @submit="onPasswordSubmit"
   />
 </template>

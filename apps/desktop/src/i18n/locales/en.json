@@ -22,6 +22,7 @@
     "edit": "Edit",
     "remote": "Remote",
     "cancel": "Cancel",
+    "continue": "Continue",
     "undo": "Undo",
     "save": "Save"
   },
@@ -446,7 +447,13 @@
     "vault_required": "Select a vault",
     "fields_required": "Add at least one field",
     "vault_key_mismatch": "Server already has personal vaults encrypted with a different master password. Use your previous master password, or delete the vaults on the server to start fresh.",
-    "history_unavailable_shared": "You do not have access to history details for this shared vault."
+    "history_unavailable_shared": "You do not have access to history details for this shared vault.",
+    "server_unreachable": "Unable to reach the server. Check the URL and try again.",
+    "security_title": "Security alert",
+    "time_sync_title": "Time sync required",
+    "server_identity_invalid": "Critical security error. The server failed identity verification.",
+    "server_identity_missing": "Server identity data is missing. Update the server and try again.",
+    "server_time_skew": "Cannot verify server identity due to time drift (about {minutes} minutes). Check your device clock."
   },
   "time": {
     "never": "Never",

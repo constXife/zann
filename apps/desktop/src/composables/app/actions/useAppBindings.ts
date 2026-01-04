@@ -229,6 +229,9 @@ export function useAppBindings(options: AppBindingsOptions) {
     keystoreStatus: core.keystoreStatus,
     autoUnlockError: core.autoUnlockError,
     error: core.error,
+    identityAlertOpen: core.identityAlertOpen,
+    identityAlertTitle: core.identityAlertTitle,
+    identityAlertMessage: core.identityAlertMessage,
     doUnlock: core.doUnlock,
     unlockWithBiometrics: sessionState.unlockWithBiometrics,
     personalUnlockOpen: personalUnlock.personalUnlockOpen,
@@ -399,6 +402,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     "renameFolderNewName",
     "deleteStorageOpen",
     "confirmOpen",
+    "identityAlertOpen",
     "authMethodOpen",
     "passwordLoginOpen",
   ]);

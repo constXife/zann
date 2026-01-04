@@ -4,8 +4,10 @@ use std::net::SocketAddr;
 use crate::config::ServerConfig;
 use crate::domains::access_control::policies::PolicySet;
 use crate::domains::secrets::policies::PasswordPolicy;
+use ed25519_dalek::SigningKey;
 use ipnet::IpNet;
 use std::env;
+use std::sync::Arc;
 use tracing::warn;
 use zann_core::crypto::SecretKey;
 
@@ -22,6 +24,7 @@ pub struct Settings {
     pub token_pepper: String,
     pub require_pepper: bool,
     pub server_master_key: Option<SecretKey>,
+    pub identity_key: Arc<SigningKey>,
     pub access_token_ttl_seconds: i64,
     pub refresh_token_ttl_seconds: i64,
     pub item_history_ttl_days: Option<i64>,
@@ -114,6 +117,14 @@ impl Settings {
         config.server.max_body_bytes = max_body_bytes;
         config.server.max_clock_skew_seconds = max_clock_skew_seconds;
         let server_master_key = env_config::load_server_master_key(&config);
+        let identity_key = match env_config::load_identity_key(&config) {
+            Some(key) => Arc::new(key),
+            None => {
+                warn!(event = "identity_key_missing", "identity key missing; generating ephemeral key");
+                let key = SigningKey::generate(&mut rand::rngs::OsRng);
+                Arc::new(key)
+            }
+        };
         let policies = env_config::load_policies(&config).unwrap_or_else(|err| {
             panic!("Failed to load policies: {err}");
         });
@@ -130,6 +141,7 @@ impl Settings {
             token_pepper,
             require_pepper,
             server_master_key,
+            identity_key,
             access_token_ttl_seconds,
             refresh_token_ttl_seconds,
             item_history_ttl_days,
@@ -184,6 +196,11 @@ pub fn preflight(settings: &Settings) -> Result<(), Vec<String>> {
             }
         }
     }
+    if let Ok(path) = env::var("ZANN_IDENTITY_KEY_FILE") {
+        if let Err(err) = env_config::check_key_file_permissions(&path) {
+            missing.push(err);
+        }
+    }
     if let Ok(path) = env::var("ZANN_MASTER_KEY_FILE") {
         if std::path::Path::new(&path).exists() {
             if let Err(err) = env_config::check_key_file_permissions(&path) {
@@ -196,6 +213,11 @@ pub fn preflight(settings: &Settings) -> Result<(), Vec<String>> {
             if let Err(err) = env_config::check_key_file_permissions(path) {
                 missing.push(err);
             }
+        }
+    }
+    if let Some(path) = settings.config.server.identity_key_file.as_deref() {
+        if let Err(err) = env_config::check_key_file_permissions(path) {
+            missing.push(err);
         }
     }
     if let Some(err) = validate_trusted_proxies(settings) {

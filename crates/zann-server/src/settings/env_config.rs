@@ -8,6 +8,8 @@ use base64::Engine;
 use tracing::warn;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
 
 use crate::config::{AuthMode, InternalRegistration, MasterKeyMode, MetricsProfile, ServerConfig};
 use crate::domains::access_control::policies::PolicySet;
@@ -281,6 +283,41 @@ pub(super) fn load_server_master_key(config: &ServerConfig) -> Option<SecretKey>
     None
 }
 
+pub(super) fn load_identity_key(config: &ServerConfig) -> Option<SigningKey> {
+    let env_key = env::var("ZANN_IDENTITY_KEY").ok();
+    if let Some(value) = env_key {
+        return parse_identity_key(&value).ok();
+    }
+    if let Some(value) = config.server.identity_key.as_deref() {
+        return parse_identity_key(value).ok();
+    }
+
+    let file_path = env::var("ZANN_IDENTITY_KEY_FILE")
+        .ok()
+        .or_else(|| config.server.identity_key_file.clone());
+    let file_path = file_path?;
+
+    let path = Path::new(&file_path);
+    if path.exists() {
+        let value = match read_secret_file(&file_path) {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(event = "identity_key_read_failed", path = %file_path, error = %err);
+                return None;
+            }
+        };
+        return parse_identity_key(&value).ok();
+    }
+
+    match generate_identity_key_file(path) {
+        Ok(key) => Some(key),
+        Err(err) => {
+            warn!(event = "identity_key_autogen_failed", path = %file_path, error = %err);
+            None
+        }
+    }
+}
+
 fn parse_master_key(value: &str) -> Result<SecretKey, &'static str> {
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(value.as_bytes())
@@ -291,6 +328,18 @@ fn parse_master_key(value: &str) -> Result<SecretKey, &'static str> {
     let mut key = [0u8; 32];
     key.copy_from_slice(&bytes);
     Ok(SecretKey::from_bytes(key))
+}
+
+fn parse_identity_key(value: &str) -> Result<SigningKey, &'static str> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(value.as_bytes())
+        .map_err(|_| "invalid_identity_key")?;
+    if bytes.len() != 32 {
+        return Err("invalid_identity_key_length");
+    }
+    let mut key = [0u8; 32];
+    key.copy_from_slice(&bytes);
+    Ok(SigningKey::from_bytes(&key))
 }
 
 pub(super) fn load_secret_env_or_file(
@@ -338,6 +387,31 @@ fn generate_master_key_file(path: &Path) -> Result<SecretKey, String> {
 
     let key = SecretKey::generate();
     let encoded = base64::engine::general_purpose::STANDARD.encode(key.as_bytes());
+    write_secret_file_atomic(path, &encoded)?;
+    Ok(key)
+}
+
+fn generate_identity_key_file(path: &Path) -> Result<SigningKey, String> {
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|err| {
+                format!(
+                    "identity key dir create failed ({}): {}",
+                    parent.display(),
+                    err
+                )
+            })?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+            }
+        }
+    }
+
+    let mut rng = OsRng;
+    let key = SigningKey::generate(&mut rng);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(key.to_bytes());
     write_secret_file_atomic(path, &encoded)?;
     Ok(key)
 }

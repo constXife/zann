@@ -45,7 +45,16 @@ watch(
 );
 
 const handleSubmit = () => {
-  if (!email.value || !password.value) return;
+  console.info("[auth] password_form_submit", {
+    mode: mode.value,
+    hasEmail: !!email.value,
+    passwordLength: password.value.length,
+    confirmMatches: confirm.value === password.value,
+  });
+  if (!email.value || !password.value) {
+    localError.value = props.t("errors.invalid_credentials");
+    return;
+  }
   localError.value = "";
   if (mode.value === "register" && password.value !== confirm.value) {
     localError.value = props.t("auth.passwordMismatch");

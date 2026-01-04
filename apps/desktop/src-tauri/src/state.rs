@@ -72,6 +72,8 @@ pub struct CliContext {
     #[serde(default)]
     pub needs_salt_update: bool,
     #[serde(default)]
+    pub server_id: Option<String>,
+    #[serde(default)]
     pub server_fingerprint: Option<String>,
     #[serde(default)]
     pub expected_master_key_fp: Option<String>,

@@ -12,10 +12,16 @@ pub struct ServerArgs {
 #[derive(Subcommand)]
 pub enum ServerCommand {
     Fingerprint(ServerFingerprintArgs),
+    Info(ServerInfoArgs),
 }
 
 #[derive(Args)]
 pub struct ServerFingerprintArgs {
+    pub addr: Option<String>,
+}
+
+#[derive(Args)]
+pub struct ServerInfoArgs {
     pub addr: Option<String>,
 }
 

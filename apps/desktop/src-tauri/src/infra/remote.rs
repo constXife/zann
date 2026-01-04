@@ -2,6 +2,7 @@ use reqwest::header::AUTHORIZATION;
 use serde::Deserialize;
 
 use crate::infra::http::fetch_json;
+use crate::infra::identity::{verify_system_identity, IdentityError};
 use crate::types::{
     OidcConfigResponse, OidcDiscovery, OidcExchangeResponse, SystemInfoResponse, TokenErrorResponse,
     TokenResponse,
@@ -78,7 +79,22 @@ pub async fn fetch_system_info(
     addr: &str,
 ) -> Result<SystemInfoResponse, String> {
     let url = format!("{}/v1/system/info", addr.trim_end_matches('/'));
-    fetch_json(client, &url).await
+    let info = fetch_json(client, &url).await?;
+    match verify_system_identity(&info) {
+        Ok(()) => Ok(info),
+        Err(err) => Err(format_identity_error(err)),
+    }
+}
+
+fn format_identity_error(err: IdentityError) -> String {
+    match err {
+        IdentityError::Missing => "server_identity_missing".to_string(),
+        IdentityError::InvalidId | IdentityError::InvalidKey | IdentityError::InvalidSignatureBytes => {
+            "server_identity_invalid".to_string()
+        }
+        IdentityError::InvalidSignature => "server_identity_invalid".to_string(),
+        IdentityError::TimeSkew { skew_seconds } => format!("server_time_skew:{skew_seconds}"),
+    }
 }
 
 pub async fn fetch_me_email(

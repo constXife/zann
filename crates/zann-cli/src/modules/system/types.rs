@@ -42,9 +42,26 @@ pub struct TokenEntry {
     pub access_expires_at: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SystemInfoResponse {
     pub server_fingerprint: String,
+    #[serde(default)]
+    pub server_id: Option<String>,
+    #[serde(default)]
+    pub identity: Option<SystemIdentity>,
+    #[serde(default)]
+    pub server_name: Option<String>,
+    #[serde(default)]
+    pub personal_vaults_enabled: Option<bool>,
+    #[serde(default)]
+    pub auth_methods: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+pub struct SystemIdentity {
+    pub public_key: String,
+    pub timestamp: i64,
+    pub signature: String,
 }
 
 pub struct CommandContext<'a> {

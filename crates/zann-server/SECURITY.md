@@ -47,6 +47,16 @@ formal security audit, and is not recommended for production use.
 - CLI supports server fingerprint pinning to reduce MITM or server impersonation
   risk; set a known fingerprint on clients to prevent token exfiltration.
 
+### Server identity verification (HashID + proof of possession)
+
+- Attack vector: server impersonation via copied/public `server_id` or fake URLs.
+- Mitigation: `server_id` is derived from the server's Ed25519 public key
+  (HashID), and `/v1/system/info` includes a signed timestamp proving possession
+  of the private key. Clients verify HashID, signature, and time skew before
+  accepting identity changes or URL migration.
+- This prevents a "parrot" server from replaying a public key without the
+  corresponding private key.
+
 ### Privilege escalation and data overreach
 
 - Vault access is enforced via role-based checks (admin/operator/member/readonly)

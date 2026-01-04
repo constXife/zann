@@ -10,6 +10,7 @@ use crate::modules::system::http::fetch_system_info;
 use crate::modules::system::CliConfig;
 use crate::modules::system::{ensure_secure_addr, resolve_addr};
 use crate::{DEFAULT_ADDR, SERVICE_ACCOUNT_PREFIX};
+use serde_json;
 
 pub(crate) async fn handle_server_command(
     args: ServerArgs,
@@ -25,6 +26,12 @@ pub(crate) async fn handle_server_command(
             ensure_secure_addr(&addr, allow_insecure)?;
             let info = fetch_system_info(client, &addr).await?;
             println!("{}", info.server_fingerprint);
+        }
+        ServerCommand::Info(args) => {
+            let addr = resolve_addr(args.addr, addr_arg, context_arg, config)?;
+            ensure_secure_addr(&addr, allow_insecure)?;
+            let info = fetch_system_info(client, &addr).await?;
+            println!("{}", serde_json::to_string_pretty(&info)?);
         }
     }
     Ok(())

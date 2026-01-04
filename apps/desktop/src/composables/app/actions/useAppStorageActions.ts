@@ -28,6 +28,7 @@ type AppStorageActionsOptions = {
   setupStep: Ref<"welcome" | "password" | "connect">;
   settingsOpen: Ref<boolean>;
   settingsInitialTab: Ref<"general" | "accounts">;
+  startConnect: () => void;
   showAuthMethodSelection: () => Promise<void>;
   connectServerUrl: Ref<string>;
   setError: (message: string) => void;
@@ -58,6 +59,7 @@ export function useAppStorageActions({
   setupStep,
   settingsOpen,
   settingsInitialTab,
+  startConnect,
   showAuthMethodSelection,
   connectServerUrl,
   setError,
@@ -84,8 +86,8 @@ export function useAppStorageActions({
 
   const openAddStorageWizard = () => {
     storageDropdownOpen.value = false;
+    startConnect();
     setupOpen.value = true;
-    setupStep.value = "connect";
   };
 
   const openStorageSettings = () => {

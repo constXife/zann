@@ -102,6 +102,7 @@ export function useAppAuthFlow({
 
   const startConnect = () => {
     setupError.value = "";
+    connectServerUrl.value = "";
     connectError.value = "";
     connectStatus.value = "";
     connectBusy.value = false;
@@ -279,10 +280,20 @@ export function useAppAuthFlow({
   };
 
   const handlePasswordAuth = async (payload: PasswordAuthPayload) => {
+    console.info("[auth] password_handler_start", {
+      mode: payload.mode,
+      serverUrl: connectServerUrl.value,
+      email: payload.email,
+    });
     const submitPasswordAuth = async () => {
       passwordLoginBusy.value = true;
       passwordLoginError.value = "";
       try {
+        console.info("[auth] password_submit", {
+          mode: payload.mode,
+          serverUrl: connectServerUrl.value,
+          email: payload.email,
+        });
         const command =
           payload.mode === "register" ? "password_register" : "password_login";
         const response = await invoke<
@@ -317,14 +328,15 @@ export function useAppAuthFlow({
         if (data.status === "success") {
           passwordLoginOpen.value = false;
           connectLoginId.value = "";
-          clearSyncErrors(data.storage_id ?? selectedStorageId.value);
+          const syncStorageId = data.storage_id ?? selectedStorageId.value;
+          clearSyncErrors(syncStorageId);
           await refreshAppStatus();
           const needsSetup = !appStatus.value?.initialized;
           if (needsSetup) {
             setupStep.value = "password";
           }
           if (unlocked.value) {
-            await runRemoteSync(selectedStorageId.value);
+            await runRemoteSync(syncStorageId);
           }
           await runBootstrap();
           if (needsSetup) {
@@ -349,6 +361,9 @@ export function useAppAuthFlow({
       !showSessionExpiredBanner.value;
 
     if (hasActiveSession) {
+      console.info("[auth] password_register_requires_confirm", {
+        currentAccount: storage?.account_subject ?? "",
+      });
       openConfirm({
         title: t("auth.registerWillSignOutTitle"),
         message: t("auth.registerWillSignOutDesc", {
@@ -387,14 +402,15 @@ export function useAppAuthFlow({
     }
     if (payload.status === "success") {
       connectStatus.value = "success";
-      clearSyncErrors(payload.storage_id ?? selectedStorageId.value);
+      const syncStorageId = payload.storage_id ?? selectedStorageId.value;
+      clearSyncErrors(syncStorageId);
       await refreshAppStatus();
       const needsSetup = !appStatus.value?.initialized;
       if (needsSetup) {
         setupStep.value = "password";
       }
       if (unlocked.value) {
-        await runRemoteSync(selectedStorageId.value);
+        await runRemoteSync(syncStorageId);
       }
       await runBootstrap();
       connectBusy.value = false;
@@ -493,5 +509,6 @@ export function useAppAuthFlow({
     handleSelectOidc,
     handleSelectPassword,
     handlePasswordAuth,
+    handleOidcStatus,
   };
 }

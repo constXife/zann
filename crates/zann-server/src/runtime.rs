@@ -11,6 +11,7 @@ use std::fs;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 use crate::app;
+use zann_core::crypto::SecretKey;
 use crate::config::OtelConfig;
 use crate::settings;
 
@@ -26,12 +27,53 @@ impl Drop for OtelGuard {
 }
 
 pub(crate) fn server_fingerprint(state: &app::AppState) -> String {
-    if let Some(value) = state.config.server.fingerprint.clone() {
-        return value;
+    compute_fingerprint(
+        state.config.server.fingerprint.as_deref(),
+        &state.token_pepper,
+        state.server_master_key.as_deref(),
+    )
+}
+
+pub(crate) fn compute_fingerprint(
+    configured: Option<&str>,
+    token_pepper: &str,
+    server_master_key: Option<&SecretKey>,
+) -> String {
+    if let Some(value) = configured {
+        return value.to_string();
     }
     let mut hasher = Sha256::new();
-    hasher.update(state.token_pepper.as_bytes());
+    hasher.update(b"zann-fp:v1:");
+    hasher.update(token_pepper.as_bytes());
+    hasher.update(b":");
+    if let Some(key) = server_master_key {
+        hasher.update(key.as_bytes());
+    }
     format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_prefers_configured_value() {
+        let smk = SecretKey::from_bytes([1u8; 32]);
+        let value = compute_fingerprint(Some("fixed"), "pepper", Some(&smk));
+        assert_eq!(value, "fixed");
+    }
+
+    #[test]
+    fn fingerprint_changes_with_inputs() {
+        let smk_a = SecretKey::from_bytes([1u8; 32]);
+        let smk_b = SecretKey::from_bytes([2u8; 32]);
+        let fp_a = compute_fingerprint(None, "pepper-a", Some(&smk_a));
+        let fp_b = compute_fingerprint(None, "pepper-b", Some(&smk_a));
+        let fp_c = compute_fingerprint(None, "pepper-a", Some(&smk_b));
+
+        assert_ne!(fp_a, fp_b);
+        assert_ne!(fp_a, fp_c);
+    }
 }
 
 #[allow(dead_code)]
