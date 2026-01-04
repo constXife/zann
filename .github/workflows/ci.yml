@@ -39,6 +39,8 @@ jobs:
         uses: ./.github/actions/rust-cache
         with:
           use-sccache: "true"
+      - name: sccache version
+        run: sccache --version
       - name: Clippy
         run: cargo clippy --all-targets -- -D warnings
       - name: sccache stats
@@ -76,6 +78,8 @@ jobs:
         uses: ./.github/actions/rust-cache
         with:
           use-sccache: "true"
+      - name: sccache version
+        run: sccache --version
       - name: Migrate DB
         run: |
           cargo run -p zann-server -- migrate
