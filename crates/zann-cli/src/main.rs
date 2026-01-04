@@ -32,7 +32,9 @@ pub(crate) const SERVICE_ACCOUNT_PREFIX: &str = "zann_sa_";
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_logging(cli.verbose)?;
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(cli.insecure)
+        .build()?;
     let mut config = load_config()?;
     if cli.token.is_some() && cli.token_file.is_some() {
         anyhow::bail!("use --token or --token-file, not both");
@@ -60,15 +62,32 @@ async fn main() -> anyhow::Result<()> {
             save_config(&config)?;
         }
         Command::Login(args) => {
-            handle_login_command(args, addr_arg, context_arg, &client, &mut config).await?;
+            handle_login_command(
+                args,
+                addr_arg,
+                context_arg,
+                cli.insecure,
+                &client,
+                &mut config,
+            )
+            .await?;
             save_config(&config)?;
         }
         Command::Logout(args) => {
-            handle_logout(args, addr_arg, context_arg, &client, &mut config).await?;
+            handle_logout(
+                args,
+                addr_arg,
+                context_arg,
+                cli.insecure,
+                &client,
+                &mut config,
+            )
+            .await?;
             save_config(&config)?;
         }
         Command::Server(args) => {
-            handle_server_command(args, addr_arg, context_arg, &client, &config).await?;
+            handle_server_command(args, addr_arg, context_arg, cli.insecure, &client, &config)
+                .await?;
         }
         Command::Run(args) => {
             handle_run_command(
@@ -77,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
                 token_arg,
                 token_name_arg,
                 context_arg,
+                cli.insecure,
                 &client,
                 &mut config,
             )
@@ -95,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
             let addr = addr_arg
                 .or_else(|| context.as_ref().map(|ctx| ctx.addr.clone()))
                 .unwrap_or_else(|| DEFAULT_ADDR.to_string());
+            crate::modules::system::ensure_secure_addr(&addr, cli.insecure)?;
 
             let token_name = token_name_arg
                 .or_else(|| context.as_ref().and_then(|ctx| ctx.current_token.clone()));

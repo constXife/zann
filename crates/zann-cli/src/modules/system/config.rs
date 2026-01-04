@@ -204,6 +204,13 @@ pub(crate) fn resolve_addr(
     Ok(DEFAULT_ADDR.to_string())
 }
 
+pub(crate) fn ensure_secure_addr(addr: &str, allow_insecure: bool) -> anyhow::Result<()> {
+    if addr.starts_with("http://") && !allow_insecure {
+        anyhow::bail!("refusing to use http:// without --insecure");
+    }
+    Ok(())
+}
+
 pub(crate) fn normalize_server_key(addr: &str) -> String {
     addr.trim_end_matches('/').to_string()
 }

@@ -7,20 +7,22 @@ use crate::modules::shared::{
     resolve_shared_item_id,
 };
 use crate::modules::system::http::fetch_system_info;
-use crate::modules::system::resolve_addr;
 use crate::modules::system::CliConfig;
+use crate::modules::system::{ensure_secure_addr, resolve_addr};
 use crate::{DEFAULT_ADDR, SERVICE_ACCOUNT_PREFIX};
 
 pub(crate) async fn handle_server_command(
     args: ServerArgs,
     addr_arg: Option<String>,
     context_arg: Option<String>,
+    allow_insecure: bool,
     client: &reqwest::Client,
     config: &CliConfig,
 ) -> anyhow::Result<()> {
     match args.command {
         ServerCommand::Fingerprint(args) => {
             let addr = resolve_addr(args.addr, addr_arg, context_arg, config)?;
+            ensure_secure_addr(&addr, allow_insecure)?;
             let info = fetch_system_info(client, &addr).await?;
             println!("{}", info.server_fingerprint);
         }
@@ -28,12 +30,14 @@ pub(crate) async fn handle_server_command(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_run_command(
     args: RunArgs,
     addr_arg: Option<String>,
     token_arg: Option<String>,
     token_name_arg: Option<String>,
     context_arg: Option<String>,
+    allow_insecure: bool,
     client: &reqwest::Client,
     config: &mut CliConfig,
 ) -> anyhow::Result<()> {
@@ -49,6 +53,7 @@ pub(crate) async fn handle_run_command(
     let addr = addr_arg
         .or_else(|| context.as_ref().map(|ctx| ctx.addr.clone()))
         .unwrap_or_else(|| DEFAULT_ADDR.to_string());
+    ensure_secure_addr(&addr, allow_insecure)?;
     let token_name =
         token_name_arg.or_else(|| context.as_ref().and_then(|ctx| ctx.current_token.clone()));
     let mut service_account_token = token_arg

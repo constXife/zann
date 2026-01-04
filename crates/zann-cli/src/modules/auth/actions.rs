@@ -10,13 +10,14 @@ use crate::modules::auth::{
     store_prelogin, store_refresh_token, verify_server_fingerprint, AuthResponse, LoginRequest,
     LogoutRequest,
 };
-use crate::modules::system::{CliConfig, CliContext, TokenEntry};
+use crate::modules::system::{ensure_secure_addr, CliConfig, CliContext, TokenEntry};
 use crate::{prompt_login_command, prompt_password, DEFAULT_ADDR, TOKEN_OIDC, TOKEN_SESSION};
 
 pub(crate) async fn handle_login_command(
     args: LoginArgs,
     addr_arg: Option<String>,
     context_arg: Option<String>,
+    allow_insecure: bool,
     client: &reqwest::Client,
     config: &mut CliConfig,
 ) -> anyhow::Result<()> {
@@ -41,6 +42,7 @@ pub(crate) async fn handle_login_command(
                         .map(|ctx| ctx.addr.clone())
                 })
                 .unwrap_or_else(|| DEFAULT_ADDR.to_string());
+            ensure_secure_addr(&addr, allow_insecure)?;
 
             let oidc_config_url = format!("{}/v1/auth/oidc/config", addr.trim_end_matches('/'));
             let oidc_config = fetch_oidc_config(client, &oidc_config_url).await?;
@@ -119,6 +121,7 @@ pub(crate) async fn handle_login_command(
                         .map(|ctx| ctx.addr.clone())
                 })
                 .unwrap_or_else(|| DEFAULT_ADDR.to_string());
+            ensure_secure_addr(&addr, allow_insecure)?;
 
             let password = match login.password {
                 Some(password) => password,
@@ -189,6 +192,7 @@ pub(crate) async fn handle_logout(
     args: LogoutArgs,
     addr_arg: Option<String>,
     context_arg: Option<String>,
+    allow_insecure: bool,
     client: &reqwest::Client,
     config: &mut CliConfig,
 ) -> anyhow::Result<()> {
@@ -201,6 +205,7 @@ pub(crate) async fn handle_logout(
         anyhow::bail!("context not found: {}", context_name);
     };
     let addr = addr_arg.unwrap_or(context.addr);
+    ensure_secure_addr(&addr, allow_insecure)?;
     let token_name = args
         .token_name
         .or_else(|| context.current_token.clone())

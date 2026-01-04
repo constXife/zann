@@ -25,6 +25,8 @@ pub struct Cli {
     pub context: Option<String>,
     #[arg(short, long, action = ArgAction::Count)]
     pub verbose: u8,
+    #[arg(long, help = "Allow http:// and invalid TLS certificates")]
+    pub insecure: bool,
     #[command(subcommand)]
     pub command: Command,
 }
