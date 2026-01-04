@@ -142,3 +142,4 @@ just run
 ## Docs
 
 - `ROADMAP.md`
+- `CONTRIBUTING.md`
