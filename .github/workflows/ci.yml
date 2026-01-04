@@ -23,30 +23,6 @@ jobs:
       - name: Rust fmt
         run: cargo fmt --check
 
-  clippy:
-    runs-on: ubuntu-latest
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: /home/runner/.cache/sccache
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          components: clippy
-      - name: Rust cache
-        uses: ./.github/actions/rust-cache
-        with:
-          use-sccache: "true"
-      - name: sccache version
-        run: sccache --version
-      - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
-      - name: sccache stats
-        if: always()
-        run: sccache --show-stats
-
   test:
     runs-on: ubuntu-latest
     env:
@@ -74,12 +50,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: clippy
       - name: Rust cache
         uses: ./.github/actions/rust-cache
         with:
           use-sccache: "true"
       - name: sccache version
         run: sccache --version
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
       - name: Migrate DB
         run: |
           cargo run -p zann-server -- migrate
