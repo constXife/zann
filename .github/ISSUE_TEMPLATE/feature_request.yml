@@ -1,0 +1,40 @@
+name: Feature request
+description: New functionality or enhancement
+title: "[feature] "
+labels: ["type/feature"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - desktop
+        - cli
+        - server
+        - core
+        - db
+        - keystore
+        - ci
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome do we want?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Use checkboxes (- [ ]) where possible.
+    validations:
+      required: true
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes / links
+      description: Context, mockups, references.
+    validations:
+      required: false

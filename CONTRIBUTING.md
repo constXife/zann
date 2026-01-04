@@ -62,7 +62,6 @@ Use one of:
 
 Allowed.
 - PR author is responsible for correctness, security, and maintainability.
-- Do not paste secrets/keys/tokens into prompts or commit them.
 
 ## Dependencies and security
 
