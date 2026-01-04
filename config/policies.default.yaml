@@ -1,0 +1,179 @@
+# Global admin group
+- name: admin-full-access
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: ["*"]
+  resource: "**"
+
+# All authenticated users can read their profile
+- name: whoami
+  subject_type: any
+  effect: allow
+  actions: [read]
+  resource: "users/me"
+
+# Allow users to update their profile and credentials
+- name: users-me-update
+  subject_type: any
+  effect: allow
+  actions: [write]
+  resource: "users/me"
+
+- name: users-me-password
+  subject_type: any
+  effect: allow
+  actions: [write]
+  resource: "users/me/password"
+
+- name: users-me-recovery
+  subject_type: any
+  effect: allow
+  actions: [write]
+  resource: "users/me/recovery-kit"
+
+# List vaults and view members/items (narrow examples)
+- name: vaults-list
+  subject_type: any
+  effect: allow
+  actions: [list]
+  resource: "vaults/*"
+
+- name: vaults-create
+  subject_type: any
+  effect: allow
+  actions: [write]
+  resource: "vaults"
+
+- name: vault-items-list
+  subject_type: any
+  effect: allow
+  actions: [list]
+  resource: "vaults/*/items"
+
+- name: vault-members-list
+  subject_type: any
+  effect: allow
+  actions: [list]
+  resource: "vaults/*/members"
+
+# Service accounts for CI/CD
+- name: service-accounts-list
+  subject_type: any
+  effect: allow
+  actions: [list, write]
+  resource: "service-accounts"
+
+- name: service-accounts-manage
+  subject_type: any
+  effect: allow
+  actions: [read, write]
+  resource: "service-accounts/*"
+
+# Allow policy reload for admins only
+- name: policy-reload
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [write]
+  resource: "admin/policies/reload"
+
+# Allow invite creation for admins only
+- name: admin-invites
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [read, write]
+  resource: "admin/invites"
+
+- name: admin-invites-delete
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [write]
+  resource: "admin/invites/*"
+
+- name: admin-invites-read
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [read]
+  resource: "admin/invites/*"
+
+# Allow user administration for admins only (internal auth enforced in handler)
+- name: admin-users-list
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [list, write]
+  resource: "users"
+
+- name: admin-users-read
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [read, write]
+  resource: "users/*"
+
+- name: admin-users-status
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [write]
+  resource: "users/*/block"
+
+- name: admin-users-unblock
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [write]
+  resource: "users/*/unblock"
+
+- name: admin-users-reset-password
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [write]
+  resource: "users/*/reset-password"
+
+# Allow device management for any authenticated user
+- name: devices-list
+  subject_type: any
+  effect: allow
+  actions: [list, write]
+  resource: "devices"
+
+- name: devices-revoke
+  subject_type: any
+  effect: allow
+  actions: [write]
+  resource: "devices/*"
+
+# Allow group administration for admins only
+- name: admin-groups-list
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [list, write]
+  resource: "groups"
+
+- name: admin-groups-read
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [read, write]
+  resource: "groups/*"
+
+- name: admin-groups-members-write
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [write]
+  resource: "groups/*/members"
+
+- name: admin-groups-members-delete
+  subject_type: group
+  subject_id: admins
+  effect: allow
+  actions: [write]
+  resource: "groups/*/members/*"

@@ -1,0 +1,140 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: write
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: rustfmt
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+      - name: Rust fmt
+        run: cargo fmt --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: clippy
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  test:
+    runs-on: ubuntu-latest
+    env:
+      ZANN_CONFIG_PATH: config/ci.yaml
+      ZANN_DB_URL: postgres://zann:zann@127.0.0.1:5432/zann
+      TEST_DATABASE_URL: postgres://zann:zann@127.0.0.1:5432/zann
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+    services:
+      postgres:
+        image: docker.io/library/postgres:16
+        env:
+          POSTGRES_USER: zann
+          POSTGRES_PASSWORD: zann
+          POSTGRES_DB: zann
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zann -d zann"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
+      - name: Migrate DB
+        run: |
+          cargo run -p zann-server -- migrate
+      - name: Tests
+        run: cargo test
+      - name: Tests (zann-db Postgres)
+        run: cargo test -p zann-db --features postgres
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Security audit
+        uses: rustsec/audit-check@v1.4.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    env:
+      DOCKERHUB_HOST: docker.io
+      DOCKER_IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/zann-server
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Login to Docker Hub
+        env:
+          DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_PASS: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: echo "$DOCKERHUB_PASS" | docker login "$DOCKERHUB_HOST" -u "$DOCKERHUB_USER" --password-stdin
+
+      - name: Build
+        run: docker build --build-arg GIT_COMMIT=${{ github.sha }} -f crates/zann-server/Dockerfile -t "$DOCKER_IMAGE:${{ github.sha }}" .
+
+      - name: Tag
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            docker tag "$DOCKER_IMAGE:${{ github.sha }}" "$DOCKER_IMAGE:latest"
+          fi
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            docker tag "$DOCKER_IMAGE:${{ github.sha }}" "$DOCKER_IMAGE:${GITHUB_REF_NAME}"
+          fi
+
+      - name: Push
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+        run: |
+          docker push "$DOCKER_IMAGE:${{ github.sha }}"
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            docker push "$DOCKER_IMAGE:latest"
+          fi
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            docker push "$DOCKER_IMAGE:${GITHUB_REF_NAME}"
+          fi

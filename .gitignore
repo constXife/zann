@@ -1,0 +1,13 @@
+**/.DS_Store
+.idea
+.tmp
+
+**/node_modules
+
+target
+/docs/api/dist
+apps/desktop/src-tauri/target
+apps/desktop/src-tauri/gen
+apps/desktop/dist
+
+/docs/api/bun.lockb

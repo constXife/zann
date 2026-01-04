@@ -1,0 +1,38 @@
+name: Rust cache
+description: Cache Cargo artifacts and optionally install/cache sccache
+inputs:
+  use-sccache:
+    description: "Enable sccache install and cache"
+    required: false
+    default: "false"
+  sccache-dir:
+    description: "SCCACHE_DIR location"
+    required: false
+    default: /home/runner/.cache/sccache
+runs:
+  using: composite
+  steps:
+    - name: Cache cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    - name: Cache sccache
+      if: ${{ inputs.use-sccache == 'true' }}
+      uses: actions/cache@v4
+      with:
+        path: ${{ inputs.sccache-dir }}
+        key: ${{ runner.os }}-sccache-${{ hashFiles('Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-sccache-
+
+    - name: Install sccache
+      if: ${{ inputs.use-sccache == 'true' }}
+      run: cargo install sccache --locked
+      shell: bash

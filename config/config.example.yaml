@@ -1,0 +1,86 @@
+auth:
+  mode: hybrid                # internal | oidc | hybrid
+
+  kdf:
+    algorithm: argon2id
+    iterations: 3
+    memory_kb: 65536
+    parallelism: 4
+
+  internal:
+    enabled: true
+    registration: invite_only # invite_only | open | disabled
+
+  oidc:
+    enabled: true
+    issuer: "https://auth.example.com"
+    client_id: "zann-cli"
+    audience: "zann"
+    # Optional override for requested OIDC scopes
+    # scopes: ["openid", "profile", "email", "offline_access"]
+    jwks_cache_ttl: "15m"
+    # Optional override (skips discovery)
+    jwks_url: "https://auth.example.com/.well-known/jwks.json"
+    # Offline mode (local JWKS file)
+    # jwks_file: "/etc/zann/jwks.json"
+    groups_claim: "groups"
+    admin_group: "zann-admins"
+    group_mappings:
+      "zann-admins": "admins"
+      "zann-users": "users"
+
+policy:
+  file: /etc/zann/policies.yaml
+
+secrets:
+  # Optional: password policy definitions file (YAML)
+  # policies_file: /etc/zann/secret-policies.yaml
+  # Optional: default policy name (must exist in policies file)
+  # default_policy: "default"
+
+sentry:
+  enabled: false
+  dsn: "https://examplePublicKey@o0.ingest.sentry.io/0"
+  environment: "production"
+  release: "zann@0.1.0"
+
+tracing:
+  otel:
+    enabled: false
+    # Optional OTLP endpoint (HTTP/protobuf)
+    # endpoint: "http://localhost:4318"
+    # Optional service name override
+    # service_name: "zann-server"
+
+metrics:
+  enabled: false
+  profile: prod # prod | staging | debug (required when enabled=true)
+  endpoint: "/metrics"
+
+server:
+  max_body_bytes: 2097152
+  max_clock_skew_seconds: 300
+  personal_vaults_enabled: true
+  # Optional: list of trusted proxy IPs/CIDRs for forwarded headers
+  # trusted_proxies: ["10.0.0.0/8", "192.168.0.0/16"]
+  # Optional: instance display name
+  # name: "Zann HQ"
+  # Optional: hard-coded server fingerprint for pinning
+  # fingerprint: "sha256:..."
+  # Server master key (SMK) for shared vaults (base64, 32 bytes)
+  # master_key: "base64..."
+  # master_key_file: "/etc/zann/smk"
+  # master_key_mode: "auto_generate" # auto_generate | external | manual_unseal
+
+crypto:
+  blob:
+    read_versions: [1]
+    write_version: 1
+  migration:
+    enabled: false
+    batch_size: 100
+    delay_ms: 10
+    occ_retry: 3
+  compatibility:
+    min_client_version: "0.4.0"
+    reject_old_clients: true

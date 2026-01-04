@@ -1,0 +1,22 @@
+[package]
+name = "zann-db"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4"
+blake3 = "1.5"
+async-trait = "0.1"
+sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio", "chrono", "json", "migrate", "uuid"] }
+sqlx-macros = { version = "0.8", default-features = false, features = ["migrate"] }
+sqlx-postgres = { version = "0.8", default-features = false, features = ["chrono", "json", "migrate", "uuid"], optional = true }
+sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled", "chrono", "json", "migrate", "uuid"], optional = true }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+uuid = { version = "1", features = ["v7"] }
+zann-core = { path = "../zann-core", default-features = false }
+
+[features]
+default = []
+postgres = ["dep:sqlx-postgres", "zann-core/postgres"]
+sqlite = ["dep:sqlx-sqlite", "zann-core/sqlite"]
+postgres-tests = []

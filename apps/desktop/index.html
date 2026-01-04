@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zann Desktop</title>
+    <script>
+      (function() {
+        var UI_SETTINGS_KEY = 'zann:ui-settings';
+        var stored = localStorage.getItem(UI_SETTINGS_KEY);
+        var settings = stored ? JSON.parse(stored) : {};
+        var theme = settings.theme || 'system';
+
+        function applyTheme(isDark) {
+          document.documentElement.classList.toggle('dark', isDark);
+        }
+
+        if (theme === 'dark') {
+          applyTheme(true);
+        } else if (theme === 'light') {
+          applyTheme(false);
+        } else {
+          // system
+          var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+          applyTheme(prefersDark);
+          window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+            // Re-read settings in case theme changed
+            var s = localStorage.getItem(UI_SETTINGS_KEY);
+            var t = s ? JSON.parse(s).theme : 'system';
+            if (t === 'system') {
+              applyTheme(e.matches);
+            }
+          });
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,49 @@
+[package]
+name = "zann-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.7"
+axum-prometheus = "0.7"
+aide = { version = "0.13", features = ["axum"] }
+argon2 = "0.5"
+base64 = "0.22"
+chrono = "0.4"
+hex = "0.4"
+jsonwebtoken = "9"
+prometheus = { version = "0.14", features = ["process"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sentry = "0.36"
+sentry-tracing = "0.36"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+schemars = { version = "0.8", features = ["uuid1", "chrono"] }
+sha2 = "0.10"
+blake3 = "1"
+glob = "0.3"
+ipnet = "2.9"
+opentelemetry = "0.26"
+opentelemetry-otlp = { version = "0.26", features = ["http-proto", "reqwest-client"] }
+opentelemetry_sdk = { version = "0.26", features = ["rt-tokio"] }
+sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio"] }
+sqlx-postgres = { version = "0.8", default-features = false, features = ["uuid"] }
+rand = "0.8"
+subtle = "2.6"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "signal"] }
+tracing = "0.1"
+tracing-opentelemetry = "0.27"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tower-http = { version = "0.5", features = ["catch-panic", "request-id", "trace", "util"] }
+uuid = { version = "1", features = ["v7"] }
+zann-core = { path = "../zann-core", default-features = false, features = ["postgres"] }
+zann-db = { path = "../zann-db", default-features = false, features = ["postgres"] }
+
+[dev-dependencies]
+proptest = "1.5.0"
+tower = "0.5"
+zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"] }
+
+[features]
+postgres-tests = []

@@ -1,0 +1,36 @@
+{
+  "productName": "Zann Desktop",
+  "identifier": "com.rlyeh.zann",
+  "bundle": {
+    "macOS": {
+      "entitlements": "Entitlements.plist",
+      "infoPlist": "Info.plist"
+    }
+  },
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5174",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "security": {
+      "capabilities": ["default"]
+    },
+    "trayIcon": {
+      "iconPath": "icons/icon.png",
+      "iconAsTemplate": true
+    },
+    "windows": [
+      {
+        "title": "Zann Desktop",
+        "width": 1000,
+        "height": 700,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true,
+        "devtools": true,
+        "trafficLightPosition": { "x": 14, "y": 24 }
+      }
+    ]
+  }
+}

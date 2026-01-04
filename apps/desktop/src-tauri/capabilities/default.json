@@ -1,0 +1,19 @@
+{
+  "identifier": "default",
+  "description": "Default permissions for the desktop app",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "biometry:default",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
+    "core:webview:allow-internal-toggle-devtools",
+    "core:window:allow-start-dragging",
+    "core:tray:default",
+    "core:window:allow-show",
+    "core:window:allow-hide",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "shell:allow-open"
+  ]
+}

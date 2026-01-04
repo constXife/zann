@@ -1,0 +1,53 @@
+profiles:
+  login:
+    version: 1
+    ui:
+      masked_by_default: [password, totp_secret, notes]
+      copyable: [username, password, url, totp_secret]
+      revealable: [password, totp_secret, notes]
+    never_log_fields: [password, totp_secret, notes]
+    exposable_public_attrs: [username, url]
+
+  note:
+    version: 1
+    ui:
+      masked_by_default: []
+      copyable: [title, text]
+      revealable: []
+    never_log_fields: [text]
+    exposable_public_attrs: [title]
+
+  card:
+    version: 1
+    ui:
+      masked_by_default: [number, cvv, pin, notes]
+      copyable: [cardholder, number, expiry, cvv, pin]
+      revealable: [number, cvv, pin, notes]
+    never_log_fields: [number, cvv, pin, notes]
+    exposable_public_attrs: [cardholder]
+
+  identity:
+    version: 1
+    ui:
+      masked_by_default: []
+      copyable: [first_name, last_name, email, phone, address]
+      revealable: []
+    never_log_fields: [phone, address, notes]
+    exposable_public_attrs: [email]
+
+  api:
+    version: 1
+    ui:
+      masked_by_default: [token, notes]
+      copyable: [name, url, token]
+      revealable: [token, notes]
+    never_log_fields: [token, headers, notes]
+    exposable_public_attrs: [name, url]
+
+  kv:
+    version: 1
+    ui:
+      masked_by_default: []
+      copyable: ["@all"]
+    never_log_fields: []
+    exposable_public_attrs: []
