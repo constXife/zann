@@ -294,6 +294,7 @@
     "testTouchIdSuccess": "Touch ID подтверждён",
     "rebindTouchId": "Перепривязать Touch ID",
     "rebindTouchIdSuccess": "Touch ID перепривязан",
+    "biometricsUnsupported": "Биометрия не поддерживается на этой платформе.",
     "language": "Язык",
     "accounts": {
       "localVault": "Локальное хранилище",

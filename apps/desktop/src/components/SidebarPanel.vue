@@ -25,7 +25,7 @@ defineProps<{
   openAddStorageWizard: () => void;
   openStorageSettings: () => void;
   openCreateLocalVault: () => void;
-  openSettings: () => void;
+  openSettings: (tab?: "general" | "accounts") => void;
   switchStorage: (storageId: string) => void;
   vaultDropdownOpen: boolean;
   vaults: VaultSummary[];
@@ -55,41 +55,33 @@ defineProps<{
   <aside
     class="relative flex flex-col border-r border-[var(--border-color)] bg-[var(--bg-primary)] transition-all duration-200 overflow-hidden"
   >
-    <div class="absolute right-3 top-[8px] z-[60] flex items-center gap-2">
-      <button
-        type="button"
-        class="rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
-        @click="openSettings"
-        :title="t('common.settings')"
-        data-tauri-drag-region="false"
-      >
-        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 15a3 3 0 100-6 3 3 0 000 6z" />
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.4 15a1.7 1.7 0 00.33 1.82l.05.05a2 2 0 01-2.83 2.83l-.05-.05A1.7 1.7 0 0015 19.4a1.7 1.7 0 00-1.2.5l-.08.08a2 2 0 01-2.83-2.83l.08-.08A1.7 1.7 0 009.4 15a1.7 1.7 0 00-1.82-.33l-.05.05a2 2 0 01-2.83-2.83l.05-.05A1.7 1.7 0 004.6 9a1.7 1.7 0 00-.5-1.2l-.08-.08A2 2 0 016.85 4.9l.08.08A1.7 1.7 0 009 4.6a1.7 1.7 0 001.2-.5l.08-.08a2 2 0 012.83 2.83l-.08.08A1.7 1.7 0 0014.6 9a1.7 1.7 0 001.82.33l.05-.05a2 2 0 012.83 2.83l-.05.05A1.7 1.7 0 0019.4 15z" />
-        </svg>
-      </button>
-      <button
-        type="button"
-        class="rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
-        @click="onCollapse"
-        :title="t('sidebar.collapse')"
-        data-tauri-drag-region="false"
-      >
-        <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 4H5a1 1 0 00-1 1v14a1 1 0 001 1h4m0-16v16m0-16h10a1 1 0 011 1v14a1 1 0 01-1 1H9" />
-        </svg>
-      </button>
-    </div>
+    <button
+      type="button"
+      class="absolute right-3 top-[8px] z-[60] rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
+      @click="onCollapse"
+      :title="t('sidebar.collapse')"
+      data-tauri-drag-region="false"
+    >
+      <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 4H5a1 1 0 00-1 1v14a1 1 0 001 1h4m0-16v16m0-16h10a1 1 0 011 1v14a1 1 0 01-1 1H9" />
+      </svg>
+    </button>
 
     <div
       class="relative flex items-center gap-3 p-3 pt-12"
       data-tauri-drag-region
     >
-      <div class="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+      <button
+        type="button"
+        class="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
+        @click="openSettings('accounts')"
+        :title="t('common.settings')"
+        data-tauri-drag-region="false"
+      >
         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
         </svg>
-      </div>
+      </button>
 
       <button
         type="button"

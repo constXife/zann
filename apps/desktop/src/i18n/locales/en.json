@@ -294,6 +294,7 @@
     "testTouchIdSuccess": "Touch ID verified",
     "rebindTouchId": "Rebind Touch ID",
     "rebindTouchIdSuccess": "Touch ID rebind complete",
+    "biometricsUnsupported": "Biometry is not supported on this platform.",
     "language": "Language",
     "accounts": {
       "localVault": "Local Vault",

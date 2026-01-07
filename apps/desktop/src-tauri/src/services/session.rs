@@ -119,8 +119,16 @@ pub async fn keystore_status(
             reason: if status.is_available { None } else { status.error_code },
         })),
         Err(err) => {
+            let message = err.to_string();
+            if message.to_ascii_lowercase().contains("not supported") {
+                return Ok(ApiResponse::ok(KeystoreStatusResponse {
+                    supported: false,
+                    biometrics_available: false,
+                    reason: Some(message),
+                }));
+            }
             eprintln!("[biometry] status error: {:?}", err);
-            Ok(ApiResponse::err("keystore_unavailable", &err.to_string()))
+            Ok(ApiResponse::err("keystore_unavailable", &message))
         }
     }
 }
