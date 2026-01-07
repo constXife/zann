@@ -70,6 +70,7 @@ type AppShellProps = {
   openPersonalUnlock: unknown;
   handleResetPersonal: unknown;
   runRemoteSync: unknown;
+  openSettings: unknown;
   listWidth: unknown;
   isResizingDetails: unknown;
   startResizeDetails: unknown;
@@ -207,6 +208,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :open-add-storage-wizard="openAddStorageWizard"
       :open-storage-settings="openStorageSettings"
       :open-create-local-vault="openCreateLocalVault"
+      :open-settings="openSettings"
       :switch-storage="switchStorage"
       :vault-dropdown-open="vaultDropdownOpen"
       :vaults="vaults"

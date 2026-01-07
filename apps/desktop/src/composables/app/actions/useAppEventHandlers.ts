@@ -23,6 +23,7 @@ type AppEventHandlersOptions = {
   selectedItemId: Ref<string | null>;
   loadItemDetail: (itemId: string) => Promise<void>;
   settingsOpen: Ref<boolean>;
+  openSettings: (tab?: "general" | "accounts") => void;
   lockSession: () => Promise<void> | void;
   scheduleRemoteSync: (storageId: string | null) => void;
   selectedStorageId: Ref<string>;
@@ -52,6 +53,7 @@ export function useAppEventHandlers({
   selectedItemId,
   loadItemDetail,
   settingsOpen,
+  openSettings,
   lockSession,
   scheduleRemoteSync,
   selectedStorageId,
@@ -65,6 +67,7 @@ export function useAppEventHandlers({
   const lastActivityAt = ref(Date.now());
   const altRevealAll = ref(false);
   let cacheInvalidationUnlisten: null | (() => void) = null;
+  let settingsUnlisten: null | (() => void) = null;
 
   const onActivity = () => {
     lastActivityAt.value = Date.now();
@@ -165,7 +168,7 @@ export function useAppEventHandlers({
     }
     if ((event.metaKey || event.ctrlKey) && event.key === ",") {
       event.preventDefault();
-      settingsOpen.value = true;
+      openSettings();
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
       event.preventDefault();
@@ -263,6 +266,15 @@ export function useAppEventHandlers({
     });
   };
 
+  const initSettingsListener = async () => {
+    if (settingsUnlisten) {
+      return;
+    }
+    settingsUnlisten = await listen("zann:open-settings", () => {
+      openSettings();
+    });
+  };
+
   onMounted(() => {
     window.addEventListener("keydown", onKeydown);
     window.addEventListener("mousemove", onActivity);
@@ -276,6 +288,7 @@ export function useAppEventHandlers({
     window.addEventListener("blur", handleAltRevealBlur);
     window.addEventListener("beforeunload", onBeforeUnload);
     void initCacheInvalidationListener();
+    void initSettingsListener();
   });
 
   onBeforeUnmount(() => {
@@ -293,6 +306,10 @@ export function useAppEventHandlers({
     if (cacheInvalidationUnlisten) {
       cacheInvalidationUnlisten();
       cacheInvalidationUnlisten = null;
+    }
+    if (settingsUnlisten) {
+      settingsUnlisten();
+      settingsUnlisten = null;
     }
   });
 

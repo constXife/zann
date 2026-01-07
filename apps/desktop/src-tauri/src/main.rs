@@ -11,7 +11,7 @@ mod util;
 
 use tauri::Emitter;
 use tauri::Manager;
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 use commands::auth::{
@@ -112,10 +112,38 @@ fn main() {
         .setup(|app| {
             let app_handle = app.app_handle();
 
+            let open_settings = |app: &tauri::AppHandle| {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                    let _ = window.emit("zann:open-settings", ());
+                }
+            };
+
+            let settings_item = MenuItem::with_id(app, "settings", "Settings", true, Some("CmdOrCtrl+,"))?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
+            let app_menu = SubmenuBuilder::new(app, "App")
+                .item(&settings_item)
+                .separator()
+                .item(&quit_item)
+                .build()?;
+            let menu = MenuBuilder::new(app)
+                .item(&app_menu)
+                .build()?;
+            app.set_menu(menu)?;
+            app_handle.on_menu_event(move |app, event| match event.id.as_ref() {
+                "settings" => open_settings(app),
+                "quit" => {
+                    app.exit(0);
+                }
+                _ => {}
+            });
+
             // Create tray menu
             let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;
+            let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
 
             // Create tray icon
             let _tray = TrayIconBuilder::new()
@@ -126,6 +154,15 @@ fn main() {
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
+                            #[cfg(target_os = "macos")]
+                            let _ = app.set_dock_visibility(true);
+                        }
+                    }
+                    "settings" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                            let _ = window.emit("zann:open-settings", ());
                             #[cfg(target_os = "macos")]
                             let _ = app.set_dock_visibility(true);
                         }

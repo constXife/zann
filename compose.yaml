@@ -22,11 +22,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    volumes:
+      - ./config:/config:ro
+      - ./data:/data:U
     environment:
       ZANN_DB_URL: postgres://zann:zann@db:5432/zann
       ZANN_DB_POOL_MAX: "5"
       ZANN_PASSWORD_PEPPER: dev-pepper
       ZANN_TOKEN_PEPPER: dev-pepper
+      ZANN_SMK_FILE: /data/smk
     command: ["migrate"]
     restart: "no"
 
@@ -34,10 +38,9 @@ services:
     build:
       context: .
       dockerfile: crates/zann-server/Dockerfile
-    # Preview/demo only. For real deployments, mount /config and /data, e.g.:
-    # volumes:
-    #   - ./config:/config:ro
-    #   - ./data:/data
+    volumes:
+      - ./config:/config:ro
+      - ./data:/data:U
     depends_on:
       db:
         condition: service_healthy
@@ -51,7 +54,7 @@ services:
       ZANN_ADDR: 0.0.0.0:8080
       ZANN_PASSWORD_PEPPER: dev-pepper
       ZANN_TOKEN_PEPPER: dev-pepper
-      ZANN_SMK_FILE: /config/smk
+      ZANN_SMK_FILE: /data/smk
       RUST_LOG: info
 
 volumes:
