@@ -80,6 +80,23 @@ pub struct LocalStorage {
     pub auth_method: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LocalItemHistory {
+    pub id: Uuid,
+    pub storage_id: Uuid,
+    pub vault_id: Uuid,
+    pub item_id: Uuid,
+    pub payload_enc: Vec<u8>,
+    pub checksum: String,
+    pub version: i64,
+    pub change_type: String,
+    pub changed_by_email: String,
+    pub changed_by_name: Option<String>,
+    pub changed_by_device_id: Option<Uuid>,
+    pub changed_by_device_name: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalVault {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
         Ok(Self {
@@ -159,6 +176,26 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalPendingChange {
             name: row.try_get("name")?,
             type_id: row.try_get("type_id")?,
             base_seq: row.try_get("base_seq")?,
+            created_at: row.try_get("created_at")?,
+        })
+    }
+}
+
+impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItemHistory {
+    fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
+        Ok(Self {
+            id: parse_uuid(row, "id")?,
+            storage_id: parse_uuid(row, "storage_id")?,
+            vault_id: parse_uuid(row, "vault_id")?,
+            item_id: parse_uuid(row, "item_id")?,
+            payload_enc: row.try_get("payload_enc")?,
+            checksum: row.try_get("checksum")?,
+            version: row.try_get("version")?,
+            change_type: row.try_get("change_type")?,
+            changed_by_email: row.try_get("changed_by_email")?,
+            changed_by_name: row.try_get("changed_by_name")?,
+            changed_by_device_id: row.try_get("changed_by_device_id")?,
+            changed_by_device_name: row.try_get("changed_by_device_name")?,
             created_at: row.try_get("created_at")?,
         })
     }

@@ -20,6 +20,8 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::unnecessary_wraps)]
 
+use std::time::Duration;
+
 use zann_db::migrate;
 
 mod app;
@@ -94,6 +96,9 @@ async fn main() {
     }
 
     let state = bootstrap::build_state(&settings, db);
+    if matches!(run_mode, cli::RunMode::Server) {
+        bootstrap::wait_for_schema(&state.db, Duration::from_secs(30)).await;
+    }
     bootstrap::log_fingerprint(&state);
     bootstrap::start_background_tasks(&settings, &state);
     let app = bootstrap::build_app(&metrics_config, state);

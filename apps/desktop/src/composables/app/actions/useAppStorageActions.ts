@@ -208,6 +208,20 @@ export function useAppStorageActions({
     await runRemoteSync(storageId);
   };
 
+  const handleResetSyncCursor = async (storageId: string) => {
+    try {
+      const response = await invoke<ApiResponse<null>>("sync_reset_cursor", { storageId });
+      if (!response.ok) {
+        const key = response.error?.kind ?? "generic";
+        throw new Error(t(`errors.${key}`));
+      }
+      await runRemoteSync(storageId);
+      showToast(t("common.saved"));
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
   const openCreateVault = () => {
     vaultDropdownOpen.value = false;
     void openCreateModal("vault");
@@ -280,6 +294,7 @@ export function useAppStorageActions({
     handleClearData,
     handleFactoryReset,
     handleSyncNow,
+    handleResetSyncCursor,
     openCreateVault,
     openCreateLocalVault,
     toggleVaultDropdown,

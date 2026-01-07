@@ -432,19 +432,22 @@ impl<'a> AttachmentRepo<'a> {
         query!(
             r#"
             INSERT INTO attachments (
-                id, item_id, filename, size, mime_type, content_enc, checksum, storage_url, created_at
+                id, item_id, filename, size, mime_type, enc_mode, content_enc, checksum, storage_url,
+                created_at, deleted_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
             attachment.id,
             attachment.item_id,
             attachment.filename.as_str(),
             attachment.size,
             attachment.mime_type.as_str(),
+            attachment.enc_mode.as_str(),
             &attachment.content_enc,
             attachment.checksum.as_str(),
             attachment.storage_url.as_deref(),
-            attachment.created_at
+            attachment.created_at,
+            attachment.deleted_at
         )
         .execute(self.pool)
         .await
@@ -461,10 +464,12 @@ impl<'a> AttachmentRepo<'a> {
                 filename,
                 size as "size",
                 mime_type,
+                enc_mode,
                 content_enc,
                 checksum,
                 storage_url,
-                created_at as "created_at"
+                created_at as "created_at",
+                deleted_at as "deleted_at"
             FROM attachments
             WHERE id = $1
             "#,
@@ -484,17 +489,68 @@ impl<'a> AttachmentRepo<'a> {
                 filename,
                 size as "size",
                 mime_type,
+                enc_mode,
                 content_enc,
                 checksum,
                 storage_url,
-                created_at as "created_at"
+                created_at as "created_at",
+                deleted_at as "deleted_at"
             FROM attachments
-            WHERE item_id = $1
+            WHERE item_id = $1 AND deleted_at IS NULL
             "#,
             item_id
         )
         .fetch_all(self.pool)
         .await
+    }
+
+    pub async fn mark_deleted_by_item(
+        &self,
+        item_id: Uuid,
+        deleted_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            UPDATE attachments
+            SET deleted_at = $2
+            WHERE item_id = $1 AND deleted_at IS NULL
+            "#,
+            item_id,
+            deleted_at
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| result.rows_affected())
+    }
+
+    pub async fn clear_deleted_by_item(&self, item_id: Uuid) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            UPDATE attachments
+            SET deleted_at = NULL
+            WHERE item_id = $1
+            "#,
+            item_id
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| result.rows_affected())
+    }
+
+    pub async fn purge_deleted_before(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            DELETE FROM attachments
+            WHERE deleted_at IS NOT NULL AND deleted_at < $1
+            "#,
+            cutoff
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| result.rows_affected())
     }
 }
 

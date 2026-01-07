@@ -87,6 +87,7 @@ type AppModalsProps = {
   openAddStorageWizard: unknown;
   openCreateLocalVault: unknown;
   handleSyncNow: unknown;
+  handleResetSyncCursor: unknown;
   toast: unknown;
   toastActionLabel: unknown;
   toastAction: unknown;
@@ -111,6 +112,7 @@ type AppModalsProps = {
   advancedFields: unknown;
   customFields: unknown;
   typeOptions: unknown;
+  typeGroups: unknown;
   createVaultError: unknown;
   createItemError: unknown;
   createItemErrorKey: unknown;
@@ -338,6 +340,7 @@ const confirmInputPlaceholder = valueRef<unknown>("confirmInputPlaceholder");
     :on-add-server="openAddStorageWizard"
     :on-create-local-vault="openCreateLocalVault"
     :on-sync-now="handleSyncNow"
+    :on-reset-sync-cursor="handleResetSyncCursor"
   />
 
   <ToastMessage
@@ -369,6 +372,7 @@ const confirmInputPlaceholder = valueRef<unknown>("confirmInputPlaceholder");
     :advanced-fields="advancedFields"
     :custom-fields="customFields"
     :type-options="typeOptions"
+    :type-groups="typeGroups"
     :create-vault-error="createVaultError"
     :create-item-error="createItemError"
     :create-item-error-key="createItemErrorKey"

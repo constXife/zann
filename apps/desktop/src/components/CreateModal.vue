@@ -36,6 +36,7 @@ const props = defineProps<{
   advancedFields: FieldInput[];
   customFields: FieldInput[];
   typeOptions: string[];
+  typeGroups: { id: string; label: string; types: string[] }[];
   createVaultError: string;
   createItemError: string;
   createItemErrorKey: string;
@@ -129,6 +130,7 @@ const {
   showFolderSuggestions,
   vaults: props.vaults,
   typeOptions: props.typeOptions,
+  typeGroups: props.typeGroups,
   revealedFields: props.revealedFields,
   t,
   buildPayload: props.buildPayload,
@@ -154,6 +156,7 @@ const {
       :is-editing="Boolean(props.createEditingItemId)"
       :type-menu-open="typeMenuOpen"
       :type-options="typeOptions"
+      :type-groups="typeGroups"
       :type-meta="typeMeta"
       :current-type-label="currentTypeLabel"
       :current-type-icon="currentTypeIcon"
@@ -222,14 +225,15 @@ const {
           </span>
         </div>
 
-        <CreateModalHeader
-          v-else
-          :create-mode="createMode"
-          :is-editing="Boolean(props.createEditingItemId)"
-          :type-menu-open="typeMenuOpen"
-          :copy-menu-open="copyMenuOpen"
-          :type-options="typeOptions"
-          :type-meta="typeMeta"
+    <CreateModalHeader
+      v-else
+      :create-mode="createMode"
+      :is-editing="Boolean(props.createEditingItemId)"
+      :type-menu-open="typeMenuOpen"
+      :copy-menu-open="copyMenuOpen"
+      :type-options="typeOptions"
+      :type-groups="typeGroups"
+      :type-meta="typeMeta"
           :current-type-label="currentTypeLabel"
           :current-type-icon="currentTypeIcon"
           :get-type-label="getTypeLabel"

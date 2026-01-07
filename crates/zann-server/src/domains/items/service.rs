@@ -2,12 +2,15 @@ use chrono::Utc;
 use serde_json::Value as JsonValue;
 use sqlx_core::types::Json as SqlxJson;
 use uuid::Uuid;
+use zann_core::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob};
 use zann_core::vault_crypto as core_crypto;
 use zann_core::{
-    Change, ChangeOp, ChangeType, FieldsChanged, Identity, Item, ItemHistory, SyncStatus, Vault,
-    VaultEncryptionType,
+    Attachment, Change, ChangeOp, ChangeType, FieldsChanged, Identity, Item, ItemHistory,
+    SyncStatus, Vault, VaultEncryptionType,
 };
-use zann_db::repo::{ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, UserRepo, VaultRepo};
+use zann_db::repo::{
+    AttachmentRepo, ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, UserRepo, VaultRepo,
+};
 
 use crate::app::AppState;
 use crate::domains::access_control::http::{find_vault, vault_role_allows, VaultScope};
@@ -15,6 +18,7 @@ use crate::domains::access_control::policies::PolicyDecision;
 use crate::infra::metrics;
 
 pub const ITEM_HISTORY_LIMIT: i64 = 5;
+const MAX_CIPHERTEXT_BYTES: usize = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy)]
 pub enum ItemsError {
@@ -23,6 +27,7 @@ pub enum ItemsError {
     NotFound,
     BadRequest(&'static str),
     Conflict(&'static str),
+    PayloadTooLarge(&'static str),
     Db,
     Internal(&'static str),
 }
@@ -51,6 +56,30 @@ pub struct UpdateItemCommand {
     pub version: Option<i64>,
     pub base_version: Option<i64>,
     pub fields_changed: Option<FieldsChanged>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileRepresentation {
+    Plain,
+    Opaque,
+}
+
+impl FileRepresentation {
+    pub fn from_str(value: &str) -> Result<Self, &'static str> {
+        match value {
+            "plain" => Ok(Self::Plain),
+            "opaque" => Ok(Self::Opaque),
+            _ => Err("representation_invalid"),
+        }
+    }
+}
+
+pub struct FileUploadResult {
+    pub file_id: Uuid,
+}
+
+pub struct FileDownloadResult {
+    pub bytes: Vec<u8>,
 }
 
 struct ActorSnapshot {
@@ -122,6 +151,268 @@ pub async fn get_item(
 
     tracing::info!(event = "item_fetched", item_id = %item_id, "Item fetched");
     Ok(item)
+}
+
+pub async fn upload_item_file(
+    state: &AppState,
+    identity: &Identity,
+    vault_id: &str,
+    item_id: Uuid,
+    representation: FileRepresentation,
+    file_id: Uuid,
+    bytes: Vec<u8>,
+    filename: Option<String>,
+    mime: Option<String>,
+) -> Result<FileUploadResult, ItemsError> {
+    let resource = format!("vaults/{vault_id}/items/{item_id}/file");
+    let vault = authorize_vault_access(
+        state,
+        identity,
+        vault_id,
+        "write",
+        &resource,
+        VaultScope::Items,
+    )
+    .await?;
+
+    if vault.encryption_type == VaultEncryptionType::Client
+        && representation != FileRepresentation::Opaque
+    {
+        return Err(ItemsError::Forbidden("representation_not_allowed"));
+    }
+
+    if bytes.len() > MAX_CIPHERTEXT_BYTES {
+        return Err(ItemsError::PayloadTooLarge("file_too_large"));
+    }
+
+    let item_repo = ItemRepo::new(&state.db);
+    let item = match item_repo.get_by_id(item_id).await {
+        Ok(Some(item)) => item,
+        Ok(None) => return Err(ItemsError::NotFound),
+        Err(_) => {
+            tracing::error!(event = "item_get_failed", "DB error");
+            return Err(ItemsError::Db);
+        }
+    };
+    if item.vault_id != vault.id {
+        return Err(ItemsError::NotFound);
+    }
+    if item.type_id != "file_secret" {
+        return Err(ItemsError::BadRequest("item_type_not_supported"));
+    }
+    let attachment_repo = AttachmentRepo::new(&state.db);
+    match attachment_repo.get_by_id(file_id).await {
+        Ok(Some(existing)) => {
+            if existing.item_id != item_id {
+                return Err(ItemsError::Conflict("file_id_conflict"));
+            }
+            return Ok(FileUploadResult { file_id: existing.id });
+        }
+        Ok(None) => {}
+        Err(_) => {
+            tracing::error!(event = "attachment_lookup_failed", "DB error");
+            return Err(ItemsError::Db);
+        }
+    }
+    if vault.encryption_type == VaultEncryptionType::Server {
+        let payload_bytes = decrypt_shared_payload_bytes(state, &vault, &item)
+            .map_err(|_| ItemsError::BadRequest("invalid_payload"))?;
+        let payload: JsonValue = serde_json::from_slice(&payload_bytes)
+            .map_err(|_| ItemsError::BadRequest("invalid_payload"))?;
+        let extra = payload.get("extra").and_then(|value| value.as_object());
+        let upload_state = extra
+            .and_then(|map| map.get("upload_state"))
+            .and_then(|value| value.as_str());
+        if upload_state != Some("pending") {
+            return Err(ItemsError::BadRequest("upload_state_invalid"));
+        }
+        let expected_file_id = extra
+            .and_then(|map| map.get("file_id"))
+            .and_then(|value| value.as_str())
+            .ok_or(ItemsError::BadRequest("file_id_missing"))?;
+        if expected_file_id != file_id.to_string() {
+            return Err(ItemsError::Conflict("file_id_mismatch"));
+        }
+    }
+
+    let (content_enc, checksum, enc_mode) = if vault.encryption_type == VaultEncryptionType::Server {
+        if representation == FileRepresentation::Plain {
+            let Some(smk) = state.server_master_key.as_ref() else {
+                tracing::error!(event = "file_upload_failed", "SMK not configured");
+                return Err(ItemsError::Internal("smk_missing"));
+            };
+            let vault_key =
+                match core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc) {
+                    Ok(key) => key,
+                    Err(err) => {
+                        tracing::error!(
+                            event = "file_upload_failed",
+                            error = %err,
+                            "Key decrypt failed"
+                        );
+                        return Err(ItemsError::Internal(err.as_code()));
+                    }
+                };
+            let aad = file_aad(vault.id, item_id, file_id, representation);
+            let blob = encrypt_blob(&vault_key, &bytes, &aad).map_err(|_| {
+                tracing::error!(event = "file_upload_failed", "Encryption failed");
+                ItemsError::Internal("file_encrypt_failed")
+            })?;
+            let content_enc = blob.to_bytes();
+            let checksum = core_crypto::payload_checksum(&content_enc);
+            (content_enc, checksum, "plain".to_string())
+        } else {
+            let checksum = core_crypto::payload_checksum(&bytes);
+            (bytes, checksum, "opaque".to_string())
+        }
+    } else {
+        let checksum = core_crypto::payload_checksum(&bytes);
+        (bytes, checksum, "opaque".to_string())
+    };
+
+    let attachment = Attachment {
+        id: file_id,
+        item_id,
+        filename: filename.clone().unwrap_or_else(|| "file".to_string()),
+        size: content_enc.len() as i64,
+        mime_type: mime.clone().unwrap_or_else(|| "application/octet-stream".to_string()),
+        enc_mode,
+        content_enc,
+        checksum,
+        storage_url: None,
+        created_at: Utc::now(),
+        deleted_at: None,
+    };
+
+    if attachment_repo.create(&attachment).await.is_err() {
+        tracing::error!(event = "attachment_create_failed", "DB error");
+        return Err(ItemsError::Db);
+    }
+
+    if vault.encryption_type == VaultEncryptionType::Server {
+        let _ = update_file_upload_state(
+            state,
+            identity,
+            vault_id,
+            item_id,
+            file_id,
+            attachment.filename.clone(),
+            attachment.mime_type.clone(),
+            attachment.size,
+            attachment.checksum.clone(),
+        )
+        .await;
+    }
+
+    Ok(FileUploadResult { file_id })
+}
+
+pub async fn download_item_file(
+    state: &AppState,
+    identity: &Identity,
+    vault_id: &str,
+    item_id: Uuid,
+    representation: FileRepresentation,
+) -> Result<FileDownloadResult, ItemsError> {
+    let resource = format!("vaults/{vault_id}/items/{item_id}/file");
+    let vault = authorize_vault_access(
+        state,
+        identity,
+        vault_id,
+        "read",
+        &resource,
+        VaultScope::Items,
+    )
+    .await?;
+
+    if vault.encryption_type == VaultEncryptionType::Client
+        && representation != FileRepresentation::Opaque
+    {
+        return Err(ItemsError::Forbidden("representation_not_allowed"));
+    }
+
+    let item_repo = ItemRepo::new(&state.db);
+    let item = match item_repo.get_by_id(item_id).await {
+        Ok(Some(item)) => item,
+        Ok(None) => return Err(ItemsError::NotFound),
+        Err(_) => {
+            tracing::error!(event = "item_get_failed", "DB error");
+            return Err(ItemsError::Db);
+        }
+    };
+    if item.vault_id != vault.id {
+        return Err(ItemsError::NotFound);
+    }
+    if item.type_id != "file_secret" {
+        return Err(ItemsError::BadRequest("item_type_not_supported"));
+    }
+
+    let attachment_repo = AttachmentRepo::new(&state.db);
+    let mut attachments = match attachment_repo.list_by_item(item_id).await {
+        Ok(attachments) => attachments,
+        Err(_) => {
+            tracing::error!(event = "attachment_list_failed", "DB error");
+            return Err(ItemsError::Db);
+        }
+    };
+    let mut attachment = None;
+    if vault.encryption_type == VaultEncryptionType::Server {
+        if let Ok(payload_bytes) = decrypt_shared_payload_bytes(state, &vault, &item) {
+            if let Ok(payload) = serde_json::from_slice::<JsonValue>(&payload_bytes) {
+                let file_id = payload
+                    .get("extra")
+                    .and_then(|value| value.as_object())
+                    .and_then(|map| map.get("file_id"))
+                    .and_then(|value| value.as_str());
+                if let Some(file_id) = file_id {
+                    if let Ok(file_uuid) = Uuid::parse_str(file_id) {
+                        if let Some(idx) =
+                            attachments.iter().position(|entry| entry.id == file_uuid)
+                        {
+                            attachment = Some(attachments.swap_remove(idx));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    let attachment = attachment.or_else(|| {
+        attachments
+            .into_iter()
+            .max_by_key(|entry| entry.created_at)
+    });
+    let Some(attachment) = attachment else {
+        return Err(ItemsError::NotFound);
+    };
+
+    if representation == FileRepresentation::Opaque {
+        return Ok(FileDownloadResult {
+            bytes: attachment.content_enc,
+        });
+    }
+
+    if vault.encryption_type == VaultEncryptionType::Server && attachment.enc_mode == "plain" {
+        let Some(smk) = state.server_master_key.as_ref() else {
+            tracing::error!(event = "file_download_failed", "SMK not configured");
+            return Err(ItemsError::Internal("smk_missing"));
+        };
+        let vault_key = match core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
+        {
+            Ok(key) => key,
+            Err(err) => {
+                tracing::error!(event = "file_download_failed", error = %err, "Key decrypt failed");
+                return Err(ItemsError::Internal(err.as_code()));
+            }
+        };
+        let aad = file_aad(vault.id, item_id, attachment.id, representation);
+        let blob = EncryptedBlob::from_bytes(&attachment.content_enc)
+            .map_err(|_| ItemsError::Internal("invalid_blob"))?;
+        let bytes = decrypt_blob(&vault_key, &blob, &aad)
+            .map_err(|_| ItemsError::Internal("file_decrypt_failed"))?;
+        return Ok(FileDownloadResult { bytes });
+    }
+
+    Err(ItemsError::Conflict("representation_not_available"))
 }
 
 pub async fn create_item(
@@ -546,6 +837,12 @@ pub async fn delete_item(
     item.device_id = device_id;
     item.updated_at = now;
 
+    let attachment_repo = AttachmentRepo::new(&state.db);
+    let _ = attachment_repo.mark_deleted_by_item(item.id, now).await;
+    let grace_days = state.config.server.attachments_gc_grace_days.max(0);
+    let cutoff = now - chrono::Duration::days(grace_days);
+    let _ = attachment_repo.purge_deleted_before(cutoff).await;
+
     let Ok(affected) = item_repo.update(&item).await else {
         tracing::error!(event = "item_delete_failed", "DB error");
         return Err(ItemsError::Db);
@@ -764,6 +1061,11 @@ pub async fn restore_item_version(
     item.deleted_by_device_id = None;
     item.updated_at = now;
 
+    if item.type_id == "file_secret" {
+        let attachment_repo = AttachmentRepo::new(&state.db);
+        let _ = attachment_repo.clear_deleted_by_item(item.id).await;
+    }
+
     let Ok(affected) = item_repo.update(&item).await else {
         tracing::error!(event = "item_restore_failed", "DB error");
         return Err(ItemsError::Db);
@@ -816,6 +1118,146 @@ pub(crate) fn replace_basename(path: &str, name: &str) -> String {
         *last = name;
     }
     parts.join("/")
+}
+
+fn file_aad(
+    vault_id: Uuid,
+    item_id: Uuid,
+    file_id: Uuid,
+    representation: FileRepresentation,
+) -> Vec<u8> {
+    let mode = match representation {
+        FileRepresentation::Plain => "plain",
+        FileRepresentation::Opaque => "opaque",
+    };
+    format!("{vault_id}:{item_id}:{file_id}:v1:{mode}").into_bytes()
+}
+
+fn decrypt_shared_payload_bytes(
+    state: &AppState,
+    vault: &Vault,
+    item: &Item,
+) -> Result<Vec<u8>, ItemsError> {
+    let Some(smk) = state.server_master_key.as_ref() else {
+        tracing::error!(event = "item_payload_decrypt_failed", "SMK not configured");
+        return Err(ItemsError::Internal("smk_missing"));
+    };
+    let vault_key = match core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc) {
+        Ok(key) => key,
+        Err(err) => {
+            tracing::error!(
+                event = "item_payload_decrypt_failed",
+                error = %err,
+                "Key decrypt failed"
+            );
+            return Err(ItemsError::Internal(err.as_code()));
+        }
+    };
+    core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item.id, &item.payload_enc)
+        .map_err(|_| ItemsError::Internal("payload_decrypt_failed"))
+}
+
+async fn update_file_upload_state(
+    state: &AppState,
+    identity: &Identity,
+    vault_id: &str,
+    item_id: Uuid,
+    file_id: Uuid,
+    filename: String,
+    mime: String,
+    size: i64,
+    checksum: String,
+) -> Result<(), ItemsError> {
+    let resource = format!("vaults/{vault_id}/items/{item_id}/file");
+    let vault = authorize_vault_access(
+        state,
+        identity,
+        vault_id,
+        "write",
+        &resource,
+        VaultScope::Items,
+    )
+    .await?;
+    if vault.encryption_type != VaultEncryptionType::Server {
+        return Ok(());
+    }
+
+    let item_repo = ItemRepo::new(&state.db);
+    let item = match item_repo.get_by_id(item_id).await {
+        Ok(Some(item)) => item,
+        Ok(None) => return Err(ItemsError::NotFound),
+        Err(_) => {
+            tracing::error!(event = "item_get_failed", "DB error");
+            return Err(ItemsError::Db);
+        }
+    };
+    if item.vault_id != vault.id {
+        return Err(ItemsError::NotFound);
+    }
+
+    let payload_bytes = match decrypt_shared_payload_bytes(state, &vault, &item) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            tracing::warn!(event = "item_update_failed", "Payload decrypt failed");
+            return Ok(());
+        }
+    };
+    let mut payload: JsonValue = match serde_json::from_slice(&payload_bytes) {
+        Ok(value) => value,
+        Err(_) => return Ok(()),
+    };
+
+    let mut updated = false;
+    if let JsonValue::Object(ref mut map) = payload {
+        let extra = map.entry("extra").or_insert_with(|| JsonValue::Object(Default::default()));
+        if let JsonValue::Object(extra_map) = extra {
+            extra_map
+                .entry("upload_state")
+                .and_modify(|value| *value = JsonValue::String("ready".to_string()))
+                .or_insert_with(|| JsonValue::String("ready".to_string()));
+            extra_map
+                .entry("file_id")
+                .and_modify(|value| *value = JsonValue::String(file_id.to_string()))
+                .or_insert_with(|| JsonValue::String(file_id.to_string()));
+            extra_map
+                .entry("filename")
+                .and_modify(|value| *value = JsonValue::String(filename.clone()))
+                .or_insert_with(|| JsonValue::String(filename.clone()));
+            extra_map
+                .entry("mime")
+                .and_modify(|value| *value = JsonValue::String(mime.clone()))
+                .or_insert_with(|| JsonValue::String(mime.clone()));
+            extra_map
+                .entry("size")
+                .and_modify(|value| *value = JsonValue::String(size.to_string()))
+                .or_insert_with(|| JsonValue::String(size.to_string()));
+            extra_map
+                .entry("checksum")
+                .and_modify(|value| *value = JsonValue::String(checksum.clone()))
+                .or_insert_with(|| JsonValue::String(checksum.clone()));
+            updated = true;
+        }
+    }
+
+    if !updated {
+        return Ok(());
+    }
+
+    let command = UpdateItemCommand {
+        path: None,
+        name: None,
+        type_id: None,
+        tags: None,
+        favorite: None,
+        payload_enc: None,
+        payload: Some(payload),
+        checksum: None,
+        version: None,
+        base_version: None,
+        fields_changed: None,
+    };
+    let _ = update_item(state, identity, vault_id, item_id, command).await?;
+    Ok(())
 }
 
 async fn actor_snapshot(

@@ -3,9 +3,10 @@ use sqlx_core::query_as::query_as;
 use sqlx_postgres::Postgres;
 use zann_core::vault_crypto as core_crypto;
 use zann_core::{Identity, VaultEncryptionType, VaultKind};
-use zann_db::repo::{ChangeRepo, ItemRepo, VaultRepo};
+use zann_db::repo::{ChangeRepo, ItemHistoryRepo, ItemRepo, VaultRepo};
 
 use crate::app::AppState;
+use crate::domains::items::service::ITEM_HISTORY_LIMIT;
 use crate::domains::access_control::http::{vault_role_allows, VaultScope};
 use crate::domains::access_control::policies::PolicyDecision;
 use crate::domains::sync::http::v1::handlers::push_apply::{apply_change, ApplyChangeResult};
@@ -13,8 +14,8 @@ use crate::domains::sync::http::v1::helpers::{
     can_push, decode_cursor, encode_cursor, parse_plaintext_payload,
 };
 use crate::domains::sync::http::v1::types::{
-    SyncAppliedChange, SyncPullChange, SyncPullRow, SyncPushChange, SyncPushConflict,
-    SyncSharedPullChange, SyncSharedPushChange,
+    SyncAppliedChange, SyncHistoryEntry, SyncPullChange, SyncPullRow, SyncPushChange,
+    SyncPushConflict, SyncSharedHistoryEntry, SyncSharedPullChange, SyncSharedPushChange,
 };
 use crate::infra::metrics;
 
@@ -183,6 +184,7 @@ pub(crate) async fn sync_pull(
 
     let mut changes = Vec::with_capacity(rows.len());
     let mut last_seq = since_seq;
+    let history_repo = ItemHistoryRepo::new(&state.db);
     for row in rows {
         let seq = row.seq;
         let op = row.op;
@@ -190,6 +192,36 @@ pub(crate) async fn sync_pull(
             None
         } else {
             Some(row.payload_enc)
+        };
+        let history = match history_repo.list_by_item_limit(row.item_id, ITEM_HISTORY_LIMIT).await {
+            Ok(entries) => {
+                let mapped = entries
+                    .into_iter()
+                    .map(|entry| SyncHistoryEntry {
+                        version: entry.version,
+                        checksum: entry.checksum,
+                        change_type: entry.change_type.as_str().to_string(),
+                        changed_by_name: entry.changed_by_name,
+                        changed_by_email: entry.changed_by_email,
+                        created_at: entry.created_at,
+                        payload_enc: entry.payload_enc,
+                    })
+                    .collect::<Vec<_>>();
+                tracing::info!(
+                    event = "sync_pull_history",
+                    item_id = %row.item_id,
+                    count = mapped.len()
+                );
+                mapped
+            }
+            Err(err) => {
+                tracing::warn!(
+                    event = "sync_pull_history_failed",
+                    item_id = %row.item_id,
+                    error = %err
+                );
+                Vec::new()
+            }
         };
         last_seq = seq;
         changes.push(SyncPullChange {
@@ -202,6 +234,7 @@ pub(crate) async fn sync_pull(
             path: row.path,
             name: row.name,
             type_id: row.type_id,
+            history,
         });
     }
 
@@ -348,6 +381,7 @@ pub(crate) async fn sync_shared_pull(
         let change_repo = ChangeRepo::new(&state.db);
         let last_seq = change_repo.last_seq_for_vault(vault.id).await.unwrap_or(0);
 
+        let history_repo = ItemHistoryRepo::new(&state.db);
         let mut changes = Vec::with_capacity(items.len());
         for item in items {
             let payload = if item.deleted_at.is_some() {
@@ -379,6 +413,61 @@ pub(crate) async fn sync_shared_pull(
                     }
                 }
             };
+            let history = match history_repo.list_by_item_limit(item.id, ITEM_HISTORY_LIMIT).await {
+                Ok(entries) => {
+                    let mut mapped = Vec::with_capacity(entries.len());
+                    for entry in entries {
+                        let payload = match core_crypto::decrypt_payload_bytes(
+                            &vault_key,
+                            vault.id,
+                            item.id,
+                            &entry.payload_enc,
+                        ) {
+                            Ok(bytes) => match serde_json::from_slice(&bytes) {
+                                Ok(payload) => payload,
+                                Err(_) => {
+                                    tracing::error!(
+                                        event = "sync_shared_pull_failed",
+                                        "History payload decode failed"
+                                    );
+                                    return Err(SyncError::Internal("payload_decrypt_failed"));
+                                }
+                            },
+                            Err(err) => {
+                                tracing::error!(
+                                    event = "sync_shared_pull_failed",
+                                    error = %err,
+                                    "History payload decrypt failed"
+                                );
+                                return Err(SyncError::Internal("payload_decrypt_failed"));
+                            }
+                        };
+                        mapped.push(SyncSharedHistoryEntry {
+                            version: entry.version,
+                            checksum: entry.checksum,
+                            change_type: entry.change_type.as_str().to_string(),
+                            changed_by_name: entry.changed_by_name,
+                            changed_by_email: entry.changed_by_email,
+                            created_at: entry.created_at.to_rfc3339(),
+                            payload,
+                        });
+                    }
+                    tracing::info!(
+                        event = "sync_shared_pull_history",
+                        item_id = %item.id,
+                        count = mapped.len()
+                    );
+                    mapped
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        event = "sync_shared_pull_history_failed",
+                        item_id = %item.id,
+                        error = %err
+                    );
+                    Vec::new()
+                }
+            };
             changes.push(SyncSharedPullChange {
                 item_id: item.id.to_string(),
                 operation: if item.deleted_at.is_some() {
@@ -393,6 +482,7 @@ pub(crate) async fn sync_shared_pull(
                 path: item.path,
                 name: item.name,
                 type_id: item.type_id,
+                history,
             });
         }
 
@@ -406,6 +496,7 @@ pub(crate) async fn sync_shared_pull(
 
     let mut changes = Vec::with_capacity(rows.len());
     let mut last_seq = since_seq;
+    let history_repo = ItemHistoryRepo::new(&state.db);
     for row in rows {
         let seq = row.seq;
         let op = row.op;
@@ -435,6 +526,61 @@ pub(crate) async fn sync_shared_pull(
                 }
             }
         };
+        let history = match history_repo.list_by_item_limit(row.item_id, ITEM_HISTORY_LIMIT).await {
+            Ok(entries) => {
+                let mut mapped = Vec::with_capacity(entries.len());
+                for entry in entries {
+                    let payload = match core_crypto::decrypt_payload_bytes(
+                        &vault_key,
+                        vault.id,
+                        row.item_id,
+                        &entry.payload_enc,
+                    ) {
+                        Ok(bytes) => match serde_json::from_slice(&bytes) {
+                            Ok(payload) => payload,
+                            Err(_) => {
+                                tracing::error!(
+                                    event = "sync_shared_pull_failed",
+                                    "History payload decode failed"
+                                );
+                                return Err(SyncError::Internal("payload_decrypt_failed"));
+                            }
+                        },
+                        Err(err) => {
+                            tracing::error!(
+                                event = "sync_shared_pull_failed",
+                                error = %err,
+                                "History payload decrypt failed"
+                            );
+                            return Err(SyncError::Internal("payload_decrypt_failed"));
+                        }
+                    };
+                    mapped.push(SyncSharedHistoryEntry {
+                        version: entry.version,
+                        checksum: entry.checksum,
+                        change_type: entry.change_type.as_str().to_string(),
+                        changed_by_name: entry.changed_by_name,
+                        changed_by_email: entry.changed_by_email,
+                        created_at: entry.created_at.to_rfc3339(),
+                        payload,
+                    });
+                }
+                tracing::info!(
+                    event = "sync_shared_pull_history",
+                    item_id = %row.item_id,
+                    count = mapped.len()
+                );
+                mapped
+            }
+            Err(err) => {
+                tracing::warn!(
+                    event = "sync_shared_pull_history_failed",
+                    item_id = %row.item_id,
+                    error = %err
+                );
+                Vec::new()
+            }
+        };
         last_seq = seq;
         changes.push(SyncSharedPullChange {
             item_id: row.item_id.to_string(),
@@ -446,6 +592,7 @@ pub(crate) async fn sync_shared_pull(
             path: row.path,
             name: row.name,
             type_id: row.type_id,
+            history,
         });
     }
 

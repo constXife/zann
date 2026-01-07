@@ -132,6 +132,16 @@ export function useAppWatchers({
     }
   });
 
+  watch(items, async () => {
+    if (!initialized.value || !unlocked.value) {
+      return;
+    }
+    if (!selectedItemId.value || selectedItem.value?.id !== selectedItemId.value) {
+      return;
+    }
+    await loadItemDetail(selectedItemId.value);
+  });
+
   watch(filteredItems, (value) => {
     if (value.length === 0) {
       selectedItemId.value = null;

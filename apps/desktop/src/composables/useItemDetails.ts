@@ -6,12 +6,13 @@ import type {
   DetailSection,
   EncryptedPayload,
   FieldRow,
+  FieldValue,
   ItemDetail,
   ItemHistoryDetail,
   ItemHistorySummary,
   Settings,
 } from "../types";
-import { getSchemaFieldDefs, getSchemaKeys } from "../data/secretSchemas";
+import { getSchemaFieldDefs, getSchemaKeys, resolveSchemaLabel } from "../data/secretSchemas";
 
 type Translator = (key: string) => string;
 
@@ -35,10 +36,65 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
   const revealedFields = ref(new Set<string>());
   const revealTimer = ref<number | null>(null);
   const historyToken = ref(0);
+  const timeTravelActive = ref(false);
+  const timeTravelIndex = ref(0);
+  const timeTravelPayload = ref<EncryptedPayload | null>(null);
+  const timeTravelBasePayload = ref<EncryptedPayload | null>(null);
+  const timeTravelLoading = ref(false);
+  const timeTravelError = ref("");
+  const timeTravelOverrides = ref<Record<string, FieldValue | null>>({});
+  const timeTravelHasDraft = computed(() => Object.keys(timeTravelOverrides.value).length > 0);
+
+  const mergePayload = (
+    base: EncryptedPayload,
+    overrides: Record<string, FieldValue | null>,
+  ): EncryptedPayload => {
+    const nextFields: Record<string, FieldValue> = {};
+    const baseFields = base.fields ?? {};
+    Object.entries(baseFields).forEach(([key, value]) => {
+      if (Object.prototype.hasOwnProperty.call(overrides, key)) {
+        const override = overrides[key];
+        if (override) {
+          nextFields[key] = override;
+        }
+      } else {
+        nextFields[key] = value;
+      }
+    });
+    Object.entries(overrides).forEach(([key, value]) => {
+      if (!value) {
+        return;
+      }
+      if (!Object.prototype.hasOwnProperty.call(baseFields, key)) {
+        nextFields[key] = value;
+      }
+    });
+    return {
+      ...base,
+      fields: nextFields,
+    };
+  };
 
   const loadItemDetail = async (itemId: string) => {
     if (!options.initialized.value || !options.unlocked.value) {
       return;
+    }
+    const preserveTimeTravel =
+      timeTravelActive.value && selectedItem.value?.id === itemId;
+    const preservedIndex = timeTravelIndex.value;
+    if (!preserveTimeTravel) {
+      timeTravelActive.value = false;
+      timeTravelIndex.value = 0;
+      timeTravelPayload.value = null;
+      timeTravelBasePayload.value = null;
+      timeTravelError.value = "";
+      timeTravelLoading.value = false;
+      timeTravelOverrides.value = {};
+    } else {
+      timeTravelPayload.value = null;
+      timeTravelBasePayload.value = null;
+      timeTravelError.value = "";
+      timeTravelLoading.value = false;
     }
     console.info("[details] load_item_start", { itemId });
     detailLoading.value = true;
@@ -57,6 +113,10 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       pendingHistoryEntries.value = [];
       historyError.value = "";
       await loadItemHistory(response.data);
+      if (preserveTimeTravel) {
+        timeTravelActive.value = true;
+        await setTimeTravelIndex(preservedIndex);
+      }
       console.info("[details] load_item_ok", {
         itemId,
         name: response.data.name,
@@ -209,7 +269,10 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
     if (!selectedItem.value?.payload) {
       return [];
     }
-    const payload = selectedItem.value.payload;
+    const payload =
+      timeTravelActive.value && timeTravelPayload.value
+        ? timeTravelPayload.value
+        : selectedItem.value.payload;
     const typeId = selectedItem.value.type_id;
     const schemaDefs = getSchemaFieldDefs(typeId);
     const schemaKeys = new Set(getSchemaKeys(typeId));
@@ -223,7 +286,7 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       const copyable = item.meta?.copyable ?? true;
       const revealable = item.meta?.masked ?? masked;
       fields.push({
-        key: def.label ?? def.key,
+        key: resolveSchemaLabel(options.t, typeId, def.key),
         value: item.value,
         path: def.key,
         kind: item.kind,
@@ -252,6 +315,31 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
         revealable,
       });
     });
+    if (typeId === "file_secret" && payload.extra) {
+      const extraKeys = [
+        "upload_state",
+        "file_id",
+        "filename",
+        "mime",
+        "size",
+        "checksum",
+      ];
+      extraKeys.forEach((key) => {
+        if (payloadFields[key]) return;
+        const raw = payload.extra?.[key];
+        if (!raw) return;
+        const label = resolveSchemaLabel(options.t, typeId, key);
+        fields.push({
+          key: label,
+          value: raw,
+          path: key,
+          kind: "text",
+          masked: false,
+          copyable: true,
+          revealable: false,
+        });
+      });
+    }
     return fields.length
       ? [
           {
@@ -265,6 +353,93 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
   const findPrimarySecret = (sections: DetailSection[]) => {
     const fields = sections.flatMap((section) => section.fields);
     return fields.find((field) => field.masked) ?? fields[0] ?? null;
+  };
+
+  const timeTravelDraftPayload = computed(() => {
+    if (!selectedItem.value || !timeTravelHasDraft.value) {
+      return null;
+    }
+    return mergePayload(selectedItem.value.payload, timeTravelOverrides.value);
+  });
+
+  const loadTimeTravelPayloads = async (index: number) => {
+    if (!selectedItem.value) {
+      return;
+    }
+    const entry = historyEntries.value[index];
+    if (!entry) {
+      timeTravelPayload.value = null;
+      timeTravelBasePayload.value = selectedItem.value.payload;
+      return;
+    }
+    timeTravelLoading.value = true;
+    timeTravelError.value = "";
+    try {
+      const payload = await fetchHistoryPayload(entry.version);
+      if (!payload) {
+        timeTravelPayload.value = null;
+        timeTravelBasePayload.value = null;
+        timeTravelError.value = options.t("items.historyVersionMissing");
+        return;
+      }
+      timeTravelPayload.value = payload;
+      if (index > 0) {
+        const baseEntry = historyEntries.value[index - 1];
+        const basePayload = baseEntry ? await fetchHistoryPayload(baseEntry.version) : null;
+        timeTravelBasePayload.value = basePayload ?? selectedItem.value.payload;
+      } else {
+        timeTravelBasePayload.value = selectedItem.value.payload;
+      }
+    } catch (err) {
+      timeTravelError.value = String(err);
+      timeTravelPayload.value = null;
+      timeTravelBasePayload.value = null;
+    } finally {
+      timeTravelLoading.value = false;
+    }
+  };
+
+  const openTimeTravel = async () => {
+    if (!selectedItem.value) {
+      return;
+    }
+    timeTravelActive.value = true;
+    timeTravelIndex.value = 0;
+    await loadTimeTravelPayloads(0);
+  };
+
+  const closeTimeTravel = () => {
+    timeTravelActive.value = false;
+    timeTravelIndex.value = 0;
+    timeTravelPayload.value = null;
+    timeTravelBasePayload.value = null;
+    timeTravelError.value = "";
+    timeTravelLoading.value = false;
+    timeTravelOverrides.value = {};
+  };
+
+  const setTimeTravelIndex = async (index: number) => {
+    const maxIndex = Math.max(0, historyEntries.value.length - 1);
+    const nextIndex = Math.min(Math.max(index, 0), maxIndex);
+    timeTravelIndex.value = nextIndex;
+    if (timeTravelActive.value) {
+      await loadTimeTravelPayloads(nextIndex);
+    }
+  };
+
+  const applyTimeTravelField = (key: string) => {
+    if (!selectedItem.value) {
+      return;
+    }
+    const source =
+      timeTravelPayload.value?.fields?.[key] ?? timeTravelBasePayload.value?.fields?.[key];
+    if (!source) {
+      return;
+    }
+    timeTravelOverrides.value = {
+      ...timeTravelOverrides.value,
+      [key]: source,
+    };
   };
 
   onBeforeUnmount(clearRevealTimer);
@@ -317,5 +492,17 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
     findPrimarySecret,
     addOptimisticHistory,
     removeOptimisticHistory,
+    timeTravelActive,
+    timeTravelIndex,
+    timeTravelPayload,
+    timeTravelBasePayload,
+    timeTravelLoading,
+    timeTravelError,
+    timeTravelHasDraft,
+    timeTravelDraftPayload,
+    openTimeTravel,
+    closeTimeTravel,
+    setTimeTravelIndex,
+    applyTimeTravelField,
   };
 };

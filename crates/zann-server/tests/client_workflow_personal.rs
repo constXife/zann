@@ -2,12 +2,73 @@ mod client_workflow_support;
 mod support;
 
 use uuid::Uuid;
+use serde_json::json;
 use zann_core::crypto::SecretKey;
 use zann_core::ItemsService;
 
 use client_workflow_support::{
     decrypt_payload, encrypt_vault_key, key_fingerprint, login_payload, LocalClient, TestApp,
 };
+
+async fn create_item(
+    app: &TestApp,
+    token: &str,
+    vault_id: Uuid,
+    password: &str,
+) -> serde_json::Value {
+    let payload = json!({
+        "path": "login",
+        "name": "login",
+        "type_id": "login",
+        "payload_enc": password.as_bytes(),
+        "checksum": format!("checksum-{}", password)
+    });
+    let (status, json) = app
+        .send_json(
+            axum::http::Method::POST,
+            &format!("/v1/vaults/{}/items", vault_id),
+            Some(token),
+            payload,
+        )
+        .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::CREATED,
+        "create item failed: {:?}",
+        json
+    );
+    json
+}
+
+async fn update_item(
+    app: &TestApp,
+    token: &str,
+    vault_id: Uuid,
+    item_id: &str,
+    password: &str,
+) {
+    let payload = json!({
+        "path": "login",
+        "name": "login",
+        "type_id": "login",
+        "payload_enc": password.as_bytes(),
+        "checksum": format!("checksum-{}", password)
+    });
+    let (status, json) = app
+        .send_json(
+            axum::http::Method::PUT,
+            &format!("/v1/vaults/{}/items/{}", vault_id, item_id),
+            Some(token),
+            payload,
+        )
+        .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "update item failed: {:?}",
+        json
+    );
+}
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
@@ -155,5 +216,52 @@ async fn personal_pull_populates_cache_with_key_fp() {
         item.cache_key_fp.as_deref(),
         Some(key_fingerprint(&vault_key).as_str()),
         "personal cache_key_fp should match vault key"
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn personal_sync_includes_history_tail() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("personal-sync-history@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+    let vault_id = app.personal_vault_id("personal-sync-history@example.com").await;
+
+    let item = create_item(&app, token, vault_id, "pw-1").await;
+    let item_id = item["id"].as_str().expect("item id").to_string();
+    update_item(&app, token, vault_id, &item_id, "pw-2").await;
+    update_item(&app, token, vault_id, &item_id, "pw-3").await;
+
+    let (status, json) = app
+        .send_json(
+            axum::http::Method::POST,
+            "/v1/sync/pull",
+            Some(token),
+            json!({ "vault_id": vault_id, "cursor": null, "limit": 100 }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "sync pull failed: {:?}",
+        json
+    );
+    let changes = json["changes"].as_array().expect("changes");
+    let change = changes
+        .iter()
+        .find(|entry| entry["item_id"].as_str() == Some(&item_id))
+        .expect("item change");
+    let history = change["history"].as_array().expect("history");
+    assert!(!history.is_empty(), "history should be included");
+    assert!(
+        history.len() <= 5,
+        "history tail should not exceed limit"
+    );
+    let payload_enc = history[0]["payload_enc"].as_array().expect("payload_enc");
+    assert!(
+        !payload_enc.is_empty(),
+        "history payload_enc should be present"
     );
 }

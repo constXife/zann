@@ -51,3 +51,48 @@ profiles:
       copyable: ["@all"]
     never_log_fields: []
     exposable_public_attrs: []
+
+  ssh_key:
+    version: 1
+    ui:
+      masked_by_default: [private_key, passphrase, notes]
+      copyable: [public_key, username]
+      revealable: [private_key, passphrase, notes]
+    never_log_fields: [private_key, passphrase, notes]
+    exposable_public_attrs: [public_key, username]
+
+  database:
+    version: 1
+    ui:
+      masked_by_default: [password, notes]
+      copyable: [host, port, user, database, driver]
+      revealable: [password, notes]
+    never_log_fields: [password, notes]
+    exposable_public_attrs: [host, port, user, database, driver]
+
+  cloud_iam:
+    version: 1
+    ui:
+      masked_by_default: [secret_key, notes]
+      copyable: [access_key, region, role]
+      revealable: [secret_key, notes]
+    never_log_fields: [secret_key, notes]
+    exposable_public_attrs: [access_key, region, role]
+
+  file_secret:
+    version: 1
+    ui:
+      masked_by_default: [notes]
+      copyable: [file_id, filename, checksum]
+      revealable: [notes]
+    never_log_fields: [notes]
+    exposable_public_attrs: [filename, mime, size]
+
+  server_credentials:
+    version: 1
+    ui:
+      masked_by_default: [password, notes]
+      copyable: [host, username, protocol]
+      revealable: [password, notes]
+    never_log_fields: [password, notes]
+    exposable_public_attrs: [host, username, protocol]

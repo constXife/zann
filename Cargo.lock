@@ -5328,6 +5328,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "chrono",
+ "serde_json",
  "sqlx-core",
  "sqlx-macros",
  "sqlx-postgres",

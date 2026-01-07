@@ -65,6 +65,7 @@ export type EncryptedPayload = {
   v: number;
   typeId: string;
   fields: Record<string, FieldValue>;
+  extra?: Record<string, string>;
 };
 
 export type ItemDetail = {

@@ -17,6 +17,7 @@ macro_rules! query_as {
 }
 
 mod item_repo;
+mod item_history_repo;
 mod metadata_repo;
 mod models;
 mod pending_change_repo;
@@ -25,8 +26,11 @@ mod sync_cursor_repo;
 mod vault_repo;
 
 pub use item_repo::LocalItemRepo;
+pub use item_history_repo::LocalItemHistoryRepo;
 pub use metadata_repo::MetadataRepo;
-pub use models::{LocalItem, LocalPendingChange, LocalStorage, LocalSyncCursor, LocalVault};
+pub use models::{
+    LocalItem, LocalItemHistory, LocalPendingChange, LocalStorage, LocalSyncCursor, LocalVault,
+};
 pub use pending_change_repo::PendingChangeRepo;
 pub use storage_repo::LocalStorageRepo;
 pub use sync_cursor_repo::SyncCursorRepo;

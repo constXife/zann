@@ -43,6 +43,7 @@ Notes:
 - Personal vaults: client-side encryption only
 - Shared vaults: server-side encryption for team workflows
 - Server sees metadata; only shared vault contents are readable server-side
+- File secrets (MVP): stored as attachments in server DB. `personal` uses opaque ciphertext only; `shared` supports `plain` or `opaque` representations.
 
 Threat model for server: `crates/zann-server/SECURITY.md`
 
@@ -79,6 +80,27 @@ Notes:
 - Pinning means the CLI trusts only the expected fingerprint
 - `#field` is optional (defaults to `password`)
 - Secrets override existing env vars with the same name
+- File secrets are not yet supported in the CLI; use the API (`POST/GET /v1/vaults/:vault_id/items/:item_id/file` with `representation=plain|opaque`).
+- Default server `max_body_bytes` is 16MB; adjust if you need larger file uploads.
+
+File upload/download API (shared vault example):
+
+Notes:
+- Shared uploads require `payload.extra.file_id` and `payload.extra.upload_state=pending` on the item; otherwise the upload returns `upload_state_invalid`, `file_id_missing`, or `file_id_mismatch`.
+
+```bash
+curl -X POST \
+  "https://zann.company.com/v1/vaults/$VAULT_ID/items/$ITEM_ID/file?representation=plain&file_id=$FILE_ID" \
+  -H "Authorization: Bearer $ZANN_SERVICE_TOKEN" \
+  -H "Content-Type: application/pdf" \
+  --data-binary @document.pdf
+
+curl -X GET \
+  "https://zann.company.com/v1/vaults/$VAULT_ID/items/$ITEM_ID/file?representation=plain" \
+  -H "Authorization: Bearer $ZANN_SERVICE_TOKEN" \
+  -o document.pdf
+```
+
 
 ## Operations
 

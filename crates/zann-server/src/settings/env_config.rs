@@ -297,15 +297,23 @@ fn write_secret_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
 }
 
 pub(super) fn load_policies(config: &ServerConfig) -> Result<PolicySet, String> {
-    let Some(path) = config.policy.file.as_deref() else {
-        return Err("policy file not configured".to_string());
-    };
+    let fallback_paths = ["/config/policies.default.yaml", "config/policies.default.yaml"];
+    let configured = config.policy.file.as_deref();
+    let path = configured
+        .map(str::to_string)
+        .or_else(|| {
+            fallback_paths
+                .iter()
+                .find(|candidate| Path::new(candidate).exists())
+                .map(|candidate| candidate.to_string())
+        })
+        .ok_or_else(|| "policy file not configured".to_string())?;
 
-    if !Path::new(path).exists() {
+    if !Path::new(&path).exists() {
         return Err(format!("policy file not found: {path}"));
     }
 
-    let contents = fs::read_to_string(path).map_err(|err| {
+    let contents = fs::read_to_string(&path).map_err(|err| {
         warn!(event = "policy_read_failed", path, error = %err);
         format!("policy file read failed: {err}")
     })?;

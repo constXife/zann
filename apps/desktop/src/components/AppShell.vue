@@ -93,6 +93,7 @@ type AppShellProps = {
   advancedFields: unknown;
   customFields: unknown;
   typeOptions: unknown;
+  typeGroups: unknown;
   createVaultError: unknown;
   createItemError: unknown;
   createItemErrorKey: unknown;
@@ -116,7 +117,6 @@ type AppShellProps = {
   historyEntries: unknown;
   historyLoading: unknown;
   historyError: unknown;
-  hasPasswordField: unknown;
   selectedItemConflict: unknown;
   isRevealed: unknown;
   toggleReveal: unknown;
@@ -125,6 +125,7 @@ type AppShellProps = {
   copyJson: unknown;
   copyRaw: unknown;
   copyHistoryPassword: unknown;
+  restoreHistoryVersion: unknown;
   fetchHistoryPayload: unknown;
   openExternal: unknown;
   openEditItem: unknown;
@@ -134,6 +135,17 @@ type AppShellProps = {
   purgeItem: unknown;
   selectedVaultName: unknown;
   resolveConflict: unknown;
+  timeTravelActive: unknown;
+  timeTravelIndex: unknown;
+  timeTravelPayload: unknown;
+  timeTravelBasePayload: unknown;
+  timeTravelLoading: unknown;
+  timeTravelError: unknown;
+  timeTravelHasDraft: unknown;
+  applyTimeTravelField: unknown;
+  openTimeTravel: unknown;
+  closeTimeTravel: unknown;
+  setTimeTravelIndex: unknown;
 };
 
 const props = defineProps<AppShellProps>();
@@ -287,6 +299,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :advanced-fields="advancedFields"
       :custom-fields="customFields"
       :type-options="typeOptions"
+      :type-groups="typeGroups"
       :create-vault-error="createVaultError"
       :create-item-error="createItemError"
       :create-item-error-key="createItemErrorKey"
@@ -316,7 +329,6 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :history-entries="historyEntries"
       :history-loading="historyLoading"
       :history-error="historyError"
-      :has-password-field="hasPasswordField"
       :is-conflict="selectedItemConflict"
       :is-revealed="isRevealed"
       :alt-reveal-all="altRevealAll"
@@ -326,6 +338,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :copy-json="copyJson"
       :copy-raw="copyRaw"
       :copy-history-password="copyHistoryPassword"
+      :restore-history-version="restoreHistoryVersion"
       :fetch-history-payload="fetchHistoryPayload"
       :open-external="openExternal"
       :select-folder="selectFolderFilter"
@@ -337,6 +350,17 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :vault-name="selectedVaultName"
       :is-shared-vault="isSharedVault"
       :resolve-conflict="resolveConflict"
+      :time-travel-active="timeTravelActive"
+      :time-travel-index="timeTravelIndex"
+      :time-travel-payload="timeTravelPayload"
+      :time-travel-base-payload="timeTravelBasePayload"
+      :time-travel-loading="timeTravelLoading"
+      :time-travel-error="timeTravelError"
+      :time-travel-has-draft="timeTravelHasDraft"
+      :apply-time-travel-field="applyTimeTravelField"
+      :open-time-travel="openTimeTravel"
+      :close-time-travel="closeTimeTravel"
+      :set-time-travel-index="setTimeTravelIndex"
       :style="{ minWidth: uiSettings.detailsWidth + 'px' }"
     />
   </div>

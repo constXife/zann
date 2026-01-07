@@ -167,6 +167,35 @@ pub fn log_fingerprint(state: &AppState) {
     tracing::info!("SERVER FINGERPRINT: {}", fingerprint);
 }
 
+pub async fn wait_for_schema(pool: &PgPool, max_wait: Duration) {
+    let start = Instant::now();
+    loop {
+        let table =
+            sqlx_core::query_scalar::query_scalar::<_, Option<String>>(
+                "SELECT to_regclass('public.items')",
+            )
+            .fetch_one(pool)
+            .await;
+        match table {
+            Ok(Some(_)) => {
+                if start.elapsed().as_secs() > 0 {
+                    tracing::info!(event = "schema_ready", elapsed_ms = start.elapsed().as_millis());
+                }
+                return;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(event = "schema_check_failed", error = %err);
+            }
+        }
+        if start.elapsed() >= max_wait {
+            tracing::warn!(event = "schema_wait_timeout", waited_ms = start.elapsed().as_millis());
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
 pub fn start_background_tasks(settings: &settings::Settings, state: &AppState) {
     if let Some(ttl_days) = settings.item_history_ttl_days {
         let pool = state.db.clone();

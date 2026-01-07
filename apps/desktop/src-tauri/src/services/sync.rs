@@ -2,8 +2,8 @@ use chrono::Utc;
 use tauri::State;
 use uuid::Uuid;
 use zann_db::local::{
-    LocalItemRepo, LocalPendingChange, LocalStorage, LocalStorageRepo, LocalSyncCursor,
-    LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
+    LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange, LocalStorage, LocalStorageRepo,
+    LocalSyncCursor, LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
 };
 
 use crate::crypto::{decrypt_vault_key_with_master, vault_key_aad};
@@ -194,6 +194,7 @@ pub async fn remote_sync(
     }
 
     let item_repo = LocalItemRepo::new(&state.pool);
+    let history_repo = LocalItemHistoryRepo::new(&state.pool);
     let cursor_repo = SyncCursorRepo::new(&state.pool);
     let pending_repo = PendingChangeRepo::new(&state.pool);
     let mut applied_total = 0;
@@ -383,6 +384,7 @@ pub async fn remote_sync(
                 for change in &pull.changes {
                     if apply_shared_pull_change(
                         &item_repo,
+                        &history_repo,
                         master_key.as_ref(),
                         storage_uuid,
                         vault_id,
@@ -422,7 +424,14 @@ pub async fn remote_sync(
                     break;
                 };
                 for change in &pull.changes {
-                    if apply_pull_change(&item_repo, vault_key, storage_uuid, vault_id, change)
+                    if apply_pull_change(
+                        &item_repo,
+                        &history_repo,
+                        vault_key,
+                        storage_uuid,
+                        vault_id,
+                        change,
+                    )
                         .await
                         .unwrap_or(false)
                     {
@@ -507,6 +516,36 @@ pub async fn remote_reset(
     };
     storage_repo
         .upsert(&updated)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    Ok(ApiResponse::ok(()))
+}
+
+pub async fn sync_reset_cursor(
+    storage_id: String,
+    state: State<'_, AppState>,
+) -> Result<ApiResponse<()>, String> {
+    ensure_unlocked(&state).await?;
+    let storage_uuid = Uuid::parse_str(&storage_id).map_err(|_| "invalid storage id")?;
+    let storage_repo = LocalStorageRepo::new(&state.pool);
+    let Some(storage) = storage_repo
+        .get(storage_uuid)
+        .await
+        .map_err(|err| err.to_string())?
+    else {
+        return Ok(ApiResponse::err("storage_not_found", "storage not found"));
+    };
+    if storage.kind != "remote" {
+        return Ok(ApiResponse::err(
+            "not_remote",
+            "reset only supported for remote storages",
+        ));
+    }
+
+    let cursor_repo = SyncCursorRepo::new(&state.pool);
+    cursor_repo
+        .delete_by_storage(&storage_id)
         .await
         .map_err(|err| err.to_string())?;
 

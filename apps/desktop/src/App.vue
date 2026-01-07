@@ -519,6 +519,10 @@ const settingsActions = useAppSettingsActions({
 });
 const { updateSettings, testBiometrics, rebindBiometrics } = settingsActions;
 
+const timeTravelMaxIndex = computed(() =>
+  Math.max(0, itemDetailsState.historyEntries.value.length - 1),
+);
+
 const { lastActivityAt, altRevealAll } = useAppEventHandlers({
   settings,
   unlocked,
@@ -542,6 +546,10 @@ const { lastActivityAt, altRevealAll } = useAppEventHandlers({
   selectedStorageId,
   clearClipboardNow,
   runRemoteSync,
+  timeTravelActive: itemDetailsState.timeTravelActive,
+  timeTravelIndex: itemDetailsState.timeTravelIndex,
+  timeTravelMaxIndex,
+  setTimeTravelIndex: itemDetailsState.setTimeTravelIndex,
 });
 
 const { scheduleTrashPurge, clearTrashPurgeTimer } = useAppTrashPurge({

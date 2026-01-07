@@ -28,6 +28,10 @@ type AppEventHandlersOptions = {
   selectedStorageId: Ref<string>;
   clearClipboardNow: () => Promise<void> | void;
   runRemoteSync: (storageId?: string | null) => Promise<boolean>;
+  timeTravelActive: Ref<boolean>;
+  timeTravelIndex: Ref<number>;
+  timeTravelMaxIndex: ComputedRef<number>;
+  setTimeTravelIndex: (index: number) => Promise<void> | void;
 };
 
 export function useAppEventHandlers({
@@ -53,6 +57,10 @@ export function useAppEventHandlers({
   selectedStorageId,
   clearClipboardNow,
   runRemoteSync,
+  timeTravelActive,
+  timeTravelIndex,
+  timeTravelMaxIndex,
+  setTimeTravelIndex,
 }: AppEventHandlersOptions) {
   const lastActivityAt = ref(Date.now());
   const altRevealAll = ref(false);
@@ -99,7 +107,10 @@ export function useAppEventHandlers({
       return true;
     }
     const tag = active.tagName.toLowerCase();
-    return tag === "input" || tag === "textarea" || tag === "select";
+    if (tag === "input") {
+      return (active as HTMLInputElement).type !== "range";
+    }
+    return tag === "textarea" || tag === "select";
   };
 
   const onKeydown = (event: KeyboardEvent) => {
@@ -182,6 +193,28 @@ export function useAppEventHandlers({
     if (event.key === "/") {
       event.preventDefault();
       detailsPanel.value?.focusSearch?.();
+    }
+    if (timeTravelActive.value) {
+      if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        setTimeTravelIndex(timeTravelIndex.value + 1);
+        return;
+      }
+      if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        setTimeTravelIndex(timeTravelIndex.value - 1);
+        return;
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        setTimeTravelIndex(timeTravelMaxIndex.value);
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        setTimeTravelIndex(0);
+        return;
+      }
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();

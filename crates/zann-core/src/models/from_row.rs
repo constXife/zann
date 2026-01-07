@@ -261,10 +261,12 @@ impl_from_row!(Attachment, row => {
             filename: row.try_get("filename")?,
             size: row.try_get("size")?,
             mime_type: row.try_get("mime_type")?,
+            enc_mode: row.try_get("enc_mode")?,
             content_enc: row.try_get("content_enc")?,
             checksum: row.try_get("checksum")?,
             storage_url: row.try_get("storage_url")?,
             created_at: row.try_get("created_at")?,
+            deleted_at: row.try_get("deleted_at")?,
         })
     }
 );

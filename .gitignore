@@ -1,6 +1,7 @@
 **/.DS_Store
 .idea
 .tmp
+tmp
 
 **/node_modules
 

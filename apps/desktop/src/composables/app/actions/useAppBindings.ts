@@ -129,6 +129,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     advancedFields: createState.advancedFields,
     customFields: createState.customFields,
     typeOptions: createState.typeOptions,
+    typeGroups: createState.typeGroups,
     createVaultError: createState.createVaultError,
     createItemError: createState.createItemError,
     createItemErrorKey: createState.createItemErrorKey,
@@ -153,7 +154,6 @@ export function useAppBindings(options: AppBindingsOptions) {
     historyEntries: detailState.historyEntries,
     historyLoading: detailState.historyLoading,
     historyError: detailState.historyError,
-    hasPasswordField: computedState.hasPasswordField,
     selectedItemConflict: computedState.selectedItemConflict,
     isRevealed: detailState.isRevealed,
     toggleReveal: detailState.toggleReveal,
@@ -162,15 +162,33 @@ export function useAppBindings(options: AppBindingsOptions) {
     copyJson: itemActions.copyJson,
     copyRaw: itemActions.copyRaw,
     copyHistoryPassword: itemActions.copyHistoryPassword,
+    restoreHistoryVersion: itemActions.restoreHistoryVersion,
     fetchHistoryPayload: detailState.fetchHistoryPayload,
     openExternal: core.openExternal,
-    openEditItem: createState.openEditItem,
+    openEditItem: () => {
+      const payloadOverride =
+        isRef(detailState.timeTravelDraftPayload) && detailState.timeTravelHasDraft?.value
+          ? detailState.timeTravelDraftPayload.value
+          : null;
+      createState.openEditItem(payloadOverride ?? undefined);
+    },
     deleteItem: itemActions.deleteItem,
     selectedItemDeleted: computedState.selectedItemDeleted,
     restoreItem: itemActions.restoreItem,
     purgeItem: itemActions.purgeItem,
     selectedVaultName: selectionState.selectedVaultName,
     resolveConflict: misc.resolveConflict,
+    timeTravelActive: detailState.timeTravelActive,
+    timeTravelIndex: detailState.timeTravelIndex,
+    timeTravelPayload: detailState.timeTravelPayload,
+    timeTravelBasePayload: detailState.timeTravelBasePayload,
+    timeTravelLoading: detailState.timeTravelLoading,
+    timeTravelError: detailState.timeTravelError,
+    timeTravelHasDraft: detailState.timeTravelHasDraft,
+    applyTimeTravelField: detailState.applyTimeTravelField,
+    openTimeTravel: detailState.openTimeTravel,
+    closeTimeTravel: detailState.closeTimeTravel,
+    setTimeTravelIndex: detailState.setTimeTravelIndex,
   };
 
   const modalBindings = {
@@ -240,6 +258,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     openAddStorageWizard: storageActions.openAddStorageWizard,
     openCreateLocalVault: storageActions.openCreateLocalVault,
     handleSyncNow: storageActions.handleSyncNow,
+    handleResetSyncCursor: storageActions.handleResetSyncCursor,
     storages: storageState.storages,
     toast: toastState.toast,
     toastActionLabel: toastState.toastActionLabel,

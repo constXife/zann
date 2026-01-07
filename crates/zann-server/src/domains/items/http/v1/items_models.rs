@@ -117,3 +117,9 @@ pub(crate) struct ItemHistoryDetailResponse {
     pub(crate) change_type: String,
     pub(crate) created_at: String,
 }
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct FileUploadResponse {
+    pub(crate) file_id: String,
+    pub(crate) upload_state: String,
+}

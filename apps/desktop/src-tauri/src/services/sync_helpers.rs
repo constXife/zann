@@ -1,7 +1,9 @@
 use chrono::Utc;
+use std::io::Write;
 use uuid::Uuid;
 use zann_db::local::{
-    LocalItem, LocalItemRepo, LocalPendingChange, LocalStorage, LocalVault, LocalVaultRepo,
+    LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange,
+    LocalStorage, LocalVault, LocalVaultRepo,
 };
 
 use crate::crypto::{decrypt_payload, payload_aad, payload_checksum};
@@ -12,6 +14,23 @@ use crate::types::{
 };
 use crate::util::{parse_rfc3339, storage_name_from_url};
 use zann_core::crypto::{encrypt_blob, SecretKey};
+
+fn append_sync_log(message: &str) {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let logs_dir = home.join(".zann").join("logs");
+    let _ = std::fs::create_dir_all(&logs_dir);
+    let log_path = logs_dir.join("sync.log");
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{} {}", Utc::now().to_rfc3339(), message);
+}
 
 pub(crate) async fn fetch_vault_details(
     client: &reqwest::Client,
@@ -248,6 +267,7 @@ pub(crate) async fn apply_push_applied(
 
 pub(crate) async fn apply_pull_change(
     item_repo: &LocalItemRepo<'_>,
+    history_repo: &LocalItemHistoryRepo<'_>,
     vault_key: &zann_core::crypto::SecretKey,
     storage_id: Uuid,
     vault_id: Uuid,
@@ -256,7 +276,13 @@ pub(crate) async fn apply_pull_change(
     let item_id = Uuid::parse_str(&change.item_id).map_err(|err| err.to_string())?;
     let updated_at = match parse_rfc3339(&change.updated_at) {
         Some(value) => value,
-        None => return Ok(false),
+        None => {
+            append_sync_log(&format!(
+                "[pull] invalid updated_at: storage_id={}, item_id={}, value={}",
+                storage_id, item_id, change.updated_at
+            ));
+            return Ok(false);
+        }
     };
 
     let existing = item_repo
@@ -264,7 +290,14 @@ pub(crate) async fn apply_pull_change(
         .await
         .map_err(|err| err.to_string())?;
     if let Some(local) = existing.as_ref() {
-        if local.updated_at > updated_at {
+        if local.version > change.seq {
+            append_sync_log(&format!(
+                "[pull] skipped newer local version: storage_id={}, item_id={}, local_version={}, remote_version={}",
+                storage_id,
+                item_id,
+                local.version,
+                change.seq
+            ));
             return Ok(false);
         }
     }
@@ -278,19 +311,35 @@ pub(crate) async fn apply_pull_change(
             local.version = change.seq;
             item_repo.update(&local).await.map_err(|err| err.to_string())?;
         }
+        apply_history_payloads(history_repo, storage_id, vault_id, item_id, &change.history)
+            .await?;
         return Ok(true);
     }
 
     let payload_enc = match change.payload_enc.as_ref() {
         Some(payload) => payload.clone(),
-        None => return Ok(false),
+        None => {
+            append_sync_log(&format!(
+                "[pull] missing payload_enc: storage_id={}, item_id={}",
+                storage_id, item_id
+            ));
+            return Ok(false);
+        }
     };
     let checksum = payload_checksum(&payload_enc);
     if checksum != change.checksum {
+        append_sync_log(&format!(
+            "[pull] checksum mismatch: storage_id={}, item_id={}",
+            storage_id, item_id
+        ));
         return Ok(false);
     }
     let key_fp = key_fingerprint(vault_key);
     if decrypt_payload(vault_key, vault_id, item_id, &payload_enc).is_err() {
+        append_sync_log(&format!(
+            "[pull] decrypt failed: storage_id={}, item_id={}",
+            storage_id, item_id
+        ));
         return Ok(false);
     }
 
@@ -306,6 +355,8 @@ pub(crate) async fn apply_pull_change(
         local.sync_status = "synced".to_string();
         local.version = change.seq;
         item_repo.update(&local).await.map_err(|err| err.to_string())?;
+        apply_history_payloads(history_repo, storage_id, vault_id, item_id, &change.history)
+            .await?;
         return Ok(true);
     }
 
@@ -325,11 +376,13 @@ pub(crate) async fn apply_pull_change(
         sync_status: "synced".to_string(),
     };
     item_repo.create(&item).await.map_err(|err| err.to_string())?;
+    apply_history_payloads(history_repo, storage_id, vault_id, item_id, &change.history).await?;
     Ok(true)
 }
 
 pub(crate) async fn apply_shared_pull_change(
     item_repo: &LocalItemRepo<'_>,
+    history_repo: &LocalItemHistoryRepo<'_>,
     master_key: &SecretKey,
     storage_id: Uuid,
     vault_id: Uuid,
@@ -346,7 +399,7 @@ pub(crate) async fn apply_shared_pull_change(
         .await
         .map_err(|err| err.to_string())?;
     if let Some(local) = existing.as_ref() {
-        if local.updated_at > updated_at {
+        if local.version > change.seq {
             return Ok(false);
         }
     }
@@ -360,6 +413,15 @@ pub(crate) async fn apply_shared_pull_change(
             local.version = change.seq;
             item_repo.update(&local).await.map_err(|err| err.to_string())?;
         }
+        apply_shared_history_payloads(
+            history_repo,
+            master_key,
+            storage_id,
+            vault_id,
+            item_id,
+            &change.history,
+        )
+        .await?;
         return Ok(true);
     }
 
@@ -381,6 +443,15 @@ pub(crate) async fn apply_shared_pull_change(
         local.sync_status = "synced".to_string();
         local.version = change.seq;
         item_repo.update(&local).await.map_err(|err| err.to_string())?;
+        apply_shared_history_payloads(
+            history_repo,
+            master_key,
+            storage_id,
+            vault_id,
+            item_id,
+            &change.history,
+        )
+        .await?;
         return Ok(true);
     }
 
@@ -403,7 +474,149 @@ pub(crate) async fn apply_shared_pull_change(
         .create(&item)
         .await
         .map_err(|err| err.to_string())?;
+    apply_shared_history_payloads(
+        history_repo,
+        master_key,
+        storage_id,
+        vault_id,
+        item_id,
+        &change.history,
+    )
+    .await?;
     Ok(true)
+}
+
+async fn apply_history_payloads(
+    history_repo: &LocalItemHistoryRepo<'_>,
+    storage_id: Uuid,
+    vault_id: Uuid,
+    item_id: Uuid,
+    history: &[crate::types::SyncHistoryEntry],
+) -> Result<(), String> {
+    if history.is_empty() {
+        append_sync_log(&format!(
+            "[history] empty history: storage_id={}, item_id={}",
+            storage_id, item_id
+        ));
+        return Ok(());
+    }
+    let entries = history
+        .iter()
+        .map(|entry| LocalItemHistory {
+            id: Uuid::now_v7(),
+            storage_id,
+            vault_id,
+            item_id,
+            payload_enc: entry.payload_enc.clone(),
+            checksum: entry.checksum.clone(),
+            version: entry.version,
+            change_type: entry.change_type.clone(),
+            changed_by_email: entry.changed_by_email.clone(),
+            changed_by_name: entry.changed_by_name.clone(),
+            changed_by_device_id: None,
+            changed_by_device_name: None,
+            created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
+        })
+        .collect::<Vec<_>>();
+    match history_repo
+        .replace_by_item(storage_id, item_id, &entries)
+        .await
+    {
+        Ok(()) => {
+            append_sync_log(&format!(
+                "[history] applied: storage_id={}, item_id={}, entries={}",
+                storage_id,
+                item_id,
+                entries.len()
+            ));
+            eprintln!(
+                "[sync] applied history: storage_id={}, item_id={}, entries={}",
+                storage_id,
+                item_id,
+                entries.len()
+            );
+            Ok(())
+        }
+        Err(err) => {
+            append_sync_log(&format!(
+                "[history] apply failed: storage_id={}, item_id={}, error={}",
+                storage_id, item_id, err
+            ));
+            eprintln!(
+                "[sync] history apply failed: storage_id={}, item_id={}, error={}",
+                storage_id, item_id, err
+            );
+            Err(err.to_string())
+        }
+    }
+}
+
+async fn apply_shared_history_payloads(
+    history_repo: &LocalItemHistoryRepo<'_>,
+    master_key: &SecretKey,
+    storage_id: Uuid,
+    vault_id: Uuid,
+    item_id: Uuid,
+    history: &[crate::types::SyncSharedHistoryEntry],
+) -> Result<(), String> {
+    if history.is_empty() {
+        append_sync_log(&format!(
+            "[shared_history] empty history: storage_id={}, item_id={}",
+            storage_id, item_id
+        ));
+        return Ok(());
+    }
+    let mut entries = Vec::with_capacity(history.len());
+    for entry in history {
+        let (payload_enc, checksum) =
+            encrypt_payload_for_cache(master_key, vault_id, item_id, &entry.payload)?;
+        entries.push(LocalItemHistory {
+            id: Uuid::now_v7(),
+            storage_id,
+            vault_id,
+            item_id,
+            payload_enc,
+            checksum,
+            version: entry.version,
+            change_type: entry.change_type.clone(),
+            changed_by_email: entry.changed_by_email.clone(),
+            changed_by_name: entry.changed_by_name.clone(),
+            changed_by_device_id: None,
+            changed_by_device_name: None,
+            created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
+        });
+    }
+    match history_repo
+        .replace_by_item(storage_id, item_id, &entries)
+        .await
+    {
+        Ok(()) => {
+            append_sync_log(&format!(
+                "[shared_history] applied: storage_id={}, item_id={}, entries={}",
+                storage_id,
+                item_id,
+                entries.len()
+            ));
+            eprintln!(
+                "[sync] applied shared history: storage_id={}, item_id={}, entries={}",
+                storage_id,
+                item_id,
+                entries.len()
+            );
+            Ok(())
+        }
+        Err(err) => {
+            append_sync_log(&format!(
+                "[shared_history] apply failed: storage_id={}, item_id={}, error={}",
+                storage_id, item_id, err
+            ));
+            eprintln!(
+                "[sync] shared history apply failed: storage_id={}, item_id={}, error={}",
+                storage_id, item_id, err
+            );
+            Err(err.to_string())
+        }
+    }
 }
 
 pub(crate) fn encrypt_payload_for_cache(

@@ -19,3 +19,11 @@ pub async fn remote_reset(
 ) -> Result<ApiResponse<()>, String> {
     sync_service::remote_reset(storage_id, state).await
 }
+
+#[tauri::command]
+pub async fn sync_reset_cursor(
+    storage_id: String,
+    state: State<'_, AppState>,
+) -> Result<ApiResponse<()>, String> {
+    sync_service::sync_reset_cursor(storage_id, state).await
+}

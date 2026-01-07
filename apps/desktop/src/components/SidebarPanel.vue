@@ -455,6 +455,7 @@ defineProps<{
             'bg-category-identity/15 text-category-identity': cat.id === 'identity',
             'bg-category-api/15 text-category-api': cat.id === 'api',
             'bg-category-kv/15 text-category-kv': cat.id === 'kv',
+            'bg-category-infra/15 text-category-infra': cat.id === 'infra',
             'bg-category-security/15 text-category-security': cat.id === 'trash',
           }"
         >
