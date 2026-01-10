@@ -176,6 +176,8 @@ jobs:
       TAURI_E2E_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
       TAURI_E2E_BUILD_SERVER: "0"
       RUST_BACKTRACE: "1"
+      TAURI_E2E_LOG_HANDLES: "1"
+      TAURI_E2E_FORCE_EXIT: "1"
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: /home/runner/.cache/sccache
       SCCACHE_LOG: debug

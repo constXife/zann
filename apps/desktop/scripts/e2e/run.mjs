@@ -378,6 +378,26 @@ const rotateArtifacts = async (artifactsDir, keepCount) => {
 
 let testsCompleted = false;
 
+const logActiveHandles = (label) => {
+  const getHandles = process._getActiveHandles?.() ?? [];
+  const getRequests = process._getActiveRequests?.() ?? [];
+  if (!getHandles.length && !getRequests.length) {
+    console.warn(`[e2e] ${label}: no active handles`);
+    return;
+  }
+  console.warn(
+    `[e2e] ${label}: handles=${getHandles.length} requests=${getRequests.length}`,
+  );
+  for (const handle of getHandles) {
+    const name = handle?.constructor?.name ?? "unknown";
+    console.warn(`[e2e] active handle: ${name}`);
+  }
+  for (const req of getRequests) {
+    const name = req?.constructor?.name ?? "unknown";
+    console.warn(`[e2e] active request: ${name}`);
+  }
+};
+
 const main = async () => {
   ensureSupportedPlatform();
   const driverBin = await resolveDriverBin();
@@ -544,11 +564,23 @@ const main = async () => {
   }
 };
 
-main().catch((error) => {
+main()
+  .then(() => {
+    if (process.env.TAURI_E2E_LOG_HANDLES === "1") {
+      logActiveHandles("post-run");
+    }
+    if (process.env.TAURI_E2E_FORCE_EXIT === "1" && testsCompleted) {
+      process.exit(0);
+    }
+  })
+  .catch((error) => {
+    if (process.env.TAURI_E2E_LOG_HANDLES === "1") {
+      logActiveHandles("error");
+    }
   if (String(error?.message || error).includes("The operation was canceled") && testsCompleted) {
     console.warn(`[e2e] cleanup canceled after tests: ${error.message}`);
     process.exit(0);
   }
   console.error(error.message);
   process.exit(1);
-});
+  });
