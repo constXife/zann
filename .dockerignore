@@ -6,6 +6,10 @@
 .tmp
 .env
 .env.*
+compose*.yaml
+loadtest
+grafana
+data
 rust-toolchain.toml
 target
 **/target

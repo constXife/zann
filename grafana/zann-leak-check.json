@@ -1,0 +1,195 @@
+{
+  "uid": "zann-leak-check",
+  "title": "Zann Server (Leak Check)",
+  "tags": [
+    "zann",
+    "loadtest",
+    "leak-check"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": "label_values(zann_http_requests_total, job)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": "label_values(zann_http_requests_total, instance)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      },
+      {
+        "name": "container",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": "label_values(container_memory_working_set_bytes, container)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Container Working Set",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "avg(container_memory_working_set_bytes{container=~\"$container\",instance=~\"$instance\"})",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "decimals": 2 } }
+    },
+    {
+      "type": "stat",
+      "title": "Process RSS",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "avg(process_resident_memory_bytes{job=~\"$job\",instance=~\"$instance\"})",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "decimals": 2 } }
+    },
+    {
+      "type": "stat",
+      "title": "Container Memory Limit",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "avg(container_spec_memory_limit_bytes{container=~\"$container\",instance=~\"$instance\"})",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "decimals": 2 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Working Set (Container)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "container_memory_working_set_bytes{container=~\"$container\",instance=~\"$instance\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 6 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory Slope (30m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "deriv(container_memory_working_set_bytes{container=~\"$container\",instance=~\"$instance\"}[30m])",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 6 },
+      "fieldConfig": { "defaults": { "unit": "bytes" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests / sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(zann_http_requests_total{job=~\"$job\",instance=~\"$instance\"}[1m]))",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 6 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(zann_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[5m])) by (le))",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 10, "w": 12, "h": 6 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } }
+    }
+  ]
+}

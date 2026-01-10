@@ -1,0 +1,357 @@
+{
+  "uid": "zann-debug",
+  "title": "Zann Server (Debug/Max)",
+  "tags": [
+    "zann",
+    "debug"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": "label_values(zann_http_requests_total, job)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      },
+      {
+        "name": "instance",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "query": "label_values(zann_http_requests_total, instance)",
+        "includeAll": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": ".*"
+        }
+      }
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Requests / sec",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(zann_http_requests_total{job=~\"$job\",instance=~\"$instance\"}[1m]))",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "reqps", "decimals": 2 } }
+    },
+    {
+      "type": "stat",
+      "title": "5xx Error %",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(zann_http_requests_total{status_class=\"5xx\",job=~\"$job\",instance=~\"$instance\"}[5m])) / sum(rate(zann_http_requests_total{job=~\"$job\",instance=~\"$instance\"}[5m]))",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 6, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2 } }
+    },
+    {
+      "type": "stat",
+      "title": "In-flight",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(zann_http_in_flight{job=~\"$job\",instance=~\"$instance\"})",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 } }
+    },
+    {
+      "type": "stat",
+      "title": "RSS Memory",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "process_resident_memory_bytes{job=~\"$job\",instance=~\"$instance\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 18, "y": 0, "w": 6, "h": 4 },
+      "fieldConfig": { "defaults": { "unit": "bytes", "decimals": 2 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests by Status Class",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(zann_http_requests_total{job=~\"$job\",instance=~\"$instance\"}[5m])) by (status_class)",
+          "legendFormat": "{{status_class}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 12, "h": 7 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Requests by Status Code",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(zann_http_requests_by_status_total{job=~\"$job\",instance=~\"$instance\"}[5m])) by (status)",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 4, "w": 12, "h": 7 }
+    },
+    {
+      "type": "timeseries",
+      "title": "HTTP Latency (p50/p95/p99)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum(rate(zann_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(zann_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(zann_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[5m])) by (le))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 11, "w": 12, "h": 7 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Latency by Status (p95)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(zann_http_request_duration_seconds_by_status_bucket{job=~\"$job\",instance=~\"$instance\"}[5m])) by (le, status))",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 11, "w": 12, "h": 7 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Top Routes by RPS",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "topk(10, sum(rate(zann_http_requests_total{job=~\"$job\",instance=~\"$instance\"}[5m])) by (route))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 18, "w": 12, "h": 7 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Top Routes by p95 Latency",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "topk(10, histogram_quantile(0.95, sum(rate(zann_http_request_duration_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[5m])) by (le, route)))",
+          "legendFormat": "{{route}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 18, "w": 12, "h": 7 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "DB Pool Connections",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "zann_db_pool_connections{job=~\"$job\",instance=~\"$instance\"}",
+          "legendFormat": "{{state}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 25, "w": 8, "h": 6 }
+    },
+    {
+      "type": "timeseries",
+      "title": "KDF In-flight",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "zann_kdf_in_flight{job=~\"$job\",instance=~\"$instance\"}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 8, "y": 25, "w": 8, "h": 6 }
+    },
+    {
+      "type": "timeseries",
+      "title": "KDF Wait p95",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(zann_kdf_wait_seconds_bucket{job=~\"$job\",instance=~\"$instance\"}[5m])) by (le, operation))",
+          "legendFormat": "{{operation}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 16, "y": 25, "w": 8, "h": 6 },
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 3 } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Auth Logins",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(zann_auth_logins_total{job=~\"$job\",instance=~\"$instance\"}[5m])) by (method, result)",
+          "legendFormat": "{{method}} {{result}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 31, "w": 12, "h": 7 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Secrets Ops",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(zann_secrets_operations_total{job=~\"$job\",instance=~\"$instance\"}[5m])) by (operation, result)",
+          "legendFormat": "{{operation}} {{result}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 31, "w": 12, "h": 7 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Forbidden Access by Resource",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(zann_forbidden_access_total{job=~\"$job\",instance=~\"$instance\"}[5m])) by (resource)",
+          "legendFormat": "{{resource}}",
+          "refId": "A"
+        }
+      ],
+      "gridPos": { "x": 0, "y": 38, "w": 12, "h": 6 }
+    },
+    {
+      "type": "timeseries",
+      "title": "CPU / Virtual Memory",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${DS_PROMETHEUS}"
+      },
+      "targets": [
+        {
+          "expr": "rate(process_cpu_seconds_total{job=~\"$job\",instance=~\"$instance\"}[5m])",
+          "legendFormat": "cpu",
+          "refId": "A"
+        },
+        {
+          "expr": "process_virtual_memory_bytes{job=~\"$job\",instance=~\"$instance\"}",
+          "legendFormat": "vms",
+          "refId": "B"
+        }
+      ],
+      "gridPos": { "x": 12, "y": 38, "w": 12, "h": 6 }
+    }
+  ]
+}
