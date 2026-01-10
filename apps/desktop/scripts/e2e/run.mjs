@@ -301,7 +301,11 @@ const stopCompose = async (state) => {
     "-v",
   ];
 
-  await runCommand(state.compose.bin, args, { cwd: REPO_ROOT });
+  try {
+    await runCommand(state.compose.bin, args, { cwd: REPO_ROOT });
+  } catch (error) {
+    console.warn(`[e2e] compose down failed: ${error.message}`);
+  }
 };
 
 const wrapWithXvfb = async (command, args, extraEnv = {}) => {
@@ -507,7 +511,11 @@ const main = async () => {
   } finally {
     await stopCompose(composeState);
     if (process.env.TAURI_E2E_KEEP_HOME !== "1") {
-      await rm(e2eHome, { recursive: true, force: true });
+      try {
+        await rm(e2eHome, { recursive: true, force: true });
+      } catch (error) {
+        console.warn(`[e2e] cleanup failed: ${error.message}`);
+      }
     }
   }
 };
