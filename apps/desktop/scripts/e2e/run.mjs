@@ -468,22 +468,32 @@ const main = async () => {
       process.stderr.write(text);
     });
 
-    const stopDriver = () => {
+    const closeStream = (stream) =>
+      new Promise((resolve) => {
+        if (!stream.writableEnded) {
+          stream.end(() => resolve());
+        } else {
+          resolve();
+        }
+      });
+
+    const stopDriver = async () => {
       if (!driverProcess.killed) {
         driverProcess.kill();
       }
-      driverLog.end();
-      driverErr.end();
+      await Promise.all([closeStream(driverLog), closeStream(driverErr)]);
       wrapped.cleanup();
     };
 
-    process.on("exit", stopDriver);
-    process.on("SIGINT", () => {
-      stopDriver();
+    process.on("exit", () => {
+      stopDriver().catch(() => {});
+    });
+    process.on("SIGINT", async () => {
+      await stopDriver();
       process.exit(1);
     });
-    process.on("SIGTERM", () => {
-      stopDriver();
+    process.on("SIGTERM", async () => {
+      await stopDriver();
       process.exit(1);
     });
 
@@ -506,7 +516,7 @@ const main = async () => {
         },
       );
     } finally {
-      stopDriver();
+      await stopDriver();
     }
   } finally {
     await stopCompose(composeState);
