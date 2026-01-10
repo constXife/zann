@@ -21,12 +21,16 @@ const ensureSupportedPlatform = () => {
 const runCommand = (command, args, options = {}) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "inherit", ...options });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      reject(
+        new Error(`command failed: ${command} ${args.join(" ")}\n${error.message}`),
+      );
+    });
     child.on("exit", (code) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`${command} exited with code ${code}`));
+        reject(new Error(`command failed: ${command} ${args.join(" ")} (code ${code})`));
       }
     });
   });
@@ -34,12 +38,16 @@ const runCommand = (command, args, options = {}) =>
 const runCommandQuiet = (command, args, options = {}) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "ignore", ...options });
-    child.on("error", reject);
+    child.on("error", (error) => {
+      reject(
+        new Error(`command failed: ${command} ${args.join(" ")}\n${error.message}`),
+      );
+    });
     child.on("exit", (code) => {
       if (code === 0) {
         resolve();
       } else {
-        reject(new Error(`${command} exited with code ${code}`));
+        reject(new Error(`command failed: ${command} ${args.join(" ")} (code ${code})`));
       }
     });
   });
@@ -304,7 +312,9 @@ const stopCompose = async (state) => {
   try {
     await runCommand(state.compose.bin, args, { cwd: REPO_ROOT });
   } catch (error) {
-    console.warn(`[e2e] compose down failed: ${error.message}`);
+    console.warn(
+      `[e2e] compose down failed: ${error.stack || error.message || error}`,
+    );
   }
 };
 
@@ -526,7 +536,9 @@ const main = async () => {
       try {
         await rm(e2eHome, { recursive: true, force: true });
       } catch (error) {
-        console.warn(`[e2e] cleanup failed: ${error.message}`);
+        console.warn(
+          `[e2e] cleanup failed: ${error.stack || error.message || error}`,
+        );
       }
     }
   }
