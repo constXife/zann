@@ -147,6 +147,43 @@ const ensureDriverAvailable = async (driverBin) => {
   }
 };
 
+const resolveNativeDriverBin = async () => {
+  const configured = process.env.TAURI_E2E_NATIVE_DRIVER;
+  if (configured) {
+    try {
+      if (configured.includes(path.sep)) {
+        await access(configured);
+      } else {
+        await commandExists(configured);
+      }
+      return configured;
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    await commandExists("WebKitWebDriver");
+    return "WebKitWebDriver";
+  } catch {}
+
+  const candidates = [
+    "/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver",
+    "/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver",
+    "/usr/lib/webkit2gtk-4.1/WebKitWebDriver",
+    "/usr/lib/webkit2gtk-4.0/WebKitWebDriver",
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return candidate;
+    } catch {}
+  }
+
+  return null;
+};
+
 const resolveDriverBin = async () => {
   const configured = process.env.TAURI_DRIVER_BIN;
   if (configured) {
@@ -334,6 +371,7 @@ const main = async () => {
 
   await ensureDriverAvailable(driverBin);
   await ensureXvfbAvailable();
+  const nativeDriverBin = await resolveNativeDriverBin();
 
   const composeState = await startCompose(serverPort);
   if (composeState) {
@@ -353,11 +391,11 @@ const main = async () => {
       throw new Error(`Tauri app binary not found at ${appPath}`);
     }
 
-    const wrapped = await wrapWithXvfb(
-      driverBin,
-      ["--port", String(driverPort)],
-      { HOME: e2eHome },
-    );
+    const driverArgs = ["--port", String(driverPort)];
+    if (nativeDriverBin) {
+      driverArgs.push("--native-driver", nativeDriverBin);
+    }
+    const wrapped = await wrapWithXvfb(driverBin, driverArgs, { HOME: e2eHome });
     const artifactsDir = path.join(APP_ROOT, "e2e", "artifacts");
     const keepCount = Number(process.env.TAURI_E2E_ARTIFACTS_KEEP ?? "1");
     await rotateArtifacts(artifactsDir, keepCount);

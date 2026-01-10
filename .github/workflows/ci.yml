@@ -185,6 +185,9 @@ jobs:
             libxkbcommon-dev \
             libssl-dev \
             xvfb
+          if ! sudo apt-get install -y webkit2gtk-driver; then
+            sudo apt-get install -y webkit2gtk-4.1-driver
+          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
       - name: Rust cache
