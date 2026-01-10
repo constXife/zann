@@ -166,6 +166,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.js == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       TAURI_E2E_HEADLESS: "1"
       TAURI_E2E_ARTIFACTS_KEEP: "1"
