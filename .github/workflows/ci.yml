@@ -176,6 +176,10 @@ jobs:
       TAURI_E2E_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
       TAURI_E2E_BUILD_SERVER: "0"
       RUST_BACKTRACE: "1"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      SCCACHE_LOG: debug
+      CARGO_INCREMENTAL: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -214,6 +218,10 @@ jobs:
         uses: dtolnay/rust-toolchain@1.92.0
       - name: Rust cache
         uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
+      - name: sccache version
+        run: sccache --version
       - name: Install tauri-driver
         run: cargo install tauri-driver
       - name: Setup Bun
@@ -227,9 +235,17 @@ jobs:
       - name: Install JS deps
         working-directory: apps/desktop
         run: bun install --frozen-lockfile
+      - name: Build desktop app
+        working-directory: apps/desktop
+        run: bun run tauri build --debug --no-bundle
       - name: Run e2e tests
         working-directory: apps/desktop
+        env:
+          TAURI_E2E_SKIP_BUILD: "1"
         run: bun e2e
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   server-image:
     needs: changes
