@@ -99,9 +99,8 @@ impl<'a> SessionRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
-        .map(|sessions| {
+        .inspect(|sessions| {
             Span::current().record("db.rows", sessions.len() as i64);
-            sessions
         })
     }
 

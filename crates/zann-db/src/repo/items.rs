@@ -811,9 +811,8 @@ impl<'a> ItemConflictRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
-        .map(|conflicts| {
+        .inspect(|conflicts| {
             Span::current().record("db.rows", conflicts.len() as i64);
-            conflicts
         })
     }
 }
