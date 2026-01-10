@@ -490,6 +490,7 @@ onBeforeUnmount(() => {
                   type="button"
                   class="rounded-lg px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                   @click="actionMenuOpen = !actionMenuOpen"
+                  data-testid="item-action-menu"
                 >
                   ⋯
                 </button>

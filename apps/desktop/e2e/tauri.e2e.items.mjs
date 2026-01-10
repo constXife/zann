@@ -12,10 +12,7 @@ import {
 import { UI_TIMEOUT } from "./tauri.e2e.config.mjs";
 
 const openItemActionMenu = async (browser) => {
-  const selector =
-    '//button[normalize-space()="Edit"]/following::button[1]' +
-    ' | //button[normalize-space()="Restore"]/following::button[1]';
-  await clickByXPath(browser, selector, UI_TIMEOUT, "item action menu");
+  await clickWhenReady(browser, '[data-testid="item-action-menu"]', UI_TIMEOUT);
 };
 
 const openItemFromList = async (browser, name, timeout = UI_TIMEOUT) => {
