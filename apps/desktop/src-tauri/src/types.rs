@@ -479,6 +479,7 @@ pub struct ItemGetRequest {
 #[derive(Deserialize)]
 pub struct ItemHistoryListRequest {
     pub storage_id: String,
+    #[allow(dead_code)]
     pub vault_id: String,
     pub item_id: String,
     #[serde(default)]
@@ -496,6 +497,7 @@ pub struct ItemHistoryGetRequest {
 #[derive(Deserialize)]
 pub struct ItemHistoryRestoreRequest {
     pub storage_id: String,
+    #[allow(dead_code)]
     pub vault_id: String,
     pub item_id: String,
     pub version: i64,
