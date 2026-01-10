@@ -366,9 +366,10 @@ const rotateArtifacts = async (artifactsDir, keepCount) => {
   }
 };
 
+let testsCompleted = false;
+
 const main = async () => {
   ensureSupportedPlatform();
-
   const driverBin = await resolveDriverBin();
   if (!process.env.TAURI_E2E_HEADLESS) {
     process.env.TAURI_E2E_HEADLESS = "1";
@@ -515,6 +516,7 @@ const main = async () => {
           },
         },
       );
+      testsCompleted = true;
     } finally {
       await stopDriver();
     }
@@ -531,6 +533,10 @@ const main = async () => {
 };
 
 main().catch((error) => {
+  if (String(error?.message || error).includes("The operation was canceled") && testsCompleted) {
+    console.warn(`[e2e] cleanup canceled after tests: ${error.message}`);
+    process.exit(0);
+  }
   console.error(error.message);
   process.exit(1);
 });

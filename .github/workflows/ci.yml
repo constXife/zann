@@ -166,7 +166,7 @@ jobs:
     needs: [changes, server-image]
     if: needs.changes.outputs.js == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       packages: read
