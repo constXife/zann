@@ -1,8 +1,8 @@
 mod client_workflow_support;
 mod support;
 
-use uuid::Uuid;
 use serde_json::json;
+use uuid::Uuid;
 use zann_core::crypto::SecretKey;
 use zann_core::ItemsService;
 
@@ -40,13 +40,7 @@ async fn create_item(
     json
 }
 
-async fn update_item(
-    app: &TestApp,
-    token: &str,
-    vault_id: Uuid,
-    item_id: &str,
-    password: &str,
-) {
+async fn update_item(app: &TestApp, token: &str, vault_id: Uuid, item_id: &str, password: &str) {
     let payload = json!({
         "path": "login",
         "name": "login",
@@ -227,7 +221,9 @@ async fn personal_sync_includes_history_tail() {
         .register("personal-sync-history@example.com", "password")
         .await;
     let token = user["access_token"].as_str().expect("token");
-    let vault_id = app.personal_vault_id("personal-sync-history@example.com").await;
+    let vault_id = app
+        .personal_vault_id("personal-sync-history@example.com")
+        .await;
 
     let item = create_item(&app, token, vault_id, "pw-1").await;
     let item_id = item["id"].as_str().expect("item id").to_string();
@@ -255,10 +251,7 @@ async fn personal_sync_includes_history_tail() {
         .expect("item change");
     let history = change["history"].as_array().expect("history");
     assert!(!history.is_empty(), "history should be included");
-    assert!(
-        history.len() <= 5,
-        "history tail should not exceed limit"
-    );
+    assert!(history.len() <= 5, "history tail should not exceed limit");
     let payload_enc = history[0]["payload_enc"].as_array().expect("payload_enc");
     assert!(
         !payload_enc.is_empty(),

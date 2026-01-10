@@ -206,7 +206,9 @@ pub async fn upload_item_file(
             if existing.item_id != item_id {
                 return Err(ItemsError::Conflict("file_id_conflict"));
             }
-            return Ok(FileUploadResult { file_id: existing.id });
+            return Ok(FileUploadResult {
+                file_id: existing.id,
+            });
         }
         Ok(None) => {}
         Err(_) => {
@@ -243,7 +245,8 @@ pub async fn upload_item_file(
         }
     }
 
-    let (content_enc, checksum, enc_mode) = if vault.encryption_type == VaultEncryptionType::Server {
+    let (content_enc, checksum, enc_mode) = if vault.encryption_type == VaultEncryptionType::Server
+    {
         if representation == FileRepresentation::Plain {
             let Some(smk) = state.server_master_key.as_ref() else {
                 tracing::error!(event = "file_upload_failed", "SMK not configured");
@@ -283,7 +286,9 @@ pub async fn upload_item_file(
         item_id,
         filename: filename.clone().unwrap_or_else(|| "file".to_string()),
         size: content_enc.len() as i64,
-        mime_type: mime.clone().unwrap_or_else(|| "application/octet-stream".to_string()),
+        mime_type: mime
+            .clone()
+            .unwrap_or_else(|| "application/octet-stream".to_string()),
         enc_mode,
         content_enc,
         checksum,
@@ -392,11 +397,8 @@ pub async fn download_item_file(
             }
         }
     }
-    let attachment = attachment.or_else(|| {
-        attachments
-            .into_iter()
-            .max_by_key(|entry| entry.created_at)
-    });
+    let attachment =
+        attachment.or_else(|| attachments.into_iter().max_by_key(|entry| entry.created_at));
     let Some(attachment) = attachment else {
         return Err(ItemsError::NotFound);
     };
@@ -412,8 +414,7 @@ pub async fn download_item_file(
             tracing::error!(event = "file_download_failed", "SMK not configured");
             return Err(ItemsError::Internal("smk_missing"));
         };
-        let vault_key = match core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
-        {
+        let vault_key = match core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc) {
             Ok(key) => key,
             Err(err) => {
                 tracing::error!(event = "file_download_failed", error = %err, "Key decrypt failed");
@@ -1241,7 +1242,9 @@ async fn update_file_upload_state(
 
     let mut updated = false;
     if let JsonValue::Object(ref mut map) = payload {
-        let extra = map.entry("extra").or_insert_with(|| JsonValue::Object(Default::default()));
+        let extra = map
+            .entry("extra")
+            .or_insert_with(|| JsonValue::Object(Default::default()));
         if let JsonValue::Object(extra_map) = extra {
             extra_map
                 .entry("upload_state")

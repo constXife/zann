@@ -208,7 +208,6 @@ async fn admin_reload() -> (StatusCode, Json<ReloadResponse>) {
     })
 }
 
-
 async fn auth_register(Json(_payload): Json<RegisterRequest>) -> (StatusCode, Json<LoginResponse>) {
     not_implemented(LoginResponse {
         access_token: String::new(),
@@ -661,9 +660,13 @@ async fn items_history_restore(
 #[derive(serde::Deserialize, JsonSchema)]
 #[allow(dead_code)]
 struct FileUploadQuery {
-    #[schemars(description = "plain = server decryptable (shared vaults), opaque = encrypted by client")]
+    #[schemars(
+        description = "plain = server decryptable (shared vaults), opaque = encrypted by client"
+    )]
     representation: Option<String>,
-    #[schemars(description = "Client-provided UUID for idempotent uploads; shared vaults must match item payload extra.file_id and upload_state=pending")]
+    #[schemars(
+        description = "Client-provided UUID for idempotent uploads; shared vaults must match item payload extra.file_id and upload_state=pending"
+    )]
     file_id: Option<String>,
     #[schemars(description = "Optional filename metadata")]
     filename: Option<String>,
@@ -674,7 +677,9 @@ struct FileUploadQuery {
 #[derive(serde::Deserialize, JsonSchema)]
 #[allow(dead_code)]
 struct FileDownloadQuery {
-    #[schemars(description = "plain = server decryptable (shared vaults), opaque = ciphertext; shared vaults use payload extra.file_id when set")]
+    #[schemars(
+        description = "plain = server decryptable (shared vaults), opaque = ciphertext; shared vaults use payload extra.file_id when set"
+    )]
     representation: Option<String>,
 }
 

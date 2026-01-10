@@ -1,8 +1,8 @@
 mod client_workflow_support;
 mod support;
 
-use uuid::Uuid;
 use serde_json::json;
+use uuid::Uuid;
 
 use client_workflow_support::{key_fingerprint, login_payload, LocalClient, TestApp};
 use zann_core::ItemsService;
@@ -42,13 +42,7 @@ async fn create_item(
     json
 }
 
-async fn update_item(
-    app: &TestApp,
-    token: &str,
-    vault_id: &str,
-    item_id: &str,
-    password: &str,
-) {
+async fn update_item(app: &TestApp, token: &str, vault_id: &str, item_id: &str, password: &str) {
     let payload = json!({
         "path": "login",
         "name": "login",

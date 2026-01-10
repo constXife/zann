@@ -1,10 +1,10 @@
+use axum::http::HeaderMap;
 use axum::{
     body::Bytes,
     extract::{Query, State},
     response::IntoResponse,
     Extension, Json,
 };
-use axum::http::HeaderMap;
 use serde::Deserialize;
 use uuid::Uuid;
 use zann_core::Identity;
@@ -101,19 +101,17 @@ pub(super) async fn download_item_file(
         Err(code) => return map_items_error(service::ItemsError::BadRequest(code)),
     };
 
-    let result = match service::download_item_file(
-        &state,
-        &identity,
-        &vault_id,
-        item_id,
-        representation,
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(error) => return map_items_error(error),
-    };
+    let result =
+        match service::download_item_file(&state, &identity, &vault_id, item_id, representation)
+            .await
+        {
+            Ok(result) => result,
+            Err(error) => return map_items_error(error),
+        };
 
-    ([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], result.bytes)
+    (
+        [(axum::http::header::CONTENT_TYPE, "application/octet-stream")],
+        result.bytes,
+    )
         .into_response()
 }

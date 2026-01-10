@@ -144,11 +144,7 @@ impl TestApp {
         (status, json)
     }
 
-    async fn get_bytes(
-        &self,
-        uri: &str,
-        token: Option<&str>,
-    ) -> (StatusCode, Vec<u8>) {
+    async fn get_bytes(&self, uri: &str, token: Option<&str>) -> (StatusCode, Vec<u8>) {
         let mut builder = Request::builder().method(Method::GET).uri(uri);
         if let Some(token) = token {
             builder = builder.header("authorization", format!("Bearer {}", token));
@@ -301,9 +297,7 @@ async fn shared_file_upload_and_download_plain() {
     let vault = app.create_shared_vault(token, "shared-file-vault").await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let file_id = Uuid::now_v7().to_string();
-    let item = app
-        .create_shared_file_item(token, vault_id, &file_id)
-        .await;
+    let item = app.create_shared_file_item(token, vault_id, &file_id).await;
     let item_id = item["id"].as_str().expect("item id");
 
     let bytes = b"hello-file".to_vec();
@@ -346,12 +340,12 @@ async fn shared_file_upload_and_download_opaque() {
         .await;
     let token = user["access_token"].as_str().expect("token");
 
-    let vault = app.create_shared_vault(token, "shared-file-opaque-vault").await;
+    let vault = app
+        .create_shared_vault(token, "shared-file-opaque-vault")
+        .await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let file_id = Uuid::now_v7().to_string();
-    let item = app
-        .create_shared_file_item(token, vault_id, &file_id)
-        .await;
+    let item = app.create_shared_file_item(token, vault_id, &file_id).await;
     let item_id = item["id"].as_str().expect("item id");
 
     let bytes = b"opaque-shared".to_vec();
@@ -399,9 +393,7 @@ async fn shared_plain_download_rejects_opaque_storage() {
         .await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let file_id = Uuid::now_v7().to_string();
-    let item = app
-        .create_shared_file_item(token, vault_id, &file_id)
-        .await;
+    let item = app.create_shared_file_item(token, vault_id, &file_id).await;
     let item_id = item["id"].as_str().expect("item id");
 
     let bytes = b"opaque-shared".to_vec();
@@ -428,8 +420,7 @@ async fn shared_plain_download_rejects_opaque_storage() {
         )
         .await;
     assert_eq!(status, StatusCode::CONFLICT, "expected conflict");
-    let response_json: serde_json::Value =
-        serde_json::from_slice(&response).expect("error json");
+    let response_json: serde_json::Value = serde_json::from_slice(&response).expect("error json");
     assert_eq!(response_json["error"], "representation_not_available");
 }
 
@@ -447,9 +438,7 @@ async fn shared_opaque_download_returns_ciphertext_for_plain_storage() {
         .await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let file_id = Uuid::now_v7().to_string();
-    let item = app
-        .create_shared_file_item(token, vault_id, &file_id)
-        .await;
+    let item = app.create_shared_file_item(token, vault_id, &file_id).await;
     let item_id = item["id"].as_str().expect("item id");
 
     let bytes = b"plain-storage".to_vec();
@@ -484,12 +473,12 @@ async fn shared_opaque_download_returns_ciphertext_for_plain_storage() {
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn personal_file_upload_and_download_opaque() {
     let app = TestApp::new_with_smk().await;
-    let user = app
-        .register("personal_files@example.com", "password")
-        .await;
+    let user = app.register("personal_files@example.com", "password").await;
     let token = user["access_token"].as_str().expect("token");
 
-    let vault = app.create_personal_vault(token, "personal-file-vault").await;
+    let vault = app
+        .create_personal_vault(token, "personal-file-vault")
+        .await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let file_id = Uuid::now_v7().to_string();
     let item = app.create_personal_file_item(token, vault_id).await;
@@ -535,7 +524,9 @@ async fn personal_plain_download_forbidden() {
         .await;
     let token = user["access_token"].as_str().expect("token");
 
-    let vault = app.create_personal_vault(token, "personal-plain-file-vault").await;
+    let vault = app
+        .create_personal_vault(token, "personal-plain-file-vault")
+        .await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let file_id = Uuid::now_v7().to_string();
     let item = app.create_personal_file_item(token, vault_id).await;
@@ -565,8 +556,7 @@ async fn personal_plain_download_forbidden() {
         )
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN, "expected forbidden");
-    let response_json: serde_json::Value =
-        serde_json::from_slice(&response).expect("error json");
+    let response_json: serde_json::Value = serde_json::from_slice(&response).expect("error json");
     assert_eq!(response_json["error"], "representation_not_allowed");
 }
 
@@ -579,12 +569,12 @@ async fn file_upload_rejects_large_payload() {
         .await;
     let token = user["access_token"].as_str().expect("token");
 
-    let vault = app.create_shared_vault(token, "shared-large-file-vault").await;
+    let vault = app
+        .create_shared_vault(token, "shared-large-file-vault")
+        .await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let file_id = Uuid::now_v7().to_string();
-    let item = app
-        .create_shared_file_item(token, vault_id, &file_id)
-        .await;
+    let item = app.create_shared_file_item(token, vault_id, &file_id).await;
     let item_id = item["id"].as_str().expect("item id");
 
     let bytes = vec![0u8; 10 * 1024 * 1024 + 1];
@@ -619,9 +609,7 @@ async fn file_upload_is_idempotent_by_file_id() {
         .await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let file_id = Uuid::now_v7().to_string();
-    let item = app
-        .create_shared_file_item(token, vault_id, &file_id)
-        .await;
+    let item = app.create_shared_file_item(token, vault_id, &file_id).await;
     let item_id = item["id"].as_str().expect("item id");
 
     let bytes = b"idempotent-file".to_vec();

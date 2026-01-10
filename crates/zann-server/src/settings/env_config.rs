@@ -406,7 +406,10 @@ fn write_secret_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
 }
 
 pub(super) fn load_policies(config: &ServerConfig) -> Result<PolicySet, String> {
-    let fallback_paths = ["/config/policies.default.yaml", "config/policies.default.yaml"];
+    let fallback_paths = [
+        "/config/policies.default.yaml",
+        "config/policies.default.yaml",
+    ];
     let configured = config.policy.file.as_deref();
     let path = configured
         .map(str::to_string)

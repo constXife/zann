@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
 use zann_core::{EncryptedPayload, FieldKind, FieldValue, ItemsService};
-use zann_db::local::{LocalItemHistoryRepo, LocalStorage, LocalStorageRepo, LocalVault, LocalVaultRepo};
+use zann_db::local::{
+    LocalItemHistoryRepo, LocalStorage, LocalStorageRepo, LocalVault, LocalVaultRepo,
+};
 use zann_db::services::LocalServices;
 use zann_db::{connect_sqlite_with_max, migrate_local, SqlitePool};
 
@@ -194,7 +196,10 @@ async fn local_history_restore_replaces_payload() {
         .await
         .expect("history list");
     assert_eq!(history.len(), 2, "restore should add history snapshot");
-    assert_eq!(history[0].version, 2, "restore snapshot records prior version");
+    assert_eq!(
+        history[0].version, 2,
+        "restore snapshot records prior version"
+    );
     assert_eq!(history[0].change_type, "restore");
     assert_eq!(history[1].version, 1, "original update still present");
 }

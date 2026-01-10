@@ -266,10 +266,10 @@ impl<'a> LocalServices<'a> {
         prev: &EncryptedPayload,
         next: &EncryptedPayload,
     ) -> Result<bool, ServiceError> {
-        let prev_value =
-            serde_json::to_value(prev).map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
-        let next_value =
-            serde_json::to_value(next).map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
+        let prev_value = serde_json::to_value(prev)
+            .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
+        let next_value = serde_json::to_value(next)
+            .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
         Ok(prev_value == next_value)
     }
 

@@ -173,16 +173,18 @@ pub fn log_fingerprint(state: &AppState) {
 pub async fn wait_for_schema(pool: &PgPool, max_wait: Duration) {
     let start = Instant::now();
     loop {
-        let table =
-            sqlx_core::query_scalar::query_scalar::<_, Option<String>>(
-                "SELECT to_regclass('public.items')::text",
-            )
-            .fetch_one(pool)
-            .await;
+        let table = sqlx_core::query_scalar::query_scalar::<_, Option<String>>(
+            "SELECT to_regclass('public.items')::text",
+        )
+        .fetch_one(pool)
+        .await;
         match table {
             Ok(Some(_)) => {
                 if start.elapsed().as_secs() > 0 {
-                    tracing::info!(event = "schema_ready", elapsed_ms = start.elapsed().as_millis());
+                    tracing::info!(
+                        event = "schema_ready",
+                        elapsed_ms = start.elapsed().as_millis()
+                    );
                 }
                 return;
             }
@@ -192,7 +194,10 @@ pub async fn wait_for_schema(pool: &PgPool, max_wait: Duration) {
             }
         }
         if start.elapsed() >= max_wait {
-            tracing::warn!(event = "schema_wait_timeout", waited_ms = start.elapsed().as_millis());
+            tracing::warn!(
+                event = "schema_wait_timeout",
+                waited_ms = start.elapsed().as_millis()
+            );
             return;
         }
         tokio::time::sleep(Duration::from_secs(1)).await;
@@ -294,7 +299,10 @@ pub fn build_app(metrics_config: &MetricsConfig, state: AppState) -> Router {
                 let span_ref = span_cx.span();
                 let span_context = span_ref.span_context();
                 if span_context.is_valid() {
-                    span.record("trace_id", &tracing::field::display(span_context.trace_id()));
+                    span.record(
+                        "trace_id",
+                        &tracing::field::display(span_context.trace_id()),
+                    );
                     span.record("span_id", &tracing::field::display(span_context.span_id()));
                 }
                 span

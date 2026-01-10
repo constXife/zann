@@ -6,9 +6,9 @@ use zann_core::{Identity, VaultEncryptionType, VaultKind};
 use zann_db::repo::{ChangeRepo, ItemHistoryRepo, ItemRepo, VaultRepo};
 
 use crate::app::AppState;
-use crate::domains::items::service::ITEM_HISTORY_LIMIT;
 use crate::domains::access_control::http::{vault_role_allows, VaultScope};
 use crate::domains::access_control::policies::PolicyDecision;
+use crate::domains::items::service::ITEM_HISTORY_LIMIT;
 use crate::domains::sync::http::v1::handlers::push_apply::{apply_change, ApplyChangeResult};
 use crate::domains::sync::http::v1::helpers::{
     can_push, decode_cursor, encode_cursor, parse_plaintext_payload,
@@ -193,7 +193,10 @@ pub(crate) async fn sync_pull(
         } else {
             Some(row.payload_enc)
         };
-        let history = match history_repo.list_by_item_limit(row.item_id, ITEM_HISTORY_LIMIT).await {
+        let history = match history_repo
+            .list_by_item_limit(row.item_id, ITEM_HISTORY_LIMIT)
+            .await
+        {
             Ok(entries) => {
                 let mapped = entries
                     .into_iter()
@@ -413,7 +416,10 @@ pub(crate) async fn sync_shared_pull(
                     }
                 }
             };
-            let history = match history_repo.list_by_item_limit(item.id, ITEM_HISTORY_LIMIT).await {
+            let history = match history_repo
+                .list_by_item_limit(item.id, ITEM_HISTORY_LIMIT)
+                .await
+            {
                 Ok(entries) => {
                     let mut mapped = Vec::with_capacity(entries.len());
                     for entry in entries {
@@ -526,7 +532,10 @@ pub(crate) async fn sync_shared_pull(
                 }
             }
         };
-        let history = match history_repo.list_by_item_limit(row.item_id, ITEM_HISTORY_LIMIT).await {
+        let history = match history_repo
+            .list_by_item_limit(row.item_id, ITEM_HISTORY_LIMIT)
+            .await
+        {
             Ok(entries) => {
                 let mut mapped = Vec::with_capacity(entries.len());
                 for entry in entries {

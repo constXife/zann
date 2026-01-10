@@ -508,8 +508,7 @@ fn encrypt_secret_payload(
         })?;
     let payload_bytes = {
         let _span = tracing::debug_span!("serialize_json", op = "secret_payload_encode").entered();
-        serde_json::to_vec(payload)
-            .map_err(|_| SecretError::Internal("payload_encode_failed"))?
+        serde_json::to_vec(payload).map_err(|_| SecretError::Internal("payload_encode_failed"))?
     };
     let payload_enc =
         core_crypto::encrypt_payload_bytes(&vault_key, vault.id, item_id, &payload_bytes).map_err(
