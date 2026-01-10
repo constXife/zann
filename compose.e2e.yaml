@@ -19,7 +19,7 @@ services:
     build:
       context: .
       dockerfile: crates/zann-server/Dockerfile
-    image: zann-e2e/server:dev
+    image: "${TAURI_E2E_SERVER_IMAGE:-zann-e2e/server:dev}"
     depends_on:
       db_e2e:
         condition: service_healthy
@@ -40,7 +40,7 @@ services:
     build:
       context: .
       dockerfile: crates/zann-server/Dockerfile
-    image: zann-e2e/server:dev
+    image: "${TAURI_E2E_SERVER_IMAGE:-zann-e2e/server:dev}"
     depends_on:
       db_e2e:
         condition: service_healthy
