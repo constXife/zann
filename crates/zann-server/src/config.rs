@@ -279,6 +279,12 @@ pub struct OtelConfig {
     pub endpoint: Option<String>,
     #[serde(default)]
     pub service_name: Option<String>,
+    #[serde(default)]
+    pub sampling_ratio: Option<f64>,
+    #[serde(default)]
+    pub ca_file: Option<String>,
+    #[serde(default)]
+    pub insecure: Option<bool>,
 }
 
 const fn default_true() -> bool {

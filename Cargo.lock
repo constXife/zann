@@ -5317,6 +5317,7 @@ dependencies = [
  "sqlx-core",
  "sqlx-postgres",
  "sqlx-sqlite",
+ "tracing",
  "uuid",
  "zeroize",
 ]
@@ -5334,6 +5335,7 @@ dependencies = [
  "sqlx-postgres",
  "sqlx-sqlite",
  "tokio",
+ "tracing",
  "uuid",
  "zann-core",
 ]

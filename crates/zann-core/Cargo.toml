@@ -14,6 +14,7 @@ rand = "0.8"
 serde_yaml = "0.9"
 async-trait = "0.1"
 blake3 = "1"
+tracing = "0.1"
 sqlx-core = { version = "0.8", default-features = false, features = ["chrono", "json", "uuid"] }
 sqlx-postgres = { version = "0.8", default-features = false, features = ["chrono", "json", "uuid"], optional = true }
 sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled", "chrono", "json", "uuid"], optional = true }

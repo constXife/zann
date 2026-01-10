@@ -15,6 +15,7 @@ sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v7"] }
 serde_json = "1"
+tracing = "0.1"
 zann-core = { path = "../zann-core", default-features = false }
 
 [features]

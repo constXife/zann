@@ -217,8 +217,16 @@ pub async fn upload_item_file(
     if vault.encryption_type == VaultEncryptionType::Server {
         let payload_bytes = decrypt_shared_payload_bytes(state, &vault, &item)
             .map_err(|_| ItemsError::BadRequest("invalid_payload"))?;
-        let payload: JsonValue = serde_json::from_slice(&payload_bytes)
-            .map_err(|_| ItemsError::BadRequest("invalid_payload"))?;
+        let payload: JsonValue = {
+            let _span = tracing::debug_span!(
+                "serialize_json",
+                op = "item_payload_decode",
+                bytes_len = payload_bytes.len()
+            )
+            .entered();
+            serde_json::from_slice(&payload_bytes)
+                .map_err(|_| ItemsError::BadRequest("invalid_payload"))?
+        };
         let extra = payload.get("extra").and_then(|value| value.as_object());
         let upload_state = extra
             .and_then(|map| map.get("upload_state"))
@@ -358,7 +366,15 @@ pub async fn download_item_file(
     let mut attachment = None;
     if vault.encryption_type == VaultEncryptionType::Server {
         if let Ok(payload_bytes) = decrypt_shared_payload_bytes(state, &vault, &item) {
-            if let Ok(payload) = serde_json::from_slice::<JsonValue>(&payload_bytes) {
+            if let Ok(payload) = {
+                let _span = tracing::debug_span!(
+                    "serialize_json",
+                    op = "item_payload_decode",
+                    bytes_len = payload_bytes.len()
+                )
+                .entered();
+                serde_json::from_slice::<JsonValue>(&payload_bytes)
+            } {
                 let file_id = payload
                     .get("extra")
                     .and_then(|value| value.as_object())
@@ -457,7 +473,11 @@ pub async fn create_item(
         let Some(plaintext_payload) = command.payload else {
             return Err(ItemsError::BadRequest("payload_required"));
         };
-        let payload_bytes = match serde_json::to_vec(&plaintext_payload) {
+        let payload_bytes = match {
+            let _span =
+                tracing::debug_span!("serialize_json", op = "item_payload_encode").entered();
+            serde_json::to_vec(&plaintext_payload)
+        } {
             Ok(bytes) => bytes,
             Err(_) => return Err(ItemsError::BadRequest("invalid_payload")),
         };
@@ -668,7 +688,11 @@ pub async fn update_item(
         if vault.encryption_type != VaultEncryptionType::Server {
             return Err(ItemsError::BadRequest("plaintext_not_allowed"));
         }
-        let payload_bytes = match serde_json::to_vec(&plaintext_payload) {
+        let payload_bytes = match {
+            let _span =
+                tracing::debug_span!("serialize_json", op = "item_payload_encode").entered();
+            serde_json::to_vec(&plaintext_payload)
+        } {
             Ok(bytes) => bytes,
             Err(_) => return Err(ItemsError::BadRequest("invalid_payload")),
         };
@@ -1202,7 +1226,15 @@ async fn update_file_upload_state(
             return Ok(());
         }
     };
-    let mut payload: JsonValue = match serde_json::from_slice(&payload_bytes) {
+    let mut payload: JsonValue = match {
+        let _span = tracing::debug_span!(
+            "serialize_json",
+            op = "item_payload_decode",
+            bytes_len = payload_bytes.len()
+        )
+        .entered();
+        serde_json::from_slice(&payload_bytes)
+    } {
         Ok(value) => value,
         Err(_) => return Ok(()),
     };

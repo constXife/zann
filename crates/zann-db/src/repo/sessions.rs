@@ -1,4 +1,5 @@
 use super::prelude::*;
+use tracing::{instrument, Span};
 
 pub struct SessionRepo<'a> {
     pool: &'a PgPool,
@@ -9,6 +10,17 @@ impl<'a> SessionRepo<'a> {
         Self { pool }
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, session),
+        fields(
+            session_id = %session.id,
+            user_id = %session.user_id,
+            db.system = "postgresql",
+            db.operation = "INSERT",
+            db.query = "sessions.create"
+        )
+    )]
     pub async fn create(&self, session: &Session) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
@@ -29,9 +41,17 @@ impl<'a> SessionRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+            ()
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(session_id = %id, db.system = "postgresql", db.operation = "SELECT", db.query = "sessions.get_by_id")
+    )]
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<Session>, sqlx_core::Error> {
         query_as!(
             Session,
@@ -54,6 +74,11 @@ impl<'a> SessionRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(user_id = %user_id, db.system = "postgresql", db.operation = "SELECT", db.query = "sessions.list_by_user")
+    )]
     pub async fn list_by_user(&self, user_id: Uuid) -> Result<Vec<Session>, sqlx_core::Error> {
         query_as!(
             Session,
@@ -74,8 +99,17 @@ impl<'a> SessionRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
+        .map(|sessions| {
+            Span::current().record("db.rows", sessions.len() as i64);
+            sessions
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(db.system = "postgresql", db.operation = "SELECT", db.query = "sessions.get_by_refresh_token_hash")
+    )]
     pub async fn get_by_refresh_token_hash(
         &self,
         refresh_token_hash: &str,
@@ -101,6 +135,11 @@ impl<'a> SessionRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(db.system = "postgresql", db.operation = "SELECT", db.query = "sessions.get_by_access_token_hash")
+    )]
     pub async fn get_by_access_token_hash(
         &self,
         access_token_hash: &str,
@@ -126,6 +165,11 @@ impl<'a> SessionRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(session_id = %session_id, db.system = "postgresql", db.operation = "UPDATE", db.query = "sessions.update_refresh_token")
+    )]
     pub async fn update_refresh_token(
         &self,
         session_id: Uuid,
@@ -152,9 +196,17 @@ impl<'a> SessionRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+            ()
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(db.system = "postgresql", db.operation = "DELETE", db.query = "sessions.delete_by_refresh_token_hash")
+    )]
     pub async fn delete_by_refresh_token_hash(
         &self,
         refresh_token_hash: &str,
@@ -168,7 +220,10 @@ impl<'a> SessionRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+            ()
+        })
     }
 }
 
@@ -181,6 +236,11 @@ impl<'a> AppliedOpRepo<'a> {
         Self { pool }
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, op),
+        fields(op_id = %op.op_id, db.system = "postgresql", db.operation = "INSERT", db.query = "applied_ops.create")
+    )]
     pub async fn create(&self, op: &AppliedOp) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
@@ -195,9 +255,17 @@ impl<'a> AppliedOpRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+            ()
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(op_id = %op_id, db.system = "postgresql", db.operation = "SELECT", db.query = "applied_ops.get_by_id")
+    )]
     pub async fn get_by_id(&self, op_id: Uuid) -> Result<Option<AppliedOp>, sqlx_core::Error> {
         query_as!(
             AppliedOp,

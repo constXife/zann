@@ -3,6 +3,7 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const BLOB_MAGIC: [u8; 3] = *b"ZAN";
@@ -103,6 +104,7 @@ impl EncryptedBlob {
         out
     }
 
+    #[instrument(level = "debug", skip(bytes), fields(bytes_len = bytes.len()))]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
         if bytes.len() < 3 + 1 {
             return Err(CryptoError::InvalidBlob);
@@ -120,6 +122,11 @@ impl EncryptedBlob {
     }
 }
 
+#[instrument(
+    level = "debug",
+    skip(key, plaintext, aad),
+    fields(plaintext_len = plaintext.len(), aad_len = aad.len())
+)]
 pub fn encrypt_blob(
     key: &SecretKey,
     plaintext: &[u8],
@@ -149,6 +156,11 @@ pub fn encrypt_blob(
     })
 }
 
+#[instrument(
+    level = "debug",
+    skip(key, blob, aad),
+    fields(ciphertext_len = blob.ciphertext.len(), aad_len = aad.len())
+)]
 pub fn decrypt_blob(
     key: &SecretKey,
     blob: &EncryptedBlob,
