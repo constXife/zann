@@ -44,6 +44,7 @@ const props = defineProps<{
               class="flex items-center gap-2 rounded-lg bg-[var(--bg-tertiary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
               data-tauri-drag-region="false"
               @click="props.onToggleTypeMenu"
+              data-testid="create-type-menu"
             >
               <CategoryIcon :icon="props.currentTypeIcon" class="h-4 w-4" />
               <span>{{ props.currentTypeLabel }}</span>
@@ -71,6 +72,7 @@ const props = defineProps<{
                   class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-[var(--bg-hover)] transition-colors"
                   data-tauri-drag-region="false"
                   @click="props.onSelectType(type)"
+                  :data-testid="`create-type-${type}`"
                 >
                   <CategoryIcon :icon="props.typeMeta[type]?.icon ?? 'key'" class="h-4 w-4" />
                   <span>{{ props.getTypeLabel(type) }}</span>
@@ -99,6 +101,7 @@ const props = defineProps<{
             :disabled="props.busy"
             data-tauri-drag-region="false"
             @click="props.onSubmit"
+            data-testid="create-submit"
           >
             <svg
               v-if="props.busy"

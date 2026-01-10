@@ -12,6 +12,7 @@ const props = defineProps<{
   suggestions: string[];
   dense?: boolean;
   hasError?: boolean;
+  inputTestId?: string;
 }>();
 
 const emit = defineEmits<{
@@ -82,6 +83,7 @@ const inputClass = computed(() =>
         class="flex-1 bg-transparent focus:outline-none"
         :class="inputClass"
         :placeholder="props.placeholder"
+        :data-testid="props.inputTestId"
         @focus="emit('focus')"
         @blur="emit('blur')"
         @keydown="emit('keydown', $event)"

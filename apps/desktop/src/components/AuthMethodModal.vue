@@ -49,6 +49,7 @@ const emit = defineEmits<{
           type="button"
           class="w-full flex items-center gap-4 rounded-lg bg-[var(--bg-tertiary)] p-4 hover:bg-[var(--bg-hover)] transition-colors text-left"
           @click="emit('selectPassword')"
+          data-testid="auth-method-password"
         >
           <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-hover)]">
             <svg class="h-5 w-5 text-[var(--text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,6 +71,7 @@ const emit = defineEmits<{
           type="button"
           class="w-full flex items-center gap-4 rounded-lg bg-[var(--bg-tertiary)] p-4 hover:bg-[var(--bg-hover)] transition-colors text-left"
           @click="emit('selectOidc')"
+          data-testid="auth-method-oidc"
         >
           <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-hover)]">
             <svg class="h-5 w-5 text-[var(--text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

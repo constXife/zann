@@ -120,6 +120,7 @@ const toggleMode = () => {
             :disabled="busy"
             class="w-full rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-sm placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
             autocomplete="name"
+            data-testid="auth-full-name"
           />
         </div>
 
@@ -132,6 +133,7 @@ const toggleMode = () => {
             :disabled="busy"
             class="w-full rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-sm placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
             autocomplete="email"
+            data-testid="auth-email"
           />
         </div>
 
@@ -144,6 +146,7 @@ const toggleMode = () => {
             :disabled="busy"
             class="w-full rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-sm placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
             :autocomplete="mode === 'register' ? 'new-password' : 'current-password'"
+            data-testid="auth-password"
           />
         </div>
 
@@ -156,6 +159,7 @@ const toggleMode = () => {
             :disabled="busy"
             class="w-full rounded-lg bg-[var(--bg-tertiary)] px-3 py-2.5 text-sm placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:opacity-50"
             autocomplete="new-password"
+            data-testid="auth-confirm"
           />
         </div>
 
@@ -163,6 +167,7 @@ const toggleMode = () => {
           type="submit"
           :disabled="busy || !canSubmit"
           class="w-full rounded-lg bg-[var(--accent)] px-4 py-2.5 text-sm font-medium text-white hover:bg-[var(--accent-hover)] active:bg-[var(--accent-active)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          data-testid="auth-submit"
         >
           {{
             busy
@@ -182,6 +187,7 @@ const toggleMode = () => {
             type="button"
             class="ml-1 text-[var(--accent)] hover:underline"
             @click="toggleMode"
+            data-testid="auth-toggle"
           >
             {{ mode === "login" ? t("auth.signUp") : t("auth.signIn") }}
           </button>
