@@ -91,37 +91,24 @@ const restoreFromHistory = async (browser) => {
   }
 
   logStep("Open history");
-  await waitForButtonByText(browser, "History", UI_TIMEOUT);
-  const clicked = await withTimeout(
-    browser.execute(() => {
-      const buttons = Array.from(document.querySelectorAll("button"));
-      const target = buttons.find(
-        (btn) => btn.textContent?.includes("History"),
-      );
-      if (!target) {
-        return false;
-      }
-      target.scrollIntoView({ block: "center", inline: "center" });
-      target.click();
-      return true;
-    }),
-    UI_TIMEOUT,
-    "history click",
-  );
-  if (!clicked) {
-    throw new Error("History button not found for click.");
-  }
-  const rangeSelector = "input.time-travel-range";
+  await clickWhenReady(browser, '[data-testid="history-toggle"]', UI_TIMEOUT);
   await withTimeout(
-    browser.$(rangeSelector).then((el) => el.waitForExist({ timeout: UI_TIMEOUT })),
+    browser
+      .$('[data-testid="history-panel"]')
+      .then((el) => el.waitForExist({ timeout: UI_TIMEOUT })),
     UI_TIMEOUT,
     "history panel open",
   );
-  await waitForButtonByText(browser, "Close history", UI_TIMEOUT);
-  await waitForButtonByText(browser, "Restore this version", UI_TIMEOUT);
+  await withTimeout(
+    browser
+      .$('[data-testid="history-restore"]')
+      .then((el) => el.waitForExist({ timeout: UI_TIMEOUT })),
+    UI_TIMEOUT,
+    "history restore ready",
+  );
   await withTimeout(
     browser.execute(() => {
-      const slider = document.querySelector("input.time-travel-range");
+      const slider = document.querySelector('[data-testid="history-slider"]');
       if (!slider) {
         return;
       }
@@ -132,14 +119,19 @@ const restoreFromHistory = async (browser) => {
     "history slider",
   );
   logStep("Apply history restore");
-  await clickButtonByText(browser, "Restore this version", UI_TIMEOUT);
+  await clickWhenReady(browser, '[data-testid="history-restore"]', UI_TIMEOUT);
   await clickConfirmModalButton(browser, "Restore previous version", "Restore", UI_TIMEOUT);
-  const closeSelector =
-    `//button[contains(normalize-space(), "Close history")]` +
-    ` | //button[.//span[contains(normalize-space(), "Close history")]]`;
-  const closeButton = await browser.$(closeSelector);
-  if (await closeButton.isExisting()) {
-    await clickByXPath(browser, closeSelector, UI_TIMEOUT, "close history");
+  const historyToggle = await browser.$('[data-testid="history-toggle"]');
+  const state = await historyToggle.getAttribute("data-state");
+  if (state === "open") {
+    await clickWhenReady(browser, '[data-testid="history-toggle"]', UI_TIMEOUT);
+    await withTimeout(
+      browser
+        .$('[data-testid="history-panel"]')
+        .then((el) => el.waitForExist({ timeout: UI_TIMEOUT, reverse: true })),
+      UI_TIMEOUT,
+      "history panel close",
+    );
   } else {
     logStep("History already closed");
   }

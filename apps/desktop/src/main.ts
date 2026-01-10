@@ -36,6 +36,10 @@ library.add(fas, far, fab);
 const fallbackLocale = "en";
 const systemLocale = navigator.language?.split("-")[0] || fallbackLocale;
 
+if (import.meta.env.VITE_E2E === "1") {
+  document.documentElement.dataset.e2e = "true";
+}
+
 const i18n = createI18n({
   legacy: false,
   locale: systemLocale,

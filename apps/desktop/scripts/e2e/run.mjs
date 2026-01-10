@@ -365,6 +365,9 @@ const main = async () => {
   if (!process.env.NO_AT_BRIDGE) {
     process.env.NO_AT_BRIDGE = "1";
   }
+  if (!process.env.VITE_E2E) {
+    process.env.VITE_E2E = "1";
+  }
   const driverPort = Number(process.env.TAURI_DRIVER_PORT ?? 4444);
   const serverUrl = process.env.TAURI_E2E_SERVER_URL ?? "http://127.0.0.1:18081";
   const serverPort = Number(process.env.TAURI_E2E_SERVER_PORT ?? 18081);

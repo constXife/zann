@@ -450,6 +450,10 @@ onBeforeUnmount(() => {
                 :class="timeTravelActive ? 'bg-[var(--bg-active)] text-[var(--text-primary)]' : ''"
                 :disabled="historyLoading || !!historyError || !historyEntries.length"
                 @click="timeTravelActive ? closeTimeTravel() : openTimeTravel()"
+                data-testid="history-toggle"
+                :data-state="timeTravelActive ? 'open' : 'closed'"
+                :aria-expanded="timeTravelActive"
+                aria-controls="history-panel"
               >
                 <span class="mr-1">🕒</span>
                 {{ timeTravelActive ? t("items.historyClose") : t("items.historyOpen") }}
@@ -574,6 +578,8 @@ onBeforeUnmount(() => {
 
         <div
           v-if="timeTravelActive"
+          id="history-panel"
+          data-testid="history-panel"
           class="sticky top-0 z-10 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 px-3 py-2 text-xs text-[var(--text-primary)] backdrop-blur"
         >
           <div class="flex flex-wrap items-center justify-between gap-3">
@@ -593,6 +599,7 @@ onBeforeUnmount(() => {
                 class="rounded px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-active)] disabled:opacity-50"
                 :disabled="!timeTravelEntry || timeTravelEntry.pending"
                 @click="timeTravelEntry && restoreHistoryVersion(timeTravelEntry)"
+                data-testid="history-restore"
               >
                 {{ t("items.historyRestore") }}
               </button>
@@ -629,6 +636,7 @@ onBeforeUnmount(() => {
               </div>
               <input
                 class="time-travel-range w-full"
+                data-testid="history-slider"
                 type="range"
                 min="0"
                 :max="timeTravelSliderMax"
