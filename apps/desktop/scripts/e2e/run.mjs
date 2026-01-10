@@ -168,6 +168,9 @@ const resolveNativeDriverBin = async () => {
   } catch {}
 
   const candidates = [
+    "/usr/libexec/webkit2gtk-4.1/WebKitWebDriver",
+    "/usr/libexec/webkit2gtk-4.0/WebKitWebDriver",
+    "/usr/libexec/WebKitWebDriver",
     "/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver",
     "/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver",
     "/usr/lib/webkit2gtk-4.1/WebKitWebDriver",

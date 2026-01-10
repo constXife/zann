@@ -188,6 +188,22 @@ jobs:
           if ! sudo apt-get install -y webkit2gtk-driver; then
             sudo apt-get install -y webkit2gtk-4.1-driver
           fi
+      - name: Resolve WebKitWebDriver
+        run: |
+          if command -v WebKitWebDriver >/dev/null 2>&1; then
+            echo "TAURI_E2E_NATIVE_DRIVER=$(command -v WebKitWebDriver)" >> "$GITHUB_ENV"
+          elif [ -x /usr/libexec/webkit2gtk-4.1/WebKitWebDriver ]; then
+            echo "TAURI_E2E_NATIVE_DRIVER=/usr/libexec/webkit2gtk-4.1/WebKitWebDriver" >> "$GITHUB_ENV"
+          elif [ -x /usr/libexec/webkit2gtk-4.0/WebKitWebDriver ]; then
+            echo "TAURI_E2E_NATIVE_DRIVER=/usr/libexec/webkit2gtk-4.0/WebKitWebDriver" >> "$GITHUB_ENV"
+          elif [ -x /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver ]; then
+            echo "TAURI_E2E_NATIVE_DRIVER=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver" >> "$GITHUB_ENV"
+          elif [ -x /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver ]; then
+            echo "TAURI_E2E_NATIVE_DRIVER=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver" >> "$GITHUB_ENV"
+          else
+            echo "WebKitWebDriver not found in expected locations" >&2
+            exit 1
+          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
       - name: Rust cache
