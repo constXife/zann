@@ -47,6 +47,24 @@ const runCommandQuiet = (command, args, options = {}) =>
 const commandExists = (command) =>
   runCommand("sh", ["-c", `command -v ${command} >/dev/null 2>&1`]);
 
+const resolveCommandPath = (command) =>
+  new Promise((resolve, reject) => {
+    const child = spawn("sh", ["-c", `command -v ${command}`], { stdio: ["ignore", "pipe", "ignore"] });
+    let output = "";
+    child.stdout?.on("data", (chunk) => {
+      output += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        const resolved = output.trim();
+        resolve(resolved || null);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+
 const cleanupComposeArtifacts = async (composeBin, namePrefix, serverPort) => {
   const nameFilter = `^${namePrefix}`;
   const portFilter = String(serverPort);
@@ -153,18 +171,22 @@ const resolveNativeDriverBin = async () => {
     try {
       if (configured.includes(path.sep)) {
         await access(configured);
-      } else {
-        await commandExists(configured);
+        return configured;
       }
-      return configured;
+      const resolved = await resolveCommandPath(configured);
+      if (resolved) {
+        return resolved;
+      }
     } catch {
       return null;
     }
   }
 
   try {
-    await commandExists("WebKitWebDriver");
-    return "WebKitWebDriver";
+    const resolved = await resolveCommandPath("WebKitWebDriver");
+    if (resolved) {
+      return resolved;
+    }
   } catch {}
 
   const candidates = [
