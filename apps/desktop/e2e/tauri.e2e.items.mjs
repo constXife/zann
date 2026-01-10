@@ -134,7 +134,15 @@ const restoreFromHistory = async (browser) => {
   logStep("Apply history restore");
   await clickButtonByText(browser, "Restore this version", UI_TIMEOUT);
   await clickConfirmModalButton(browser, "Restore previous version", "Restore", UI_TIMEOUT);
-  await clickButtonByText(browser, "Close history", UI_TIMEOUT);
+  const closeSelector =
+    `//button[contains(normalize-space(), "Close history")]` +
+    ` | //button[.//span[contains(normalize-space(), "Close history")]]`;
+  const closeButton = await browser.$(closeSelector);
+  if (await closeButton.isExisting()) {
+    await clickByXPath(browser, closeSelector, UI_TIMEOUT, "close history");
+  } else {
+    logStep("History already closed");
+  }
 };
 
 export {
