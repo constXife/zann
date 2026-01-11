@@ -32,6 +32,17 @@ fn append_sync_log(message: &str) {
     let _ = writeln!(file, "{} {}", Utc::now().to_rfc3339(), message);
 }
 
+fn redact_uuid(id: Uuid) -> String {
+    let value = id.as_hyphenated().to_string();
+    let prefix = value.get(0..8).unwrap_or(&value);
+    let suffix = value.get(value.len().saturating_sub(4)..).unwrap_or("");
+    if value.len() > 12 {
+        format!("{prefix}...{suffix}")
+    } else {
+        value
+    }
+}
+
 pub(crate) async fn fetch_vault_details(
     client: &reqwest::Client,
     headers: &reqwest::header::HeaderMap,
@@ -279,7 +290,9 @@ pub(crate) async fn apply_pull_change(
         None => {
             append_sync_log(&format!(
                 "[pull] invalid updated_at: storage_id={}, item_id={}, value={}",
-                storage_id, item_id, change.updated_at
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
+                change.updated_at
             ));
             return Ok(false);
         }
@@ -293,8 +306,8 @@ pub(crate) async fn apply_pull_change(
         if local.version > change.seq {
             append_sync_log(&format!(
                 "[pull] skipped newer local version: storage_id={}, item_id={}, local_version={}, remote_version={}",
-                storage_id,
-                item_id,
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
                 local.version,
                 change.seq
             ));
@@ -321,7 +334,8 @@ pub(crate) async fn apply_pull_change(
         None => {
             append_sync_log(&format!(
                 "[pull] missing payload_enc: storage_id={}, item_id={}",
-                storage_id, item_id
+                redact_uuid(storage_id),
+                redact_uuid(item_id)
             ));
             return Ok(false);
         }
@@ -330,7 +344,8 @@ pub(crate) async fn apply_pull_change(
     if checksum != change.checksum {
         append_sync_log(&format!(
             "[pull] checksum mismatch: storage_id={}, item_id={}",
-            storage_id, item_id
+            redact_uuid(storage_id),
+            redact_uuid(item_id)
         ));
         return Ok(false);
     }
@@ -338,7 +353,8 @@ pub(crate) async fn apply_pull_change(
     if decrypt_payload(vault_key, vault_id, item_id, &payload_enc).is_err() {
         append_sync_log(&format!(
             "[pull] decrypt failed: storage_id={}, item_id={}",
-            storage_id, item_id
+            redact_uuid(storage_id),
+            redact_uuid(item_id)
         ));
         return Ok(false);
     }
@@ -496,7 +512,8 @@ async fn apply_history_payloads(
     if history.is_empty() {
         append_sync_log(&format!(
             "[history] empty history: storage_id={}, item_id={}",
-            storage_id, item_id
+            redact_uuid(storage_id),
+            redact_uuid(item_id)
         ));
         return Ok(());
     }
@@ -525,14 +542,14 @@ async fn apply_history_payloads(
         Ok(()) => {
             append_sync_log(&format!(
                 "[history] applied: storage_id={}, item_id={}, entries={}",
-                storage_id,
-                item_id,
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
                 entries.len()
             ));
             eprintln!(
                 "[sync] applied history: storage_id={}, item_id={}, entries={}",
-                storage_id,
-                item_id,
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
                 entries.len()
             );
             Ok(())
@@ -540,11 +557,15 @@ async fn apply_history_payloads(
         Err(err) => {
             append_sync_log(&format!(
                 "[history] apply failed: storage_id={}, item_id={}, error={}",
-                storage_id, item_id, err
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
+                err
             ));
             eprintln!(
                 "[sync] history apply failed: storage_id={}, item_id={}, error={}",
-                storage_id, item_id, err
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
+                err
             );
             Err(err.to_string())
         }
@@ -562,7 +583,8 @@ async fn apply_shared_history_payloads(
     if history.is_empty() {
         append_sync_log(&format!(
             "[shared_history] empty history: storage_id={}, item_id={}",
-            storage_id, item_id
+            redact_uuid(storage_id),
+            redact_uuid(item_id)
         ));
         return Ok(());
     }
@@ -593,14 +615,14 @@ async fn apply_shared_history_payloads(
         Ok(()) => {
             append_sync_log(&format!(
                 "[shared_history] applied: storage_id={}, item_id={}, entries={}",
-                storage_id,
-                item_id,
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
                 entries.len()
             ));
             eprintln!(
                 "[sync] applied shared history: storage_id={}, item_id={}, entries={}",
-                storage_id,
-                item_id,
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
                 entries.len()
             );
             Ok(())
@@ -608,11 +630,15 @@ async fn apply_shared_history_payloads(
         Err(err) => {
             append_sync_log(&format!(
                 "[shared_history] apply failed: storage_id={}, item_id={}, error={}",
-                storage_id, item_id, err
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
+                err
             ));
             eprintln!(
                 "[sync] shared history apply failed: storage_id={}, item_id={}, error={}",
-                storage_id, item_id, err
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
+                err
             );
             Err(err.to_string())
         }
