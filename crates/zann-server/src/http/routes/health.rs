@@ -68,7 +68,11 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     );
 
     let oidc_status = if state.config.auth.oidc.enabled {
-        match state.oidc_jwks_cache.get_jwks(&state.config.auth.oidc).await {
+        match state
+            .oidc_jwks_cache
+            .get_jwks(&state.config.auth.oidc)
+            .await
+        {
             Ok(_) => HealthComponent {
                 status: "ok",
                 details: None,
@@ -88,7 +92,10 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 
     let status = if !db_ok {
         "db_error"
-    } else if components.values().any(|component| component.status == "degraded") {
+    } else if components
+        .values()
+        .any(|component| component.status == "degraded")
+    {
         "degraded"
     } else {
         "ok"

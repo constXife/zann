@@ -60,7 +60,11 @@ impl TestApp {
         };
         let app = zann_server::bootstrap::build_app(&metrics_config, state);
 
-        Self { _guard: guard, app, _pool: pool }
+        Self {
+            _guard: guard,
+            app,
+            _pool: pool,
+        }
     }
 
     async fn get(&self, path: &str) -> axum::response::Response {

@@ -108,10 +108,7 @@ pub async fn setup_shared_db() -> PgPool {
 
     migrate(&pool).await.expect("migrate");
 
-    let shared = SharedDb {
-        schema,
-        db_url,
-    };
+    let shared = SharedDb { schema, db_url };
     *guard = Some(shared);
     pool
 }

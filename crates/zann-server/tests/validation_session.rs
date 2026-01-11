@@ -77,7 +77,12 @@ impl TestApp {
         };
 
         let app = build_router(state);
-        Self { _guard: guard, app, pool, config }
+        Self {
+            _guard: guard,
+            app,
+            pool,
+            config,
+        }
     }
 
     fn config(&self) -> &ServerConfig {

@@ -51,7 +51,11 @@ impl TestApp {
         };
         let app = build_router(state);
 
-        Self { _guard: guard, app, _pool: pool }
+        Self {
+            _guard: guard,
+            app,
+            _pool: pool,
+        }
     }
 
     async fn get_json(&self, path: &str) -> serde_json::Value {

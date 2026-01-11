@@ -70,7 +70,11 @@ impl TestApp {
         };
 
         let app = build_router(state);
-        Self { _guard: guard, app, pool }
+        Self {
+            _guard: guard,
+            app,
+            pool,
+        }
     }
 
     async fn send_json(
