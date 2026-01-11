@@ -1,6 +1,7 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::collections::HashMap;
 
 use crate::app::AppState;
 
@@ -10,6 +11,14 @@ pub(crate) struct HealthResponse {
     pub(crate) version: &'static str,
     pub(crate) build_commit: Option<&'static str>,
     pub(crate) uptime_seconds: u64,
+    pub(crate) components: HashMap<String, HealthComponent>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct HealthComponent {
+    pub(crate) status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) details: Option<String>,
 }
 
 pub fn router() -> Router<AppState> {
@@ -21,29 +30,83 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     let version = env!("CARGO_PKG_VERSION");
     let build_commit = option_env!("GIT_COMMIT");
 
-    if sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT 1")
+    let mut components = HashMap::new();
+
+    let db_ok = sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT 1")
         .execute(&state.db)
         .await
-        .is_ok()
-    {
-        (
-            StatusCode::OK,
-            Json(HealthResponse {
+        .is_ok();
+    components.insert(
+        "db".to_string(),
+        HealthComponent {
+            status: if db_ok { "ok" } else { "error" },
+            details: if db_ok {
+                None
+            } else {
+                Some("db_ping_failed".to_string())
+            },
+        },
+    );
+
+    let pool_idle = state.db.num_idle();
+    let pool_size = state.db.size();
+    components.insert(
+        "db_pool".to_string(),
+        HealthComponent {
+            status: if pool_idle > 0 { "ok" } else { "degraded" },
+            details: Some(format!("size={}, idle={}", pool_size, pool_idle)),
+        },
+    );
+
+    let kdf_permits = state.argon2_semaphore.available_permits();
+    components.insert(
+        "kdf".to_string(),
+        HealthComponent {
+            status: if kdf_permits > 0 { "ok" } else { "degraded" },
+            details: Some(format!("available={}", kdf_permits)),
+        },
+    );
+
+    let oidc_status = if state.config.auth.oidc.enabled {
+        match state.oidc_jwks_cache.get_jwks(&state.config.auth.oidc).await {
+            Ok(_) => HealthComponent {
                 status: "ok",
-                version,
-                build_commit,
-                uptime_seconds,
-            }),
-        )
+                details: None,
+            },
+            Err(err) => HealthComponent {
+                status: "degraded",
+                details: Some(err),
+            },
+        }
     } else {
-        (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(HealthResponse {
-                status: "db_error",
-                version,
-                build_commit,
-                uptime_seconds,
-            }),
-        )
-    }
+        HealthComponent {
+            status: "disabled",
+            details: None,
+        }
+    };
+    components.insert("oidc".to_string(), oidc_status);
+
+    let status = if !db_ok {
+        "db_error"
+    } else if components.values().any(|component| component.status == "degraded") {
+        "degraded"
+    } else {
+        "ok"
+    };
+    let http_status = if db_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (
+        http_status,
+        Json(HealthResponse {
+            status,
+            version,
+            build_commit,
+            uptime_seconds,
+            components,
+        }),
+    )
 }

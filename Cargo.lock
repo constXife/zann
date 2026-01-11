@@ -5494,6 +5494,7 @@ dependencies = [
  "sqlx-core",
  "sqlx-postgres",
  "subtle",
+ "thiserror 1.0.69",
  "tokio",
  "tower 0.5.2",
  "tower-http 0.5.2",

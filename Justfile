@@ -33,7 +33,7 @@ db-reset:
 
 server-test-db:
     podman compose -p zann_test -f compose.test.yaml up -d db
-    bash -euo pipefail -c 'set +e; TEST_DATABASE_URL={{pg_test_url}} cargo test -p zann-server --features postgres-tests; status=$?; set -e; podman compose -p zann_test -f compose.test.yaml down; exit $status'
+    bash -euo pipefail -c 'set +e; TEST_DATABASE_URL={{pg_test_url}} RUST_TEST_THREADS=1 cargo test -p zann-server --features postgres-tests -- --test-threads=1; status=$?; set -e; podman compose -p zann_test -f compose.test.yaml down; exit $status'
 
 test-db-down:
     podman compose -p zann_test -f compose.test.yaml down
@@ -49,8 +49,7 @@ server-lint:
     DATABASE_URL={{db_url}} cargo clippy -- -D warnings
 
 server-test:
-    just server-migrate
-    DATABASE_URL={{db_url}} cargo test -p zann-server
+    just server-test-db
 
 server-run:
     just server-migrate

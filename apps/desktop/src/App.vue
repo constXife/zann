@@ -166,7 +166,7 @@ const storageState = useStorages({
 });
 const {
   storages, remoteStorages, localStorage: localStorageRef, hasLocalVaults, showLocalSection,
-  storageSyncErrors, storagePersonalLocked, syncBusy, syncError, loadStorages, checkLocalVaults,
+  storageSyncErrors, storagePersonalLocked, isOffline, syncBusy, syncError, loadStorages, checkLocalVaults,
   runRemoteSync: runRemoteSyncRaw, scheduleRemoteSync, startAutoSync, stopAutoSync, clearSyncErrors, getSyncStatus,
   getStorageInfo, deleteStorage, disconnectStorage, revealStorage,
 } = storageState;
@@ -308,6 +308,7 @@ const statusBanners = useAppStatusBanners({
   selectedStorageId,
   storageSyncErrors,
   storagePersonalLocked,
+  isOffline,
   localStorageId: LOCAL_STORAGE_ID,
 });
 const {

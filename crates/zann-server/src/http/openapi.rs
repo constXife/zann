@@ -199,6 +199,7 @@ async fn health() -> (StatusCode, Json<HealthResponse>) {
         version: "0.0.0",
         build_commit: None,
         uptime_seconds: 0,
+        components: HashMap::new(),
     })
 }
 

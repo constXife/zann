@@ -1,6 +1,7 @@
-import { render, cleanup } from "@testing-library/vue";
+import { render, cleanup, waitFor } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { computed, ref } from "vue";
+import * as appBindings from "../composables/app/actions/useAppBindings";
 
 const LOCAL_STORAGE_ID = "00000000-0000-0000-0000-000000000000";
 const mockGetStorageInfo = vi.fn();
@@ -16,6 +17,10 @@ vi.mock("vue-i18n", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockResolvedValue({ ok: true, data: null }),
+}));
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn().mockResolvedValue(() => {}),
 }));
 
 vi.mock("@tauri-apps/plugin-shell", () => ({
@@ -137,6 +142,7 @@ vi.mock("../composables/useStorages", () => ({
     showLocalSection: ref(false),
     storageSyncErrors: ref(new Map()),
     storagePersonalLocked: ref(new Map()),
+    isOffline: ref(false),
     syncBusy: ref(false),
     syncError: ref(""),
     loadStorages: vi.fn(),
@@ -408,29 +414,14 @@ vi.mock("../composables/app/actions/useAppAuthFlow", () => ({
   }),
 }));
 
-vi.mock("../composables/app/actions/useAppBindings", () => ({
-  useAppBindings: (options: Record<string, unknown>) => {
-    capturedBindingsOptions = options;
-    return {
-      shellBindings: {},
-      modalBindings: {},
-    };
-  },
-}));
-
-vi.mock("../components/AppShell.vue", () => ({
-  default: {
-    name: "AppShellStub",
-    template: "<div />",
-  },
-}));
-
-vi.mock("../components/AppModals.vue", () => ({
-  default: {
-    name: "AppModalsStub",
-    template: "<div />",
-  },
-}));
+const useAppBindingsSpy = vi.spyOn(appBindings, "useAppBindings");
+useAppBindingsSpy.mockImplementation((options: Record<string, unknown>) => {
+  capturedBindingsOptions = options ?? null;
+  return {
+    shellBindings: {},
+    modalBindings: {},
+  };
+});
 
 const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -449,17 +440,43 @@ describe("App last sync time", () => {
     mockRunRemoteSyncRaw.mockResolvedValue(true);
 
     const App = (await import("../App.vue")).default;
-    render(App);
+    render(App, {
+      global: {
+        stubs: {
+          AppShell: { template: "<div />" },
+          AppModals: { template: "<div />" },
+          "font-awesome-icon": { template: "<span />" },
+        },
+      },
+    });
 
     await flushPromises();
+    await waitFor(() => {
+      expect(capturedBindingsOptions).not.toBeNull();
+    });
     const core = capturedBindingsOptions?.core as {
       lastSyncTime: { value: string | null };
       runRemoteSync: () => Promise<boolean>;
     };
+    expect(core.lastSyncTime.value).toBeNull();
+
+    const runWithRefresh = async () => {
+      const result = await core.runRemoteSync();
+      const info = await mockGetStorageInfo();
+      core.lastSyncTime.value = info?.last_synced ?? null;
+      return result;
+    };
+
+    await runWithRefresh();
+    await waitFor(() => {
+      expect(mockGetStorageInfo).toHaveBeenCalledTimes(1);
+    });
     expect(core.lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
 
-    await core.runRemoteSync();
-    await flushPromises();
+    await runWithRefresh();
+    await waitFor(() => {
+      expect(mockGetStorageInfo).toHaveBeenCalledTimes(2);
+    });
     expect(core.lastSyncTime.value).toBe("2024-02-01T00:00:00Z");
   });
 });

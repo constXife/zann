@@ -117,6 +117,10 @@ jobs:
           cargo run -p zann-server --bin zann-server -- migrate
       - name: Tests
         run: cargo test
+      - name: Tests (zann-server Postgres)
+        env:
+          RUST_TEST_THREADS: "1"
+        run: cargo test -p zann-server --features postgres-tests -- --test-threads=1
       - name: Tests (zann-db Postgres)
         run: cargo test -p zann-db --features postgres
       - name: sccache stats
