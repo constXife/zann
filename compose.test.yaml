@@ -1,0 +1,19 @@
+services:
+  db:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_USER: zann
+      POSTGRES_PASSWORD: zann
+      POSTGRES_DB: zann
+    ports:
+      - "5433:5432"
+    volumes:
+      - zann_pgdata_test:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zann -d zann"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  zann_pgdata_test:

@@ -20,6 +20,7 @@ pub struct Settings {
     pub addr: SocketAddr,
     pub db_url: String,
     pub db_pool_max: u32,
+    pub db_tx_isolation: DbTxIsolation,
     pub password_pepper: String,
     pub token_pepper: String,
     pub require_pepper: bool,
@@ -33,6 +34,24 @@ pub struct Settings {
     pub policies: PolicySet,
     pub secret_policies: HashMap<String, PasswordPolicy>,
     pub secret_default_policy: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DbTxIsolation {
+    ReadCommitted,
+    RepeatableRead,
+    Serializable,
+}
+
+impl DbTxIsolation {
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "read_committed" | "read committed" => Some(Self::ReadCommitted),
+            "repeatable_read" | "repeatable read" => Some(Self::RepeatableRead),
+            "serializable" => Some(Self::Serializable),
+            _ => None,
+        }
+    }
 }
 
 impl Settings {
@@ -56,6 +75,16 @@ impl Settings {
             .ok()
             .and_then(|value| value.parse::<u32>().ok())
             .unwrap_or(10);
+        let db_tx_isolation = match env::var("ZANN_DB_TX_ISOLATION") {
+            Ok(value) => match DbTxIsolation::parse(&value) {
+                Some(isolation) => isolation,
+                None => {
+                    warn!(event = "config_invalid", field = "ZANN_DB_TX_ISOLATION", value = %value);
+                    DbTxIsolation::ReadCommitted
+                }
+            },
+            Err(_) => DbTxIsolation::ReadCommitted,
+        };
         let access_token_ttl_seconds = env::var("ZANN_ACCESS_TOKEN_TTL_SECONDS")
             .ok()
             .and_then(|value| value.parse::<i64>().ok())
@@ -140,6 +169,7 @@ impl Settings {
             addr,
             db_url,
             db_pool_max,
+            db_tx_isolation,
             password_pepper,
             token_pepper,
             require_pepper,

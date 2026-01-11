@@ -8,6 +8,7 @@ use crate::domains::access_control::policy_store::PolicyStore;
 use crate::domains::auth::core::oidc::OidcJwksCache;
 use crate::domains::secrets::policies::PasswordPolicy;
 use crate::infra::usage::UsageTracker;
+use crate::settings::DbTxIsolation;
 use ed25519_dalek::SigningKey;
 use std::sync::Arc;
 use zann_core::crypto::SecretKey;
@@ -17,6 +18,7 @@ use zann_db::PgPool;
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
+    pub db_tx_isolation: DbTxIsolation,
     pub started_at: Instant,
     pub password_pepper: String,
     pub token_pepper: String,

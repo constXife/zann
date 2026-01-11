@@ -1,4 +1,5 @@
 pub mod audit;
+pub mod db;
 pub mod history;
 pub mod metrics;
 pub mod request_context;

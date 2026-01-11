@@ -25,6 +25,55 @@ pub(crate) enum ApplyChangeResult {
     Conflict(SyncPushConflict),
 }
 
+fn db_error() -> ApplyChangeError {
+    ApplyChangeError {
+        status: StatusCode::INTERNAL_SERVER_ERROR,
+        error: "db_error",
+    }
+}
+
+async fn insert_item_history(
+    conn: &mut PgConnection,
+    history: &zann_core::ItemHistory,
+) -> Result<(), ApplyChangeError> {
+    if let Err(err) = query!(
+        r"
+        INSERT INTO item_history (
+            id, item_id, payload_enc, checksum, version, change_type, fields_changed,
+            changed_by_user_id, changed_by_email, changed_by_name, changed_by_device_id,
+            changed_by_device_name, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        ON CONFLICT (item_id, version) DO NOTHING
+        ",
+        history.id,
+        history.item_id,
+        &history.payload_enc,
+        history.checksum.as_str(),
+        history.version,
+        history.change_type.as_str(),
+        history.fields_changed.as_ref(),
+        history.changed_by_user_id,
+        history.changed_by_email.as_str(),
+        history.changed_by_name.as_deref(),
+        history.changed_by_device_id,
+        history.changed_by_device_name.as_deref(),
+        history.created_at
+    )
+    .execute(&mut *conn)
+    .await
+    {
+        tracing::error!(
+            event = "sync_push_history_insert_failed",
+            error = %err,
+            item_id = %history.item_id,
+            "Failed to insert item history"
+        );
+        return Err(db_error());
+    }
+    Ok(())
+}
+
 pub(crate) async fn apply_change(
     conn: &mut PgConnection,
     identity: &Identity,
@@ -34,7 +83,7 @@ pub(crate) async fn apply_change(
 ) -> Result<ApplyChangeResult, ApplyChangeError> {
     let operation = change.operation.as_str();
     let base_seq = change.base_seq.unwrap_or(0);
-    let max_seq: Option<i64> = query!(
+    let max_seq_row = query!(
         r#"
         SELECT MAX(seq) as "seq"
         FROM changes
@@ -43,14 +92,22 @@ pub(crate) async fn apply_change(
         vault_id,
         change.item_id
     )
-    .fetch_optional(&mut *conn)
+    .fetch_one(&mut *conn)
     .await
-    .ok()
-    .and_then(|row| row.and_then(|r| r.try_get("seq").ok()));
+    .map_err(|err| {
+        tracing::error!(event = "sync_push_failed", error = %err, "DB error");
+        db_error()
+    })?;
+    let max_seq = max_seq_row
+        .try_get::<Option<i64>, _>("seq")
+        .map_err(|err| {
+            tracing::error!(event = "sync_push_failed", error = %err, "DB error");
+            db_error()
+        })?;
 
     if let Some(server_seq) = max_seq {
         if base_seq > 0 && server_seq > base_seq {
-            let updated_at = query!(
+            let updated_at = match query!(
                 r"
                 SELECT updated_at
                 FROM items
@@ -60,9 +117,23 @@ pub(crate) async fn apply_change(
             )
             .fetch_optional(&mut *conn)
             .await
-            .ok()
-            .and_then(|row| row.and_then(|r| r.try_get("updated_at").ok()))
-            .unwrap_or_else(|| Utc::now().to_rfc3339());
+            {
+                Ok(Some(row)) => row
+                    .try_get::<chrono::DateTime<Utc>, _>("updated_at")
+                    .ok()
+                    .map(|value| value.to_rfc3339())
+                    .unwrap_or_else(|| Utc::now().to_rfc3339()),
+                Ok(None) => Utc::now().to_rfc3339(),
+                Err(err) => {
+                    tracing::error!(
+                        event = "sync_push_conflict_timestamp_failed",
+                        error = %err,
+                        item_id = %change.item_id,
+                        "Failed to load conflict timestamp"
+                    );
+                    Utc::now().to_rfc3339()
+                }
+            };
             return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                 item_id: change.item_id.to_string(),
                 reason: "concurrent_modification",
@@ -100,11 +171,15 @@ pub(crate) async fn apply_change(
         change.item_id
     )
     .fetch_optional(&mut *conn)
-    .await;
+    .await
+    .map_err(|err| {
+        tracing::error!(event = "sync_push_failed", error = %err, "DB error");
+        db_error()
+    })?;
 
     let now = Utc::now();
     let item_version = match (operation, existing) {
-        ("create", Ok(None)) => {
+        ("create", None) => {
             let payload_enc = match change.payload_enc {
                 Some(payload) => payload,
                 None => {
@@ -143,7 +218,19 @@ pub(crate) async fn apply_change(
                 }
             };
 
-            if let Some(updated_at) = find_path_conflict(conn, vault_id, &path, None).await {
+            let conflict_updated_at =
+                find_path_conflict(conn, vault_id, &path, None)
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(
+                            event = "sync_push_path_conflict_failed",
+                            error = %err,
+                            item_id = %change.item_id,
+                            "Failed to check path conflicts"
+                        );
+                        db_error()
+                    })?;
+            if let Some(updated_at) = conflict_updated_at {
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: change.item_id.to_string(),
                     reason: "already_exists",
@@ -174,7 +261,7 @@ pub(crate) async fn apply_change(
             };
             let item_version = item.version;
 
-            if query!(
+            if let Err(err) = query!(
                 r"
                 INSERT INTO items (
                     id, vault_id, path, name, type_id, tags, favorite, payload_enc, checksum,
@@ -204,16 +291,18 @@ pub(crate) async fn apply_change(
             )
             .execute(&mut *conn)
             .await
-            .is_err()
             {
-                return Err(ApplyChangeError {
-                    status: StatusCode::INTERNAL_SERVER_ERROR,
-                    error: "db_error",
-                });
+                tracing::error!(
+                    event = "sync_push_item_insert_failed",
+                    error = %err,
+                    item_id = %item.id,
+                    "Failed to insert item"
+                );
+                return Err(db_error());
             }
             item_version
         }
-        ("create", Ok(Some(_))) => {
+        ("create", Some(_)) => {
             return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                 item_id: change.item_id.to_string(),
                 reason: "already_exists",
@@ -221,7 +310,7 @@ pub(crate) async fn apply_change(
                 server_updated_at: now.to_rfc3339(),
             }));
         }
-        ("update", Ok(Some(mut item))) => {
+        ("update", Some(mut item)) => {
             let payload_changed = match (change.payload_enc.as_ref(), change.checksum.as_deref()) {
                 (Some(_), Some(checksum)) => {
                     let trimmed = checksum.trim();
@@ -232,9 +321,19 @@ pub(crate) async fn apply_change(
             };
             let (next_path, next_name) =
                 normalize_path_and_name(&item.path, change.path.as_deref(), change.name.as_deref());
-            if let Some(updated_at) =
-                find_path_conflict(conn, vault_id, &next_path, Some(item.id)).await
-            {
+            let conflict_updated_at =
+                find_path_conflict(conn, vault_id, &next_path, Some(item.id))
+                    .await
+                    .map_err(|err| {
+                        tracing::error!(
+                            event = "sync_push_path_conflict_failed",
+                            error = %err,
+                            item_id = %item.id,
+                            "Failed to check path conflicts"
+                        );
+                        db_error()
+                    })?;
+            if let Some(updated_at) = conflict_updated_at {
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: item.id.to_string(),
                     reason: "already_exists",
@@ -260,33 +359,15 @@ pub(crate) async fn apply_change(
                     changed_by_device_name: actor.device_name,
                     created_at: now,
                 };
-                let _ = query!(
-                    r"
-                    INSERT INTO item_history (
-                        id, item_id, payload_enc, checksum, version, change_type, fields_changed,
-                        changed_by_user_id, changed_by_email, changed_by_name, changed_by_device_id,
-                        changed_by_device_name, created_at
-                    )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                    ON CONFLICT (item_id, version) DO NOTHING
-                    ",
-                    history.id,
-                    history.item_id,
-                    &history.payload_enc,
-                    history.checksum.as_str(),
-                    history.version,
-                    history.change_type.as_str(),
-                    history.fields_changed.as_ref(),
-                    history.changed_by_user_id,
-                    history.changed_by_email.as_str(),
-                    history.changed_by_name.as_deref(),
-                    history.changed_by_device_id,
-                    history.changed_by_device_name.as_deref(),
-                    history.created_at
-                )
-                .execute(&mut *conn)
-                .await;
-                let _ = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await;
+                insert_item_history(conn, &history).await?;
+                if let Err(err) = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await {
+                    tracing::error!(
+                        event = "sync_push_history_prune_failed",
+                        error = %err,
+                        item_id = %item.id,
+                        "Failed to prune item history"
+                    );
+                }
             }
 
             item.path = next_path;
@@ -355,7 +436,7 @@ pub(crate) async fn apply_change(
             }
             item_version
         }
-        ("restore", Ok(Some(mut item))) => {
+        ("restore", Some(mut item)) => {
             let actor = actor_snapshot(conn, identity, Some(device_id)).await;
             let history = zann_core::ItemHistory {
                 id: Uuid::now_v7(),
@@ -372,33 +453,15 @@ pub(crate) async fn apply_change(
                 changed_by_device_name: actor.device_name,
                 created_at: now,
             };
-            let _ = query!(
-                r"
-                INSERT INTO item_history (
-                    id, item_id, payload_enc, checksum, version, change_type, fields_changed,
-                    changed_by_user_id, changed_by_email, changed_by_name, changed_by_device_id,
-                    changed_by_device_name, created_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                ON CONFLICT (item_id, version) DO NOTHING
-                ",
-                history.id,
-                history.item_id,
-                &history.payload_enc,
-                history.checksum.as_str(),
-                history.version,
-                history.change_type.as_str(),
-                history.fields_changed.as_ref(),
-                history.changed_by_user_id,
-                history.changed_by_email.as_str(),
-                history.changed_by_name.as_deref(),
-                history.changed_by_device_id,
-                history.changed_by_device_name.as_deref(),
-                history.created_at
-            )
-            .execute(&mut *conn)
-            .await;
-            let _ = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await;
+            insert_item_history(conn, &history).await?;
+            if let Err(err) = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await {
+                tracing::error!(
+                    event = "sync_push_history_prune_failed",
+                    error = %err,
+                    item_id = %item.id,
+                    "Failed to prune item history"
+                );
+            }
 
             if let Some(path) = change.path.as_deref() {
                 if !path.trim().is_empty() {
@@ -487,7 +550,7 @@ pub(crate) async fn apply_change(
             }
             item_version
         }
-        ("delete", Ok(Some(mut item))) => {
+        ("delete", Some(mut item)) => {
             let actor = actor_snapshot(conn, identity, Some(device_id)).await;
             let history = zann_core::ItemHistory {
                 id: Uuid::now_v7(),
@@ -504,33 +567,15 @@ pub(crate) async fn apply_change(
                 changed_by_device_name: actor.device_name,
                 created_at: now,
             };
-            let _ = query!(
-                r"
-                INSERT INTO item_history (
-                    id, item_id, payload_enc, checksum, version, change_type, fields_changed,
-                    changed_by_user_id, changed_by_email, changed_by_name, changed_by_device_id,
-                    changed_by_device_name, created_at
-                )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                ON CONFLICT (item_id, version) DO NOTHING
-                ",
-                history.id,
-                history.item_id,
-                &history.payload_enc,
-                history.checksum.as_str(),
-                history.version,
-                history.change_type.as_str(),
-                history.fields_changed.as_ref(),
-                history.changed_by_user_id,
-                history.changed_by_email.as_str(),
-                history.changed_by_name.as_deref(),
-                history.changed_by_device_id,
-                history.changed_by_device_name.as_deref(),
-                history.created_at
-            )
-            .execute(&mut *conn)
-            .await;
-            let _ = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await;
+            insert_item_history(conn, &history).await?;
+            if let Err(err) = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await {
+                tracing::error!(
+                    event = "sync_push_history_prune_failed",
+                    error = %err,
+                    item_id = %item.id,
+                    "Failed to prune item history"
+                );
+            }
 
             item.version = item.version.saturating_add(1);
             item.row_version = item.row_version.saturating_add(1);
@@ -583,7 +628,7 @@ pub(crate) async fn apply_change(
             }
             item_version
         }
-        (_, Ok(None)) => {
+        (_, None) => {
             return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                 item_id: change.item_id.to_string(),
                 reason: "missing_item",
@@ -618,11 +663,25 @@ pub(crate) async fn apply_change(
         now
     )
     .fetch_one(&mut *conn)
-    .await;
-    let seq = inserted
-        .ok()
-        .and_then(|row| row.try_get::<i64, _>("seq").ok())
-        .unwrap_or(item_version);
+    .await
+    .map_err(|err| {
+        tracing::error!(
+            event = "sync_push_change_insert_failed",
+            error = %err,
+            item_id = %change.item_id,
+            "Failed to insert change"
+        );
+        db_error()
+    })?;
+    let seq = inserted.try_get::<i64, _>("seq").map_err(|err| {
+        tracing::error!(
+            event = "sync_push_change_insert_failed",
+            error = %err,
+            item_id = %change.item_id,
+            "Failed to read change sequence"
+        );
+        db_error()
+    })?;
     let deleted_at = if operation == "delete" {
         Some(now.to_rfc3339())
     } else {

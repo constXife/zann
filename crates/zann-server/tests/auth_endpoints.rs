@@ -10,7 +10,7 @@ mod support;
 use tokio::sync::Semaphore;
 use zann_core::crypto::SecretKey;
 use zann_core::ServiceAccount;
-use zann_db::repo::{ServiceAccountRepo, UserRepo};
+use zann_db::repo::{DeviceRepo, ServiceAccountRepo, SessionRepo, UserRepo};
 use zann_db::PgPool;
 use zann_server::app::{build_router, AppState};
 use zann_server::config::{AuthMode, InternalRegistration, ServerConfig};
@@ -64,6 +64,7 @@ impl TestApp {
         };
         let state = AppState {
             db: pool.clone(),
+            db_tx_isolation: zann_server::settings::DbTxIsolation::ReadCommitted,
             started_at: std::time::Instant::now(),
             password_pepper: "pepper".to_string(),
             token_pepper: token_pepper.clone(),
@@ -236,6 +237,54 @@ async fn prelogin_requires_email() {
     let app = TestApp::new().await;
     let status = app.get_status("/v1/auth/prelogin").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn register_conflict_does_not_create_extra_records() {
+    let app = TestApp::new().await;
+
+    let payload = json!({
+        "email": "conflict@example.com",
+        "password": "password-1",
+        "device_name": "test",
+        "device_platform": "tests",
+    });
+    let (status, _) = app
+        .send_json(Method::POST, "/v1/auth/register", payload.clone())
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let user = UserRepo::new(&app.pool)
+        .get_by_email("conflict@example.com")
+        .await
+        .expect("user lookup")
+        .expect("user");
+    let devices_before = DeviceRepo::new(&app.pool)
+        .list_by_user(user.id, 100, 0, "asc")
+        .await
+        .expect("devices list");
+    let sessions_before = SessionRepo::new(&app.pool)
+        .list_by_user(user.id)
+        .await
+        .expect("sessions list");
+
+    let (status, _) = app
+        .send_json(Method::POST, "/v1/auth/register", payload)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+
+    let devices_after = DeviceRepo::new(&app.pool)
+        .list_by_user(user.id, 100, 0, "asc")
+        .await
+        .expect("devices list");
+    let sessions_after = SessionRepo::new(&app.pool)
+        .list_by_user(user.id)
+        .await
+        .expect("sessions list");
+
+    assert_eq!(devices_before.len(), devices_after.len());
+    assert_eq!(sessions_before.len(), sessions_after.len());
 }
 
 #[tokio::test]

@@ -56,6 +56,7 @@ impl TestApp {
         let (secret_policies, secret_default_policy) = support::default_secret_policies();
         let state = AppState {
             db: pool.clone(),
+            db_tx_isolation: zann_server::settings::DbTxIsolation::ReadCommitted,
             started_at: std::time::Instant::now(),
             password_pepper: "pepper".to_string(),
             token_pepper: "pepper".to_string(),

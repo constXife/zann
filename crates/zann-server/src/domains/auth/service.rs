@@ -8,6 +8,8 @@ use zann_core::api::auth::{
 };
 use zann_core::vault_crypto as core_crypto;
 use zann_core::{Session, User, UserStatus, VaultEncryptionType, VaultKind};
+use sqlx_core::query::query;
+use sqlx_postgres::Postgres;
 use zann_db::repo::{
     DeviceRepo, ServiceAccountRepo, ServiceAccountSessionRepo, SessionRepo, UserRepo, VaultRepo,
 };
@@ -22,7 +24,8 @@ use crate::domains::auth::core::passwords::{
     random_kdf_salt, verify_password, KdfParams,
 };
 use crate::domains::auth::core::tokens::hash_token;
-use crate::domains::auth::helpers::{build_device, ensure_personal_vault};
+use crate::domains::auth::helpers::{build_device, ensure_personal_vault, ensure_personal_vault_tx};
+use crate::infra::db::apply_tx_isolation;
 use crate::infra::metrics;
 
 use super::http::v1::types::{
@@ -144,20 +147,6 @@ pub async fn register(
         InternalRegistration::Open => {}
     }
 
-    let repo = UserRepo::new(&state.db);
-    if let Ok(Some(_)) = repo.get_by_email(&payload.email).await {
-        metrics::auth_register("rejected");
-        tracing::warn!(
-            event = "auth_register_rejected",
-            reason = "email_taken",
-            email = "redacted",
-            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
-            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
-            "Registration rejected"
-        );
-        return Err(AuthError::Conflict("email_taken"));
-    }
-
     let now = Utc::now();
     let params = KdfParams {
         algorithm: state.config.auth.kdf.algorithm.clone(),
@@ -236,19 +225,6 @@ pub async fn register(
         last_login_at: None,
     };
 
-    if repo.create(&user).await.is_err() {
-        metrics::auth_register("db_error");
-        tracing::error!(
-            event = "auth_register_failed",
-            reason = "db_error",
-            email = "redacted",
-            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
-            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
-            "Registration failed"
-        );
-        return Err(AuthError::Internal("db_error"));
-    }
-
     let device = build_device(
         user.id,
         payload.device_name.clone(),
@@ -261,20 +237,6 @@ pub async fn register(
         "unknown",
         now,
     );
-    let device_repo = DeviceRepo::new(&state.db);
-    if device_repo.create(&device).await.is_err() {
-        metrics::auth_register("db_error");
-        tracing::error!(
-            event = "auth_register_failed",
-            reason = "db_error",
-            email = "redacted",
-            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
-            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
-            "Registration failed"
-        );
-        return Err(AuthError::Internal("db_error"));
-    }
-
     let refresh_token = Uuid::now_v7().to_string();
     let access_token = Uuid::now_v7().to_string();
     let refresh_token_hash = hash_token(&refresh_token, &state.token_pepper);
@@ -292,12 +254,28 @@ pub async fn register(
         created_at: now,
     };
 
-    let session_repo = SessionRepo::new(&state.db);
-    if session_repo.create(&session).await.is_err() {
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(err) => {
+            metrics::auth_register("db_error");
+            tracing::error!(
+                event = "auth_register_failed",
+                reason = "db_error",
+                error = %err,
+                email = "redacted",
+                ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+                request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+                "Registration failed"
+            );
+            return Err(AuthError::Internal("db_error"));
+        }
+    };
+    if let Err(err) = apply_tx_isolation(&mut *tx, state.db_tx_isolation).await {
         metrics::auth_register("db_error");
         tracing::error!(
             event = "auth_register_failed",
             reason = "db_error",
+            error = %err,
             email = "redacted",
             ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
@@ -306,13 +284,241 @@ pub async fn register(
         return Err(AuthError::Internal("db_error"));
     }
 
-    if ensure_personal_vault(state, user.id, now).await.is_err() {
+    let existing = query::<Postgres>(
+        r#"
+        SELECT 1
+        FROM users
+        WHERE email = $1 AND deleted_at IS NULL
+        "#,
+    )
+    .bind(&payload.email)
+    .fetch_optional(&mut *tx)
+    .await;
+    match existing {
+        Ok(Some(_)) => {
+            if let Err(err) = tx.rollback().await {
+                tracing::error!(
+                    event = "auth_register_failed",
+                    error = %err,
+                    "DB rollback failed"
+                );
+            }
+            metrics::auth_register("rejected");
+            tracing::warn!(
+                event = "auth_register_rejected",
+                reason = "email_taken",
+                email = "redacted",
+                ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+                request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+                "Registration rejected"
+            );
+            return Err(AuthError::Conflict("email_taken"));
+        }
+        Ok(None) => {}
+        Err(err) => {
+            if let Err(err) = tx.rollback().await {
+                tracing::error!(
+                    event = "auth_register_failed",
+                    error = %err,
+                    "DB rollback failed"
+                );
+            }
+            metrics::auth_register("db_error");
+            tracing::error!(
+                event = "auth_register_failed",
+                reason = "db_error",
+                error = %err,
+                email = "redacted",
+                ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+                request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+                "Registration failed"
+            );
+            return Err(AuthError::Internal("db_error"));
+        }
+    }
+
+    if let Err(err) = query::<Postgres>(
+        r#"
+        INSERT INTO users (
+            id,
+            email,
+            full_name,
+            password_hash,
+            kdf_salt,
+            kdf_algorithm,
+            kdf_iterations,
+            kdf_memory_kb,
+            kdf_parallelism,
+            recovery_key_hash,
+            status,
+            deleted_at,
+            deleted_by_user_id,
+            deleted_by_device_id,
+            row_version,
+            created_at,
+            updated_at,
+            last_login_at
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+        )
+        "#,
+    )
+    .bind(user.id)
+    .bind(user.email.as_str())
+    .bind(user.full_name.as_deref())
+    .bind(user.password_hash.as_deref())
+    .bind(user.kdf_salt.as_str())
+    .bind(user.kdf_algorithm.as_str())
+    .bind(user.kdf_iterations)
+    .bind(user.kdf_memory_kb)
+    .bind(user.kdf_parallelism)
+    .bind(user.recovery_key_hash.as_deref())
+    .bind(user.status.as_str())
+    .bind(user.deleted_at)
+    .bind(user.deleted_by_user_id)
+    .bind(user.deleted_by_device_id)
+    .bind(user.row_version)
+    .bind(user.created_at)
+    .bind(user.updated_at)
+    .bind(user.last_login_at)
+    .execute(&mut *tx)
+    .await
+    {
+        if let Err(rollback_err) = tx.rollback().await {
+            tracing::error!(
+                event = "auth_register_failed",
+                error = %rollback_err,
+                "DB rollback failed"
+            );
+        }
+        metrics::auth_register("db_error");
+        tracing::error!(
+            event = "auth_register_failed",
+            reason = "db_error",
+            error = %err,
+            email = "redacted",
+            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+            "Registration failed"
+        );
+        return Err(AuthError::Internal("db_error"));
+    }
+
+    if let Err(err) = query::<Postgres>(
+        r#"
+        INSERT INTO devices (
+            id, user_id, name, fingerprint, os, os_version, app_version,
+            last_seen_at, last_ip, revoked_at, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        "#,
+    )
+    .bind(device.id)
+    .bind(device.user_id)
+    .bind(device.name.as_str())
+    .bind(device.fingerprint.as_str())
+    .bind(device.os.as_deref())
+    .bind(device.os_version.as_deref())
+    .bind(device.app_version.as_deref())
+    .bind(device.last_seen_at)
+    .bind(device.last_ip.as_deref())
+    .bind(device.revoked_at)
+    .bind(device.created_at)
+    .execute(&mut *tx)
+    .await
+    {
+        if let Err(rollback_err) = tx.rollback().await {
+            tracing::error!(
+                event = "auth_register_failed",
+                error = %rollback_err,
+                "DB rollback failed"
+            );
+        }
+        metrics::auth_register("db_error");
+        tracing::error!(
+            event = "auth_register_failed",
+            reason = "db_error",
+            error = %err,
+            email = "redacted",
+            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+            "Registration failed"
+        );
+        return Err(AuthError::Internal("db_error"));
+    }
+
+    if let Err(err) = query::<Postgres>(
+        r#"
+        INSERT INTO sessions (
+            id, user_id, device_id, access_token_hash, access_expires_at,
+            refresh_token_hash, expires_at, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#,
+    )
+    .bind(session.id)
+    .bind(session.user_id)
+    .bind(session.device_id)
+    .bind(session.access_token_hash.as_str())
+    .bind(session.access_expires_at)
+    .bind(session.refresh_token_hash.as_str())
+    .bind(session.expires_at)
+    .bind(session.created_at)
+    .execute(&mut *tx)
+    .await
+    {
+        if let Err(rollback_err) = tx.rollback().await {
+            tracing::error!(
+                event = "auth_register_failed",
+                error = %rollback_err,
+                "DB rollback failed"
+            );
+        }
+        metrics::auth_register("db_error");
+        tracing::error!(
+            event = "auth_register_failed",
+            reason = "db_error",
+            error = %err,
+            email = "redacted",
+            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+            "Registration failed"
+        );
+        return Err(AuthError::Internal("db_error"));
+    }
+
+    if ensure_personal_vault_tx(state, &mut *tx, user.id, now)
+        .await
+        .is_err()
+    {
+        if let Err(rollback_err) = tx.rollback().await {
+            tracing::error!(
+                event = "auth_register_failed",
+                error = %rollback_err,
+                "DB rollback failed"
+            );
+        }
         tracing::error!(
             event = "personal_vault_create_failed",
             user_id = "redacted",
             "Failed to ensure personal vault"
         );
         return Err(AuthError::Internal("personal_vault_create_failed"));
+    }
+
+    if let Err(err) = tx.commit().await {
+        metrics::auth_register("db_error");
+        tracing::error!(
+            event = "auth_register_failed",
+            reason = "db_error",
+            error = %err,
+            email = "redacted",
+            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+            "Registration failed"
+        );
+        return Err(AuthError::Internal("db_error"));
     }
 
     metrics::auth_register("ok");
@@ -517,7 +723,15 @@ pub async fn login_internal(
         return Err(AuthError::Internal("personal_vault_create_failed"));
     }
 
-    let _ = repo.update_last_login(user.id, user.row_version, now).await;
+    if let Err(err) = repo.update_last_login(user.id, user.row_version, now).await {
+        tracing::warn!(
+            event = "auth_login_update_last_login_failed",
+            error = %err,
+            user_id = "redacted",
+            method = "internal",
+            "Failed to update last login timestamp"
+        );
+    }
     metrics::auth_login("ok", "internal");
     metrics::auth_tokens_issued("access");
     metrics::auth_tokens_issued("refresh");
@@ -983,7 +1197,7 @@ pub(crate) async fn login_service_account(
         return Err(AuthError::Internal("db_error"));
     }
 
-    let _ = repo
+    if let Err(err) = repo
         .update_usage(
             account.id,
             now,
@@ -991,7 +1205,15 @@ pub(crate) async fn login_service_account(
             ctx.user_agent.as_deref(),
             1,
         )
-        .await;
+        .await
+    {
+        tracing::warn!(
+            event = "service_account_usage_update_failed",
+            error = %err,
+            service_account_id = %account.id,
+            "Failed to update service account usage"
+        );
+    }
 
     metrics::auth_login("ok", "service_account");
     metrics::auth_tokens_issued("access");
