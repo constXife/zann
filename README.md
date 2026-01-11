@@ -20,6 +20,10 @@ Self-hosted password manager for individuals and small teams.
 - **💻 Desktop app** — offline-first, works without a server (macOS, Windows)
 - **🔑 Hybrid auth** — OIDC + built-in authentication
 
+## Screenshots
+
+![Desktop app](docs/screenshots/desktop-app.png)
+
 ## Quick start
 
 ### Option 1: Local use (no server)
@@ -65,13 +69,6 @@ Components:
 
 Server threat model: [crates/zann-server/SECURITY.md](crates/zann-server/SECURITY.md) (assumptions and trust boundaries).
 
-## Screenshots
-
-<!-- TODO: Add screenshots -->
-- Desktop app main screen
-- Vault management
-- CLI usage example
-
 ## For DevOps and CI/CD
 
 Zann supports CI/CD integrations:
@@ -91,6 +88,14 @@ GitHub Actions example:
   env:
     ZANN_TOKEN: ${{ secrets.ZANN_SERVICE_TOKEN }}
 ```
+
+## Performance baseline
+
+From a local k6 "morning sync" run (~500 VUs, ~2.5k req/s):
+- **RSS memory**: ~100 MiB
+- **Errors**: no 5xx observed
+
+CPU usage depends on workload and database performance. See [loadtest/k6/scenarios/morning_sync.js](loadtest/k6/scenarios/morning_sync.js) for the scenario.
 
 ## Tech stack
 
