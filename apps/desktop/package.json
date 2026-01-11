@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "e2e": "node ./scripts/e2e/run.mjs",
-    "test": "vitest"
+    "test": "vitest run"
   },
   "dependencies": {
     "@fortawesome/fontawesome-svg-core": "^7.1.0",

@@ -44,6 +44,7 @@ defineProps<{
             class="rounded"
             :checked="settings.close_to_tray"
             @change="updateSettings({ close_to_tray: ($event.target as HTMLInputElement).checked })"
+            data-testid="settings-close-to-tray"
           />
           <span>{{ t("settings.general.closeToTray") }}</span>
         </label>

@@ -18,6 +18,10 @@ import {
   maybeUnlock,
 } from "./tauri.e2e.auth.mjs";
 import {
+  setCloseToTray,
+  expectCloseToTray,
+} from "./tauri.e2e.settings.mjs";
+import {
   createKvItem,
   createLoginItem,
   deleteAndRestoreItem,
@@ -102,6 +106,12 @@ const registerAndCreateKvScenario = async (browser) => {
 
   await openItemFromList(browser, "kv-first");
   logStep("KV item created");
+
+  logStep("Toggle close-to-tray setting");
+  await setCloseToTray(browser, false);
+  await expectCloseToTray(browser, false);
+  await setCloseToTray(browser, true);
+  await expectCloseToTray(browser, true);
 
   logStep("Delete and restore KV item");
   await deleteAndRestoreItem(browser, "kv-first");
