@@ -65,7 +65,7 @@ pub enum FileRepresentation {
 }
 
 impl FileRepresentation {
-    pub fn from_str(value: &str) -> Result<Self, &'static str> {
+    pub fn parse(value: &str) -> Result<Self, &'static str> {
         match value {
             "plain" => Ok(Self::Plain),
             "opaque" => Ok(Self::Opaque),
@@ -474,11 +474,12 @@ pub async fn create_item(
         let Some(plaintext_payload) = command.payload else {
             return Err(ItemsError::BadRequest("payload_required"));
         };
-        let payload_bytes = match {
+        let payload_bytes = {
             let _span =
                 tracing::debug_span!("serialize_json", op = "item_payload_encode").entered();
             serde_json::to_vec(&plaintext_payload)
-        } {
+        };
+        let payload_bytes = match payload_bytes {
             Ok(bytes) => bytes,
             Err(_) => return Err(ItemsError::BadRequest("invalid_payload")),
         };
@@ -689,11 +690,12 @@ pub async fn update_item(
         if vault.encryption_type != VaultEncryptionType::Server {
             return Err(ItemsError::BadRequest("plaintext_not_allowed"));
         }
-        let payload_bytes = match {
+        let payload_bytes = {
             let _span =
                 tracing::debug_span!("serialize_json", op = "item_payload_encode").entered();
             serde_json::to_vec(&plaintext_payload)
-        } {
+        };
+        let payload_bytes = match payload_bytes {
             Ok(bytes) => bytes,
             Err(_) => return Err(ItemsError::BadRequest("invalid_payload")),
         };
@@ -1227,7 +1229,7 @@ async fn update_file_upload_state(
             return Ok(());
         }
     };
-    let mut payload: JsonValue = match {
+    let payload_result = {
         let _span = tracing::debug_span!(
             "serialize_json",
             op = "item_payload_decode",
@@ -1235,7 +1237,8 @@ async fn update_file_upload_state(
         )
         .entered();
         serde_json::from_slice(&payload_bytes)
-    } {
+    };
+    let mut payload: JsonValue = match payload_result {
         Ok(value) => value,
         Err(_) => return Ok(()),
     };

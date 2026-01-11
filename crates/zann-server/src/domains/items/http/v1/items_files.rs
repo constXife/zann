@@ -40,7 +40,7 @@ pub(super) async fn upload_item_file(
     let Some(representation) = query.representation.as_deref() else {
         return map_items_error(service::ItemsError::BadRequest("representation_required"));
     };
-    let representation = match FileRepresentation::from_str(representation) {
+    let representation = match FileRepresentation::parse(representation) {
         Ok(value) => value,
         Err(code) => return map_items_error(service::ItemsError::BadRequest(code)),
     };
@@ -96,7 +96,7 @@ pub(super) async fn download_item_file(
     let Some(representation) = query.representation.as_deref() else {
         return map_items_error(service::ItemsError::BadRequest("representation_required"));
     };
-    let representation = match FileRepresentation::from_str(representation) {
+    let representation = match FileRepresentation::parse(representation) {
         Ok(value) => value,
         Err(code) => return map_items_error(service::ItemsError::BadRequest(code)),
     };

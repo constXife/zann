@@ -299,11 +299,8 @@ pub fn build_app(metrics_config: &MetricsConfig, state: AppState) -> Router {
                 let span_ref = span_cx.span();
                 let span_context = span_ref.span_context();
                 if span_context.is_valid() {
-                    span.record(
-                        "trace_id",
-                        &tracing::field::display(span_context.trace_id()),
-                    );
-                    span.record("span_id", &tracing::field::display(span_context.span_id()));
+                    span.record("trace_id", tracing::field::display(span_context.trace_id()));
+                    span.record("span_id", tracing::field::display(span_context.span_id()));
                 }
                 span
             }),
