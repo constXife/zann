@@ -38,7 +38,6 @@ impl<'a> ChangeRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 
@@ -72,9 +71,8 @@ impl<'a> ChangeRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
-        .map(|changes| {
+        .inspect(|changes| {
             Span::current().record("db.rows", changes.len() as i64);
-            changes
         })
     }
 

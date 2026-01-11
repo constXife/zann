@@ -403,9 +403,8 @@ impl<'a> ItemHistoryRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
-        .map(|history| {
+        .inspect(|history| {
             Span::current().record("db.rows", history.len() as i64);
-            history
         })
     }
 
@@ -446,9 +445,8 @@ impl<'a> ItemHistoryRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
-        .map(|history| {
+        .inspect(|history| {
             Span::current().record("db.rows", history.len() as i64);
-            history
         })
     }
 
@@ -626,9 +624,8 @@ impl<'a> AttachmentRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
-        .map(|attachments| {
+        .inspect(|attachments| {
             Span::current().record("db.rows", attachments.len() as i64);
-            attachments
         })
     }
 
