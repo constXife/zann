@@ -1,6 +1,5 @@
-use clap::{Args, Subcommand, ValueEnum};
+use clap::{Args, ValueEnum};
 use std::path::PathBuf;
-use uuid::Uuid;
 
 #[derive(Args)]
 pub struct SharedListArgs {
@@ -14,18 +13,6 @@ pub struct SharedListArgs {
     pub cursor: Option<String>,
     #[arg(long, value_enum, default_value = "table")]
     pub format: ListFormat,
-}
-
-#[derive(Args)]
-pub struct SharedVersionsArgs {
-    #[arg(long)]
-    pub vault: Option<String>,
-    #[arg(long)]
-    pub path: Option<String>,
-    #[arg(long)]
-    pub item_id: Option<Uuid>,
-    #[arg(long)]
-    pub limit: Option<i64>,
 }
 
 #[derive(Args)]
@@ -54,87 +41,6 @@ pub struct RenderArgs {
     pub template: PathBuf,
     #[arg(long)]
     pub out: Option<PathBuf>,
-}
-
-#[derive(Args)]
-pub struct RotateArgs {
-    #[command(subcommand)]
-    pub command: RotateCommand,
-}
-
-#[derive(Subcommand)]
-pub enum RotateCommand {
-    Start(RotateStartArgs),
-    Status(RotateStatusArgs),
-    Candidate(RotateCandidateArgs),
-    Commit(RotateCommitArgs),
-    Abort(RotateAbortArgs),
-    Recover(RotateRecoverArgs),
-}
-
-#[derive(Args)]
-pub struct RotateStartArgs {
-    pub path: String,
-    #[arg(long)]
-    pub vault: Option<String>,
-    #[arg(long)]
-    pub raw: bool,
-    #[arg(long, value_enum, default_value = "json")]
-    pub format: RotateFormat,
-    #[arg(long)]
-    pub policy: Option<String>,
-}
-
-#[derive(Args)]
-pub struct RotateStatusArgs {
-    pub path: String,
-    #[arg(long)]
-    pub vault: Option<String>,
-}
-
-#[derive(Args)]
-pub struct RotateCandidateArgs {
-    pub path: String,
-    #[arg(long)]
-    pub vault: Option<String>,
-    #[arg(long)]
-    pub raw: bool,
-    #[arg(long, value_enum, default_value = "json")]
-    pub format: RotateFormat,
-}
-
-#[derive(Args)]
-pub struct RotateCommitArgs {
-    pub path: String,
-    #[arg(long)]
-    pub vault: Option<String>,
-}
-
-#[derive(Args)]
-pub struct RotateAbortArgs {
-    pub path: String,
-    #[arg(long)]
-    pub vault: Option<String>,
-    #[arg(long)]
-    pub reason: Option<String>,
-    #[arg(long)]
-    pub force: bool,
-}
-
-#[derive(Args)]
-pub struct RotateRecoverArgs {
-    pub path: String,
-    #[arg(long)]
-    pub vault: Option<String>,
-    #[arg(long)]
-    pub raw: bool,
-    #[arg(long, value_enum, default_value = "json")]
-    pub format: RotateFormat,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub enum RotateFormat {
-    Json,
 }
 
 #[derive(Args)]

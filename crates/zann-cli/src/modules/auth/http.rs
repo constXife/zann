@@ -6,6 +6,8 @@ use std::io::{self, IsTerminal, Write};
 #[cfg(test)]
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
+#[cfg(test)]
+use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
 #[cfg(not(test))]
 use tracing::warn;
@@ -41,6 +43,24 @@ fn keyring_key(kind: &str, context_name: &str, token_name: &str) -> String {
 fn keyring_store() -> &'static Mutex<HashMap<String, String>> {
     static STORE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     STORE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(test)]
+static KEYRING_TEST_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
+
+#[cfg(test)]
+pub(crate) fn lock_keyring_tests_sync() -> tokio::sync::MutexGuard<'static, ()> {
+    KEYRING_TEST_LOCK
+        .get_or_init(|| TokioMutex::new(()))
+        .blocking_lock()
+}
+
+#[cfg(test)]
+pub(crate) async fn lock_keyring_tests_async() -> tokio::sync::MutexGuard<'static, ()> {
+    KEYRING_TEST_LOCK
+        .get_or_init(|| TokioMutex::new(()))
+        .lock()
+        .await
 }
 
 #[cfg(not(test))]
@@ -596,23 +616,6 @@ mod tests {
     use super::*;
     use crate::modules::system::{CliConfig, CliContext, TokenEntry};
     use std::collections::HashMap;
-    use std::sync::OnceLock;
-    use tokio::sync::Mutex;
-
-    static KEYRING_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn lock_keyring_tests_sync() -> tokio::sync::MutexGuard<'static, ()> {
-        KEYRING_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .blocking_lock()
-    }
-
-    async fn lock_keyring_tests_async() -> tokio::sync::MutexGuard<'static, ()> {
-        KEYRING_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .await
-    }
 
     #[test]
     fn keyring_access_roundtrip() -> anyhow::Result<()> {

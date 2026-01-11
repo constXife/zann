@@ -19,12 +19,6 @@ pub(crate) async fn handle_server_command(
     config: &CliConfig,
 ) -> anyhow::Result<()> {
     match args.command {
-        ServerCommand::Fingerprint(args) => {
-            let addr = resolve_addr(args.addr, addr_arg, context_arg, config)?;
-            ensure_secure_addr(&addr, allow_insecure)?;
-            let info = fetch_system_info(client, &addr).await?;
-            println!("{}", info.server_fingerprint);
-        }
         ServerCommand::Info(args) => {
             let addr = resolve_addr(args.addr, addr_arg, context_arg, config)?;
             ensure_secure_addr(&addr, allow_insecure)?;
@@ -124,14 +118,4 @@ pub(crate) async fn handle_run_command(
         std::process::exit(code);
     }
     Ok(())
-}
-
-pub(crate) fn handle_types_command() {
-    println!("TYPE       DESCRIPTION");
-    println!("login      Username/password credentials");
-    println!("note       Secure text note");
-    println!("card       Credit/debit card");
-    println!("identity   Personal information");
-    println!("api        API keys and tokens");
-    println!("kv         Generic key/value payload");
 }

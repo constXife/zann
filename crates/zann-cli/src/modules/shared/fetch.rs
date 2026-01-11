@@ -1,6 +1,6 @@
 use uuid::Uuid;
 
-use crate::modules::shared::{SharedHistoryListResponse, SharedItemResponse, SharedItemsResponse};
+use crate::modules::shared::{SharedItemResponse, SharedItemsResponse};
 use crate::modules::system::http::{append_params, build_params, opt_param};
 
 pub(crate) async fn fetch_shared_items(
@@ -43,27 +43,4 @@ pub(crate) async fn fetch_shared_item(
         anyhow::bail!("Shared get failed: {status} {body}");
     }
     Ok(response.json::<SharedItemResponse>().await?)
-}
-
-pub(crate) async fn fetch_shared_versions(
-    client: &reqwest::Client,
-    addr: &str,
-    access_token: &str,
-    item_id: Uuid,
-    limit: Option<i64>,
-) -> anyhow::Result<SharedHistoryListResponse> {
-    let mut url = format!(
-        "{}/v1/shared/items/{}/versions",
-        addr.trim_end_matches('/'),
-        item_id
-    );
-    let params = build_params([opt_param("limit", limit.map(|value| value.to_string()))]);
-    append_params(&mut url, params);
-    let response = client.get(url).bearer_auth(access_token).send().await?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Shared versions failed: {status} {body}");
-    }
-    Ok(response.json::<SharedHistoryListResponse>().await?)
 }

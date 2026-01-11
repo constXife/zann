@@ -87,19 +87,6 @@ pub(crate) async fn print_json_response(response: reqwest::Response) -> anyhow::
     Ok(())
 }
 
-pub(crate) async fn print_empty_response(
-    response: reqwest::Response,
-    message: &str,
-) -> anyhow::Result<()> {
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Request failed: {status} {body}");
-    }
-    println!("{message}");
-    Ok(())
-}
-
 pub(crate) async fn fetch_json<T: for<'de> Deserialize<'de>>(
     client: &reqwest::Client,
     url: &str,
@@ -148,28 +135,4 @@ pub(crate) fn append_params(url: &mut String, params: Vec<(String, String)>) {
         .join("&");
     url.push('?');
     url.push_str(&query);
-}
-
-pub(crate) fn parse_base64(value: &str) -> anyhow::Result<Vec<u8>> {
-    use base64::Engine;
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        anyhow::bail!("invalid base64 value");
-    }
-    Ok(base64::engine::general_purpose::STANDARD.decode(trimmed)?)
-}
-
-pub(crate) async fn send_json<T: for<'de> Deserialize<'de>>(
-    ctx: &mut CommandContext<'_>,
-    method: Method,
-    url: String,
-    payload: Option<serde_json::Value>,
-) -> anyhow::Result<T> {
-    let response = send_request(ctx, method, url, payload).await?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Request failed: {status} {body}");
-    }
-    Ok(response.json::<T>().await?)
 }

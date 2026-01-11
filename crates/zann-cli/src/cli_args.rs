@@ -1,13 +1,8 @@
 use clap::{ArgAction, Parser, Subcommand};
 
 pub use crate::modules::auth::args::*;
-pub use crate::modules::devices::args::*;
-pub use crate::modules::groups::args::*;
-pub use crate::modules::items::args::*;
 pub use crate::modules::shared::args::*;
 pub use crate::modules::system::args::*;
-pub use crate::modules::users::args::*;
-pub use crate::modules::vaults::args::*;
 
 #[derive(Parser)]
 #[command(name = "zann")]
@@ -33,23 +28,15 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
-    Device(DeviceArgs),
     Server(ServerArgs),
     Run(RunArgs),
     Whoami,
-    Types(TypesArgs),
     List(SharedListArgs),
-    Versions(SharedVersionsArgs),
     #[command(about = "Materialize secrets into files (shared vaults)")]
     Materialize(SharedMaterializeArgs),
     Render(RenderArgs),
-    User(UserArgs),
-    Group(GroupArgs),
-    Vault(VaultArgs),
-    Item(ItemArgs),
     Config(ConfigArgs),
     Login(LoginArgs),
     Logout(LogoutArgs),
-    Rotate(RotateArgs),
     Get(GetArgs),
 }

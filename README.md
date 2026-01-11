@@ -70,10 +70,10 @@ export ZANN_SERVER_FINGERPRINT=sha256:abc123...
 zann get db/postgres password
 ```
 
-Get the server fingerprint:
+Get the server info (includes fingerprint):
 
 ```bash
-zann server fingerprint https://zann.company.com
+zann server info https://zann.company.com
 ```
 
 Notes:

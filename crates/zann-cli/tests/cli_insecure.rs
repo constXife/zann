@@ -8,7 +8,7 @@ fn http_requires_insecure_flag() {
 
     Command::new(assert_cmd::cargo::cargo_bin!("zann-cli"))
         .env("HOME", home)
-        .args(["server", "fingerprint", "http://example.com"])
+        .args(["server", "info", "http://example.com"])
         .assert()
         .failure()
         .stderr(predicate::str::contains(

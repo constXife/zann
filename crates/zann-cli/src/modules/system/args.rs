@@ -1,9 +1,6 @@
 use clap::{Args, Subcommand};
 
 #[derive(Args)]
-pub struct TypesArgs {}
-
-#[derive(Args)]
 pub struct ServerArgs {
     #[command(subcommand)]
     pub command: ServerCommand,
@@ -11,13 +8,7 @@ pub struct ServerArgs {
 
 #[derive(Subcommand)]
 pub enum ServerCommand {
-    Fingerprint(ServerFingerprintArgs),
     Info(ServerInfoArgs),
-}
-
-#[derive(Args)]
-pub struct ServerFingerprintArgs {
-    pub addr: Option<String>,
 }
 
 #[derive(Args)]

@@ -13,6 +13,8 @@ pub(crate) use http::{
     store_access_token, store_prelogin, store_refresh_token, store_service_token,
     verify_server_fingerprint,
 };
+#[cfg(test)]
+pub(crate) use http::{clear_keyring_mock, lock_keyring_tests_async, lock_keyring_tests_sync};
 pub(crate) use types::{
     AuthResponse, DeviceAuthResponse, LoginRequest, LogoutRequest, OidcConfigResponse,
     OidcDiscovery, RefreshRequest, ServiceAccountAuthRequest, ServiceAccountAuthResponse,

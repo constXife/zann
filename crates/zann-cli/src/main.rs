@@ -15,7 +15,7 @@ use crate::modules::auth::{handle_login_command, handle_logout};
 use crate::modules::system::http::fetch_system_info;
 use crate::modules::system::CommandContext;
 use crate::modules::system::{handle_config_command, load_config, save_config};
-use crate::modules::system::{handle_run_command, handle_server_command, handle_types_command};
+use crate::modules::system::{handle_run_command, handle_server_command};
 use tracing_subscriber::EnvFilter;
 
 pub(crate) const DEFAULT_ADDR: &str = "https://127.0.0.1:8080";
@@ -102,9 +102,6 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
             save_config(&config)?;
-        }
-        Command::Types(_args) => {
-            handle_types_command();
         }
         command => {
             let context_name = context_arg.or_else(|| config.current_context.clone());
@@ -236,3 +233,6 @@ pub(crate) fn find_field<'a>(payload: &'a EncryptedPayload, key: &str) -> Option
         }
     })
 }
+
+#[cfg(test)]
+mod tests;
