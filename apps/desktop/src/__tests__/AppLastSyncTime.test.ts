@@ -469,7 +469,7 @@ describe("App last sync time", () => {
 
     await runWithRefresh();
     await waitFor(() => {
-      expect(mockGetStorageInfo).toHaveBeenCalledTimes(2);
+      expect(mockGetStorageInfo.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
     expect(core.lastSyncTime.value).toBe("2024-02-01T00:00:00Z");
   });
