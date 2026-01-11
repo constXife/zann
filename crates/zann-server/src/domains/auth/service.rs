@@ -1,5 +1,7 @@
 use base64::Engine;
 use chrono::Utc;
+use sqlx_core::query::query;
+use sqlx_postgres::Postgres;
 use std::collections::HashSet;
 use uuid::Uuid;
 use zann_core::api::auth::{
@@ -8,8 +10,6 @@ use zann_core::api::auth::{
 };
 use zann_core::vault_crypto as core_crypto;
 use zann_core::{Session, User, UserStatus, VaultEncryptionType, VaultKind};
-use sqlx_core::query::query;
-use sqlx_postgres::Postgres;
 use zann_db::repo::{
     DeviceRepo, ServiceAccountRepo, ServiceAccountSessionRepo, SessionRepo, UserRepo, VaultRepo,
 };
@@ -24,7 +24,9 @@ use crate::domains::auth::core::passwords::{
     random_kdf_salt, verify_password, KdfParams,
 };
 use crate::domains::auth::core::tokens::hash_token;
-use crate::domains::auth::helpers::{build_device, ensure_personal_vault, ensure_personal_vault_tx};
+use crate::domains::auth::helpers::{
+    build_device, ensure_personal_vault, ensure_personal_vault_tx,
+};
 use crate::infra::db::apply_tx_isolation;
 use crate::infra::metrics;
 

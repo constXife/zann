@@ -233,7 +233,9 @@ async fn sync_push_is_atomic_on_error() {
 async fn sync_push_conflict_is_atomic() {
     let app = TestApp::new().await;
 
-    let user = app.register("conflict-batch@example.com", "password-1").await;
+    let user = app
+        .register("conflict-batch@example.com", "password-1")
+        .await;
     let token = user["access_token"].as_str().expect("token");
     let vault = app.personal_vault(token, "vault-conflict").await;
     let vault_id = Uuid::parse_str(vault["id"].as_str().expect("vault id")).expect("uuid");

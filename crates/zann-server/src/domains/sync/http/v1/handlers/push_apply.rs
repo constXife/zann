@@ -218,18 +218,17 @@ pub(crate) async fn apply_change(
                 }
             };
 
-            let conflict_updated_at =
-                find_path_conflict(conn, vault_id, &path, None)
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(
-                            event = "sync_push_path_conflict_failed",
-                            error = %err,
-                            item_id = %change.item_id,
-                            "Failed to check path conflicts"
-                        );
-                        db_error()
-                    })?;
+            let conflict_updated_at = find_path_conflict(conn, vault_id, &path, None)
+                .await
+                .map_err(|err| {
+                    tracing::error!(
+                        event = "sync_push_path_conflict_failed",
+                        error = %err,
+                        item_id = %change.item_id,
+                        "Failed to check path conflicts"
+                    );
+                    db_error()
+                })?;
             if let Some(updated_at) = conflict_updated_at {
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: change.item_id.to_string(),
@@ -321,18 +320,17 @@ pub(crate) async fn apply_change(
             };
             let (next_path, next_name) =
                 normalize_path_and_name(&item.path, change.path.as_deref(), change.name.as_deref());
-            let conflict_updated_at =
-                find_path_conflict(conn, vault_id, &next_path, Some(item.id))
-                    .await
-                    .map_err(|err| {
-                        tracing::error!(
-                            event = "sync_push_path_conflict_failed",
-                            error = %err,
-                            item_id = %item.id,
-                            "Failed to check path conflicts"
-                        );
-                        db_error()
-                    })?;
+            let conflict_updated_at = find_path_conflict(conn, vault_id, &next_path, Some(item.id))
+                .await
+                .map_err(|err| {
+                    tracing::error!(
+                        event = "sync_push_path_conflict_failed",
+                        error = %err,
+                        item_id = %item.id,
+                        "Failed to check path conflicts"
+                    );
+                    db_error()
+                })?;
             if let Some(updated_at) = conflict_updated_at {
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: item.id.to_string(),
@@ -360,7 +358,8 @@ pub(crate) async fn apply_change(
                     created_at: now,
                 };
                 insert_item_history(conn, &history).await?;
-                if let Err(err) = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await {
+                if let Err(err) = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await
+                {
                     tracing::error!(
                         event = "sync_push_history_prune_failed",
                         error = %err,
