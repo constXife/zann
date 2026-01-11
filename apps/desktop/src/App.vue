@@ -167,9 +167,24 @@ const storageState = useStorages({
 const {
   storages, remoteStorages, localStorage: localStorageRef, hasLocalVaults, showLocalSection,
   storageSyncErrors, storagePersonalLocked, syncBusy, syncError, loadStorages, checkLocalVaults,
-  runRemoteSync, scheduleRemoteSync, startAutoSync, stopAutoSync, clearSyncErrors, getSyncStatus,
+  runRemoteSync: runRemoteSyncRaw, scheduleRemoteSync, startAutoSync, stopAutoSync, clearSyncErrors, getSyncStatus,
   getStorageInfo, deleteStorage, disconnectStorage, revealStorage,
 } = storageState;
+
+const lastSyncTime = ref<string | null>(null);
+const refreshLastSyncTime = async (storageId: string | null = selectedStorageId.value) => {
+  if (!storageId || storageId === LOCAL_STORAGE_ID) {
+    lastSyncTime.value = null;
+    return;
+  }
+  const info = await getStorageInfo(storageId);
+  lastSyncTime.value = info?.last_synced ?? null;
+};
+const runRemoteSync = async (storageId?: string | null) => {
+  const result = await runRemoteSyncRaw(storageId ?? null);
+  await refreshLastSyncTime(storageId ?? selectedStorageId.value);
+  return result;
+};
 
 const runBootstrap = async () => {
   error.value = "";
@@ -299,6 +314,14 @@ const {
   showOfflineBanner, showSessionExpiredBanner, showPersonalLockedBanner,
   syncErrorMessage, showSyncErrorBanner,
 } = statusBanners;
+
+watch(
+  () => [selectedStorageId.value, storages.value],
+  () => {
+    void refreshLastSyncTime();
+  },
+  { immediate: true },
+);
 
 
 const layoutState = useAppLayout({
@@ -566,6 +589,7 @@ const timeTravelMaxIndex = computed(() =>
 );
 
 const { lastActivityAt, altRevealAll } = useAppEventHandlers({
+  t,
   settings,
   unlocked,
   storageDropdownOpen,
@@ -593,6 +617,7 @@ const { lastActivityAt, altRevealAll } = useAppEventHandlers({
   timeTravelIndex: itemDetailsState.timeTravelIndex,
   timeTravelMaxIndex,
   setTimeTravelIndex: itemDetailsState.setTimeTravelIndex,
+  showToast,
 });
 
 const { scheduleTrashPurge, clearTrashPurgeTimer } = useAppTrashPurge({
@@ -658,7 +683,9 @@ const { shellBindings, modalBindings } = useAppBindings({
     logoUrl,
     appStatus,
     runBootstrap,
+    runRemoteSync,
     openExternal,
+    lastSyncTime,
     copyToClipboard,
     password,
     error,

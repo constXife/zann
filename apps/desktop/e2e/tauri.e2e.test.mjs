@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createSession,
 } from "./tauri.e2e.session.mjs";
+import { e2eEnabled } from "./tauri.e2e.config.mjs";
 import {
   registerAndCreateKvScenario,
   reloginAndRestoreScenario,
@@ -75,7 +76,7 @@ const runScenario = async (state, label, timeoutMs, fn) => {
   return await runWithArtifacts(state.browser, label, timeoutMs, fn);
 };
 
-test("e2e scenario", { timeout: 360000 }, async () => {
+test("e2e scenario", { timeout: 360000, skip: !e2eEnabled }, async () => {
   const state = { browser: null, label: "init" };
   try {
     await withTimeout(

@@ -14,6 +14,7 @@ use tauri::Manager;
 use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
+use crate::infra::config::save_settings;
 use commands::auth::{
     get_server_info, password_login, password_register, remote_begin_login, remote_trust_fingerprint,
 };
@@ -37,7 +38,7 @@ use commands::storage::{
 use commands::sync::{remote_reset, remote_sync, sync_reset_cursor};
 use commands::types::{publish_list, publish_trigger, types_list, types_show};
 use commands::vaults::{vault_create, vault_list, vault_reset_personal};
-use state::build_state;
+use state::{AppState, build_state};
 
 fn main() {
     std::panic::set_hook(Box::new(|info| {
@@ -192,14 +193,38 @@ fn main() {
 
             app_handle.emit("zann:ready", ())?;
             Ok(())
-        })
+    })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app_handle = window.app_handle();
+                let state = app_handle.state::<AppState>();
+                let settings = tauri::async_runtime::block_on(async {
+                    state.settings.read().await.clone()
+                });
+
+                if !settings.close_to_tray {
+                    return;
+                }
+
+                api.prevent_close();
+                if !settings.close_to_tray_notice_shown {
+                    let _ = window.emit("zann:close-to-tray", ());
+                    let app_handle = app_handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let state = app_handle.state::<AppState>();
+                        let mut next = state.settings.read().await.clone();
+                        next.close_to_tray_notice_shown = true;
+                        if save_settings(&state.root, next.clone()).is_ok() {
+                            *state.settings.write().await = next;
+                        }
+                    });
+                    return;
+                }
+
                 // Hide instead of close
                 let _ = window.hide();
                 #[cfg(target_os = "macos")]
                 let _ = window.app_handle().set_dock_visibility(false);
-                api.prevent_close();
             }
         })
         .run(tauri::generate_context!())

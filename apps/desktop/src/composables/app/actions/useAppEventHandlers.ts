@@ -6,6 +6,7 @@ import type { Settings } from "../../../types";
 type PaletteItem = { action?: () => void; enabled?: boolean };
 
 type AppEventHandlersOptions = {
+  t: (key: string, params?: Record<string, unknown>) => string;
   settings: Ref<Settings | null>;
   unlocked: ComputedRef<boolean>;
   storageDropdownOpen: Ref<boolean>;
@@ -33,9 +34,11 @@ type AppEventHandlersOptions = {
   timeTravelIndex: Ref<number>;
   timeTravelMaxIndex: ComputedRef<number>;
   setTimeTravelIndex: (index: number) => Promise<void> | void;
+  showToast: (message: string, options?: { duration?: number }) => void;
 };
 
 export function useAppEventHandlers({
+  t,
   settings,
   unlocked,
   storageDropdownOpen,
@@ -63,11 +66,13 @@ export function useAppEventHandlers({
   timeTravelIndex,
   timeTravelMaxIndex,
   setTimeTravelIndex,
+  showToast,
 }: AppEventHandlersOptions) {
   const lastActivityAt = ref(Date.now());
   const altRevealAll = ref(false);
   let cacheInvalidationUnlisten: null | (() => void) = null;
   let settingsUnlisten: null | (() => void) = null;
+  let trayNoticeUnlisten: null | (() => void) = null;
 
   const onActivity = () => {
     lastActivityAt.value = Date.now();
@@ -275,6 +280,15 @@ export function useAppEventHandlers({
     });
   };
 
+  const initTrayNoticeListener = async () => {
+    if (trayNoticeUnlisten) {
+      return;
+    }
+    trayNoticeUnlisten = await listen("zann:close-to-tray", () => {
+      showToast(t("status.trayNotice"), { duration: 2400 });
+    });
+  };
+
   onMounted(() => {
     window.addEventListener("keydown", onKeydown);
     window.addEventListener("mousemove", onActivity);
@@ -289,6 +303,7 @@ export function useAppEventHandlers({
     window.addEventListener("beforeunload", onBeforeUnload);
     void initCacheInvalidationListener();
     void initSettingsListener();
+    void initTrayNoticeListener();
   });
 
   onBeforeUnmount(() => {
@@ -310,6 +325,10 @@ export function useAppEventHandlers({
     if (settingsUnlisten) {
       settingsUnlisten();
       settingsUnlisten = null;
+    }
+    if (trayNoticeUnlisten) {
+      trayNoticeUnlisten();
+      trayNoticeUnlisten = null;
     }
   });
 

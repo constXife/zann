@@ -77,6 +77,7 @@ watch(() => props.open, (isOpen) => {
           type="button"
           class="rounded-lg p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
           @click="emit('update:open', false)"
+          data-testid="settings-close"
         >
           <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -97,6 +98,7 @@ watch(() => props.open, (isOpen) => {
               ? 'bg-[var(--accent)] text-white'
               : 'text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]'"
             @click="activeTab = tab.id"
+            :data-testid="`settings-tab-${tab.id}`"
           >
             <svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="tab.icon" />
