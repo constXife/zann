@@ -452,11 +452,14 @@ describe("App last sync time", () => {
     render(App);
 
     await flushPromises();
-    const lastSyncTime = (capturedBindingsOptions?.lastSyncTime as { value: string | null });
-    expect(lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
+    const core = capturedBindingsOptions?.core as {
+      lastSyncTime: { value: string | null };
+      runRemoteSync: () => Promise<boolean>;
+    };
+    expect(core.lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
 
-    await (capturedBindingsOptions?.runRemoteSync as () => Promise<boolean>)();
+    await core.runRemoteSync();
     await flushPromises();
-    expect(lastSyncTime.value).toBe("2024-02-01T00:00:00Z");
+    expect(core.lastSyncTime.value).toBe("2024-02-01T00:00:00Z");
   });
 });
