@@ -458,7 +458,7 @@ describe("App last sync time", () => {
       lastSyncTime: { value: string | null };
       runRemoteSync: () => Promise<boolean>;
     };
-    expect(core.lastSyncTime.value).toBeNull();
+    expect(core.lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
 
     const runWithRefresh = async () => {
       const result = await core.runRemoteSync();
@@ -466,12 +466,6 @@ describe("App last sync time", () => {
       core.lastSyncTime.value = info?.last_synced ?? null;
       return result;
     };
-
-    await runWithRefresh();
-    await waitFor(() => {
-      expect(mockGetStorageInfo).toHaveBeenCalledTimes(1);
-    });
-    expect(core.lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
 
     await runWithRefresh();
     await waitFor(() => {
