@@ -1,4 +1,3 @@
-use sqlx_core::query::query;
 use sqlx_core::query_as::query_as;
 use sqlx_postgres::Postgres;
 use zann_core::vault_crypto as core_crypto;
@@ -17,6 +16,7 @@ use crate::domains::sync::http::v1::types::{
     SyncAppliedChange, SyncHistoryEntry, SyncPullChange, SyncPullRow, SyncPushChange,
     SyncPushConflict, SyncSharedHistoryEntry, SyncSharedPullChange, SyncSharedPushChange,
 };
+use crate::infra::db::apply_tx_isolation;
 use crate::infra::metrics;
 
 pub(crate) struct SyncPrep {
@@ -633,63 +633,71 @@ pub(crate) async fn sync_push(
     let vault = prep.vault;
     let device_id = prep.device_id;
 
-    let mut pool_conn = if let Ok(conn) = state.db.acquire().await {
-        conn
-    } else {
-        tracing::error!(event = "sync_push_failed", "DB begin failed");
-        return Err(SyncError::Db);
-    };
-
     let mut applied = Vec::new();
     let mut applied_changes = Vec::new();
     let mut conflicts = Vec::new();
 
-    {
-        let conn = pool_conn.as_mut();
-        if query::<Postgres>("BEGIN")
-            .execute(&mut *conn)
-            .await
-            .is_err()
-        {
-            tracing::error!(event = "sync_push_failed", "DB begin failed");
+    let mut tx = match state.db.begin().await {
+        Ok(tx) => tx,
+        Err(err) => {
+            tracing::error!(event = "sync_push_failed", error = %err, "DB begin failed");
             return Err(SyncError::Db);
         }
+    };
+    if let Err(err) = apply_tx_isolation(&mut tx, state.db_tx_isolation).await {
+        tracing::error!(event = "sync_push_failed", error = %err, "DB begin failed");
+        return Err(SyncError::Db);
+    }
 
-        for change in changes {
-            match apply_change(conn, identity, device_id, vault.id, change).await {
-                Ok(ApplyChangeResult::Applied {
-                    item_id,
-                    applied_change,
-                }) => {
-                    applied.push(item_id.to_string());
-                    applied_changes.push(applied_change);
+    for change in changes {
+        match apply_change(&mut tx, identity, device_id, vault.id, change).await {
+            Ok(ApplyChangeResult::Applied {
+                item_id,
+                applied_change,
+            }) => {
+                applied.push(item_id.to_string());
+                applied_changes.push(applied_change);
+            }
+            Ok(ApplyChangeResult::Conflict(conflict)) => {
+                conflicts.push(conflict);
+            }
+            Err(err) => {
+                if let Err(rollback_err) = tx.rollback().await {
+                    tracing::error!(
+                        event = "sync_push_failed",
+                        error = %rollback_err,
+                        "DB rollback failed"
+                    );
                 }
-                Ok(ApplyChangeResult::Conflict(conflict)) => {
-                    conflicts.push(conflict);
-                }
-                Err(err) => {
-                    let _ = query::<Postgres>("ROLLBACK").execute(&mut *conn).await;
-                    return match err.status {
-                        axum::http::StatusCode::BAD_REQUEST => {
-                            Err(SyncError::BadRequest(err.error))
-                        }
-                        axum::http::StatusCode::INTERNAL_SERVER_ERROR => {
-                            Err(SyncError::Internal(err.error))
-                        }
-                        _ => Err(SyncError::Internal(err.error)),
-                    };
-                }
+                return match err.status {
+                    axum::http::StatusCode::BAD_REQUEST => Err(SyncError::BadRequest(err.error)),
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR => {
+                        Err(SyncError::Internal(err.error))
+                    }
+                    _ => Err(SyncError::Internal(err.error)),
+                };
             }
         }
+    }
 
-        if query::<Postgres>("COMMIT")
-            .execute(&mut *conn)
-            .await
-            .is_err()
-        {
-            tracing::error!(event = "sync_push_failed", "DB commit failed");
-            return Err(SyncError::Db);
+    if !conflicts.is_empty() {
+        if let Err(err) = tx.rollback().await {
+            tracing::error!(event = "sync_push_failed", error = %err, "DB rollback failed");
         }
+        let change_repo = ChangeRepo::new(&state.db);
+        let new_seq = change_repo.last_seq_for_vault(vault.id).await.unwrap_or(0);
+        let new_cursor = encode_cursor(new_seq);
+        return Ok(SyncPushResult {
+            applied: Vec::new(),
+            applied_changes: Vec::new(),
+            conflicts,
+            new_cursor,
+        });
+    }
+
+    if let Err(err) = tx.commit().await {
+        tracing::error!(event = "sync_push_failed", error = %err, "DB commit failed");
+        return Err(SyncError::Db);
     }
 
     let change_repo = ChangeRepo::new(&state.db);

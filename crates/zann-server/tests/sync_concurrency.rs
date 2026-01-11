@@ -44,6 +44,7 @@ impl TestApp {
         let (secret_policies, secret_default_policy) = support::default_secret_policies();
         let state = AppState {
             db: pool.clone(),
+            db_tx_isolation: zann_server::settings::DbTxIsolation::ReadCommitted,
             started_at: std::time::Instant::now(),
             password_pepper: "pepper".to_string(),
             token_pepper: "pepper".to_string(),
@@ -218,6 +219,56 @@ async fn sync_push_is_atomic_on_error() {
         .send_json(Method::POST, "/v1/sync/push", Some(token), payload)
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    let (status, body) = app
+        .get_json(&format!("/v1/vaults/{}/items", vault_id), Some(token))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = body["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 0);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn sync_push_conflict_is_atomic() {
+    let app = TestApp::new().await;
+
+    let user = app
+        .register("conflict-batch@example.com", "password-1")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+    let vault = app.personal_vault(token, "vault-conflict").await;
+    let vault_id = Uuid::parse_str(vault["id"].as_str().expect("vault id")).expect("uuid");
+
+    let payload = serde_json::json!({
+        "vault_id": vault_id,
+        "changes": [
+            {
+                "item_id": Uuid::now_v7(),
+                "operation": "create",
+                "payload_enc": [1, 2, 3],
+                "checksum": "checksum-1",
+                "path": "dup/path",
+                "type_id": "login"
+            },
+            {
+                "item_id": Uuid::now_v7(),
+                "operation": "create",
+                "payload_enc": [4, 5, 6],
+                "checksum": "checksum-2",
+                "path": "dup/path",
+                "type_id": "login"
+            }
+        ]
+    });
+
+    let (status, body) = app
+        .send_json(Method::POST, "/v1/sync/push", Some(token), payload)
+        .await;
+    assert_eq!(status, StatusCode::OK, "sync push failed: {:?}", body);
+    assert_eq!(body["applied"].as_array().map(|v| v.len()), Some(0));
+    assert_eq!(body["applied_changes"].as_array().map(|v| v.len()), Some(0));
+    assert_eq!(body["conflicts"].as_array().map(|v| v.len()), Some(1));
 
     let (status, body) = app
         .get_json(&format!("/v1/vaults/{}/items", vault_id), Some(token))

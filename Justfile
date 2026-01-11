@@ -6,6 +6,7 @@ default:
 
 db_url := "sqlite://./.tmp/dev.db"
 pg_url := "postgres://zann:zann@127.0.0.1:5432/zann"
+pg_test_url := "postgres://zann:zann@127.0.0.1:5433/zann"
 
 MIGRATE_SOURCE := "--source crates/zann-server/migrations"
 
@@ -31,8 +32,11 @@ db-reset:
     podman compose down -v
 
 server-test-db:
-    just db-up
-    TEST_DATABASE_URL={{pg_url}} cargo test -p zann-server --features postgres-tests
+    podman compose -p zann_test -f compose.test.yaml up -d db
+    bash -euo pipefail -c 'set +e; TEST_DATABASE_URL={{pg_test_url}} cargo test -p zann-server --features postgres-tests; status=$?; set -e; podman compose -p zann_test -f compose.test.yaml down; exit $status'
+
+test-db-down:
+    podman compose -p zann_test -f compose.test.yaml down
 
 server-migrate:
     mkdir -p .tmp

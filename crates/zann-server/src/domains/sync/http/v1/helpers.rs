@@ -18,7 +18,7 @@ pub(super) async fn find_path_conflict(
     vault_id: Uuid,
     path: &str,
     exclude_id: Option<Uuid>,
-) -> Option<String> {
+) -> Result<Option<String>, sqlx_core::Error> {
     let row = query!(
         r#"
         SELECT updated_at
@@ -34,12 +34,12 @@ pub(super) async fn find_path_conflict(
         exclude_id
     )
     .fetch_optional(conn)
-    .await
-    .ok()
-    .flatten()?;
-    row.try_get::<DateTime<Utc>, _>("updated_at")
-        .ok()
-        .map(|value| value.to_rfc3339())
+    .await?;
+    Ok(row.and_then(|row| {
+        row.try_get::<DateTime<Utc>, _>("updated_at")
+            .ok()
+            .map(|value| value.to_rfc3339())
+    }))
 }
 
 impl FromRow<'_, PgRow> for SyncPullRow {

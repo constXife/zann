@@ -146,6 +146,7 @@ pub fn build_state(settings: &settings::Settings, db: PgPool) -> AppState {
 
     AppState {
         db,
+        db_tx_isolation: settings.db_tx_isolation,
         started_at: Instant::now(),
         password_pepper: settings.password_pepper.clone(),
         token_pepper: settings.token_pepper.clone(),

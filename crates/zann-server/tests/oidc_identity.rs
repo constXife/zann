@@ -27,6 +27,7 @@ async fn build_state(pool: PgPool, mut config: ServerConfig) -> AppState {
 
     AppState {
         db: pool.clone(),
+        db_tx_isolation: zann_server::settings::DbTxIsolation::ReadCommitted,
         started_at: std::time::Instant::now(),
         password_pepper: "pepper".to_string(),
         token_pepper: "pepper".to_string(),

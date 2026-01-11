@@ -303,7 +303,7 @@ pub async fn upload_item_file(
     }
 
     if vault.encryption_type == VaultEncryptionType::Server {
-        let _ = update_file_upload_state(
+        if let Err(err) = update_file_upload_state(
             state,
             identity,
             vault_id,
@@ -314,7 +314,15 @@ pub async fn upload_item_file(
             attachment.size,
             attachment.checksum.clone(),
         )
-        .await;
+        .await
+        {
+            tracing::warn!(
+                event = "file_upload_state_update_failed",
+                error = ?err,
+                item_id = %item_id,
+                "Failed to update upload state"
+            );
+        }
     }
 
     Ok(FileUploadResult { file_id })
@@ -565,10 +573,25 @@ pub async fn create_item(
         changed_by_device_name: actor.device_name,
         created_at: now,
     };
-    let _ = history_repo.create(&history).await;
-    let _ = history_repo
+    if let Err(err) = history_repo.create(&history).await {
+        tracing::error!(
+            event = "item_history_create_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to create item history"
+        );
+    }
+    if let Err(err) = history_repo
         .prune_by_item(item.id, ITEM_HISTORY_LIMIT)
-        .await;
+        .await
+    {
+        tracing::error!(
+            event = "item_history_prune_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to prune item history"
+        );
+    }
 
     let change_repo = ChangeRepo::new(&state.db);
     let change = Change {
@@ -580,7 +603,14 @@ pub async fn create_item(
         device_id,
         created_at: now,
     };
-    let _ = change_repo.create(&change).await;
+    if let Err(err) = change_repo.create(&change).await {
+        tracing::error!(
+            event = "item_change_create_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to create change entry"
+        );
+    }
 
     tracing::info!(event = "item_created", item_id = %item.id, "Item created");
     Ok(item)
@@ -762,10 +792,25 @@ pub async fn update_item(
             changed_by_device_name: actor.device_name,
             created_at: Utc::now(),
         };
-        let _ = history_repo.create(&history).await;
-        let _ = history_repo
+        if let Err(err) = history_repo.create(&history).await {
+            tracing::error!(
+                event = "item_history_create_failed",
+                error = %err,
+                item_id = %item.id,
+                "Failed to create item history"
+            );
+        }
+        if let Err(err) = history_repo
             .prune_by_item(item.id, ITEM_HISTORY_LIMIT)
-            .await;
+            .await
+        {
+            tracing::error!(
+                event = "item_history_prune_failed",
+                error = %err,
+                item_id = %item.id,
+                "Failed to prune item history"
+            );
+        }
     }
 
     item.version = command.version.unwrap_or(item.version + 1);
@@ -790,7 +835,14 @@ pub async fn update_item(
         device_id,
         created_at: item.updated_at,
     };
-    let _ = change_repo.create(&change).await;
+    if let Err(err) = change_repo.create(&change).await {
+        tracing::error!(
+            event = "item_change_create_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to create change entry"
+        );
+    }
 
     tracing::info!(event = "item_updated", item_id = %item_id, "Item updated");
     Ok(item)
@@ -851,10 +903,25 @@ pub async fn delete_item(
         changed_by_device_name: actor.device_name,
         created_at: now,
     };
-    let _ = history_repo.create(&history).await;
-    let _ = history_repo
+    if let Err(err) = history_repo.create(&history).await {
+        tracing::error!(
+            event = "item_history_create_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to create item history"
+        );
+    }
+    if let Err(err) = history_repo
         .prune_by_item(item.id, ITEM_HISTORY_LIMIT)
-        .await;
+        .await
+    {
+        tracing::error!(
+            event = "item_history_prune_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to prune item history"
+        );
+    }
 
     item.deleted_at = Some(now);
     item.deleted_by_user_id = Some(identity.user_id);
@@ -865,10 +932,24 @@ pub async fn delete_item(
     item.updated_at = now;
 
     let attachment_repo = AttachmentRepo::new(&state.db);
-    let _ = attachment_repo.mark_deleted_by_item(item.id, now).await;
+    if let Err(err) = attachment_repo.mark_deleted_by_item(item.id, now).await {
+        tracing::error!(
+            event = "item_attachment_mark_deleted_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to mark attachments deleted"
+        );
+    }
     let grace_days = state.config.server.attachments_gc_grace_days.max(0);
     let cutoff = now - chrono::Duration::days(grace_days);
-    let _ = attachment_repo.purge_deleted_before(cutoff).await;
+    if let Err(err) = attachment_repo.purge_deleted_before(cutoff).await {
+        tracing::error!(
+            event = "item_attachment_purge_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to purge deleted attachments"
+        );
+    }
 
     let Ok(affected) = item_repo.update(&item).await else {
         tracing::error!(event = "item_delete_failed", "DB error");
@@ -888,7 +969,14 @@ pub async fn delete_item(
         device_id,
         created_at: now,
     };
-    let _ = change_repo.create(&change).await;
+    if let Err(err) = change_repo.create(&change).await {
+        tracing::error!(
+            event = "item_change_create_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to create change entry"
+        );
+    }
 
     tracing::info!(event = "item_deleted", item_id = %item_id, "Item deleted");
     Ok(())
@@ -1073,10 +1161,25 @@ pub async fn restore_item_version(
         changed_by_device_name: actor.device_name,
         created_at: now,
     };
-    let _ = history_repo.create(&history_snapshot).await;
-    let _ = history_repo
+    if let Err(err) = history_repo.create(&history_snapshot).await {
+        tracing::error!(
+            event = "item_history_create_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to create item history"
+        );
+    }
+    if let Err(err) = history_repo
         .prune_by_item(item.id, ITEM_HISTORY_LIMIT)
-        .await;
+        .await
+    {
+        tracing::error!(
+            event = "item_history_prune_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to prune item history"
+        );
+    }
 
     item.payload_enc = history.payload_enc;
     item.checksum = history.checksum;
@@ -1090,7 +1193,14 @@ pub async fn restore_item_version(
 
     if item.type_id == "file_secret" {
         let attachment_repo = AttachmentRepo::new(&state.db);
-        let _ = attachment_repo.clear_deleted_by_item(item.id).await;
+        if let Err(err) = attachment_repo.clear_deleted_by_item(item.id).await {
+            tracing::error!(
+                event = "item_attachment_clear_deleted_failed",
+                error = %err,
+                item_id = %item.id,
+                "Failed to clear deleted attachments"
+            );
+        }
     }
 
     let Ok(affected) = item_repo.update(&item).await else {
@@ -1111,7 +1221,14 @@ pub async fn restore_item_version(
         device_id,
         created_at: item.updated_at,
     };
-    let _ = change_repo.create(&change).await;
+    if let Err(err) = change_repo.create(&change).await {
+        tracing::error!(
+            event = "item_change_create_failed",
+            error = %err,
+            item_id = %item.id,
+            "Failed to create change entry"
+        );
+    }
 
     tracing::info!(
         event = "item.restore_previous",
@@ -1294,7 +1411,7 @@ async fn update_file_upload_state(
         base_version: None,
         fields_changed: None,
     };
-    let _ = update_item(state, identity, vault_id, item_id, command).await?;
+    update_item(state, identity, vault_id, item_id, command).await?;
     Ok(())
 }
 

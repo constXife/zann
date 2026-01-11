@@ -1,4 +1,6 @@
 use chrono::{DateTime, Utc};
+use sqlx_core::query::query;
+use sqlx_postgres::{PgConnection, Postgres};
 use uuid::Uuid;
 use zann_core::{
     CachePolicy, Device, Vault, VaultEncryptionType, VaultKind, VaultMember, VaultMemberRole,
@@ -69,6 +71,117 @@ pub(crate) async fn ensure_personal_vault(
             .map_err(|_| "db_error")?
             .is_some()
         {
+            return Ok(());
+        }
+        return Err("db_error");
+    }
+
+    Ok(())
+}
+
+pub(crate) async fn ensure_personal_vault_tx(
+    state: &AppState,
+    conn: &mut PgConnection,
+    user_id: Uuid,
+    now: DateTime<Utc>,
+) -> Result<(), &'static str> {
+    if !state.config.server.personal_vaults_enabled {
+        return Ok(());
+    }
+
+    let existing = query::<Postgres>(
+        r#"
+        SELECT v.id
+        FROM vaults v
+        INNER JOIN vault_members vm ON vm.vault_id = v.id
+        WHERE vm.user_id = $1 AND v.kind = 'personal' AND v.deleted_at IS NULL
+        ORDER BY v.created_at ASC
+        LIMIT 1
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|_| "db_error")?;
+    if existing.is_some() {
+        return Ok(());
+    }
+
+    let vault_id = Uuid::now_v7();
+    let tags = sqlx_core::types::Json(Vec::<String>::new());
+    if query::<Postgres>(
+        r#"
+        INSERT INTO vaults (
+            id, slug, name, kind, encryption_type, vault_key_enc, cache_policy, tags,
+            deleted_at, deleted_by_user_id, deleted_by_device_id, row_version, created_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        "#,
+    )
+    .bind(vault_id)
+    .bind(format!("personal-{}", user_id))
+    .bind("Personal")
+    .bind(VaultKind::Personal.as_str())
+    .bind(VaultEncryptionType::Client.as_str())
+    .bind(Vec::<u8>::new())
+    .bind(CachePolicy::Full.as_str())
+    .bind(&tags)
+    .bind(None::<DateTime<Utc>>)
+    .bind(None::<Uuid>)
+    .bind(None::<Uuid>)
+    .bind(1_i64)
+    .bind(now)
+    .execute(&mut *conn)
+    .await
+    .is_err()
+    {
+        let existing = query::<Postgres>(
+            r#"
+            SELECT v.id
+            FROM vaults v
+            INNER JOIN vault_members vm ON vm.vault_id = v.id
+            WHERE vm.user_id = $1 AND v.kind = 'personal' AND v.deleted_at IS NULL
+            ORDER BY v.created_at ASC
+            LIMIT 1
+            "#,
+        )
+        .bind(user_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|_| "db_error")?;
+        if existing.is_some() {
+            return Ok(());
+        }
+        return Err("db_error");
+    }
+
+    if query::<Postgres>(
+        r#"
+        INSERT INTO vault_members (vault_id, user_id, role, created_at)
+        VALUES ($1, $2, $3, $4)
+        "#,
+    )
+    .bind(vault_id)
+    .bind(user_id)
+    .bind(VaultMemberRole::Admin.as_str())
+    .bind(now)
+    .execute(&mut *conn)
+    .await
+    .is_err()
+    {
+        let existing = query::<Postgres>(
+            r#"
+            SELECT 1
+            FROM vault_members
+            WHERE vault_id = $1 AND user_id = $2
+            "#,
+        )
+        .bind(vault_id)
+        .bind(user_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|_| "db_error")?;
+        if existing.is_some() {
             return Ok(());
         }
         return Err("db_error");
