@@ -366,6 +366,8 @@ pub struct DesktopSettings {
     pub auto_hide_reveal_seconds: u32,
     pub require_os_auth: bool,
     pub trash_auto_purge_days: u32,
+    pub close_to_tray: bool,
+    pub close_to_tray_notice_shown: bool,
 }
 
 impl Default for DesktopSettings {
@@ -386,6 +388,8 @@ impl Default for DesktopSettings {
             auto_hide_reveal_seconds: 20,
             require_os_auth: true,
             trash_auto_purge_days: 90,
+            close_to_tray: true,
+            close_to_tray_notice_shown: false,
         }
     }
 }

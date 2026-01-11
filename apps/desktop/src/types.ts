@@ -27,6 +27,8 @@ export type Settings = {
   require_os_auth: boolean;
   biometry_dwk_backup?: string | null;
   trash_auto_purge_days: number;
+  close_to_tray: boolean;
+  close_to_tray_notice_shown: boolean;
 };
 export type VaultSummary = {
   id: string;

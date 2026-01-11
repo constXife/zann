@@ -70,6 +70,7 @@ type AppShellProps = {
   openPersonalUnlock: unknown;
   handleResetPersonal: unknown;
   runRemoteSync: unknown;
+  lastSyncTime: unknown;
   openSettings: unknown;
   listWidth: unknown;
   isResizingDetails: unknown;
@@ -203,6 +204,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :current-storage="currentStorage"
       :get-sync-status="getSyncStatus"
       :storage-sync-errors="storageSyncErrors"
+      :last-sync-time="lastSyncTime"
       :toggle-storage-dropdown="toggleStorageDropdown"
       :close-storage-dropdown="closeStorageDropdown"
       :open-add-storage-wizard="openAddStorageWizard"
@@ -265,7 +267,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :on-sign-in="handleBannerSignIn"
       :on-unlock-personal="openPersonalUnlock"
       :on-reset-personal="handleResetPersonal"
-      :last-sync-time="null"
+      :last-sync-time="lastSyncTime"
       :retry-sync="() => runRemoteSync()"
       @expandSidebar="uiSettings.sidebarCollapsed = false"
       :style="{ width: listWidth + 'px', minWidth: listWidth + 'px' }"

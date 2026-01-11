@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import CategoryIcon from "./CategoryIcon.vue";
+import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { FolderNode, StorageSummary, VaultSummary } from "../types";
 
@@ -8,7 +9,7 @@ type SyncStatus = "idle" | "syncing" | "synced" | "error";
 
 const { t } = useI18n();
 
-defineProps<{
+const props = defineProps<{
   onCollapse: () => void;
   storageDropdownOpen: boolean;
   storages: StorageSummary[];
@@ -20,6 +21,7 @@ defineProps<{
   currentStorage?: StorageSummary;
   getSyncStatus: (storageId: string) => SyncStatus;
   storageSyncErrors: Map<string, string>;
+  lastSyncTime: string | null;
   toggleStorageDropdown: () => void;
   closeStorageDropdown: () => void;
   openAddStorageWizard: () => void;
@@ -49,6 +51,35 @@ defineProps<{
   openFolderMenu: (event: MouseEvent, folder: FolderNode) => void;
   selectFolder: (path: string | null) => void;
 }>();
+
+const staleSyncLevel = computed(() => {
+  if (!props.lastSyncTime || props.currentStorage?.kind !== "remote") {
+    return null;
+  }
+  const last = new Date(props.lastSyncTime);
+  if (Number.isNaN(last.getTime())) {
+    return null;
+  }
+  const diffDays = (Date.now() - last.getTime()) / 86400000;
+  if (diffDays >= 30) {
+    return "critical";
+  }
+  if (diffDays >= 7) {
+    return "warning";
+  }
+  return null;
+});
+
+const staleSyncTitle = computed(() => {
+  if (!props.lastSyncTime) {
+    return "";
+  }
+  const last = new Date(props.lastSyncTime);
+  if (Number.isNaN(last.getTime())) {
+    return "";
+  }
+  return `${t("storage.lastSynced")}: ${last.toLocaleDateString()}`;
+});
 </script>
 
 <template>
@@ -113,15 +144,6 @@ defineProps<{
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v2a6 6 0 00-6 6H4z"></path>
           </svg>
           <svg
-            v-else-if="getSyncStatus(currentStorage.id) === 'synced'"
-            class="h-4 w-4 text-green-500"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-          </svg>
-          <svg
             v-else-if="getSyncStatus(currentStorage.id) === 'error'"
             class="h-4 w-4 text-category-security"
             fill="none"
@@ -130,6 +152,26 @@ defineProps<{
             :title="storageSyncErrors.get(currentStorage.id)"
           >
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <svg
+            v-else-if="staleSyncLevel"
+            class="h-4 w-4"
+            :class="staleSyncLevel === 'critical' ? 'text-red-500' : 'text-amber-500'"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            :title="staleSyncTitle"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+          </svg>
+          <svg
+            v-else-if="getSyncStatus(currentStorage.id) === 'synced'"
+            class="h-4 w-4 text-green-500"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
           </svg>
         </span>
 

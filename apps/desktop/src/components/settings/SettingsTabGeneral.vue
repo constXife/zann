@@ -35,6 +35,26 @@ defineProps<{
 
     <div>
       <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-4">
+        {{ t("settings.general.behavior") }}
+      </h4>
+      <div class="space-y-2">
+        <label class="flex items-center gap-2 text-[var(--text-secondary)]">
+          <input
+            type="checkbox"
+            class="rounded"
+            :checked="settings.close_to_tray"
+            @change="updateSettings({ close_to_tray: ($event.target as HTMLInputElement).checked })"
+          />
+          <span>{{ t("settings.general.closeToTray") }}</span>
+        </label>
+        <p class="text-xs text-[var(--text-tertiary)]">
+          {{ t("settings.general.closeToTrayHelp") }}
+        </p>
+      </div>
+    </div>
+
+    <div>
+      <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-4">
         {{ t("settings.general.trash") }}
       </h4>
       <div class="space-y-2">

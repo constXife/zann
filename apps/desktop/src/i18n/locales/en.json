@@ -268,6 +268,9 @@
     "general": {
       "appearance": "Appearance",
       "language": "Language",
+      "behavior": "Behavior",
+      "closeToTray": "Close to tray instead of quitting",
+      "closeToTrayHelp": "Zann stays running in the background when you close the window.",
       "trash": "Trash",
       "trashRetention": "Auto-delete items in trash",
       "trashRetentionHelp": "Only deletes items that are already synced.",
@@ -503,6 +506,7 @@
     "syncing": "Syncing...",
     "sessionExpired": "Session expired. Sign in to sync.",
     "syncError": "Sync error",
+    "trayNotice": "Zann is still running in the background.",
     "personalLocked": "Personal vaults locked",
     "personalLockedDesc": "Unlock with the master password used for this server.",
     "personalLockedAction": "Unlock",
