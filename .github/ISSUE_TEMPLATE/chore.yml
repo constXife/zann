@@ -1,12 +1,13 @@
 name: Chore / tech debt
 description: Maintenance, refactors, or cleanup
-title: "[chore] "
-labels: ["type/chore"]
+title: "chore(scope): "
+labels: ["t: chore"]
 body:
   - type: dropdown
     id: area
     attributes:
       label: Area
+      description: Pick the primary area; reuse it in the title scope (chore(server): ...).
       options:
         - desktop
         - cli
@@ -15,6 +16,7 @@ body:
         - db
         - keystore
         - ci
+        - repo
     validations:
       required: true
   - type: textarea
@@ -22,6 +24,13 @@ body:
     attributes:
       label: Goal
       description: What should be improved or cleaned up?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why / user value
+      description: What user or business value does this unlock?
     validations:
       required: true
   - type: textarea

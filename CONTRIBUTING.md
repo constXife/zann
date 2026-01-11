@@ -50,7 +50,19 @@ Format:
 
 Common types: `feat`, `fix`, `docs`, `refactor`, `test`, `perf`, `build`, `ci`, `chore`.
 
-Scopes: pick the primary area (`desktop`, `cli`, `server`, `core`, `db`, `keystore`, `repo`).
+Scopes: pick the primary area (`desktop`, `cli`, `server`, `core`, `db`, `keystore`, `ci`, `repo`).
+
+## Issues naming and labels
+
+Use the same Conventional Commits format for issue titles:
+`<type>(<scope>): <subject>`.
+
+Types map to `t:` labels (feature, bug, refactor, discussion, chore).
+Scopes map to `s:` labels (desktop, cli, server, core, db, keystore, ci, repo).
+
+Issue templates add the type label automatically and the issue-labeler workflow
+applies the scope label based on the selected Area. If you change label names or
+colors, run the "Sync labels" workflow.
 
 ## Breaking changes
 
