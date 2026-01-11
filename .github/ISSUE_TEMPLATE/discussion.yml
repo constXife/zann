@@ -1,0 +1,42 @@
+name: Discussion
+description: Architecture or product decision
+title: "discussion(scope): "
+labels: ["t: discussion"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Pick the primary area; reuse it in the title scope (discussion(core): ...).
+      options:
+        - desktop
+        - cli
+        - server
+        - core
+        - db
+        - keystore
+        - ci
+        - repo
+    validations:
+      required: true
+  - type: textarea
+    id: topic
+    attributes:
+      label: Topic
+      description: What decision or open question is on the table?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Why now, and what constraints should we keep in mind?
+    validations:
+      required: true
+  - type: textarea
+    id: decision
+    attributes:
+      label: Desired outcome
+      description: What would “done” look like for this discussion?
+    validations:
+      required: true

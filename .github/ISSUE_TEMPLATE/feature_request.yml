@@ -1,12 +1,13 @@
 name: Feature request
 description: New functionality or enhancement
-title: "[feature] "
-labels: ["type/feature"]
+title: "feat(scope): "
+labels: ["t: feature"]
 body:
   - type: dropdown
     id: area
     attributes:
       label: Area
+      description: Pick the primary area; reuse it in the title scope (feat(server): ...).
       options:
         - desktop
         - cli
@@ -15,6 +16,7 @@ body:
         - db
         - keystore
         - ci
+        - repo
     validations:
       required: true
   - type: textarea
@@ -22,6 +24,13 @@ body:
     attributes:
       label: Goal
       description: What outcome do we want?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why / user value
+      description: What user or business value does this unlock?
     validations:
       required: true
   - type: textarea

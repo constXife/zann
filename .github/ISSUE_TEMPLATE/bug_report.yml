@@ -1,12 +1,13 @@
 name: Bug report
 description: Report a defect or regression
-title: "[bug] "
-labels: ["type/bug"]
+title: "fix(scope): "
+labels: ["t: bug"]
 body:
   - type: dropdown
     id: area
     attributes:
       label: Area
+      description: Pick the primary area; reuse it in the title scope (fix(server): ...).
       options:
         - desktop
         - cli
@@ -15,6 +16,7 @@ body:
         - db
         - keystore
         - ci
+        - repo
     validations:
       required: true
   - type: textarea
