@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Detect changes
         id: filter
         uses: dorny/paths-filter@v3
@@ -38,17 +38,21 @@ jobs:
               - 'Cargo.lock'
               - 'deny.toml'
               - 'rust-toolchain.toml'
+              - 'apps/desktop/src-tauri/**'
             server:
               - 'crates/zann-server/**'
               - 'config/**'
               - 'compose.yaml'
+              - 'compose.e2e.yaml'
             docker:
               - 'crates/zann-server/Dockerfile'
               - '.dockerignore'
               - 'compose.yaml'
+              - 'compose.e2e.yaml'
             js:
               - 'apps/desktop/**'
               - 'bun.lockb'
+              - 'apps/desktop/bun.lock'
             ci:
               - '.github/workflows/**'
 
