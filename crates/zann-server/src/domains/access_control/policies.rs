@@ -54,10 +54,9 @@ impl PolicySet {
 
     #[must_use]
     pub fn from_rules(rules: Vec<PolicyRule>) -> Self {
-        let default_allow = rules.is_empty();
         Self {
             rules,
-            default_allow,
+            default_allow: false,
         }
     }
 
@@ -138,7 +137,22 @@ fn matches_pattern(pattern: &str, value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::matches_pattern;
+    use super::{matches_pattern, PolicyDecision, PolicySet};
+    use zann_core::{AuthSource, Identity};
+
+    fn test_identity() -> Identity {
+        Identity {
+            user_id: uuid::Uuid::new_v4(),
+            email: "test@example.com".to_string(),
+            display_name: "Test".to_string(),
+            avatar_url: None,
+            avatar_initials: "T".to_string(),
+            groups: Vec::new(),
+            source: AuthSource::Internal,
+            device_id: None,
+            service_account_id: None,
+        }
+    }
 
     #[test]
     fn matches_pattern_allows_wildcards() {
@@ -153,5 +167,22 @@ mod tests {
         assert!(!matches_pattern("vault/*", "vault"));
         assert!(!matches_pattern("*a*b", "ba"));
         assert!(!matches_pattern("read", "write"));
+    }
+
+    #[test]
+    fn empty_policy_set_denies_by_default() {
+        let identity = test_identity();
+        let policies = PolicySet::from_rules(Vec::new());
+        assert!(!policies.is_allowed(&identity, "read", "vault/abc"));
+    }
+
+    #[test]
+    fn allow_all_policy_set_allows() {
+        let identity = test_identity();
+        let policies = PolicySet::allow_all();
+        assert_eq!(
+            policies.evaluate(&identity, "read", "vault/abc"),
+            PolicyDecision::Allow
+        );
     }
 }
