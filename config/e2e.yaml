@@ -1,0 +1,23 @@
+auth:
+  mode: internal
+  internal:
+    enabled: true
+    registration: open
+  oidc:
+    enabled: false
+
+server:
+  master_key_mode: auto_generate
+  master_key_file: "/data/smk"
+
+metrics:
+  enabled: true
+  profile: debug
+  endpoint: "/metrics"
+
+tracing:
+  otel:
+    enabled: false
+    endpoint: "http://127.0.0.1:4318"
+    service_name: "zann-server-e2e"
+    sampling_ratio: 0.0

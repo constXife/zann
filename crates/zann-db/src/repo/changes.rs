@@ -1,4 +1,5 @@
 use super::prelude::*;
+use tracing::{instrument, Span};
 
 pub struct ChangeRepo<'a> {
     pool: &'a PgPool,
@@ -9,6 +10,17 @@ impl<'a> ChangeRepo<'a> {
         Self { pool }
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, change),
+        fields(
+            vault_id = %change.vault_id,
+            item_id = %change.item_id,
+            db.system = "postgresql",
+            db.operation = "INSERT",
+            db.query = "changes.create"
+        )
+    )]
     pub async fn create(&self, change: &Change) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
@@ -24,9 +36,16 @@ impl<'a> ChangeRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(vault_id = %vault_id, since_seq, db.system = "postgresql", db.operation = "SELECT", db.query = "changes.list_since_seq")
+    )]
     pub async fn list_since_seq(
         &self,
         vault_id: Uuid,
@@ -52,8 +71,12 @@ impl<'a> ChangeRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
+        .inspect(|changes| {
+            Span::current().record("db.rows", changes.len() as i64);
+        })
     }
 
+    #[instrument(level = "debug", skip(self), fields(vault_id = %vault_id, db.system = "postgresql", db.operation = "SELECT", db.query = "changes.last_seq_for_vault"))]
     pub async fn last_seq_for_vault(&self, vault_id: Uuid) -> Result<i64, sqlx_core::Error> {
         let row = query!(
             r#"

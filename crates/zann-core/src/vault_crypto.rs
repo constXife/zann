@@ -2,6 +2,7 @@ use uuid::Uuid;
 
 use crate::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
 use crate::EncryptedPayload;
+use tracing::instrument;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VaultCryptoError {
@@ -62,6 +63,7 @@ pub fn rotation_candidate_aad(vault_id: Uuid, item_id: Uuid) -> Vec<u8> {
     aad
 }
 
+#[instrument(level = "debug", skip(master_key, vault_key), fields(vault_id = %vault_id))]
 pub fn encrypt_vault_key(
     master_key: &SecretKey,
     vault_id: Uuid,
@@ -73,6 +75,7 @@ pub fn encrypt_vault_key(
     Ok(blob.to_bytes())
 }
 
+#[instrument(level = "debug", skip(master_key, vault_key_enc), fields(vault_id = %vault_id))]
 pub fn decrypt_vault_key(
     master_key: &SecretKey,
     vault_id: Uuid,
@@ -91,6 +94,11 @@ pub fn decrypt_vault_key(
     Ok(SecretKey::from_bytes(key))
 }
 
+#[instrument(
+    level = "debug",
+    skip(vault_key, payload_bytes),
+    fields(vault_id = %vault_id, item_id = %item_id, payload_len = payload_bytes.len())
+)]
 pub fn encrypt_payload_bytes(
     vault_key: &SecretKey,
     vault_id: Uuid,
@@ -103,6 +111,11 @@ pub fn encrypt_payload_bytes(
     Ok(blob.to_bytes())
 }
 
+#[instrument(
+    level = "debug",
+    skip(vault_key, payload_enc),
+    fields(vault_id = %vault_id, item_id = %item_id, payload_len = payload_enc.len())
+)]
 pub fn decrypt_payload_bytes(
     vault_key: &SecretKey,
     vault_id: Uuid,
@@ -114,6 +127,11 @@ pub fn decrypt_payload_bytes(
     decrypt_blob(vault_key, &blob, &aad).map_err(|_| VaultCryptoError::DecryptFailed)
 }
 
+#[instrument(
+    level = "debug",
+    skip(vault_key, candidate),
+    fields(vault_id = %vault_id, item_id = %item_id, candidate_len = candidate.len())
+)]
 pub fn encrypt_rotation_candidate(
     vault_key: &SecretKey,
     vault_id: Uuid,
@@ -126,6 +144,11 @@ pub fn encrypt_rotation_candidate(
     Ok(blob.to_bytes())
 }
 
+#[instrument(
+    level = "debug",
+    skip(vault_key, candidate_enc),
+    fields(vault_id = %vault_id, item_id = %item_id, candidate_len = candidate_enc.len())
+)]
 pub fn decrypt_rotation_candidate(
     vault_key: &SecretKey,
     vault_id: Uuid,
@@ -138,6 +161,11 @@ pub fn decrypt_rotation_candidate(
     decrypt_blob(vault_key, &blob, &aad).map_err(|_| VaultCryptoError::DecryptFailed)
 }
 
+#[instrument(
+    level = "debug",
+    skip(vault_key, payload),
+    fields(vault_id = %vault_id, item_id = %item_id)
+)]
 pub fn encrypt_payload(
     vault_key: &SecretKey,
     vault_id: Uuid,
@@ -150,6 +178,11 @@ pub fn encrypt_payload(
     encrypt_payload_bytes(vault_key, vault_id, item_id, &payload_bytes)
 }
 
+#[instrument(
+    level = "debug",
+    skip(vault_key, payload_enc),
+    fields(vault_id = %vault_id, item_id = %item_id, payload_len = payload_enc.len())
+)]
 pub fn decrypt_payload(
     vault_key: &SecretKey,
     vault_id: Uuid,

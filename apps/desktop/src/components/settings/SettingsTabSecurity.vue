@@ -1,9 +1,10 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import type { KeystoreStatus, Settings } from "../../types";
 
 type Translator = (key: string) => string;
 
-defineProps<{
+const props = defineProps<{
   settings: Settings | null;
   rememberEnabled: boolean;
   error: string;
@@ -13,6 +14,25 @@ defineProps<{
   onTestBiometrics: () => void;
   onRebindBiometrics: () => void;
 }>();
+
+const keystoreSupported = computed(() => props.keystoreStatus?.supported === true);
+const rememberUnlockDisabled = computed(
+  () => !keystoreSupported.value && !props.settings?.remember_unlock,
+);
+const autoUnlockDisabled = computed(
+  () => !props.rememberEnabled || (!keystoreSupported.value && !props.settings?.auto_unlock),
+);
+const requireOsAuthDisabled = computed(
+  () => !props.rememberEnabled || (!keystoreSupported.value && !props.settings?.require_os_auth),
+);
+
+const handleRememberUnlockChange = (event: Event) => {
+  const checked = (event.target as HTMLInputElement).checked;
+  if (!keystoreSupported.value && checked) {
+    return;
+  }
+  props.updateSettings({ remember_unlock: checked, auto_unlock: false });
+};
 </script>
 
 <template>
@@ -137,13 +157,23 @@ defineProps<{
       <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-4">
         {{ t("settings.keystore") }}
       </h4>
-      <div class="space-y-3">
+      <p
+        v-if="!keystoreSupported"
+        class="mb-3 text-xs text-[var(--text-tertiary)]"
+      >
+        {{ t("settings.biometricsUnsupported") }}
+      </p>
+      <div
+        class="space-y-3"
+        :class="!keystoreSupported ? 'opacity-60 pointer-events-none' : ''"
+      >
         <label class="flex items-center gap-2 text-[var(--text-secondary)]">
           <input
             type="checkbox"
-            class="rounded"
+            class="rounded disabled:opacity-60 disabled:cursor-not-allowed"
             :checked="settings.remember_unlock"
-            @change="updateSettings({ remember_unlock: ($event.target as HTMLInputElement).checked, auto_unlock: false })"
+            :disabled="rememberUnlockDisabled"
+            @change="handleRememberUnlockChange"
           />
           <span>{{ t("unlock.remember") }}</span>
         </label>
@@ -152,7 +182,7 @@ defineProps<{
             type="checkbox"
             class="rounded disabled:opacity-60 disabled:cursor-not-allowed"
             :checked="settings.auto_unlock"
-            :disabled="!rememberEnabled"
+            :disabled="autoUnlockDisabled"
             @change="updateSettings({ auto_unlock: ($event.target as HTMLInputElement).checked })"
           />
           <span>{{ t("unlock.autoUnlock") }}</span>
@@ -162,7 +192,7 @@ defineProps<{
             type="checkbox"
             class="rounded disabled:opacity-60 disabled:cursor-not-allowed"
             :checked="settings.require_os_auth"
-            :disabled="!rememberEnabled"
+            :disabled="requireOsAuthDisabled"
             @change="updateSettings({ require_os_auth: ($event.target as HTMLInputElement).checked })"
           />
           <span>{{ t("settings.requireOsAuth") }}</span>
@@ -186,6 +216,7 @@ defineProps<{
         <button
           type="button"
           class="rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+          :disabled="!keystoreSupported"
           @click="updateSettings({ remember_unlock: false, auto_unlock: false })"
         >
           {{ t("settings.forgetDevice") }}

@@ -58,6 +58,10 @@ const listLoading = ref(false);
 const fatalError = ref("");
 const settingsOpen = ref(false);
 const settingsInitialTab = ref<"general" | "accounts">("general");
+const openSettings = (tab: "general" | "accounts" = "general") => {
+  settingsInitialTab.value = tab;
+  settingsOpen.value = true;
+};
 const idleTimer = ref<number | null>(null);
 
 const {
@@ -367,7 +371,7 @@ const paletteState = usePalette({
   onRevealToggle: itemDetailsState.revealToggle,
   onCopyPrimary: () => void copyPrimarySecret(),
   onOpenSettings: () => {
-    settingsOpen.value = true;
+    openSettings();
   },
 });
 const { paletteOpen, paletteQuery, paletteIndex, paletteItems } = paletteState;
@@ -519,6 +523,10 @@ const settingsActions = useAppSettingsActions({
 });
 const { updateSettings, testBiometrics, rebindBiometrics } = settingsActions;
 
+const timeTravelMaxIndex = computed(() =>
+  Math.max(0, itemDetailsState.historyEntries.value.length - 1),
+);
+
 const { lastActivityAt, altRevealAll } = useAppEventHandlers({
   settings,
   unlocked,
@@ -537,11 +545,16 @@ const { lastActivityAt, altRevealAll } = useAppEventHandlers({
   selectedItemId,
   loadItemDetail: itemDetailsState.loadItemDetail,
   settingsOpen,
+  openSettings,
   lockSession,
   scheduleRemoteSync,
   selectedStorageId,
   clearClipboardNow,
   runRemoteSync,
+  timeTravelActive: itemDetailsState.timeTravelActive,
+  timeTravelIndex: itemDetailsState.timeTravelIndex,
+  timeTravelMaxIndex,
+  setTimeTravelIndex: itemDetailsState.setTimeTravelIndex,
 });
 
 const { scheduleTrashPurge, clearTrashPurgeTimer } = useAppTrashPurge({
@@ -613,6 +626,7 @@ const { shellBindings, modalBindings } = useAppBindings({
     error,
     settingsOpen,
     settingsInitialTab,
+    openSettings,
     listLoading,
     itemDetailError,
     settings,

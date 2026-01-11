@@ -6,6 +6,7 @@ use aide::openapi::{Info, OpenApi};
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::Json;
+use schemars::JsonSchema;
 use serde_json::json;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -27,8 +28,8 @@ use crate::domains::groups::http::v1::{
     ListGroupsQuery, UpdateGroupRequest,
 };
 use crate::domains::items::http::v1::items_models::{
-    CreateItemRequest, HistoryListQuery, ItemHistoryDetailResponse, ItemHistoryListResponse,
-    ItemResponse, ItemsResponse, UpdateItemRequest,
+    CreateItemRequest, FileUploadResponse, HistoryListQuery, ItemHistoryDetailResponse,
+    ItemHistoryListResponse, ItemResponse, ItemsResponse, UpdateItemRequest,
 };
 use crate::domains::members::http::v1::MembersResponse;
 use crate::domains::secrets::http::v1::{
@@ -145,6 +146,10 @@ fn doc_router() -> ApiRouter<AppState> {
         .api_route(
             "/v1/vaults/:vault_id/items/:item_id",
             get(items_get).put(items_update).delete(items_delete),
+        )
+        .api_route(
+            "/v1/vaults/:vault_id/items/:item_id/file",
+            get(items_file_download).post(items_file_upload),
         )
         .api_route(
             "/v1/vaults/:vault_id/items/:item_id/versions",
@@ -650,6 +655,49 @@ async fn items_history_restore(
         deleted_at: None,
         updated_at: String::new(),
     })
+}
+
+#[derive(serde::Deserialize, JsonSchema)]
+#[allow(dead_code)]
+struct FileUploadQuery {
+    #[schemars(
+        description = "plain = server decryptable (shared vaults), opaque = encrypted by client"
+    )]
+    representation: Option<String>,
+    #[schemars(
+        description = "Client-provided UUID for idempotent uploads; shared vaults must match item payload extra.file_id and upload_state=pending"
+    )]
+    file_id: Option<String>,
+    #[schemars(description = "Optional filename metadata")]
+    filename: Option<String>,
+    #[schemars(description = "Optional MIME type override (otherwise Content-Type is used)")]
+    mime: Option<String>,
+}
+
+#[derive(serde::Deserialize, JsonSchema)]
+#[allow(dead_code)]
+struct FileDownloadQuery {
+    #[schemars(
+        description = "plain = server decryptable (shared vaults), opaque = ciphertext; shared vaults use payload extra.file_id when set"
+    )]
+    representation: Option<String>,
+}
+
+async fn items_file_upload(
+    Path((_vault_id, _item_id)): Path<(String, String)>,
+    Query(_query): Query<FileUploadQuery>,
+) -> (StatusCode, Json<FileUploadResponse>) {
+    not_implemented(FileUploadResponse {
+        file_id: String::new(),
+        upload_state: String::new(),
+    })
+}
+
+async fn items_file_download(
+    Path((_vault_id, _item_id)): Path<(String, String)>,
+    Query(_query): Query<FileDownloadQuery>,
+) -> StatusCode {
+    StatusCode::NOT_IMPLEMENTED
 }
 
 async fn members_list(Path(_vault_id): Path<String>) -> (StatusCode, Json<MembersResponse>) {

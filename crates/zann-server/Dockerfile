@@ -68,6 +68,7 @@ COPY --from=builder /app/target/release/zann-server /app/zann-server
 COPY --from=fs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=fs --chown=65532:65532 /data /data
 COPY --from=fs --chown=65532:65532 /config /config
+COPY --from=builder /app/config/policies.default.yaml /config/policies.default.yaml
 
 EXPOSE 8080
 VOLUME ["/data", "/config"]

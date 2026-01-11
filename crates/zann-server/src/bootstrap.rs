@@ -2,8 +2,10 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
 use axum::{middleware, Router};
+use opentelemetry::baggage::BaggageExt;
 use opentelemetry::global;
 use opentelemetry::propagation::Extractor;
+use opentelemetry::trace::TraceContextExt;
 use prometheus::Encoder;
 use tokio::sync::Semaphore;
 use tower_http::catch_panic::CatchPanicLayer;
@@ -115,6 +117,7 @@ pub fn init_metrics_registry(metrics_config: &MetricsConfig) {
     if !metrics_config.enabled {
         return;
     }
+    metrics::warmup();
     #[cfg(target_os = "linux")]
     {
         let process_collector = prometheus::process_collector::ProcessCollector::for_self();
@@ -165,6 +168,40 @@ pub fn build_state(settings: &settings::Settings, db: PgPool) -> AppState {
 pub fn log_fingerprint(state: &AppState) {
     let fingerprint = runtime::server_fingerprint(state);
     tracing::info!("SERVER FINGERPRINT: {}", fingerprint);
+}
+
+pub async fn wait_for_schema(pool: &PgPool, max_wait: Duration) {
+    let start = Instant::now();
+    loop {
+        let table = sqlx_core::query_scalar::query_scalar::<_, Option<String>>(
+            "SELECT to_regclass('public.items')::text",
+        )
+        .fetch_one(pool)
+        .await;
+        match table {
+            Ok(Some(_)) => {
+                if start.elapsed().as_secs() > 0 {
+                    tracing::info!(
+                        event = "schema_ready",
+                        elapsed_ms = start.elapsed().as_millis()
+                    );
+                }
+                return;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                tracing::warn!(event = "schema_check_failed", error = %err);
+            }
+        }
+        if start.elapsed() >= max_wait {
+            tracing::warn!(
+                event = "schema_wait_timeout",
+                waited_ms = start.elapsed().as_millis()
+            );
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
 }
 
 pub fn start_background_tasks(settings: &settings::Settings, state: &AppState) {
@@ -244,12 +281,27 @@ pub fn build_app(metrics_config: &MetricsConfig, state: AppState) -> Router {
                     method = %request.method(),
                     path = %matched,
                     request_id = %request_id,
-                    user_id = tracing::field::Empty
+                    user_id = tracing::field::Empty,
+                    test_run_id = tracing::field::Empty,
+                    trace_id = tracing::field::Empty,
+                    span_id = tracing::field::Empty
                 );
                 let parent = global::get_text_map_propagator(|prop| {
                     prop.extract(&HeaderExtractor(request.headers()))
                 });
+                if let Some(opentelemetry::Value::String(value)) =
+                    parent.baggage().get("zann.test_run_id")
+                {
+                    span.record("test_run_id", value.as_str());
+                }
                 span.set_parent(parent);
+                let span_cx = span.context();
+                let span_ref = span_cx.span();
+                let span_context = span_ref.span_context();
+                if span_context.is_valid() {
+                    span.record("trace_id", tracing::field::display(span_context.trace_id()));
+                    span.record("span_id", tracing::field::display(span_context.span_id()));
+                }
                 span
             }),
         )

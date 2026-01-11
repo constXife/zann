@@ -4,9 +4,10 @@ use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::trace::Tracer;
+use opentelemetry_sdk::trace::{Sampler, Tracer};
 use opentelemetry_sdk::Resource;
 use sha2::{Digest, Sha256};
+use std::fs;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 use crate::app;
@@ -65,7 +66,12 @@ pub(crate) fn init_tracing(
         .with(otel_layer);
     if format_json {
         registry
-            .with(tracing_subscriber::fmt::layer().json().flatten_event(true))
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .flatten_event(true)
+                    .with_current_span(true),
+            )
             .init();
     } else {
         registry
@@ -86,16 +92,49 @@ fn init_otel(config: &OtelConfig) -> Result<Tracer, String> {
     if let Some(endpoint) = config.endpoint.as_deref() {
         exporter = exporter.with_endpoint(endpoint);
     }
+    if config.insecure.unwrap_or(false) || config.ca_file.is_some() {
+        let mut client_builder = reqwest::Client::builder();
+        if config.insecure.unwrap_or(false) {
+            client_builder = client_builder.danger_accept_invalid_certs(true);
+        }
+        if let Some(path) = config.ca_file.as_deref() {
+            let pem = fs::read(path).map_err(|err| format!("otel_ca_read_failed: {err}"))?;
+            let cert = reqwest::Certificate::from_pem(&pem)
+                .map_err(|err| format!("otel_ca_invalid: {err}"))?;
+            client_builder = client_builder.add_root_certificate(cert);
+        }
+        let client = client_builder
+            .build()
+            .map_err(|err| format!("otel_http_client_failed: {err}"))?;
+        exporter = exporter.with_http_client(client);
+    }
     let service_name = config
         .service_name
         .clone()
         .unwrap_or_else(|| "zann-server".to_string());
+    let ratio = config.sampling_ratio.unwrap_or(1.0);
+    let ratio = if (0.0..=1.0).contains(&ratio) {
+        ratio
+    } else {
+        tracing::warn!(
+            event = "otel_sampling_ratio_invalid",
+            ratio,
+            "sampling_ratio must be between 0 and 1"
+        );
+        1.0
+    };
+    let sampler = Sampler::TraceIdRatioBased(ratio);
     let tracer_provider = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(exporter)
-        .with_trace_config(opentelemetry_sdk::trace::Config::default().with_resource(
-            Resource::new(vec![KeyValue::new("service.name", service_name)]),
-        ))
+        .with_trace_config(
+            opentelemetry_sdk::trace::Config::default()
+                .with_resource(Resource::new(vec![KeyValue::new(
+                    "service.name",
+                    service_name,
+                )]))
+                .with_sampler(sampler),
+        )
         .install_batch(runtime::Tokio)
         .map_err(|err| format!("otel_install_failed: {err}"))?;
     global::set_text_map_propagator(TraceContextPropagator::new());

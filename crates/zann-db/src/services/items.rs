@@ -7,9 +7,14 @@ use zann_core::{
     ServiceError, ServiceResult,
 };
 
-use crate::local::{LocalItem, LocalItemRepo, LocalPendingChange, PendingChangeRepo};
+use crate::local::{
+    LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange,
+    PendingChangeRepo,
+};
 
 use super::LocalServices;
+
+const ITEM_HISTORY_LIMIT: i64 = 5;
 
 #[async_trait]
 impl<'a> ItemsService for LocalServices<'a> {
@@ -129,6 +134,11 @@ impl<'a> ItemsService for LocalServices<'a> {
         let now = Utc::now();
         if let Some(mut item) = existing {
             let prev_version = item.version;
+            let prev_payload_enc = item.payload_enc.clone();
+            let prev_checksum = item.checksum.clone();
+            let prev_payload = self
+                .decrypt_payload(storage_id, vault_id, item.id, &item.payload_enc)
+                .await?;
             let (payload_enc, key_fp) = self
                 .encrypt_payload(storage_id, vault_id, item.id, &payload)
                 .await?;
@@ -143,6 +153,28 @@ impl<'a> ItemsService for LocalServices<'a> {
             repo.update(&item)
                 .await
                 .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
+            if !Self::payloads_equal(&prev_payload, &payload)? {
+                let history_repo = LocalItemHistoryRepo::new(self.pool);
+                let history = LocalItemHistory {
+                    id: Uuid::now_v7(),
+                    storage_id,
+                    vault_id,
+                    item_id: item.id,
+                    payload_enc: prev_payload_enc,
+                    checksum: prev_checksum,
+                    version: prev_version,
+                    change_type: "update".to_string(),
+                    changed_by_email: "local".to_string(),
+                    changed_by_name: None,
+                    changed_by_device_id: None,
+                    changed_by_device_name: None,
+                    created_at: now,
+                };
+                let _ = history_repo.create(&history).await;
+                let _ = history_repo
+                    .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
+                    .await;
+            }
             self.track_pending(
                 storage_id,
                 LocalPendingChange {

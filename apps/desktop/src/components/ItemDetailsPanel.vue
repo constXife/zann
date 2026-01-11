@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import ItemCharViewModal from "./ItemCharViewModal.vue";
 import type {
   DetailSection,
+  EncryptedPayload,
   FieldRow,
   ItemDetail,
   ItemHistorySummary,
@@ -20,7 +21,6 @@ const props = defineProps<{
   historyEntries: ItemHistorySummary[];
   historyLoading: boolean;
   historyError: string;
-  hasPasswordField: boolean;
   isRevealed: (path: string) => boolean;
   altRevealAll: boolean;
   toggleReveal: (path: string) => void;
@@ -29,6 +29,7 @@ const props = defineProps<{
   copyJson: () => void;
   copyRaw: () => void;
   copyHistoryPassword: (version: number) => void;
+  restoreHistoryVersion: (entry: ItemHistorySummary) => void;
   fetchHistoryPayload: (version: number) => Promise<{
     v: number;
     typeId: string;
@@ -45,6 +46,17 @@ const props = defineProps<{
   isSharedVault: boolean;
   isConflict: boolean;
   resolveConflict: () => void;
+  timeTravelActive: boolean;
+  timeTravelIndex: number;
+  timeTravelPayload: EncryptedPayload | null;
+  timeTravelBasePayload: EncryptedPayload | null;
+  timeTravelLoading: boolean;
+  timeTravelError: string;
+  timeTravelHasDraft: boolean;
+  openTimeTravel: () => void;
+  closeTimeTravel: () => void;
+  setTimeTravelIndex: (index: number) => void;
+  applyTimeTravelField: (fieldKey: string) => void;
 }>();
 
 const emit = defineEmits<{ (e: "update:query", value: string): void }>();
@@ -75,50 +87,191 @@ const formatUpdatedAt = (value?: string | null) => {
   return date.toLocaleString();
 };
 
-const formatHistoryActor = (entry: ItemHistorySummary) =>
-  entry.changed_by_name ?? entry.changed_by_email;
+type DiffStatus = "same" | "modified" | "added" | "deleted";
 
-const latestHistoryEntry = computed(() => props.historyEntries[0] ?? null);
-const currentPasswordField = computed(() =>
-  props.detailSections
-    .flatMap((section) => section.fields)
-    .find((field) => field.kind === "password"),
+const timeTravelActive = computed(() => props.timeTravelActive);
+
+const fileStatus = computed(() => {
+  if (!props.selectedItem || props.selectedItem.type_id !== "file_secret") {
+    return null;
+  }
+  const extra = props.selectedItem.payload?.extra ?? {};
+  const uploadState = extra.upload_state;
+  if (!uploadState) {
+    return null;
+  }
+  const key = uploadState.toLowerCase();
+  const label = t(`items.fileStatus.${key}`);
+  return {
+    key,
+    label: label.includes("items.fileStatus.") ? uploadState : label,
+  };
+});
+
+const timeTravelEntry = computed(() => props.historyEntries[props.timeTravelIndex] ?? null);
+
+const timeTravelTitle = computed(() =>
+  timeTravelEntry.value ? formatUpdatedAt(timeTravelEntry.value.created_at) : "",
 );
 
-const historyViewerOpen = ref(false);
-const historyViewerLoading = ref(false);
-const historyViewerError = ref("");
-const historyViewerTitle = ref("");
-const historyViewerPayload = ref("");
+const timeTravelTotal = computed(() => props.historyEntries.length);
 
-const openHistoryViewer = async (entry: ItemHistorySummary) => {
-  historyViewerOpen.value = true;
-  historyViewerLoading.value = true;
-  historyViewerError.value = "";
-  historyViewerTitle.value = formatUpdatedAt(entry.created_at);
-  historyViewerPayload.value = "";
-  try {
-    const payload = await props.fetchHistoryPayload(entry.version);
-    historyViewerPayload.value = payload
-      ? JSON.stringify(payload, null, 2)
-      : "";
-    if (!historyViewerPayload.value) {
-      historyViewerError.value = t("items.historyVersionMissing");
-    }
-  } catch (err) {
-    historyViewerError.value = String(err);
-  } finally {
-    historyViewerLoading.value = false;
+const timeTravelPosition = computed(() => {
+  if (!timeTravelTotal.value) {
+    return 0;
   }
+  return timeTravelSliderIndex.value + 1;
+});
+
+const timeTravelPercent = computed(() => {
+  if (timeTravelSliderMax.value === 0) {
+    return 0;
+  }
+  return Math.round((timeTravelSliderIndex.value / timeTravelSliderMax.value) * 100);
+});
+
+const timeTravelTimeline = computed(() => {
+  const entries = props.historyEntries.map((entry, historyIndex) => ({
+    entry,
+    historyIndex,
+    ts: Date.parse(entry.created_at),
+  }));
+  return entries
+    .slice()
+    .sort((a, b) => {
+      const aOk = Number.isFinite(a.ts);
+      const bOk = Number.isFinite(b.ts);
+      if (aOk && bOk) {
+        return a.ts - b.ts;
+      }
+      if (aOk) return -1;
+      if (bOk) return 1;
+      return a.historyIndex - b.historyIndex;
+    })
+    .map((entry, timelineIndex) => ({
+      ...entry,
+      timelineIndex,
+    }));
+});
+
+const timeTravelSliderMax = computed(() =>
+  Math.max(0, timeTravelTimeline.value.length - 1),
+);
+
+const timeTravelSliderIndex = computed(() => {
+  const match = timeTravelTimeline.value.find(
+    (entry) => entry.historyIndex === props.timeTravelIndex,
+  );
+  return match?.timelineIndex ?? 0;
+});
+
+const timeTravelSegments = computed(() => {
+  const total = timeTravelTotal.value;
+  if (!total) {
+    return [];
+  }
+  const max = Math.max(0, timeTravelSliderMax.value);
+  const widthPercent = total > 0 ? 100 / total : 100;
+  return timeTravelTimeline.value.map((entry) => {
+    const percent = max > 0 ? (entry.timelineIndex / max) * 100 : 0;
+    const left = Math.min(100 - widthPercent, Math.max(0, percent - widthPercent / 2));
+    return {
+      ...entry,
+      percent,
+      left,
+      width: widthPercent,
+    };
+  });
+});
+
+const getBaseField = (key: string) => props.timeTravelBasePayload?.fields?.[key];
+
+const timeTravelSnapPulse = ref(false);
+let timeTravelSnapTimer: number | null = null;
+
+const triggerTimeTravelSnap = () => {
+  timeTravelSnapPulse.value = true;
+  if (timeTravelSnapTimer) {
+    window.clearTimeout(timeTravelSnapTimer);
+  }
+  timeTravelSnapTimer = window.setTimeout(() => {
+    timeTravelSnapPulse.value = false;
+    timeTravelSnapTimer = null;
+  }, 160);
 };
 
-const closeHistoryViewer = () => {
-  historyViewerOpen.value = false;
-  historyViewerLoading.value = false;
-  historyViewerError.value = "";
-  historyViewerTitle.value = "";
-  historyViewerPayload.value = "";
+const setTimeTravelByTimelineIndex = (timelineIndex: number) => {
+  const entry = timeTravelTimeline.value[timelineIndex];
+  if (!entry) {
+    return;
+  }
+  props.setTimeTravelIndex(entry.historyIndex);
+  triggerTimeTravelSnap();
 };
+
+const timeTravelSliderPercent = computed(() => {
+  if (timeTravelSliderMax.value === 0) {
+    return 0;
+  }
+  return Math.round((timeTravelSliderIndex.value / timeTravelSliderMax.value) * 100);
+});
+
+const isRevealed = (path: string) => props.isRevealed(path);
+
+const showMaskedValue = (path: string) =>
+  !(props.altRevealAll || isRevealed(path) || timeTravelActive.value);
+
+const diffStatus = (field: FieldRow): DiffStatus => {
+  if (!timeTravelActive.value) {
+    return "same";
+  }
+  const base = getBaseField(field.path);
+  if (!base) {
+    return "added";
+  }
+  if (base.kind === field.kind && base.value === field.value) {
+    return "same";
+  }
+  return "modified";
+};
+
+const diffPreviousValue = (field: FieldRow) => getBaseField(field.path)?.value ?? "";
+
+const diffPreviousMasked = (field: FieldRow) => {
+  const base = getBaseField(field.path);
+  if (!base) {
+    return false;
+  }
+  return base.meta?.masked ?? (base.kind === "password" || base.kind === "otp");
+};
+
+const deletedTimeTravelFields = computed(() => {
+  if (!timeTravelActive.value || !props.timeTravelBasePayload || !props.timeTravelPayload) {
+    return [];
+  }
+  const baseFields = props.timeTravelBasePayload.fields ?? {};
+  const currentFields = props.timeTravelPayload.fields ?? {};
+  const keys = Object.keys(baseFields).filter((key) => !(key in currentFields));
+  keys.sort((a, b) => a.localeCompare(b));
+  return keys.map((key) => {
+    const entry = baseFields[key];
+    const masked = entry.meta?.masked ?? (entry.kind === "password" || entry.kind === "otp");
+    const copyable = entry.meta?.copyable ?? true;
+    const revealable = entry.meta?.masked ?? masked;
+    return {
+      key,
+      field: {
+        key,
+        value: entry.value,
+        path: `history-base:${key}`,
+        kind: entry.kind,
+        masked,
+        copyable,
+        revealable,
+      },
+    };
+  });
+});
 
 const folderSegments = computed(() => {
   if (!props.selectedItem) {
@@ -231,6 +384,10 @@ onBeforeUnmount(() => {
     window.clearTimeout(headerCopyTimer);
     headerCopyTimer = null;
   }
+  if (timeTravelSnapTimer) {
+    window.clearTimeout(timeTravelSnapTimer);
+    timeTravelSnapTimer = null;
+  }
 });
 </script>
 
@@ -288,6 +445,20 @@ onBeforeUnmount(() => {
             </div>
             <div class="flex items-center gap-2">
               <button
+                type="button"
+                class="rounded-lg px-2 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] disabled:opacity-50"
+                :class="timeTravelActive ? 'bg-[var(--bg-active)] text-[var(--text-primary)]' : ''"
+                :disabled="historyLoading || !!historyError || !historyEntries.length"
+                @click="timeTravelActive ? closeTimeTravel() : openTimeTravel()"
+                data-testid="history-toggle"
+                :data-state="timeTravelActive ? 'open' : 'closed'"
+                :aria-expanded="timeTravelActive"
+                aria-controls="history-panel"
+              >
+                <span class="mr-1">🕒</span>
+                {{ timeTravelActive ? t("items.historyClose") : t("items.historyOpen") }}
+              </button>
+              <button
                 v-if="isDeleted"
                 type="button"
                 class="rounded-lg px-3 py-1.5 text-xs font-semibold text-white bg-[var(--accent)] hover:opacity-90"
@@ -319,6 +490,7 @@ onBeforeUnmount(() => {
                   type="button"
                   class="rounded-lg px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)]"
                   @click="actionMenuOpen = !actionMenuOpen"
+                  data-testid="item-action-menu"
                 >
                   ⋯
                 </button>
@@ -391,6 +563,12 @@ onBeforeUnmount(() => {
                 >
                   {{ t('nav.shared') }}
                 </span>
+                <span
+                  v-if="fileStatus"
+                  class="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400"
+                >
+                  {{ fileStatus.label }}
+                </span>
               </div>
               <div class="text-xs text-[var(--text-tertiary)] mt-2">
                 {{ formatUpdatedAt(selectedItem.updated_at) }}
@@ -400,82 +578,216 @@ onBeforeUnmount(() => {
         </div>
 
         <div
-          v-for="section in detailSections"
-          :key="section.title"
-          class="space-y-2"
+          v-if="timeTravelActive"
+          id="history-panel"
+          data-testid="history-panel"
+          class="sticky top-0 z-10 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 px-3 py-2 text-xs text-[var(--text-primary)] backdrop-blur"
         >
-          <div v-if="section.title" class="text-xs font-medium text-[var(--text-secondary)] mb-3">
-            {{ section.title }}
+          <div class="flex flex-wrap items-center justify-between gap-3">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="font-semibold">{{ t("items.historyTimeTravelTitle") }}</span>
+              <span class="text-[var(--text-tertiary)]">· {{ timeTravelTitle }}</span>
+            </div>
+            <div class="flex items-center gap-2 text-[var(--text-tertiary)]">
+              <span>{{ t("items.historyPosition", { current: timeTravelPosition, total: timeTravelTotal }) }}</span>
+              <span>{{ timeTravelPercent }}%</span>
+            </div>
           </div>
-          <div
-            v-for="field in section.fields"
-            :key="field.path"
-            class="group border-b border-white/5 py-3 last:border-b-0"
-          >
-            <div class="grid grid-cols-[180px,1fr] gap-4 items-start">
-              <div class="text-xs font-mono font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-                {{ formatFieldLabel(field.key) }}
-              </div>
-              <div class="flex items-start justify-between gap-3">
+          <div class="mt-2">
+            <div class="flex items-center justify-between gap-2 text-[10px] text-[var(--text-tertiary)]">
+              <button
+                type="button"
+                class="rounded px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-active)] disabled:opacity-50"
+                :disabled="!timeTravelEntry || timeTravelEntry.pending"
+                @click="timeTravelEntry && restoreHistoryVersion(timeTravelEntry)"
+                data-testid="history-restore"
+              >
+                {{ t("items.historyRestore") }}
+              </button>
+              <div class="flex items-center gap-1">
                 <button
                   type="button"
-                  class="min-w-0 flex-1 text-left font-mono text-sm text-[var(--text-primary)] px-1 py-1 transition-colors focus:outline-none"
-                  :class="field.copyable ? 'hover:bg-[var(--bg-hover)] cursor-pointer rounded-md' : ''"
-                  @click="handleCopy(field)"
+                  class="rounded px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-active)] disabled:opacity-50"
+                  :disabled="timeTravelSliderIndex >= timeTravelSliderMax"
+                  @click="setTimeTravelByTimelineIndex(timeTravelSliderIndex + 1)"
                 >
+                  ◀
+                </button>
+                <button
+                  type="button"
+                  class="rounded px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-active)] disabled:opacity-50"
+                  :disabled="timeTravelSliderIndex <= 0"
+                  @click="setTimeTravelByTimelineIndex(timeTravelSliderIndex - 1)"
+                >
+                  ▶
+                </button>
+              </div>
+            </div>
+            <div
+              class="relative mt-2"
+              :class="timeTravelSnapPulse ? 'time-travel-snap' : ''"
+            >
+              <div class="absolute inset-0 pointer-events-none">
+                <span
+                  v-for="entry in timeTravelSegments"
+                  :key="entry.entry.version"
+                  class="absolute top-1/2 h-2 -translate-y-1/2 rounded-full bg-[var(--bg-tertiary)]/70"
+                  :style="{ left: `${entry.left}%`, width: `${entry.width}%` }"
+                ></span>
+              </div>
+              <input
+                class="time-travel-range w-full"
+                data-testid="history-slider"
+                type="range"
+                min="0"
+                :max="timeTravelSliderMax"
+                step="1"
+                :value="timeTravelSliderIndex"
+                @input="setTimeTravelByTimelineIndex(Number(($event.target as HTMLInputElement).value))"
+              />
+            </div>
+            <div class="mt-1 flex items-center justify-between text-[10px] text-[var(--text-tertiary)]">
+              <span v-if="timeTravelTimeline.length">
+                {{ formatUpdatedAt(timeTravelTimeline[0].entry.created_at) }}
+              </span>
+              <span v-if="timeTravelTimeline.length">
+                {{ formatUpdatedAt(timeTravelTimeline[timeTravelTimeline.length - 1].entry.created_at) }}
+              </span>
+            </div>
+          </div>
+          <div v-if="timeTravelLoading" class="mt-2 text-[var(--text-tertiary)]">
+            {{ t("items.historyVersionLoading") }}
+          </div>
+          <div v-else-if="timeTravelError" class="mt-2 text-red-400">
+            {{ timeTravelError }}
+          </div>
+          <div v-else-if="timeTravelHasDraft" class="mt-2 text-[var(--text-tertiary)]">
+            {{ t("items.historyDraftNotice") }}
+          </div>
+        </div>
+
+        <div
+          class="transition-all"
+          :class="timeTravelActive ? 'opacity-80 translate-y-1' : ''"
+        >
+          <div
+            v-for="section in detailSections"
+            :key="section.title"
+            class="space-y-2"
+          >
+            <div v-if="section.title" class="text-xs font-medium text-[var(--text-secondary)] mb-3">
+              {{ section.title }}
+            </div>
+            <div
+              v-for="field in section.fields"
+              :key="field.path"
+              class="group border-b border-white/5 py-3 last:border-b-0"
+              :class="timeTravelActive && diffStatus(field) === 'modified'
+                ? 'bg-amber-500/10'
+                : timeTravelActive && diffStatus(field) === 'added'
+                  ? 'bg-emerald-500/10'
+                  : ''"
+            >
+              <div class="grid grid-cols-[180px,1fr] gap-4 items-start">
+                <div class="text-xs font-mono font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {{ formatFieldLabel(field.key) }}
                   <span
-                    v-if="field.masked && !(props.altRevealAll || isRevealed(field.path))"
+                    v-if="timeTravelActive && diffStatus(field) === 'added'"
+                    class="ml-2 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-emerald-200"
+                  >
+                    {{ t("items.historyAddedTag") }}
+                  </span>
+                  <span
+                    v-else-if="timeTravelActive && diffStatus(field) === 'modified'"
+                    class="ml-2 rounded-full bg-amber-500/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-200"
+                  >
+                    {{ t("items.historyModifiedTag") }}
+                  </span>
+                </div>
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <button
+                      type="button"
+                    class="min-w-0 w-full text-left font-mono text-sm text-[var(--text-primary)] px-1 py-1 transition-colors focus:outline-none"
+                    :class="[
+                      field.copyable ? 'hover:bg-[var(--bg-hover)] cursor-pointer rounded-md' : '',
+                      timeTravelActive && diffStatus(field) === 'modified' ? 'bg-emerald-500/10 rounded-md' : '',
+                    ]"
+                    @click="handleCopy(field)"
+                  >
+                  <span
+                    v-if="field.masked && showMaskedValue(field.path)"
                     class="tracking-widest text-base leading-none text-[var(--text-primary)]"
                   >
                     ••••••••••••
                   </span>
-                  <span
-                    v-else
-                    class="break-words text-[var(--text-primary)]"
-                    :class="isLongValue(field) && !isExpanded(field) ? 'truncate whitespace-nowrap' : 'whitespace-pre-wrap'"
-                  >
-                    {{ field.value }}
-                  </span>
-                </button>
-                <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    v-if="field.kind === 'url'"
-                    type="button"
-                    class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
-                    @click.stop="openLink(field)"
-                  >
-                    ↗
-                  </button>
-                  <button
-                    type="button"
-                    class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
-                    @click.stop="openCharView(field)"
-                    title="Character view"
-                  >
-                    ⧉
-                  </button>
-                  <button
-                    v-if="isLongValue(field)"
-                    type="button"
-                    class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
-                    @click.stop="toggleExpanded(field)"
-                  >
-                    {{ isExpanded(field) ? t('common.hide') : t('common.reveal') }}
-                  </button>
-                  <button
-                    v-if="field.masked && field.revealable"
-                    type="button"
-                    class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
-                    @click.stop="toggleReveal(field.path)"
-                  >
-                    <svg v-if="!(props.altRevealAll || isRevealed(field.path))" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                    </svg>
-                    <svg v-else class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
-                    </svg>
-                  </button>
+                      <span
+                        v-else
+                        class="break-words text-[var(--text-primary)]"
+                        :class="isLongValue(field) && !isExpanded(field) ? 'truncate whitespace-nowrap' : 'whitespace-pre-wrap'"
+                      >
+                        {{ field.value }}
+                      </span>
+                    </button>
+                    <div
+                      v-if="timeTravelActive && diffStatus(field) === 'modified'"
+                      class="mt-2 rounded-md border border-red-500/30 bg-red-500/10 px-2 py-1 text-xs text-red-200"
+                    >
+                      <div class="text-[9px] font-semibold uppercase tracking-wide text-red-300">
+                        {{ t("items.historyPreviousValue") }}
+                      </div>
+                      <div
+                      class="mt-1 font-mono whitespace-pre-wrap"
+                        :class="diffPreviousMasked(field) && showMaskedValue(field.path) ? 'tracking-widest text-base leading-none' : ''"
+                      >
+                        <span
+                          v-if="diffPreviousMasked(field) && showMaskedValue(field.path)"
+                        >
+                          ••••••••••••
+                        </span>
+                        <span v-else>{{ diffPreviousValue(field) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      v-if="field.kind === 'url'"
+                      type="button"
+                      class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
+                      @click.stop="openLink(field)"
+                    >
+                      ↗
+                    </button>
+                    <button
+                      type="button"
+                      class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
+                      @click.stop="openCharView(field)"
+                      title="Character view"
+                    >
+                      ⧉
+                    </button>
+                    <button
+                      v-if="isLongValue(field)"
+                      type="button"
+                      class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
+                      @click.stop="toggleExpanded(field)"
+                    >
+                      {{ isExpanded(field) ? t('common.hide') : t('common.reveal') }}
+                    </button>
+                    <button
+                      v-if="field.masked && field.revealable && !timeTravelActive"
+                      type="button"
+                      class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
+                      @click.stop="toggleReveal(field.path)"
+                    >
+                      <svg v-if="!(props.altRevealAll || isRevealed(field.path))" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      <svg v-else class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                      </svg>
+                    </button>
                   <button
                     v-if="field.copyable"
                     type="button"
@@ -487,139 +799,106 @@ onBeforeUnmount(() => {
                     </span>
                     <span v-else>📋 {{ t('common.copy') }}</span>
                   </button>
+                  <button
+                    v-if="timeTravelActive && (diffStatus(field) === 'modified' || diffStatus(field) === 'added')"
+                    type="button"
+                    class="rounded px-2 py-1 text-[11px] font-semibold text-amber-200 hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
+                    @click.stop="applyTimeTravelField(field.path)"
+                  >
+                    ↩ {{ t("items.historyApplyField") }}
+                  </button>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+          </div>
 
-        <div v-if="hasPasswordField" class="mt-10">
-          <div class="flex items-center justify-between gap-3">
-            <div class="text-xs font-semibold uppercase tracking-widest text-[var(--text-tertiary)]">
-              {{ t("items.previousPasswords") }}
-            </div>
-            <div class="flex items-center gap-2">
-              <button
-                type="button"
-                class="rounded px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-active)] disabled:opacity-50"
-                :disabled="!currentPasswordField"
-                @click="currentPasswordField && copyField(currentPasswordField)"
-              >
-                {{ t("items.copyCurrentPassword") }}
-              </button>
-              <button
-                type="button"
-                class="rounded px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-active)] disabled:opacity-50"
-                :disabled="!latestHistoryEntry || historyLoading || !!historyError"
-                @click="latestHistoryEntry && copyHistoryPassword(latestHistoryEntry.version)"
-              >
-                {{ t("items.copyPreviousPassword") }}
-              </button>
-              <button
-                type="button"
-                class="rounded px-2 py-1 text-[11px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-active)] disabled:opacity-50"
-                :disabled="!latestHistoryEntry || historyLoading || !!historyError"
-                @click="latestHistoryEntry && openHistoryViewer(latestHistoryEntry)"
-              >
-                {{ t("items.viewHistoryVersion") }}
-              </button>
-            </div>
-          </div>
-          <div class="mt-1 text-[10px] text-[var(--text-tertiary)]">
-            {{ t("items.previousPasswordsNote") }}
-          </div>
           <div
-            v-if="historyLoading"
-            class="mt-3 text-xs text-[var(--text-tertiary)]"
+            v-if="timeTravelActive && deletedTimeTravelFields.length"
+            class="space-y-2"
           >
-            {{ t("items.previousPasswordsLoading") }}
-          </div>
-          <div
-            v-else-if="historyError"
-            class="mt-3 text-xs text-red-500"
-          >
-            {{ historyError }}
-          </div>
-          <div class="mt-3 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)]">
-            <div
-              v-if="!historyEntries.length && !historyLoading && !historyError"
-              class="px-4 py-3 text-xs italic text-[var(--text-tertiary)]"
-            >
-              {{ t("items.previousPasswordsEmpty") }}
+            <div class="text-xs font-medium text-[var(--text-secondary)] mb-3">
+              {{ t("items.historyDeletedSection") }}
             </div>
             <div
-              v-for="entry in historyEntries"
-              :key="entry.version"
-              class="flex items-center justify-between gap-3 px-4 py-3 text-sm text-[var(--text-primary)] border-b border-[var(--border-color)] last:border-b-0"
+              v-for="entry in deletedTimeTravelFields"
+              :key="entry.key"
+              class="group border-b border-white/5 py-3 last:border-b-0 bg-red-500/10"
             >
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span>{{ formatUpdatedAt(entry.created_at) }}</span>
-                  <span class="text-[var(--text-tertiary)]">• v{{ entry.version }}</span>
-                  <span
-                    v-if="entry.pending"
-                    class="rounded-full bg-[var(--bg-hover)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]"
-                  >
-                    {{ t("items.historyPending") }}
+              <div class="grid grid-cols-[180px,1fr] gap-4 items-start">
+                <div class="text-xs font-mono font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {{ formatFieldLabel(entry.field.key) }}
+                  <span class="ml-2 rounded-full bg-red-500/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-red-200">
+                    {{ t("items.historyDeletedTag") }}
                   </span>
                 </div>
-                <div class="text-xs text-[var(--text-tertiary)]">
-                  {{ formatHistoryActor(entry) }}
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      class="min-w-0 w-full text-left font-mono text-sm text-[var(--text-primary)] px-1 py-1 transition-colors focus:outline-none"
+                      :class="entry.field.copyable ? 'hover:bg-[var(--bg-hover)] cursor-pointer rounded-md' : ''"
+                      @click="handleCopy(entry.field)"
+                    >
+                    <span
+                      v-if="entry.field.masked && showMaskedValue(entry.field.path)"
+                      class="tracking-widest text-base leading-none text-[var(--text-primary)]"
+                    >
+                      ••••••••••••
+                    </span>
+                      <span
+                        v-else
+                        class="break-words text-[var(--text-primary)] whitespace-pre-wrap"
+                      >
+                        {{ entry.field.value }}
+                      </span>
+                    </button>
+                  </div>
+                  <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      v-if="entry.field.masked && entry.field.revealable && !timeTravelActive"
+                      type="button"
+                      class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
+                      @click.stop="toggleReveal(entry.field.path)"
+                    >
+                      <svg v-if="!(props.altRevealAll || isRevealed(entry.field.path))" class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                      </svg>
+                      <svg v-else class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                      </svg>
+                    </button>
+                  <button
+                    v-if="entry.field.copyable"
+                    type="button"
+                    class="rounded px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
+                    @click.stop="handleCopy(entry.field)"
+                  >
+                    <span v-if="copiedField === entry.field.path" class="text-emerald-400">
+                      ✓ {{ t('common.copied') }}
+                    </span>
+                    <span v-else>📋 {{ t('common.copy') }}</span>
+                  </button>
+                  <button
+                    v-if="timeTravelActive"
+                    type="button"
+                    class="rounded px-2 py-1 text-[11px] font-semibold text-red-200 hover:bg-[var(--bg-active)] active:bg-[var(--bg-active)]"
+                    @click.stop="applyTimeTravelField(entry.key)"
+                  >
+                    ↩ {{ t("items.historyApplyField") }}
+                  </button>
                 </div>
               </div>
-              <div class="flex items-center gap-1">
-                <button
-                  type="button"
-                  class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                  :title="t('items.historyCopyTitle')"
-                  @click="copyHistoryPassword(entry.version)"
-                >
-                  📋
-                </button>
-                <button
-                  type="button"
-                  class="rounded p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-                  :title="t('items.historyViewTitle')"
-                  @click="openHistoryViewer(entry)"
-                >
-                  👁️
-                </button>
-              </div>
             </div>
           </div>
         </div>
-
-      </div>
-
-      <div
-        v-if="historyViewerOpen"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md"
-        @click.self="closeHistoryViewer"
-      >
-        <div class="w-full max-w-2xl rounded-xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-5 shadow-2xl">
-          <div class="flex items-center justify-between gap-3">
-            <div class="text-sm font-semibold text-[var(--text-primary)]">
-              {{ t("items.historyVersionTitle") }} · {{ historyViewerTitle }}
-            </div>
-            <button
-              type="button"
-              class="rounded-md px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-              @click="closeHistoryViewer"
-            >
-              {{ t("common.close") }}
-            </button>
-          </div>
-          <div v-if="historyViewerLoading" class="mt-4 text-xs text-[var(--text-tertiary)]">
-            {{ t("items.historyVersionLoading") }}
-          </div>
-          <div v-else-if="historyViewerError" class="mt-4 text-xs text-red-500">
-            {{ historyViewerError }}
-          </div>
-          <pre
-            v-else
-            class="mt-4 max-h-[60vh] overflow-auto rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-4 py-3 text-xs text-[var(--text-primary)]"
-          >{{ historyViewerPayload }}</pre>
         </div>
+
+        <div v-if="timeTravelActive && !historyEntries.length" class="mt-6 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] px-4 py-3 text-xs text-[var(--text-tertiary)]">
+          {{ t("items.historyEmpty") }}
+        </div>
+
       </div>
 
       <ItemCharViewModal
@@ -645,3 +924,59 @@ onBeforeUnmount(() => {
     </div>
   </section>
 </template>
+
+<style scoped>
+.time-travel-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 10px;
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.2), rgba(16, 185, 129, 0.2));
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.time-travel-range:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.25);
+}
+
+.time-travel-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.35);
+  transition: transform 120ms ease;
+}
+
+.time-travel-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.35);
+  transition: transform 120ms ease;
+}
+
+.time-travel-range::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: 999px;
+}
+
+.time-travel-range::-moz-range-track {
+  height: 10px;
+  border-radius: 999px;
+}
+
+.time-travel-snap .time-travel-range::-webkit-slider-thumb {
+  transform: scale(1.08);
+}
+
+.time-travel-snap .time-travel-range::-moz-range-thumb {
+  transform: scale(1.08);
+}
+</style>

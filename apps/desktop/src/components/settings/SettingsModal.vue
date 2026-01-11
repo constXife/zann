@@ -36,6 +36,7 @@ const props = defineProps<{
   onAddServer: () => void;
   onCreateLocalVault: () => void;
   onSyncNow: (storageId: string) => Promise<void>;
+  onResetSyncCursor: (storageId: string) => Promise<void>;
 }>();
 
 const emit = defineEmits<{
@@ -142,6 +143,7 @@ watch(() => props.open, (isOpen) => {
             :on-add-server="onAddServer"
             :on-create-local-vault="onCreateLocalVault"
             :on-sync-now="onSyncNow"
+            :on-reset-sync-cursor="onResetSyncCursor"
           />
           <SettingsTabBackups
             v-else-if="activeTab === 'backups'"

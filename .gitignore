@@ -1,6 +1,7 @@
 **/.DS_Store
 .idea
 .tmp
+tmp
 
 **/node_modules
 
@@ -11,3 +12,12 @@ apps/desktop/src-tauri/gen
 apps/desktop/dist
 
 /docs/api/bun.lockb
+.env
+.env.highload
+loadtest/.env.k6
+.direnv/
+/.local/
+/data/
+loadtest/loadtest_sa_token
+loadtest/data/loadtest_sa_token
+compose.loadtest.yaml

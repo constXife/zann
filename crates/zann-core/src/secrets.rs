@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing::instrument;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -70,10 +71,12 @@ impl EncryptedPayload {
         }
     }
 
+    #[instrument(level = "debug", skip(self))]
     pub fn to_bytes(&self) -> Result<Vec<u8>, PayloadError> {
         serde_json::to_vec(self).map_err(PayloadError::InvalidJson)
     }
 
+    #[instrument(level = "debug", skip(bytes), fields(bytes_len = bytes.len()))]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, PayloadError> {
         serde_json::from_slice(bytes).map_err(PayloadError::InvalidJson)
     }

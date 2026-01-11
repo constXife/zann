@@ -1,4 +1,5 @@
 use super::prelude::*;
+use tracing::{instrument, Span};
 
 pub struct VaultRepo<'a> {
     pool: &'a PgPool,
@@ -9,6 +10,16 @@ impl<'a> VaultRepo<'a> {
         Self { pool }
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, vault),
+        fields(
+            vault_id = %vault.id,
+            db.system = "postgresql",
+            db.operation = "INSERT",
+            db.query = "vaults.create"
+        )
+    )]
     pub async fn create(&self, vault: &Vault) -> Result<(), sqlx_core::Error> {
         let tags = vault
             .tags
@@ -38,9 +49,16 @@ impl<'a> VaultRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(vault_id = %id, db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.get_by_id")
+    )]
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<Vault>, sqlx_core::Error> {
         query_as!(
             Vault,
@@ -68,6 +86,11 @@ impl<'a> VaultRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(slug, db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.get_by_slug")
+    )]
     pub async fn get_by_slug(&self, slug: &str) -> Result<Option<Vault>, sqlx_core::Error> {
         query_as!(
             Vault,
@@ -95,6 +118,11 @@ impl<'a> VaultRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(user_id = %user_id, limit, offset, sort, db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.list_by_user")
+    )]
     pub async fn list_by_user(
         &self,
         user_id: Uuid,
@@ -131,11 +159,18 @@ impl<'a> VaultRepo<'a> {
             "#,
             order_by
         );
-        query_as!(Vault, &query, user_id, limit, offset)
+        let vaults = query_as!(Vault, &query, user_id, limit, offset)
             .fetch_all(self.pool)
-            .await
+            .await?;
+        Span::current().record("db.rows", vaults.len() as i64);
+        Ok(vaults)
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(user_id = %user_id, db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.get_personal_by_user")
+    )]
     pub async fn get_personal_by_user(
         &self,
         user_id: Uuid,
@@ -169,8 +204,9 @@ impl<'a> VaultRepo<'a> {
         .await
     }
 
+    #[instrument(level = "debug", skip(self), fields(db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.list_all"))]
     pub async fn list_all(&self) -> Result<Vec<Vault>, sqlx_core::Error> {
-        query_as!(
+        let vaults = query_as!(
             Vault,
             r#"
             SELECT
@@ -192,9 +228,16 @@ impl<'a> VaultRepo<'a> {
             "#
         )
         .fetch_all(self.pool)
-        .await
+        .await?;
+        Span::current().record("db.rows", vaults.len() as i64);
+        Ok(vaults)
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(vault_id = %id, db.system = "postgresql", db.operation = "UPDATE", db.query = "vaults.delete_by_id")
+    )]
     pub async fn delete_by_id(
         &self,
         id: Uuid,
@@ -220,9 +263,24 @@ impl<'a> VaultRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|result| result.rows_affected())
+        .map(|result| {
+            let rows = result.rows_affected();
+            Span::current().record("db.rows", rows as i64);
+            rows
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, vault_key_enc),
+        fields(
+            vault_id = %id,
+            vault_key_len = vault_key_enc.len(),
+            db.system = "postgresql",
+            db.operation = "UPDATE",
+            db.query = "vaults.update_key_by_id"
+        )
+    )]
     pub async fn update_key_by_id(
         &self,
         id: Uuid,

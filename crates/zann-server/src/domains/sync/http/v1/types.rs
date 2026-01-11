@@ -52,6 +52,8 @@ pub(crate) struct SyncPullChange {
     pub(crate) path: String,
     pub(crate) name: String,
     pub(crate) type_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) history: Vec<SyncHistoryEntry>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -65,6 +67,30 @@ pub(crate) struct SyncSharedPullChange {
     pub(crate) path: String,
     pub(crate) name: String,
     pub(crate) type_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) history: Vec<SyncSharedHistoryEntry>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct SyncHistoryEntry {
+    pub(crate) version: i64,
+    pub(crate) checksum: String,
+    pub(crate) change_type: String,
+    pub(crate) changed_by_name: Option<String>,
+    pub(crate) changed_by_email: String,
+    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) payload_enc: Vec<u8>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct SyncSharedHistoryEntry {
+    pub(crate) version: i64,
+    pub(crate) checksum: String,
+    pub(crate) change_type: String,
+    pub(crate) changed_by_name: Option<String>,
+    pub(crate) changed_by_email: String,
+    pub(crate) created_at: String,
+    pub(crate) payload: JsonValue,
 }
 
 #[derive(Deserialize, JsonSchema)]

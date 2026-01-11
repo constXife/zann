@@ -22,7 +22,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 0
       - name: Detect changes
         id: filter
         uses: dorny/paths-filter@v3
@@ -38,17 +38,21 @@ jobs:
               - 'Cargo.lock'
               - 'deny.toml'
               - 'rust-toolchain.toml'
+              - 'apps/desktop/src-tauri/**'
             server:
               - 'crates/zann-server/**'
               - 'config/**'
               - 'compose.yaml'
+              - 'compose.e2e.yaml'
             docker:
               - 'crates/zann-server/Dockerfile'
               - '.dockerignore'
               - 'compose.yaml'
+              - 'compose.e2e.yaml'
             js:
               - 'apps/desktop/**'
               - 'bun.lockb'
+              - 'apps/desktop/bun.lock'
             ci:
               - '.github/workflows/**'
 
@@ -78,7 +82,6 @@ jobs:
       TEST_DATABASE_URL: postgres://zann:zann@127.0.0.1:5432/zann
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: /home/runner/.cache/sccache
-      SCCACHE_LOG: debug
       CARGO_INCREMENTAL: "0"
     services:
       postgres:
@@ -111,7 +114,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Migrate DB
         run: |
-          cargo run -p zann-server -- migrate
+          cargo run -p zann-server --bin zann-server -- migrate
       - name: Tests
         run: cargo test
       - name: Tests (zann-db Postgres)
@@ -162,10 +165,121 @@ jobs:
         working-directory: apps/desktop
         run: bunx license-checker --production --summary --excludePrivatePackages --onlyAllow "MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;Unicode-DFS-2016;Unlicense;CC0-1.0;0BSD;MPL-2.0"
 
+  e2e-desktop:
+    needs: [changes, server-image]
+    if: needs.changes.outputs.js == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: read
+    env:
+      TAURI_E2E_HEADLESS: "1"
+      TAURI_E2E_ARTIFACTS_KEEP: "1"
+      TAURI_E2E_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
+      TAURI_E2E_BUILD_SERVER: "0"
+      RUST_BACKTRACE: "1"
+      TAURI_E2E_LOG_HANDLES: "1"
+      TAURI_E2E_FORCE_EXIT: "1"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      SCCACHE_LOG: debug
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libayatana-appindicator3-dev \
+            libxkbcommon-dev \
+            libssl-dev \
+            xvfb
+          if ! sudo apt-get install -y webkit2gtk-driver; then
+            sudo apt-get install -y webkit2gtk-4.1-driver
+          fi
+      - name: Resolve WebKitWebDriver
+        run: |
+          if command -v WebKitWebDriver >/dev/null 2>&1; then
+            echo "TAURI_E2E_NATIVE_DRIVER=$(command -v WebKitWebDriver)" >> "$GITHUB_ENV"
+          elif [ -x /usr/libexec/webkit2gtk-4.1/WebKitWebDriver ]; then
+            echo "TAURI_E2E_NATIVE_DRIVER=/usr/libexec/webkit2gtk-4.1/WebKitWebDriver" >> "$GITHUB_ENV"
+          elif [ -x /usr/libexec/webkit2gtk-4.0/WebKitWebDriver ]; then
+            echo "TAURI_E2E_NATIVE_DRIVER=/usr/libexec/webkit2gtk-4.0/WebKitWebDriver" >> "$GITHUB_ENV"
+          elif [ -x /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver ]; then
+            echo "TAURI_E2E_NATIVE_DRIVER=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver" >> "$GITHUB_ENV"
+          elif [ -x /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver ]; then
+            echo "TAURI_E2E_NATIVE_DRIVER=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver" >> "$GITHUB_ENV"
+          else
+            echo "WebKitWebDriver not found in expected locations" >&2
+            exit 1
+          fi
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
+      - name: sccache version
+        run: sccache --version
+      - name: Install tauri-driver
+        run: cargo install tauri-driver
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Pull server image
+        run: docker pull "${{ needs.server-image.outputs.image }}"
+      - name: Install JS deps
+        working-directory: apps/desktop
+        run: bun install --frozen-lockfile
+      - name: Build desktop app
+        working-directory: apps/desktop
+        run: bun run tauri build --debug --no-bundle
+      - name: Run e2e tests
+        working-directory: apps/desktop
+        env:
+          TAURI_E2E_SKIP_BUILD: "1"
+        run: bun e2e
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  server-image:
+    needs: changes
+    if: needs.changes.outputs.js == 'true' || needs.changes.outputs.ci == 'true' || needs.changes.outputs.server == 'true' || needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Resolve image name
+        id: meta
+        run: |
+          repo="$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')"
+          echo "image=ghcr.io/${repo}/zann-server:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build image
+        run: docker build --build-arg GIT_COMMIT=${{ github.sha }} -f crates/zann-server/Dockerfile -t "${{ steps.meta.outputs.image }}" .
+      - name: Push image
+        run: docker push "${{ steps.meta.outputs.image }}"
+
   docker:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (needs.changes.outputs.server == 'true' || needs.changes.outputs.docker == 'true' || needs.changes.outputs.ci == 'true')
-    needs: changes
+    needs: [changes, server-image]
     env:
       DOCKERHUB_HOST: docker.io
       DOCKER_IMAGE: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/zann-server
@@ -175,14 +289,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Login to Docker Hub
         env:
           DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_PASS: ${{ secrets.DOCKERHUB_TOKEN }}
         run: echo "$DOCKERHUB_PASS" | docker login "$DOCKERHUB_HOST" -u "$DOCKERHUB_USER" --password-stdin
 
-      - name: Build
-        run: docker build --build-arg GIT_COMMIT=${{ github.sha }} -f crates/zann-server/Dockerfile -t "$DOCKER_IMAGE:${{ github.sha }}" .
+      - name: Pull image from GHCR
+        run: docker pull "${{ needs.server-image.outputs.image }}"
+
+      - name: Tag commit image
+        run: docker tag "${{ needs.server-image.outputs.image }}" "$DOCKER_IMAGE:${{ github.sha }}"
 
       - name: Tag
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')

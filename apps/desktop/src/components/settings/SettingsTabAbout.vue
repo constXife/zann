@@ -107,7 +107,7 @@ const openLogs = async () => {
 
     <!-- Copyright -->
     <div class="pt-4 border-t border-[var(--border-color)] text-center text-xs text-[var(--text-tertiary)]">
-      &copy; 2024 Zann
+      &copy; 2025 Zann
     </div>
   </div>
 </template>

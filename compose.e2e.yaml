@@ -1,0 +1,67 @@
+services:
+  db_e2e:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_USER: zann
+      POSTGRES_PASSWORD: zann
+      POSTGRES_DB: zann_e2e
+    ports:
+      - "${TAURI_E2E_DB_PORT:-15433}:5432"
+    volumes:
+      - zann_pgdata_e2e:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zann -d zann_e2e"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build:
+      context: .
+      dockerfile: crates/zann-server/Dockerfile
+    image: "${TAURI_E2E_SERVER_IMAGE:-zann-e2e/server:dev}"
+    depends_on:
+      db_e2e:
+        condition: service_healthy
+    volumes:
+      - ./config:/config:ro
+      - zann_data_e2e:/data
+    environment:
+      ZANN_DB_URL: postgres://zann:zann@db_e2e:5432/zann_e2e
+      ZANN_DB_POOL_MAX: "5"
+      ZANN_PASSWORD_PEPPER: dev-pepper
+      ZANN_TOKEN_PEPPER: dev-pepper
+      ZANN_CONFIG_PATH: /config/e2e.yaml
+      ZANN_SMK_FILE: /data/smk
+    command: ["migrate"]
+    restart: "no"
+
+  server:
+    build:
+      context: .
+      dockerfile: crates/zann-server/Dockerfile
+    image: "${TAURI_E2E_SERVER_IMAGE:-zann-e2e/server:dev}"
+    depends_on:
+      db_e2e:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - "${TAURI_E2E_SERVER_PORT:-18081}:18081"
+    volumes:
+      - ./config:/config:ro
+      - zann_data_e2e:/data
+    environment:
+      ZANN_DB_URL: postgres://zann:zann@db_e2e:5432/zann_e2e
+      ZANN_DB_POOL_MAX: "10"
+      ZANN_ADDR: 0.0.0.0:18081
+      ZANN_PASSWORD_PEPPER: dev-pepper
+      ZANN_TOKEN_PEPPER: dev-pepper
+      ZANN_CONFIG_PATH: /config/e2e.yaml
+      ZANN_ALLOW_METRICS_DEBUG: "true"
+      ZANN_SMK_FILE: /data/smk
+      RUST_LOG: info
+
+volumes:
+  zann_pgdata_e2e:
+  zann_data_e2e:

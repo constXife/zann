@@ -6853,6 +6853,7 @@ dependencies = [
  "serde_yaml",
  "sqlx-core",
  "sqlx-sqlite",
+ "tracing",
  "uuid",
  "zeroize",
 ]
@@ -6864,10 +6865,12 @@ dependencies = [
  "async-trait",
  "blake3",
  "chrono",
+ "serde_json",
  "sqlx-core",
  "sqlx-macros",
  "sqlx-sqlite",
  "tokio",
+ "tracing",
  "uuid",
  "zann-core",
 ]

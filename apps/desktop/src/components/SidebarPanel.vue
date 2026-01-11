@@ -25,6 +25,7 @@ defineProps<{
   openAddStorageWizard: () => void;
   openStorageSettings: () => void;
   openCreateLocalVault: () => void;
+  openSettings: (tab?: "general" | "accounts") => void;
   switchStorage: (storageId: string) => void;
   vaultDropdownOpen: boolean;
   vaults: VaultSummary[];
@@ -56,7 +57,7 @@ defineProps<{
   >
     <button
       type="button"
-      class="absolute right-3 top-[8px] rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors z-[60]"
+      class="absolute right-3 top-[8px] z-[60] rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
       @click="onCollapse"
       :title="t('sidebar.collapse')"
       data-tauri-drag-region="false"
@@ -70,11 +71,17 @@ defineProps<{
       class="relative flex items-center gap-3 p-3 pt-12"
       data-tauri-drag-region
     >
-      <div class="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)]">
+      <button
+        type="button"
+        class="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
+        @click="openSettings('accounts')"
+        :title="t('common.settings')"
+        data-tauri-drag-region="false"
+      >
         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
         </svg>
-      </div>
+      </button>
 
       <button
         type="button"
@@ -455,6 +462,7 @@ defineProps<{
             'bg-category-identity/15 text-category-identity': cat.id === 'identity',
             'bg-category-api/15 text-category-api': cat.id === 'api',
             'bg-category-kv/15 text-category-kv': cat.id === 'kv',
+            'bg-category-infra/15 text-category-infra': cat.id === 'infra',
             'bg-category-security/15 text-category-security': cat.id === 'trash',
           }"
         >

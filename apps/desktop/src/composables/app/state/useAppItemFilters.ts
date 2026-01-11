@@ -19,6 +19,13 @@ export function useAppItemFilters({
 }: AppItemFiltersOptions) {
   const selectedCategory = selectedCategoryRef ?? ref<string | null>(null);
   const query = ref("");
+  const infraTypes = new Set([
+    "ssh_key",
+    "database",
+    "cloud_iam",
+    "file_secret",
+    "server_credentials",
+  ]);
 
   const isDeletedItem = (item: ItemSummary) => !!item.deleted_at;
 
@@ -31,6 +38,7 @@ export function useAppItemFilters({
       identity: 0,
       api: 0,
       kv: 0,
+      infra: 0,
       trash: 0,
     };
     items.value.forEach((item) => {
@@ -42,22 +50,26 @@ export function useAppItemFilters({
       if (counts[item.type_id] !== undefined) {
         counts[item.type_id]++;
       }
+      if (infraTypes.has(item.type_id)) {
+        counts.infra++;
+      }
     });
     return counts;
   });
 
   const categories = computed(() => [
-    { id: "all", icon: "grid", label: "All" },
-    { id: "login", icon: "key", label: "Logins" },
-    { id: "note", icon: "doc", label: "Notes" },
-    { id: "card", icon: "card", label: "Cards" },
-    { id: "identity", icon: "person", label: "Identity" },
-    { id: "api", icon: "network", label: "API" },
-    { id: "kv", icon: "list", label: "KV" },
+    { id: "all", icon: "grid", label: t("nav.allItems") },
+    { id: "login", icon: "key", label: t("nav.logins") },
+    { id: "note", icon: "doc", label: t("nav.notes") },
+    { id: "card", icon: "card", label: t("nav.cards") },
+    { id: "identity", icon: "person", label: t("nav.identity") },
+    { id: "api", icon: "network", label: t("nav.api") },
+    { id: "kv", icon: "list", label: t("nav.kv") },
+    { id: "infra", icon: "network", label: t("nav.infrastructure") },
     {
       id: "trash",
       icon: "trash",
-      label: isSharedVault.value ? t("items.trashShared") : "Trash",
+      label: isSharedVault.value ? t("items.trashShared") : t("nav.trash"),
     },
   ]);
 
@@ -78,7 +90,11 @@ export function useAppItemFilters({
       selectedCategory.value !== "all" &&
       selectedCategory.value !== "trash"
     ) {
-      result = result.filter((item) => item.type_id === selectedCategory.value);
+      if (selectedCategory.value === "infra") {
+        result = result.filter((item) => infraTypes.has(item.type_id));
+      } else {
+        result = result.filter((item) => item.type_id === selectedCategory.value);
+      }
     }
 
     if (selectedFolder.value !== null) {

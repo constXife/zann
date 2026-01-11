@@ -257,6 +257,7 @@ const handleSelectItem = (itemId: string) => {
           class="rounded-lg p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
           data-tauri-drag-region="false"
           @click="openCreateItem"
+          data-testid="item-create"
         >
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" />
@@ -349,6 +350,7 @@ const handleSelectItem = (itemId: string) => {
           type="button"
           class="mt-3 rounded-lg bg-gray-800 dark:bg-gray-600 hover:bg-gray-700 dark:hover:bg-gray-500 px-3 py-1.5 text-xs text-white transition-colors"
           @click="openCreateItem"
+          data-testid="item-create-empty"
         >
           {{ t('onboarding.createItem') }}
         </button>

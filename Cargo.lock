@@ -5317,6 +5317,7 @@ dependencies = [
  "sqlx-core",
  "sqlx-postgres",
  "sqlx-sqlite",
+ "tracing",
  "uuid",
  "zeroize",
 ]
@@ -5328,11 +5329,13 @@ dependencies = [
  "async-trait",
  "blake3",
  "chrono",
+ "serde_json",
  "sqlx-core",
  "sqlx-macros",
  "sqlx-postgres",
  "sqlx-sqlite",
  "tokio",
+ "tracing",
  "uuid",
  "zann-core",
 ]

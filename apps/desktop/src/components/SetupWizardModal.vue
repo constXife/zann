@@ -127,6 +127,7 @@ const strengthBarWidth = computed(() => {
             type="button"
             class="w-full rounded-lg bg-gray-800 dark:bg-gray-600 hover:bg-gray-700 dark:hover:bg-gray-500 px-4 py-3 font-semibold text-white transition-colors"
             @click="startConnect"
+            data-testid="wizard-connect"
           >
             {{ t("wizard.connect") }}
           </button>
@@ -172,6 +173,7 @@ const strengthBarWidth = computed(() => {
           type="password"
           :placeholder="t('wizard.passwordPlaceholder')"
           autocomplete="new-password"
+          data-testid="wizard-master-password"
         />
         <div v-if="setupPassword" class="flex items-center gap-2 -mt-2">
           <div class="flex-1 h-1.5 bg-[var(--bg-hover)] rounded-full overflow-hidden">
@@ -191,12 +193,14 @@ const strengthBarWidth = computed(() => {
           type="password"
           :placeholder="t('wizard.passwordConfirmPlaceholder')"
           autocomplete="new-password"
+          data-testid="wizard-master-confirm"
         />
         <button
           type="button"
           class="w-full rounded-lg bg-gray-800 dark:bg-gray-600 hover:bg-gray-700 dark:hover:bg-gray-500 px-4 py-3 text-sm font-semibold text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           :disabled="setupBusy"
           @click="createMasterPassword"
+          data-testid="wizard-master-create"
         >
           {{ t("wizard.create") }}
         </button>
@@ -239,12 +243,14 @@ const strengthBarWidth = computed(() => {
           :disabled="connectBusy"
           @blur="onUrlBlur"
           @focus="prefillServerUrl"
+          data-testid="wizard-server-url"
         />
         <button
           type="button"
           class="w-full rounded-lg bg-gray-800 dark:bg-gray-600 hover:bg-gray-700 dark:hover:bg-gray-500 px-4 py-3 text-sm font-semibold text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           :disabled="connectBusy"
           @click="beginServerConnect"
+          data-testid="wizard-sign-in"
         >
           {{ t("wizard.signIn") }}
         </button>

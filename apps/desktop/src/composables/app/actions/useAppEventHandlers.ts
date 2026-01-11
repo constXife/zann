@@ -23,11 +23,16 @@ type AppEventHandlersOptions = {
   selectedItemId: Ref<string | null>;
   loadItemDetail: (itemId: string) => Promise<void>;
   settingsOpen: Ref<boolean>;
+  openSettings: (tab?: "general" | "accounts") => void;
   lockSession: () => Promise<void> | void;
   scheduleRemoteSync: (storageId: string | null) => void;
   selectedStorageId: Ref<string>;
   clearClipboardNow: () => Promise<void> | void;
   runRemoteSync: (storageId?: string | null) => Promise<boolean>;
+  timeTravelActive: Ref<boolean>;
+  timeTravelIndex: Ref<number>;
+  timeTravelMaxIndex: ComputedRef<number>;
+  setTimeTravelIndex: (index: number) => Promise<void> | void;
 };
 
 export function useAppEventHandlers({
@@ -48,15 +53,21 @@ export function useAppEventHandlers({
   selectedItemId,
   loadItemDetail,
   settingsOpen,
+  openSettings,
   lockSession,
   scheduleRemoteSync,
   selectedStorageId,
   clearClipboardNow,
   runRemoteSync,
+  timeTravelActive,
+  timeTravelIndex,
+  timeTravelMaxIndex,
+  setTimeTravelIndex,
 }: AppEventHandlersOptions) {
   const lastActivityAt = ref(Date.now());
   const altRevealAll = ref(false);
   let cacheInvalidationUnlisten: null | (() => void) = null;
+  let settingsUnlisten: null | (() => void) = null;
 
   const onActivity = () => {
     lastActivityAt.value = Date.now();
@@ -99,7 +110,10 @@ export function useAppEventHandlers({
       return true;
     }
     const tag = active.tagName.toLowerCase();
-    return tag === "input" || tag === "textarea" || tag === "select";
+    if (tag === "input") {
+      return (active as HTMLInputElement).type !== "range";
+    }
+    return tag === "textarea" || tag === "select";
   };
 
   const onKeydown = (event: KeyboardEvent) => {
@@ -154,7 +168,7 @@ export function useAppEventHandlers({
     }
     if ((event.metaKey || event.ctrlKey) && event.key === ",") {
       event.preventDefault();
-      settingsOpen.value = true;
+      openSettings();
     }
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "l") {
       event.preventDefault();
@@ -182,6 +196,28 @@ export function useAppEventHandlers({
     if (event.key === "/") {
       event.preventDefault();
       detailsPanel.value?.focusSearch?.();
+    }
+    if (timeTravelActive.value) {
+      if (event.key === "ArrowLeft" || event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        setTimeTravelIndex(timeTravelIndex.value + 1);
+        return;
+      }
+      if (event.key === "ArrowRight" || event.key.toLowerCase() === "d") {
+        event.preventDefault();
+        setTimeTravelIndex(timeTravelIndex.value - 1);
+        return;
+      }
+      if (event.key === "Home") {
+        event.preventDefault();
+        setTimeTravelIndex(timeTravelMaxIndex.value);
+        return;
+      }
+      if (event.key === "End") {
+        event.preventDefault();
+        setTimeTravelIndex(0);
+        return;
+      }
     }
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -230,6 +266,15 @@ export function useAppEventHandlers({
     });
   };
 
+  const initSettingsListener = async () => {
+    if (settingsUnlisten) {
+      return;
+    }
+    settingsUnlisten = await listen("zann:open-settings", () => {
+      openSettings();
+    });
+  };
+
   onMounted(() => {
     window.addEventListener("keydown", onKeydown);
     window.addEventListener("mousemove", onActivity);
@@ -243,6 +288,7 @@ export function useAppEventHandlers({
     window.addEventListener("blur", handleAltRevealBlur);
     window.addEventListener("beforeunload", onBeforeUnload);
     void initCacheInvalidationListener();
+    void initSettingsListener();
   });
 
   onBeforeUnmount(() => {
@@ -260,6 +306,10 @@ export function useAppEventHandlers({
     if (cacheInvalidationUnlisten) {
       cacheInvalidationUnlisten();
       cacheInvalidationUnlisten = null;
+    }
+    if (settingsUnlisten) {
+      settingsUnlisten();
+      settingsUnlisten = null;
     }
   });
 

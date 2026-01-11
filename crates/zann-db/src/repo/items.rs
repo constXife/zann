@@ -1,4 +1,5 @@
 use super::prelude::*;
+use tracing::{instrument, Span};
 
 pub struct ItemRepo<'a> {
     pool: &'a PgPool,
@@ -9,6 +10,17 @@ impl<'a> ItemRepo<'a> {
         Self { pool }
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, item),
+        fields(
+            item_id = %item.id,
+            vault_id = %item.vault_id,
+            db.system = "postgresql",
+            db.operation = "INSERT",
+            db.query = "items.create"
+        )
+    )]
     pub async fn create(&self, item: &Item) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
@@ -43,9 +55,16 @@ impl<'a> ItemRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(item_id = %id, db.system = "postgresql", db.operation = "SELECT", db.query = "items.get_by_id")
+    )]
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<Item>, sqlx_core::Error> {
         query_as!(
             Item,
@@ -78,6 +97,11 @@ impl<'a> ItemRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(vault_id = %vault_id, path, db.system = "postgresql", db.operation = "SELECT", db.query = "items.get_by_vault_path")
+    )]
     pub async fn get_by_vault_path(
         &self,
         vault_id: Uuid,
@@ -115,6 +139,11 @@ impl<'a> ItemRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(vault_id = %vault_id, include_deleted, db.system = "postgresql", db.operation = "SELECT", db.query = "items.list_by_vault")
+    )]
     pub async fn list_by_vault(
         &self,
         vault_id: Uuid,
@@ -152,9 +181,24 @@ impl<'a> ItemRepo<'a> {
             "#,
             where_clause = where_clause
         );
-        query_as!(Item, &query, vault_id).fetch_all(self.pool).await
+        let items = query_as!(Item, &query, vault_id)
+            .fetch_all(self.pool)
+            .await?;
+        Span::current().record("db.rows", items.len() as i64);
+        Ok(items)
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, item),
+        fields(
+            item_id = %item.id,
+            vault_id = %item.vault_id,
+            db.system = "postgresql",
+            db.operation = "UPDATE",
+            db.query = "items.update"
+        )
+    )]
     pub async fn update(&self, item: &Item) -> Result<u64, sqlx_core::Error> {
         query!(
             r#"
@@ -195,7 +239,11 @@ impl<'a> ItemRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|result| result.rows_affected())
+        .map(|result| {
+            let rows = result.rows_affected();
+            Span::current().record("db.rows", rows as i64);
+            rows
+        })
     }
 }
 
@@ -248,6 +296,17 @@ impl<'a> ItemHistoryRepo<'a> {
         Self { pool }
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, history),
+        fields(
+            history_id = %history.id,
+            item_id = %history.item_id,
+            db.system = "postgresql",
+            db.operation = "INSERT",
+            db.query = "item_history.create"
+        )
+    )]
     pub async fn create(&self, history: &ItemHistory) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
@@ -274,9 +333,16 @@ impl<'a> ItemHistoryRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(history_id = %id, db.system = "postgresql", db.operation = "SELECT", db.query = "item_history.get_by_id")
+    )]
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<ItemHistory>, sqlx_core::Error> {
         query_as!(
             ItemHistory,
@@ -304,6 +370,11 @@ impl<'a> ItemHistoryRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(item_id = %item_id, db.system = "postgresql", db.operation = "SELECT", db.query = "item_history.list_by_item")
+    )]
     pub async fn list_by_item(&self, item_id: Uuid) -> Result<Vec<ItemHistory>, sqlx_core::Error> {
         query_as!(
             ItemHistory,
@@ -330,8 +401,16 @@ impl<'a> ItemHistoryRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
+        .inspect(|history| {
+            Span::current().record("db.rows", history.len() as i64);
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(item_id = %item_id, limit, db.system = "postgresql", db.operation = "SELECT", db.query = "item_history.list_by_item_limit")
+    )]
     pub async fn list_by_item_limit(
         &self,
         item_id: Uuid,
@@ -364,8 +443,16 @@ impl<'a> ItemHistoryRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
+        .inspect(|history| {
+            Span::current().record("db.rows", history.len() as i64);
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(item_id = %item_id, version, db.system = "postgresql", db.operation = "SELECT", db.query = "item_history.get_by_item_version")
+    )]
     pub async fn get_by_item_version(
         &self,
         item_id: Uuid,
@@ -398,6 +485,11 @@ impl<'a> ItemHistoryRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(item_id = %item_id, keep, db.system = "postgresql", db.operation = "DELETE", db.query = "item_history.prune_by_item")
+    )]
     pub async fn prune_by_item(&self, item_id: Uuid, keep: i64) -> Result<u64, sqlx_core::Error> {
         query!(
             r#"
@@ -415,7 +507,11 @@ impl<'a> ItemHistoryRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|result| result.rows_affected())
+        .map(|result| {
+            let rows = result.rows_affected();
+            Span::current().record("db.rows", rows as i64);
+            rows
+        })
     }
 }
 
@@ -428,29 +524,50 @@ impl<'a> AttachmentRepo<'a> {
         Self { pool }
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, attachment),
+        fields(
+            attachment_id = %attachment.id,
+            item_id = %attachment.item_id,
+            db.system = "postgresql",
+            db.operation = "INSERT",
+            db.query = "attachments.create"
+        )
+    )]
     pub async fn create(&self, attachment: &Attachment) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
             INSERT INTO attachments (
-                id, item_id, filename, size, mime_type, content_enc, checksum, storage_url, created_at
+                id, item_id, filename, size, mime_type, enc_mode, content_enc, checksum, storage_url,
+                created_at, deleted_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             "#,
             attachment.id,
             attachment.item_id,
             attachment.filename.as_str(),
             attachment.size,
             attachment.mime_type.as_str(),
+            attachment.enc_mode.as_str(),
             &attachment.content_enc,
             attachment.checksum.as_str(),
             attachment.storage_url.as_deref(),
-            attachment.created_at
+            attachment.created_at,
+            attachment.deleted_at
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(attachment_id = %id, db.system = "postgresql", db.operation = "SELECT", db.query = "attachments.get_by_id")
+    )]
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<Attachment>, sqlx_core::Error> {
         query_as!(
             Attachment,
@@ -461,10 +578,12 @@ impl<'a> AttachmentRepo<'a> {
                 filename,
                 size as "size",
                 mime_type,
+                enc_mode,
                 content_enc,
                 checksum,
                 storage_url,
-                created_at as "created_at"
+                created_at as "created_at",
+                deleted_at as "deleted_at"
             FROM attachments
             WHERE id = $1
             "#,
@@ -474,6 +593,11 @@ impl<'a> AttachmentRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(item_id = %item_id, db.system = "postgresql", db.operation = "SELECT", db.query = "attachments.list_by_item")
+    )]
     pub async fn list_by_item(&self, item_id: Uuid) -> Result<Vec<Attachment>, sqlx_core::Error> {
         query_as!(
             Attachment,
@@ -484,17 +608,98 @@ impl<'a> AttachmentRepo<'a> {
                 filename,
                 size as "size",
                 mime_type,
+                enc_mode,
                 content_enc,
                 checksum,
                 storage_url,
-                created_at as "created_at"
+                created_at as "created_at",
+                deleted_at as "deleted_at"
             FROM attachments
-            WHERE item_id = $1
+            WHERE item_id = $1 AND deleted_at IS NULL
             "#,
             item_id
         )
         .fetch_all(self.pool)
         .await
+        .inspect(|attachments| {
+            Span::current().record("db.rows", attachments.len() as i64);
+        })
+    }
+
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(item_id = %item_id, db.system = "postgresql", db.operation = "UPDATE", db.query = "attachments.mark_deleted_by_item")
+    )]
+    pub async fn mark_deleted_by_item(
+        &self,
+        item_id: Uuid,
+        deleted_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            UPDATE attachments
+            SET deleted_at = $2
+            WHERE item_id = $1 AND deleted_at IS NULL
+            "#,
+            item_id,
+            deleted_at
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| {
+            let rows = result.rows_affected();
+            Span::current().record("db.rows", rows as i64);
+            rows
+        })
+    }
+
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(item_id = %item_id, db.system = "postgresql", db.operation = "UPDATE", db.query = "attachments.clear_deleted_by_item")
+    )]
+    pub async fn clear_deleted_by_item(&self, item_id: Uuid) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            UPDATE attachments
+            SET deleted_at = NULL
+            WHERE item_id = $1
+            "#,
+            item_id
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| {
+            let rows = result.rows_affected();
+            Span::current().record("db.rows", rows as i64);
+            rows
+        })
+    }
+
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(db.system = "postgresql", db.operation = "DELETE", db.query = "attachments.purge_deleted_before")
+    )]
+    pub async fn purge_deleted_before(
+        &self,
+        cutoff: chrono::DateTime<chrono::Utc>,
+    ) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            DELETE FROM attachments
+            WHERE deleted_at IS NOT NULL AND deleted_at < $1
+            "#,
+            cutoff
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| {
+            let rows = result.rows_affected();
+            Span::current().record("db.rows", rows as i64);
+            rows
+        })
     }
 }
 
@@ -507,6 +712,18 @@ impl<'a> ItemConflictRepo<'a> {
         Self { pool }
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self, conflict),
+        fields(
+            conflict_id = %conflict.id,
+            item_id = %conflict.item_id,
+            vault_id = %conflict.vault_id,
+            db.system = "postgresql",
+            db.operation = "INSERT",
+            db.query = "item_conflicts.create"
+        )
+    )]
     pub async fn create(&self, conflict: &ItemConflict) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
@@ -527,9 +744,16 @@ impl<'a> ItemConflictRepo<'a> {
         )
         .execute(self.pool)
         .await
-        .map(|_| ())
+        .map(|result| {
+            Span::current().record("db.rows", result.rows_affected() as i64);
+        })
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(conflict_id = %id, db.system = "postgresql", db.operation = "SELECT", db.query = "item_conflicts.get_by_id")
+    )]
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<ItemConflict>, sqlx_core::Error> {
         query_as!(
             ItemConflict,
@@ -552,6 +776,11 @@ impl<'a> ItemConflictRepo<'a> {
         .await
     }
 
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(vault_id = %vault_id, db.system = "postgresql", db.operation = "SELECT", db.query = "item_conflicts.list_by_vault")
+    )]
     pub async fn list_by_vault(
         &self,
         vault_id: Uuid,
@@ -575,5 +804,8 @@ impl<'a> ItemConflictRepo<'a> {
         )
         .fetch_all(self.pool)
         .await
+        .inspect(|conflicts| {
+            Span::current().record("db.rows", conflicts.len() as i64);
+        })
     }
 }

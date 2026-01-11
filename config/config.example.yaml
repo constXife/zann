@@ -51,6 +51,12 @@ tracing:
     # endpoint: "http://localhost:4318"
     # Optional service name override
     # service_name: "zann-server"
+    # Optional sampling ratio (0.0 - 1.0)
+    # sampling_ratio: 0.1
+    # Optional CA file for OTLP HTTPS
+    # ca_file: "/run/ca/arkham-ca.pem"
+    # Optional: accept invalid TLS certs (not recommended)
+    # insecure: false
 
 metrics:
   enabled: false

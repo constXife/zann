@@ -6,7 +6,8 @@ use zann_core::vault_crypto as core_crypto;
 use zann_core::{EncryptedPayload, ServiceError, ServiceResult};
 
 use crate::local::{
-    LocalItemRepo, LocalPendingChange, LocalVault, LocalVaultRepo, PendingChangeRepo,
+    LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange, LocalVault,
+    LocalVaultRepo, PendingChangeRepo,
 };
 use crate::SqlitePool;
 
@@ -14,6 +15,8 @@ pub struct LocalServices<'a> {
     pool: &'a SqlitePool,
     master_key: &'a SecretKey,
 }
+
+const ITEM_HISTORY_LIMIT: i64 = 5;
 
 impl<'a> LocalServices<'a> {
     fn key_fingerprint(key: &SecretKey) -> String {
@@ -259,6 +262,17 @@ impl<'a> LocalServices<'a> {
         core_crypto::payload_checksum(payload_enc)
     }
 
+    pub(crate) fn payloads_equal(
+        prev: &EncryptedPayload,
+        next: &EncryptedPayload,
+    ) -> Result<bool, ServiceError> {
+        let prev_value = serde_json::to_value(prev)
+            .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
+        let next_value = serde_json::to_value(next)
+            .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
+        Ok(prev_value == next_value)
+    }
+
     pub async fn update_item_by_id(
         &self,
         storage_id: Uuid,
@@ -293,6 +307,11 @@ impl<'a> LocalServices<'a> {
             }
         }
         let prev_version = item.version;
+        let prev_payload_enc = item.payload_enc.clone();
+        let prev_checksum = item.checksum.clone();
+        let prev_payload = self
+            .decrypt_payload(storage_id, item.vault_id, item.id, &item.payload_enc)
+            .await?;
         let now = Utc::now();
         let (payload_enc, key_fp) = self
             .encrypt_payload(storage_id, item.vault_id, item.id, &payload)
@@ -309,6 +328,28 @@ impl<'a> LocalServices<'a> {
         repo.update(&item)
             .await
             .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
+        if !Self::payloads_equal(&prev_payload, &payload)? {
+            let history_repo = LocalItemHistoryRepo::new(self.pool);
+            let history = LocalItemHistory {
+                id: Uuid::now_v7(),
+                storage_id,
+                vault_id: item.vault_id,
+                item_id: item.id,
+                payload_enc: prev_payload_enc,
+                checksum: prev_checksum,
+                version: prev_version,
+                change_type: "update".to_string(),
+                changed_by_email: "local".to_string(),
+                changed_by_name: None,
+                changed_by_device_id: None,
+                changed_by_device_name: None,
+                created_at: now,
+            };
+            let _ = history_repo.create(&history).await;
+            let _ = history_repo
+                .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
+                .await;
+        }
         self.track_pending(
             storage_id,
             LocalPendingChange {
@@ -328,6 +369,89 @@ impl<'a> LocalServices<'a> {
         )
         .await?;
         Ok(item.id)
+    }
+
+    pub async fn restore_item_version(
+        &self,
+        storage_id: Uuid,
+        item_id: Uuid,
+        version: i64,
+    ) -> ServiceResult<()> {
+        let repo = LocalItemRepo::new(self.pool);
+        let Some(mut item) = repo
+            .get_by_id(storage_id, item_id)
+            .await
+            .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?
+        else {
+            return Err(ServiceError::new("item_not_found", "item not found"));
+        };
+
+        let history_repo = LocalItemHistoryRepo::new(self.pool);
+        let history = history_repo
+            .get_by_item_version(storage_id, item_id, version)
+            .await
+            .map_err(|err| ServiceError::new("history_get_failed", err.to_string()))?
+            .ok_or_else(|| ServiceError::new("history_not_found", "history not found"))?;
+
+        if history.checksum == item.checksum {
+            return Err(ServiceError::new("history_no_changes", "no changes"));
+        }
+
+        let prev_version = item.version;
+        let now = Utc::now();
+        let history_snapshot = LocalItemHistory {
+            id: Uuid::now_v7(),
+            storage_id,
+            vault_id: item.vault_id,
+            item_id: item.id,
+            payload_enc: item.payload_enc.clone(),
+            checksum: item.checksum.clone(),
+            version: prev_version,
+            change_type: "restore".to_string(),
+            changed_by_email: "local".to_string(),
+            changed_by_name: None,
+            changed_by_device_id: None,
+            changed_by_device_name: None,
+            created_at: now,
+        };
+        let _ = history_repo.create(&history_snapshot).await;
+        let _ = history_repo
+            .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
+            .await;
+
+        let key = self.payload_key_for_id(storage_id, item.vault_id).await?;
+        let key_fp = Self::key_fingerprint(&key);
+        item.payload_enc = history.payload_enc;
+        item.checksum = history.checksum;
+        item.cache_key_fp = Some(key_fp);
+        item.version = item.version.saturating_add(1);
+        item.updated_at = now;
+        item.deleted_at = None;
+        item.sync_status = "modified".to_string();
+        repo.update(&item)
+            .await
+            .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
+
+        self.track_pending(
+            storage_id,
+            LocalPendingChange {
+                id: Uuid::now_v7(),
+                storage_id,
+                vault_id: item.vault_id,
+                item_id: item.id,
+                operation: "update".to_string(),
+                payload_enc: Some(item.payload_enc.clone()),
+                checksum: Some(item.checksum.clone()),
+                path: Some(item.path.clone()),
+                name: Some(item.name.clone()),
+                type_id: Some(item.type_id.clone()),
+                base_seq: Some(prev_version),
+                created_at: now,
+            },
+        )
+        .await?;
+
+        Ok(())
     }
 
     pub async fn restore_item(&self, storage_id: Uuid, item_id: Uuid) -> ServiceResult<()> {

@@ -9,6 +9,7 @@ const props = defineProps<{
   isEditing: boolean;
   typeMenuOpen: boolean;
   typeOptions: string[];
+  typeGroups: { id: string; label: string; types: string[] }[];
   typeMeta: Record<string, { icon: string }>;
   currentTypeLabel: string;
   currentTypeIcon: string;
@@ -43,6 +44,7 @@ const props = defineProps<{
               class="flex items-center gap-2 rounded-lg bg-[var(--bg-tertiary)] px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
               data-tauri-drag-region="false"
               @click="props.onToggleTypeMenu"
+              data-testid="create-type-menu"
             >
               <CategoryIcon :icon="props.currentTypeIcon" class="h-4 w-4" />
               <span>{{ props.currentTypeLabel }}</span>
@@ -54,17 +56,28 @@ const props = defineProps<{
               v-if="props.typeMenuOpen"
               class="absolute left-0 top-full mt-2 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl z-50"
             >
-              <button
-                v-for="type in props.typeOptions.length ? props.typeOptions : ['login']"
-                :key="type"
-                type="button"
-                class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-[var(--bg-hover)] transition-colors"
-                data-tauri-drag-region="false"
-                @click="props.onSelectType(type)"
+              <template
+                v-for="group in (props.typeGroups.length
+                  ? props.typeGroups
+                  : [{ id: 'default', label: 'Types', types: props.typeOptions.length ? props.typeOptions : ['login'] }])"
+                :key="group.id"
               >
-                <CategoryIcon :icon="props.typeMeta[type]?.icon ?? 'key'" class="h-4 w-4" />
-                <span>{{ props.getTypeLabel(type) }}</span>
-              </button>
+                <div class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                  {{ group.label }}
+                </div>
+                <button
+                  v-for="type in group.types"
+                  :key="type"
+                  type="button"
+                  class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-[var(--bg-hover)] transition-colors"
+                  data-tauri-drag-region="false"
+                  @click="props.onSelectType(type)"
+                  :data-testid="`create-type-${type}`"
+                >
+                  <CategoryIcon :icon="props.typeMeta[type]?.icon ?? 'key'" class="h-4 w-4" />
+                  <span>{{ props.getTypeLabel(type) }}</span>
+                </button>
+              </template>
             </div>
             <div
               v-if="props.typeMenuOpen"
@@ -88,6 +101,7 @@ const props = defineProps<{
             :disabled="props.busy"
             data-tauri-drag-region="false"
             @click="props.onSubmit"
+            data-testid="create-submit"
           >
             <svg
               v-if="props.busy"

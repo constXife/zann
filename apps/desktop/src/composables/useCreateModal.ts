@@ -2,7 +2,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, EncryptedPayload, FieldKind, FieldValue, ItemDetail, VaultSummary } from "../types";
-import { getFieldSchema, getSchemaFieldDefs, type FieldType } from "../data/secretSchemas";
+import { getFieldSchema, getSchemaFieldDefs, resolveSchemaLabel, type FieldType } from "../data/secretSchemas";
 
 type Translator = (key: string) => string;
 
@@ -53,6 +53,19 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   const createVaultError = ref("");
   const createVaultBusy = ref(false);
   const typeOptions = ref<string[]>([]);
+  const defaultTypeOrder = [
+    "login",
+    "card",
+    "note",
+    "identity",
+    "api",
+    "kv",
+    "ssh_key",
+    "database",
+    "cloud_iam",
+    "file_secret",
+    "server_credentials",
+  ];
 
   const currentSchema = computed(() => getFieldSchema(createItemType.value));
 
@@ -84,9 +97,7 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   });
 
   const getFieldLabel = (key: string): string => {
-    const schema = currentSchema.value;
-    const def = [...schema.main, ...schema.advanced].find((d) => d.key === key);
-    return def?.label ?? key;
+    return resolveSchemaLabel(options.t, createItemType.value, key);
   };
 
   const flattenPayload = (payload: EncryptedPayload, typeId: string) => {
@@ -147,6 +158,27 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
 
     return rows;
   };
+
+  const typeGroups = computed(() => {
+    const available = new Set(typeOptions.value.length ? typeOptions.value : defaultTypeOrder);
+    const groups = [
+      {
+        id: "infra",
+        label: options.t("create.typeGroupInfra"),
+        types: ["ssh_key", "database", "cloud_iam", "file_secret", "server_credentials"].filter(
+          (typeId) => available.has(typeId),
+        ),
+      },
+      {
+        id: "core",
+        label: options.t("create.typeGroupGeneral"),
+        types: ["login", "card", "note", "identity", "api", "kv"].filter((typeId) =>
+          available.has(typeId),
+        ),
+      },
+    ];
+    return groups.filter((group) => group.types.length > 0);
+  });
 
   const addCustomField = (isSecret: boolean) => {
     createItemFields.value = [
@@ -215,6 +247,23 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
               isSecret: false,
             },
           ];
+      return;
+    }
+
+    if (typeId === "file_secret") {
+      const notesDef = allSchemaDefs.find((def) => def.key === "notes");
+      createItemFields.value = notesDef
+        ? [
+            {
+              id: prev[notesDef.key]?.id ?? nextFieldId(),
+              key: notesDef.key,
+              value: prev[notesDef.key]?.value ?? "",
+              fieldType: notesDef.type,
+              isCustom: false,
+              isSecret: false,
+            },
+          ]
+        : [];
       return;
     }
 
@@ -311,7 +360,7 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createModalOpen.value = true;
   };
 
-  const openEditItem = async () => {
+  const openEditItem = async (payloadOverride?: EncryptedPayload) => {
     if (!options.selectedItem.value) {
       return;
     }
@@ -328,8 +377,9 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     advancedOpen.value = false;
     kvFilter.value = "";
     await loadTypeOptions();
+    const payloadSource = payloadOverride ?? options.selectedItem.value.payload;
     createItemFields.value = flattenPayload(
-      options.selectedItem.value.payload,
+      payloadSource,
       options.selectedItem.value.type_id,
     );
     createItemError.value = "";
@@ -602,6 +652,7 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createVaultError,
     createVaultBusy,
     typeOptions,
+    typeGroups,
     currentSchema,
     mainFields,
     advancedFields,

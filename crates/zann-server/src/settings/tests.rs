@@ -24,6 +24,9 @@ fn clear_pepper_env() {
 fn clear_metrics_env() {
     env::remove_var("ZANN_ENV");
     env::remove_var("ZANN_ALLOW_METRICS_DEBUG");
+    env::remove_var("ZANN_METRICS_ENABLED");
+    env::remove_var("ZANN_METRICS_ENDPOINT");
+    env::remove_var("ZANN_METRICS_PROFILE");
     env::remove_var("ZANN_SMK");
 }
 
@@ -264,6 +267,7 @@ fn tracing_otel_config_parses() {
     enabled: true
     endpoint: "http://tempo:4318"
     service_name: "zann-server"
+    sampling_ratio: 0.25
 "#,
     );
 
@@ -277,4 +281,5 @@ fn tracing_otel_config_parses() {
         settings.config.tracing.otel.service_name.as_deref(),
         Some("zann-server")
     );
+    assert_eq!(settings.config.tracing.otel.sampling_ratio, Some(0.25));
 }

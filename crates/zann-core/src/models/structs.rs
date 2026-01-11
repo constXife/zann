@@ -204,10 +204,12 @@ pub struct Attachment {
     pub filename: String,
     pub size: i64,
     pub mime_type: String,
+    pub enc_mode: String,
     pub content_enc: Vec<u8>,
     pub checksum: String,
     pub storage_url: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

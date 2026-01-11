@@ -9,7 +9,7 @@ use tracing::warn;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
 
-use crate::config::{AuthMode, InternalRegistration, MasterKeyMode, ServerConfig};
+use crate::config::{AuthMode, InternalRegistration, MasterKeyMode, MetricsProfile, ServerConfig};
 use crate::domains::access_control::policies::PolicySet;
 use crate::domains::secrets::policies::{
     default_policy, default_policy_name, PasswordPolicy, SecretPoliciesFile,
@@ -99,6 +99,106 @@ pub(super) fn apply_auth_env_overrides(config: &mut ServerConfig) {
     }
 }
 
+pub(super) fn apply_tracing_env_overrides(config: &mut ServerConfig) {
+    if let Ok(value) = env::var("ZANN_TRACING_OTEL_ENABLED") {
+        if let Some(enabled) = parse_bool(&value) {
+            config.tracing.otel.enabled = enabled;
+        } else {
+            warn!(
+                event = "config_invalid",
+                field = "ZANN_TRACING_OTEL_ENABLED",
+                value = %value
+            );
+        }
+    }
+    if let Ok(value) = env::var("ZANN_TRACING_OTEL_ENDPOINT") {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            config.tracing.otel.endpoint = None;
+        } else {
+            config.tracing.otel.endpoint = Some(trimmed.to_string());
+        }
+    }
+    if let Ok(value) = env::var("ZANN_TRACING_OTEL_SERVICE_NAME") {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            config.tracing.otel.service_name = None;
+        } else {
+            config.tracing.otel.service_name = Some(trimmed.to_string());
+        }
+    }
+    if let Ok(value) = env::var("ZANN_TRACING_OTEL_SAMPLING_RATIO") {
+        match value.trim().parse::<f64>() {
+            Ok(ratio) => {
+                config.tracing.otel.sampling_ratio = Some(ratio);
+            }
+            Err(_) => {
+                warn!(
+                    event = "config_invalid",
+                    field = "ZANN_TRACING_OTEL_SAMPLING_RATIO",
+                    value = %value
+                );
+            }
+        }
+    }
+    if let Ok(value) = env::var("ZANN_TRACING_OTEL_CA_FILE") {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            config.tracing.otel.ca_file = None;
+        } else {
+            config.tracing.otel.ca_file = Some(trimmed.to_string());
+        }
+    }
+    if let Ok(value) = env::var("ZANN_TRACING_OTEL_INSECURE") {
+        if let Some(insecure) = parse_bool(&value) {
+            config.tracing.otel.insecure = Some(insecure);
+        } else {
+            warn!(
+                event = "config_invalid",
+                field = "ZANN_TRACING_OTEL_INSECURE",
+                value = %value
+            );
+        }
+    }
+}
+
+pub(super) fn apply_metrics_env_overrides(config: &mut ServerConfig) {
+    if let Ok(value) = env::var("ZANN_METRICS_ENABLED") {
+        if let Some(enabled) = parse_bool(&value) {
+            config.metrics.enabled = enabled;
+        } else {
+            warn!(
+                event = "config_invalid",
+                field = "ZANN_METRICS_ENABLED",
+                value = %value
+            );
+        }
+    }
+    if let Ok(value) = env::var("ZANN_METRICS_ENDPOINT") {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            warn!(
+                event = "config_invalid",
+                field = "ZANN_METRICS_ENDPOINT",
+                value = %value
+            );
+        } else {
+            config.metrics.endpoint = trimmed.to_string();
+        }
+    }
+    if let Ok(value) = env::var("ZANN_METRICS_PROFILE") {
+        if let Some(profile) = parse_metrics_profile(&value) {
+            config.metrics.profile = Some(profile);
+        } else {
+            warn!(
+                event = "config_invalid",
+                field = "ZANN_METRICS_PROFILE",
+                value = %value
+            );
+        }
+    }
+}
+
 fn parse_bool(value: &str) -> Option<bool> {
     match value.trim().to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Some(true),
@@ -124,6 +224,15 @@ fn parse_internal_registration(value: &str) -> Option<InternalRegistration> {
     match normalize_enum(value).as_str() {
         "open" => Some(InternalRegistration::Open),
         "disabled" => Some(InternalRegistration::Disabled),
+        _ => None,
+    }
+}
+
+fn parse_metrics_profile(value: &str) -> Option<MetricsProfile> {
+    match normalize_enum(value).as_str() {
+        "prod" | "production" => Some(MetricsProfile::Prod),
+        "staging" => Some(MetricsProfile::Staging),
+        "debug" => Some(MetricsProfile::Debug),
         _ => None,
     }
 }
@@ -297,15 +406,26 @@ fn write_secret_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
 }
 
 pub(super) fn load_policies(config: &ServerConfig) -> Result<PolicySet, String> {
-    let Some(path) = config.policy.file.as_deref() else {
-        return Err("policy file not configured".to_string());
-    };
+    let fallback_paths = [
+        "/config/policies.default.yaml",
+        "config/policies.default.yaml",
+    ];
+    let configured = config.policy.file.as_deref();
+    let path = configured
+        .map(str::to_string)
+        .or_else(|| {
+            fallback_paths
+                .iter()
+                .find(|candidate| Path::new(candidate).exists())
+                .map(|candidate| candidate.to_string())
+        })
+        .ok_or_else(|| "policy file not configured".to_string())?;
 
-    if !Path::new(path).exists() {
+    if !Path::new(&path).exists() {
         return Err(format!("policy file not found: {path}"));
     }
 
-    let contents = fs::read_to_string(path).map_err(|err| {
+    let contents = fs::read_to_string(&path).map_err(|err| {
         warn!(event = "policy_read_failed", path, error = %err);
         format!("policy file read failed: {err}")
     })?;

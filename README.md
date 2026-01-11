@@ -43,6 +43,7 @@ Notes:
 - Personal vaults: client-side encryption only
 - Shared vaults: server-side encryption for team workflows
 - Server sees metadata; only shared vault contents are readable server-side
+- File secrets (MVP): stored as attachments in server DB. `personal` uses opaque ciphertext only; `shared` supports `plain` or `opaque` representations.
 
 Threat model for server: `crates/zann-server/SECURITY.md`
 
@@ -79,6 +80,27 @@ Notes:
 - Pinning means the CLI trusts only the expected fingerprint
 - `#field` is optional (defaults to `password`)
 - Secrets override existing env vars with the same name
+- File secrets are not yet supported in the CLI; use the API (`POST/GET /v1/vaults/:vault_id/items/:item_id/file` with `representation=plain|opaque`).
+- Default server `max_body_bytes` is 16MB; adjust if you need larger file uploads.
+
+File upload/download API (shared vault example):
+
+Notes:
+- Shared uploads require `payload.extra.file_id` and `payload.extra.upload_state=pending` on the item; otherwise the upload returns `upload_state_invalid`, `file_id_missing`, or `file_id_mismatch`.
+
+```bash
+curl -X POST \
+  "https://zann.company.com/v1/vaults/$VAULT_ID/items/$ITEM_ID/file?representation=plain&file_id=$FILE_ID" \
+  -H "Authorization: Bearer $ZANN_SERVICE_TOKEN" \
+  -H "Content-Type: application/pdf" \
+  --data-binary @document.pdf
+
+curl -X GET \
+  "https://zann.company.com/v1/vaults/$VAULT_ID/items/$ITEM_ID/file?representation=plain" \
+  -H "Authorization: Bearer $ZANN_SERVICE_TOKEN" \
+  -o document.pdf
+```
+
 
 ## Operations
 
@@ -105,6 +127,171 @@ cargo install sqlx-cli --no-default-features --features postgres
 
 - Sentry: set `sentry.enabled` and `sentry.dsn` in config
 - Metrics: set `metrics.enabled` and expose `metrics.endpoint` (Prometheus/VictoriaMetrics)
+
+## Load testing (k6)
+
+Local/dev only. Example test user:
+- email: `loadtest.admin@local.test`
+- password: `Loadtest123!`
+
+Highload env overrides:
+- Copy `.env.highload.example` to `.env.highload` (used by `compose.loadtest.yaml`).
+- Copy `compose.loadtest.example.yaml` to `compose.loadtest.yaml` for local/infra-specific overrides.
+- If your OTLP endpoint uses a private CA, mount the CA in `compose.loadtest.yaml` and set `ZANN_TRACING_OTEL_CA_FILE`.
+
+Reset and provision the loadtest database (drops the loadtest volume by default).
+This uses a dedicated compose project name (`zann_loadtest`) so it won't affect the main stack:
+
+```bash
+./loadtest/reset_db.sh
+```
+
+Full reset (stop everything and drop volumes) for the loadtest stack:
+
+```bash
+podman compose -p zann_loadtest -f compose.yaml -f compose.loadtest.yaml down -v
+```
+
+Skip the reset step if you only want to re-provision:
+
+```bash
+ZANN_LOADTEST_RESET_DB=0 ./loadtest/reset_db.sh
+```
+
+Create user (once) and fetch an access token:
+
+```bash
+curl -s http://localhost:18080/v1/auth/register \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"loadtest.admin@local.test","password":"Loadtest123!","device_name":"k6"}' \
+  | jq -r .access_token
+```
+
+If the user already exists, login instead:
+
+```bash
+curl -s http://localhost:18080/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"loadtest.admin@local.test","password":"Loadtest123!","device_name":"k6"}' \
+  | jq -r .access_token
+```
+
+Run k6:
+
+```bash
+ZANN_BASE_URL=http://localhost:18080 \
+ZANN_ACCESS_TOKEN=$(curl -s http://localhost:18080/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"loadtest.admin@local.test","password":"Loadtest123!","device_name":"k6"}' \
+  | jq -r .access_token) \
+k6 run loadtest/k6/zann_smoke.js
+```
+
+Morning sync (500 VUs by default, configurable):
+
+```bash
+ZANN_SERVICE_ACCOUNT_TOKEN="$(cat ./loadtest/data/loadtest_sa_token)" \
+ZANN_BASE_URL=http://localhost:18080 \
+ZANN_PEAK_VUS=500 \
+ZANN_HOLD_DURATION=5m \
+k6 run loadtest/k6/zann_morning_sync.js
+```
+
+Loadtest env shortcut (optional):
+
+```bash
+cp loadtest/.env.k6.example loadtest/.env.k6
+```
+
+Then run morning sync with reset + metrics:
+
+```bash
+./loadtest/run_morning.sh
+```
+
+Morning sync with resource watchdog (VictoriaMetrics instant queries):
+
+```bash
+ZANN_SERVICE_ACCOUNT_TOKEN="$(cat ./loadtest/data/loadtest_sa_token)" \
+ZANN_BASE_URL=http://localhost:18080 \
+ZANN_PEAK_VUS=500 \
+ZANN_HOLD_DURATION=5m \
+VM_URL=https://vm.arkham.void \
+CPU_QUERY='avg(rate(process_cpu_seconds_total{env="loadtest"}[1m]))' \
+MEM_QUERY='max(process_resident_memory_bytes{env="loadtest"})' \
+ZANN_MEM_LIMIT_BYTES=1000000000 \
+ZANN_CPU_LIMIT=0.85 \
+k6 run \
+  --tag job=k6 \
+  --tag env=loadtest \
+  --tag instance=desktop \
+  --tag test=zann_morning_sync \
+  loadtest/k6/zann_morning_sync.js
+```
+
+Low-load sanity (CPU/mem guardrails; good for regression checks):
+
+```bash
+ZANN_SERVICE_ACCOUNT_TOKEN="$(cat ./loadtest/data/loadtest_sa_token)" \
+ZANN_BASE_URL=http://localhost:18080 \
+VM_URL=https://vm.arkham.void \
+CPU_QUERY='avg(rate(process_cpu_seconds_total{env="loadtest"}[1m]))' \
+MEM_QUERY='max(process_resident_memory_bytes{env="loadtest"})' \
+ZANN_MEM_LIMIT_BYTES=500000000 \
+ZANN_CPU_LIMIT=0.3 \
+k6 run \
+  --tag job=k6 \
+  --tag env=loadtest \
+  --tag instance=desktop \
+  --tag test=zann_sanity_lowload \
+  loadtest/k6/zann_sanity_lowload.js
+```
+
+Morning sync with remote_write metrics:
+
+```bash
+ZANN_SERVICE_ACCOUNT_TOKEN="$(cat ./loadtest/data/loadtest_sa_token)" \
+ZANN_BASE_URL=http://localhost:18080 \
+ZANN_PEAK_VUS=500 \
+ZANN_HOLD_DURATION=5m \
+K6_PROMETHEUS_RW_SERVER_URL=https://vm.arkham.void/api/v1/write \
+K6_PROMETHEUS_RW_PUSH_INTERVAL=1s \
+k6 run -o experimental-prometheus-rw \
+  --tag job=k6 \
+  --tag env=loadtest \
+  --tag instance=desktop \
+  --tag test=zann_morning_sync \
+  loadtest/k6/zann_morning_sync.js
+```
+
+Custom stages (JSON array):
+
+```bash
+ZANN_SERVICE_ACCOUNT_TOKEN="$(cat ./loadtest/data/loadtest_sa_token)" \
+ZANN_BASE_URL=http://localhost:18080 \
+K6_STAGES='[{"duration":"1m","target":200},{"duration":"3m","target":500},{"duration":"1m","target":0}]' \
+k6 run loadtest/k6/zann_morning_sync.js
+```
+
+Send k6 metrics to VictoriaMetrics (remote_write):
+
+```bash
+ZANN_BASE_URL=http://localhost:18080 \
+ZANN_ACCESS_TOKEN=$(curl -s http://localhost:18080/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"loadtest.admin@local.test","password":"Loadtest123!","device_name":"k6"}' \
+  | jq -r .access_token) \
+K6_PROMETHEUS_RW_SERVER_URL=https://vm.arkham.void/api/v1/write \
+K6_PROMETHEUS_RW_PUSH_INTERVAL=1s \
+k6 run -o experimental-prometheus-rw \
+  --tag job=k6 \
+  --tag env=loadtest \
+  --tag instance=desktop \
+  --tag test=zann_smoke \
+  loadtest/k6/zann_smoke.js
+```
+
+E2E tests can reuse the same user/token approach; just keep a dedicated account and clean test data.
 
 ## Dev workflow
 

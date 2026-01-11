@@ -17,6 +17,7 @@ pub(crate) async fn handle_item(
             print_json_response(response).await?;
         }
         ItemCommand::Create(args) => {
+            ensure_type_supported(&args.type_id)?;
             let payload = build_create_payload(
                 args.path,
                 args.name,
@@ -30,6 +31,7 @@ pub(crate) async fn handle_item(
             print_json_response(response).await?;
         }
         ItemCommand::Ensure(args) => {
+            ensure_type_supported(&args.type_id)?;
             let response = list_items(ctx, &args.vault_id).await?;
             if !response.status().is_success() {
                 let status = response.status();
@@ -64,6 +66,9 @@ pub(crate) async fn handle_item(
             print_json_response(response).await?;
         }
         ItemCommand::Update(args) => {
+            if let Some(type_id) = args.type_id.as_deref() {
+                ensure_type_supported(type_id)?;
+            }
             let payload_enc = match args.payload_base64 {
                 Some(value) => Some(parse_base64(&value)?),
                 None => None,
@@ -94,6 +99,13 @@ pub(crate) async fn handle_item(
             let response = delete_item(ctx, &args.vault_id, &args.item_id).await?;
             print_empty_response(response, "Item deleted").await?;
         }
+    }
+    Ok(())
+}
+
+fn ensure_type_supported(type_id: &str) -> anyhow::Result<()> {
+    if type_id == "file_secret" {
+        anyhow::bail!("file_secret is not supported in the CLI; use the desktop app or API");
     }
     Ok(())
 }

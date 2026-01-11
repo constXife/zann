@@ -36,6 +36,7 @@ const props = defineProps<{
   advancedFields: FieldInput[];
   customFields: FieldInput[];
   typeOptions: string[];
+  typeGroups: { id: string; label: string; types: string[] }[];
   createVaultError: string;
   createItemError: string;
   createItemErrorKey: string;
@@ -129,6 +130,7 @@ const {
   showFolderSuggestions,
   vaults: props.vaults,
   typeOptions: props.typeOptions,
+  typeGroups: props.typeGroups,
   revealedFields: props.revealedFields,
   t,
   buildPayload: props.buildPayload,
@@ -154,6 +156,7 @@ const {
       :is-editing="Boolean(props.createEditingItemId)"
       :type-menu-open="typeMenuOpen"
       :type-options="typeOptions"
+      :type-groups="typeGroups"
       :type-meta="typeMeta"
       :current-type-label="currentTypeLabel"
       :current-type-icon="currentTypeIcon"
@@ -189,6 +192,7 @@ const {
                 :placeholder="t('create.itemFolderPlaceholder')"
                 :suggestions="filteredPathSuggestions"
                 :has-error="props.createItemErrorKey === 'vault_required'"
+                input-test-id="create-path"
                 @focus="showFolderSuggestions = true"
                 @blur="scheduleHideFolderSuggestions"
                 @keydown="handlePathKeydown"
@@ -213,6 +217,7 @@ const {
             class="mt-6 w-full -ml-2 rounded-lg border-none bg-transparent px-2 py-1 text-3xl font-bold tracking-tight text-[var(--text-primary)] placeholder-[var(--text-secondary)] transition-colors hover:bg-zinc-800/50 focus:bg-zinc-900/80 focus:outline-none"
             :class="props.createItemErrorKey === 'name_required' ? 'bg-category-security/10 ring-2 ring-category-security/40' : ''"
             :placeholder="t('create.itemTitlePlaceholderPanel')"
+            data-testid="create-name"
           />
           <span
             v-if="props.createItemErrorKey === 'name_required'"
@@ -222,14 +227,15 @@ const {
           </span>
         </div>
 
-        <CreateModalHeader
-          v-else
-          :create-mode="createMode"
-          :is-editing="Boolean(props.createEditingItemId)"
-          :type-menu-open="typeMenuOpen"
-          :copy-menu-open="copyMenuOpen"
-          :type-options="typeOptions"
-          :type-meta="typeMeta"
+    <CreateModalHeader
+      v-else
+      :create-mode="createMode"
+      :is-editing="Boolean(props.createEditingItemId)"
+      :type-menu-open="typeMenuOpen"
+      :copy-menu-open="copyMenuOpen"
+      :type-options="typeOptions"
+      :type-groups="typeGroups"
+      :type-meta="typeMeta"
           :current-type-label="currentTypeLabel"
           :current-type-icon="currentTypeIcon"
           :get-type-label="getTypeLabel"
@@ -304,6 +310,7 @@ const {
                 :placeholder="t('create.itemTitlePlaceholder')"
                 :suggestions="filteredPathSuggestions"
                 :has-error="['name_required', 'vault_required'].includes(props.createItemErrorKey)"
+                input-test-id="create-path"
                 @focus="showFolderSuggestions = true"
                 @blur="scheduleHideFolderSuggestions"
                 @keydown="handlePathKeydown"

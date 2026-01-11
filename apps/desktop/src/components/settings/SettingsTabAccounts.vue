@@ -21,6 +21,7 @@ const props = defineProps<{
   onAddServer: () => void;
   onCreateLocalVault: () => void;
   onSyncNow: (storageId: string) => Promise<void>;
+  onResetSyncCursor: (storageId: string) => Promise<void>;
 }>();
 
 const localInfo = ref<StorageInfo | null>(null);
@@ -31,6 +32,7 @@ const showClearDataModal = ref(false);
 const showFactoryResetModal = ref(false);
 const showSignOutModal = ref<string | null>(null);
 const showRemoveModal = ref<string | null>(null);
+const showResetCursorModal = ref<string | null>(null);
 
 const clearDataRemoteCache = ref(true);
 const clearDataRemoveConnections = ref(false);
@@ -139,6 +141,13 @@ const handleRemove = async (storageId: string) => {
   busy.value = false;
   showRemoveModal.value = null;
 };
+
+const handleResetCursor = async (storageId: string) => {
+  busy.value = true;
+  await props.onResetSyncCursor(storageId);
+  busy.value = false;
+  showResetCursorModal.value = null;
+};
 </script>
 
 <template>
@@ -208,6 +217,13 @@ const handleRemove = async (storageId: string) => {
                 @click="onSyncNow(storage.id)"
               >
                 {{ t("settings.accounts.syncNow") }}
+              </button>
+              <button
+                type="button"
+                class="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors"
+                @click="showResetCursorModal = storage.id"
+              >
+                {{ t("settings.accounts.resetSyncCursor") }}
               </button>
               <button
                 type="button"
@@ -510,6 +526,46 @@ const handleRemove = async (storageId: string) => {
             @click="handleRemove(showRemoveModal)"
           >
             {{ t("settings.accounts.remove") }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reset Sync Cursor Modal -->
+    <div
+      v-if="showResetCursorModal"
+      class="fixed inset-0 flex items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-xl z-[120]"
+      @click.self="showResetCursorModal = null"
+    >
+      <div class="w-full max-w-md rounded-xl bg-[var(--bg-secondary)] p-6 shadow-2xl">
+        <div class="flex items-center gap-3 mb-4">
+          <div class="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/20">
+            <svg class="h-5 w-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h3 class="text-lg font-semibold">{{ t("settings.accounts.resetSyncCursor") }}</h3>
+        </div>
+
+        <p class="text-sm text-[var(--text-secondary)] mb-4">
+          {{ t("settings.accounts.resetSyncCursorDesc") }}
+        </p>
+
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-lg px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
+            @click="showResetCursorModal = null"
+          >
+            {{ t("common.cancel") }}
+          </button>
+          <button
+            type="button"
+            class="rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+            :disabled="busy"
+            @click="handleResetCursor(showResetCursorModal)"
+          >
+            {{ t("settings.accounts.resetSyncCursor") }}
           </button>
         </div>
       </div>

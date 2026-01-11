@@ -21,7 +21,7 @@ pub struct ServerConfig {
     pub tracing: TracingConfig,
 }
 
-pub const DEFAULT_MAX_BODY_BYTES: usize = 2 * 1024 * 1024;
+pub const DEFAULT_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_MAX_CLOCK_SKEW_SECONDS: i64 = 300;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +32,8 @@ pub struct ServerRuntimeConfig {
     pub max_clock_skew_seconds: i64,
     #[serde(default = "default_true")]
     pub personal_vaults_enabled: bool,
+    #[serde(default = "default_attachments_gc_grace_days")]
+    pub attachments_gc_grace_days: i64,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
@@ -52,6 +54,7 @@ impl Default for ServerRuntimeConfig {
             max_body_bytes: default_max_body_bytes(),
             max_clock_skew_seconds: default_max_clock_skew_seconds(),
             personal_vaults_enabled: default_true(),
+            attachments_gc_grace_days: default_attachments_gc_grace_days(),
             name: None,
             fingerprint: None,
             master_key: None,
@@ -276,6 +279,12 @@ pub struct OtelConfig {
     pub endpoint: Option<String>,
     #[serde(default)]
     pub service_name: Option<String>,
+    #[serde(default)]
+    pub sampling_ratio: Option<f64>,
+    #[serde(default)]
+    pub ca_file: Option<String>,
+    #[serde(default)]
+    pub insecure: Option<bool>,
 }
 
 const fn default_true() -> bool {
@@ -324,4 +333,8 @@ const fn default_max_body_bytes() -> usize {
 
 const fn default_max_clock_skew_seconds() -> i64 {
     DEFAULT_MAX_CLOCK_SKEW_SECONDS
+}
+
+const fn default_attachments_gc_grace_days() -> i64 {
+    30
 }

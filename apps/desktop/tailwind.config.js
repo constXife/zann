@@ -51,6 +51,12 @@ export default {
           identity: "#5856D6",
           api: "#00C7BE",
           kv: "#64D2FF",
+          infra: "#34C759",
+          ssh_key: "#34C759",
+          database: "#34C759",
+          cloud_iam: "#34C759",
+          file_secret: "#34C759",
+          server_credentials: "#34C759",
           security: "#FF3B30",
         },
         apple: {

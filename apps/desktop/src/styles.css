@@ -90,4 +90,15 @@
     background: var(--accent);
     color: white;
   }
+
+  html[data-e2e="true"] {
+    scroll-behavior: auto;
+  }
+
+  html[data-e2e="true"] *,
+  html[data-e2e="true"] *::before,
+  html[data-e2e="true"] *::after {
+    animation: none !important;
+    transition: none !important;
+  }
 }

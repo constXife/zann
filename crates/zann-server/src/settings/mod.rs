@@ -73,6 +73,8 @@ impl Settings {
             env::var("ZANN_CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
         let mut config = env_config::load_config(&config_path);
         env_config::apply_auth_env_overrides(&mut config);
+        env_config::apply_tracing_env_overrides(&mut config);
+        env_config::apply_metrics_env_overrides(&mut config);
         let (password_pepper, token_pepper) = if require_pepper {
             let password_pepper = match env_config::load_secret_env_or_file(
                 "ZANN_PASSWORD_PEPPER",
@@ -176,18 +178,24 @@ pub fn preflight(settings: &Settings) -> Result<(), Vec<String>> {
         missing.push(err);
     }
     if let Ok(path) = env::var("ZANN_SMK_FILE") {
-        if let Err(err) = env_config::check_key_file_permissions(&path) {
-            missing.push(err);
+        if std::path::Path::new(&path).exists() {
+            if let Err(err) = env_config::check_key_file_permissions(&path) {
+                missing.push(err);
+            }
         }
     }
     if let Ok(path) = env::var("ZANN_MASTER_KEY_FILE") {
-        if let Err(err) = env_config::check_key_file_permissions(&path) {
-            missing.push(err);
+        if std::path::Path::new(&path).exists() {
+            if let Err(err) = env_config::check_key_file_permissions(&path) {
+                missing.push(err);
+            }
         }
     }
     if let Some(path) = settings.config.server.master_key_file.as_deref() {
-        if let Err(err) = env_config::check_key_file_permissions(path) {
-            missing.push(err);
+        if std::path::Path::new(path).exists() {
+            if let Err(err) = env_config::check_key_file_permissions(path) {
+                missing.push(err);
+            }
         }
     }
     if let Some(err) = validate_trusted_proxies(settings) {

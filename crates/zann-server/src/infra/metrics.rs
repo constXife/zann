@@ -235,6 +235,24 @@ static DB_POOL_CONNECTIONS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
     )
 });
 
+pub fn warmup() {
+    let _ = &*AUTH_LOGINS;
+    let _ = &*AUTH_REGISTERS;
+    let _ = &*OIDC_JWKS_FETCH;
+    let _ = &*AUTH_TOKENS_ISSUED;
+    let _ = &*HTTP_IN_FLIGHT;
+    let _ = &*HTTP_REQUESTS;
+    let _ = &*HTTP_REQUESTS_BY_STATUS;
+    let _ = &*HTTP_LATENCY;
+    let _ = &*HTTP_LATENCY_BY_STATUS;
+    let _ = &*KDF_WAIT_SECONDS;
+    let _ = &*KDF_IN_FLIGHT;
+    let _ = &*FORBIDDEN_ACCESS;
+    let _ = &*SECRETS_OPS;
+    let _ = &*SECRETS_LATENCY;
+    let _ = &*DB_POOL_CONNECTIONS;
+}
+
 pub fn auth_login(result: &str, method: &str) {
     AUTH_LOGINS.with_label_values(&[result, method]).inc();
 }

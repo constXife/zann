@@ -1,10 +1,75 @@
 mod client_workflow_support;
 mod support;
 
+use serde_json::json;
 use uuid::Uuid;
 
 use client_workflow_support::{key_fingerprint, login_payload, LocalClient, TestApp};
 use zann_core::ItemsService;
+
+async fn create_item(
+    app: &TestApp,
+    token: &str,
+    vault_id: &str,
+    password: &str,
+) -> serde_json::Value {
+    let payload = json!({
+        "path": "login",
+        "name": "login",
+        "type_id": "login",
+        "payload": {
+            "v": 1,
+            "typeId": "login",
+            "fields": {
+                "password": { "kind": "password", "value": password }
+            }
+        }
+    });
+    let (status, json) = app
+        .send_json(
+            axum::http::Method::POST,
+            &format!("/v1/vaults/{}/items", vault_id),
+            Some(token),
+            payload,
+        )
+        .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::CREATED,
+        "create item failed: {:?}",
+        json
+    );
+    json
+}
+
+async fn update_item(app: &TestApp, token: &str, vault_id: &str, item_id: &str, password: &str) {
+    let payload = json!({
+        "path": "login",
+        "name": "login",
+        "type_id": "login",
+        "payload": {
+            "v": 1,
+            "typeId": "login",
+            "fields": {
+                "password": { "kind": "password", "value": password }
+            }
+        }
+    });
+    let (status, json) = app
+        .send_json(
+            axum::http::Method::PUT,
+            &format!("/v1/vaults/{}/items/{}", vault_id, item_id),
+            Some(token),
+            payload,
+        )
+        .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "update item failed: {:?}",
+        json
+    );
+}
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
@@ -202,6 +267,53 @@ async fn shared_vault_membership_allows_second_user_sync() {
     assert_eq!(
         payload.fields["password"].value, "pw-b",
         "member update should sync back"
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn shared_sync_includes_plaintext_history_tail() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("shared-sync-history@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app.create_shared_vault(token, "shared-sync-history").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    let item = create_item(&app, token, vault_id, "pw-1").await;
+    let item_id = item["id"].as_str().expect("item id");
+
+    update_item(&app, token, vault_id, item_id, "pw-2").await;
+    update_item(&app, token, vault_id, item_id, "pw-3").await;
+
+    let (status, json) = app
+        .send_json(
+            axum::http::Method::POST,
+            "/v1/sync/shared/pull",
+            Some(token),
+            json!({ "vault_id": vault_id, "cursor": null, "limit": 100 }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        axum::http::StatusCode::OK,
+        "shared sync pull failed: {:?}",
+        json
+    );
+    let changes = json["changes"].as_array().expect("changes");
+    let change = changes
+        .iter()
+        .find(|entry| entry["item_id"].as_str() == Some(item_id))
+        .expect("item change");
+    let history = change["history"].as_array().expect("history");
+    assert!(!history.is_empty(), "history should be included");
+    let payload = &history[0]["payload"];
+    let password = payload["fields"]["password"]["value"].as_str();
+    assert_eq!(
+        password,
+        Some("pw-2"),
+        "shared history should include plaintext payload"
     );
 }
 

@@ -107,6 +107,7 @@ watch(
             spellcheck="false"
             class="min-w-0 w-full rounded bg-[var(--bg-secondary)] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
             :placeholder="props.t('create.fieldKeyPlaceholder')"
+            :data-testid="`kv-key-${idx}`"
           />
           <input
             v-model="field.value"
@@ -119,6 +120,7 @@ watch(
             :placeholder="props.t('create.fieldValuePlaceholder')"
             @focus="setFocusReveal(field.id, true)"
             @blur="setFocusReveal(field.id, false)"
+            :data-testid="`kv-value-${idx}`"
           />
         </div>
         <div class="relative flex items-center justify-center text-[var(--text-secondary)] w-10">

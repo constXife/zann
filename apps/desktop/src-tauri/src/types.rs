@@ -187,6 +187,18 @@ pub struct SyncPullResponse {
 
 #[allow(dead_code)]
 #[derive(Deserialize)]
+pub struct SyncHistoryEntry {
+    pub version: i64,
+    pub checksum: String,
+    pub change_type: String,
+    pub changed_by_name: Option<String>,
+    pub changed_by_email: String,
+    pub created_at: String,
+    pub payload_enc: Vec<u8>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
 pub struct SyncPullChange {
     pub item_id: String,
     pub operation: String,
@@ -197,6 +209,8 @@ pub struct SyncPullChange {
     pub path: String,
     pub name: String,
     pub type_id: String,
+    #[serde(default)]
+    pub history: Vec<SyncHistoryEntry>,
 }
 
 #[derive(Deserialize)]
@@ -220,6 +234,20 @@ pub struct SyncSharedPullChange {
     pub path: String,
     pub name: String,
     pub type_id: String,
+    #[serde(default)]
+    pub history: Vec<SyncSharedHistoryEntry>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+pub struct SyncSharedHistoryEntry {
+    pub version: i64,
+    pub checksum: String,
+    pub change_type: String,
+    pub changed_by_name: Option<String>,
+    pub changed_by_email: String,
+    pub created_at: String,
+    pub payload: serde_json::Value,
 }
 
 #[derive(Serialize)]
@@ -451,6 +479,7 @@ pub struct ItemGetRequest {
 #[derive(Deserialize)]
 pub struct ItemHistoryListRequest {
     pub storage_id: String,
+    #[allow(dead_code)]
     pub vault_id: String,
     pub item_id: String,
     #[serde(default)]
@@ -468,6 +497,7 @@ pub struct ItemHistoryGetRequest {
 #[derive(Deserialize)]
 pub struct ItemHistoryRestoreRequest {
     pub storage_id: String,
+    #[allow(dead_code)]
     pub vault_id: String,
     pub item_id: String,
     pub version: i64,

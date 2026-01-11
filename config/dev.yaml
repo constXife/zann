@@ -8,3 +8,8 @@ auth:
 
 server:
   master_key: "/xdJ8wIDGMQFwaChfY3k7qo1GlzYgR3peAMOFg/0u9w="
+
+metrics:
+  enabled: true
+  profile: debug
+  endpoint: "/metrics"

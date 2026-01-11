@@ -1,0 +1,52 @@
+services:
+  db_loadtest:
+    image: docker.io/library/postgres:16-alpine
+    environment:
+      POSTGRES_USER: zann
+      POSTGRES_PASSWORD: zann
+      POSTGRES_DB: zann_loadtest
+    ports:
+      - "15432:5432"
+    volumes:
+      - zann_pgdata_loadtest:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zann -d zann_loadtest"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    ports:
+      - "18080:18080"
+    user: "${ZANN_UID:-1000}:${ZANN_GID:-100}"
+    env_file:
+      - .env.highload
+    volumes:
+      - ./loadtest/data:/data:U
+      # Optional: mount custom CA for OTLP HTTPS
+      # - ./.local/arkham-ca.crt:/run/ca/arkham-ca.crt:ro
+    depends_on:
+      db_loadtest:
+        condition: service_healthy
+    environment:
+      ZANN_DB_URL: postgres://zann:zann@db_loadtest:5432/zann_loadtest
+      ZANN_ADDR: 0.0.0.0:18080
+      ZANN_CONFIG_PATH: /config/loadtest.yaml
+      ZANN_ALLOW_METRICS_DEBUG: "true"
+    mem_limit: 1g
+    cpus: "2.0"
+
+  migrate:
+    depends_on:
+      db_loadtest:
+        condition: service_healthy
+    user: "${ZANN_UID:-1000}:${ZANN_GID:-100}"
+    env_file:
+      - .env.highload
+    volumes:
+      - ./loadtest/data:/data:U
+    environment:
+      ZANN_DB_URL: postgres://zann:zann@db_loadtest:5432/zann_loadtest
+
+volumes:
+  zann_pgdata_loadtest:
