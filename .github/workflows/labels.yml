@@ -10,6 +10,8 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
       - name: Sync GitHub labels
         uses: crazy-max/ghaction-github-labeler@v5
         with:
