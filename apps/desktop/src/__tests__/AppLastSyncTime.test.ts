@@ -436,7 +436,8 @@ describe("App last sync time", () => {
   it("refreshes lastSyncTime on mount and after sync", async () => {
     mockGetStorageInfo
       .mockResolvedValueOnce({ last_synced: "2024-01-01T00:00:00Z" })
-      .mockResolvedValueOnce({ last_synced: "2024-02-01T00:00:00Z" });
+      .mockResolvedValueOnce({ last_synced: "2024-02-01T00:00:00Z" })
+      .mockResolvedValue({ last_synced: "2024-02-01T00:00:00Z" });
     mockRunRemoteSyncRaw.mockResolvedValue(true);
 
     const App = (await import("../App.vue")).default;
