@@ -19,8 +19,16 @@ type UseSessionOptions = {
   refreshAppStatus: () => Promise<void>;
 };
 
+class SessionError extends Error {}
+
 export const useSession = (options: UseSessionOptions) => {
   const unlockBusy = ref(false);
+  const normalizeError = (err: unknown) => {
+    if (err instanceof SessionError) {
+      return err.message;
+    }
+    return options.t("errors.generic");
+  };
 
   const unlock = async (password: Ref<string>) => {
     options.onError("");
@@ -32,14 +40,14 @@ export const useSession = (options: UseSessionOptions) => {
       );
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(options.t(`errors.${key}`));
+        throw new SessionError(options.t(`errors.${key}`));
       }
       await options.refreshStatus();
       await options.refreshAppStatus();
       await options.onAfterUnlock();
       password.value = "";
     } catch (err) {
-      options.onError(String(err));
+      options.onError(normalizeError(err));
     } finally {
       unlockBusy.value = false;
     }
@@ -53,13 +61,13 @@ export const useSession = (options: UseSessionOptions) => {
       );
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(options.t(`errors.${key}`));
+        throw new SessionError(options.t(`errors.${key}`));
       }
       await options.refreshStatus();
       await options.refreshAppStatus();
       await options.onAfterUnlock();
     } catch (err) {
-      options.onError(String(err));
+      options.onError(normalizeError(err));
     }
   };
 
@@ -78,7 +86,7 @@ export const useSession = (options: UseSessionOptions) => {
         await options.clearClipboardNow();
       }
     } catch (err) {
-      options.onError(String(err));
+      options.onError(normalizeError(err));
     }
   };
 
