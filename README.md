@@ -2,7 +2,7 @@
 
 Self-hosted password manager for individuals and small teams.
 
-> **⚠️ Pet Project Notice**
+> **Pet Project Notice**
 >
 > This project:
 > - Is a pet project for experiments
@@ -14,11 +14,11 @@ Self-hosted password manager for individuals and small teams.
 
 ## Features
 
-- **🔐 Client-side encryption** — personal vaults are encrypted on the client
-- **👥 Shared vaults** — shared vaults for small teams
-- **🤖 CI/CD CLI** — service account tokens, server fingerprint pinning
-- **💻 Desktop app** — offline-first, works without a server (macOS, Windows)
-- **🔑 Hybrid auth** — OIDC + built-in authentication
+- **Client-side encryption** - personal vaults are encrypted on the client
+- **Shared vaults** - shared vaults for small teams
+- **CI/CD CLI** - service account tokens, server fingerprint pinning
+- **Desktop app** - offline-first, works without a server (macOS, Windows)
+- **Hybrid auth** - OIDC + built-in authentication
 
 ## Screenshots
 
@@ -29,7 +29,7 @@ Self-hosted password manager for individuals and small teams.
 ### Option 1: Local use (no server)
 
 1. Download the desktop app for your platform from [Releases](https://github.com/constXife/zann/releases)
-2. Launch the app — it works offline-first
+2. Launch the app - it works offline-first
 3. Create a personal vault and start using it
 
 ### Option 2: Self-hosted server (for small teams and CI/CD)
@@ -48,24 +48,29 @@ docker compose up -d
 ## Architecture
 
 ```mermaid
-graph TD
-    Desktop["💻 Desktop App<br/>(Tauri/SQLite)<br/>Offline-first"]
-    CLI["⌨️ CLI Client<br/>(Rust)<br/>CI/CD ready"]
-    Server["🔐 Zann Server<br/>(Axum + PostgreSQL)"]
+flowchart TB
+    subgraph Clients["Clients"]
+        Desktop["Desktop App<br/>Offline-first"]
+        CLI["CLI Client<br/>CI/CD ready"]
+    end
 
-    Desktop -->|REST API| Server
-    CLI -->|REST API| Server
+    Server["Zann Server<br/>(Axum + PostgreSQL)"]
 
-    style Desktop fill:#e1f5ff
-    style CLI fill:#e1f5ff
-    style Server fill:#ffe1e1
+    Desktop -.->|optional| Server
+    CLI -->|required| Server
+
+    classDef clientBox fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#fff
+    classDef serverBox fill:#8b5cf6,stroke:#6d28d9,stroke-width:2px,color:#fff
+
+    class Desktop,CLI clientBox
+    class Server serverBox
 ```
 
 Components:
-- `zann-server` — HTTP API (Axum, PostgreSQL)
-- `zann-cli` — CLI client for Linux/macOS/CI
-- `apps/desktop` — Desktop app (Tauri, SQLite)
-- `zann-core` — shared business logic and cryptography
+- `zann-server` - HTTP API (Axum, PostgreSQL)
+- `zann-cli` - CLI client for Linux/macOS/CI
+- `apps/desktop` - Desktop app (Tauri, SQLite)
+- `zann-core` - shared business logic and cryptography
 
 Server threat model: [crates/zann-server/SECURITY.md](crates/zann-server/SECURITY.md) (assumptions and trust boundaries).
 
@@ -109,6 +114,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local development instructions.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE)
+MIT License - see [LICENSE](LICENSE)
 
 Copyright 2025 constXife
