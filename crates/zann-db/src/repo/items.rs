@@ -57,7 +57,6 @@ impl<'a> ItemRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 
@@ -336,7 +335,6 @@ impl<'a> ItemHistoryRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 
@@ -562,7 +560,6 @@ impl<'a> AttachmentRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 
@@ -749,7 +746,6 @@ impl<'a> ItemConflictRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 

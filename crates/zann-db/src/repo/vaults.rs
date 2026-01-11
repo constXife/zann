@@ -51,7 +51,6 @@ impl<'a> VaultRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 

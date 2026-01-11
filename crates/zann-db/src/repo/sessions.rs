@@ -196,7 +196,6 @@ impl<'a> SessionRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 
@@ -220,7 +219,6 @@ impl<'a> SessionRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 }
@@ -255,7 +253,6 @@ impl<'a> AppliedOpRepo<'a> {
         .await
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
-            ()
         })
     }
 
