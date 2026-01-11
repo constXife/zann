@@ -16,21 +16,21 @@ use zann_server::infra::usage::UsageTracker;
 use zann_server::oidc::OidcJwksCache;
 
 struct TestApp {
+    _guard: support::TestGuard,
     app: axum::Router,
     _pool: PgPool,
 }
 
 impl TestApp {
     async fn new(metrics_config: MetricsConfig) -> Self {
-        let pool = support::setup_db().await;
-
-        let policy_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../config/policies.default.yaml");
-        let rules: Vec<PolicyRule> =
-            serde_yaml::from_str(&std::fs::read_to_string(policy_path).expect("policy file"))
-                .expect("parse policies");
+        let guard = support::test_guard().await;
+        let pool = support::setup_shared_db().await;
+        support::reset_db(&pool).await;
+        let rules: Vec<PolicyRule> = support::load_policy_rules();
 
         metrics::set_profile(metrics_config.effective_profile());
+        let mut config = ServerConfig::default();
+        support::tune_test_kdf(&mut config);
         let usage_tracker = std::sync::Arc::new(UsageTracker::new(pool.clone(), 100));
         let (secret_policies, secret_default_policy) = support::default_secret_policies();
         let state = AppState {
@@ -46,7 +46,7 @@ impl TestApp {
             refresh_token_ttl_seconds: 3600,
             argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
             oidc_jwks_cache: OidcJwksCache::new(),
-            config: ServerConfig::default(),
+            config,
             policy_store: PolicyStore::new(PolicySet::from_rules(rules)),
             usage_tracker,
             security_profiles: load_security_profiles(),
@@ -55,7 +55,11 @@ impl TestApp {
         };
         let app = zann_server::bootstrap::build_app(&metrics_config, state);
 
-        Self { app, _pool: pool }
+        Self {
+            _guard: guard,
+            app,
+            _pool: pool,
+        }
     }
 
     async fn get(&self, path: &str) -> axum::response::Response {

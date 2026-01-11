@@ -83,6 +83,8 @@ jobs:
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: /home/runner/.cache/sccache
       CARGO_INCREMENTAL: "0"
+      SCCACHE_CACHE_SIZE: 2G
+      CARGO_PROFILE_TEST_DEBUG: "0"
     services:
       postgres:
         image: docker.io/library/postgres:16
@@ -100,6 +102,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+          df -h
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
         with:
@@ -117,6 +124,10 @@ jobs:
           cargo run -p zann-server --bin zann-server -- migrate
       - name: Tests
         run: cargo test
+      - name: Tests (zann-server Postgres)
+        env:
+          RUST_TEST_THREADS: "1"
+        run: cargo test -p zann-server --features postgres-tests -- --test-threads=1
       - name: Tests (zann-db Postgres)
         run: cargo test -p zann-db --features postgres
       - name: sccache stats

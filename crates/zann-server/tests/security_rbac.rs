@@ -19,6 +19,7 @@ use zann_server::infra::usage::UsageTracker;
 use zann_server::oidc::OidcJwksCache;
 
 struct TestApp {
+    _guard: support::TestGuard,
     app: axum::Router,
     pool: PgPool,
 }
@@ -33,15 +34,15 @@ impl TestApp {
                 .try_init();
         });
 
-        let pool = support::setup_db().await;
+        let guard = support::test_guard().await;
 
-        let policies_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../config/policies.default.yaml");
-        let rules: Vec<PolicyRule> =
-            serde_yaml::from_str(&std::fs::read_to_string(policies_path).expect("policy file"))
-                .expect("parse policies");
+        let pool = support::setup_shared_db().await;
+        support::reset_db(&pool).await;
+        let rules: Vec<PolicyRule> = support::load_policy_rules();
 
         let mut config = ServerConfig::default();
+
+        support::tune_test_kdf(&mut config);
         config.auth.mode = AuthMode::Internal;
         config.auth.internal.registration = InternalRegistration::Open;
 
@@ -69,7 +70,11 @@ impl TestApp {
         };
 
         let app = build_router(state);
-        Self { app, pool }
+        Self {
+            _guard: guard,
+            app,
+            pool,
+        }
     }
 
     async fn send_json(

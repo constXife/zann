@@ -1,9 +1,9 @@
-import { ref, computed } from "vue";
+import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, StorageSummary, StorageInfo } from "../types";
 
-type Translator = (key: string) => string;
+type Translator = (key: string, params?: Record<string, string | number>) => string;
 
 type UseStoragesOptions = {
   selectedStorageId: Ref<string>;
@@ -20,11 +20,23 @@ type UseStoragesOptions = {
 
 type SyncStatus = "idle" | "syncing" | "synced" | "error";
 
+class SyncError extends Error {
+  kind: string;
+
+  constructor(kind: string, message: string) {
+    super(message);
+    this.kind = kind;
+  }
+}
+
 export const useStorages = (options: UseStoragesOptions) => {
   const storages = ref<StorageSummary[]>([]);
   const storageSyncStatus = ref<Map<string, SyncStatus>>(new Map());
   const storageSyncErrors = ref<Map<string, string>>(new Map());
   const storagePersonalLocked = ref<Map<string, boolean>>(new Map());
+  const isNetworkOnline = ref(typeof navigator === "undefined" ? true : navigator.onLine);
+  const isServerReachable = ref(true);
+  const isOffline = computed(() => !isNetworkOnline.value || !isServerReachable.value);
   const syncBusy = ref(false);
   const syncError = ref("");
   const autoSyncIntervalMs = 60000;
@@ -35,6 +47,8 @@ export const useStorages = (options: UseStoragesOptions) => {
   let backoffIndex = 0;
   let pendingSyncRequested = false;
   let pendingSyncStorageId: string | null = null;
+  let queuedSyncRequested = false;
+  let queuedSyncStorageId: string | null = null;
 
   // Remote-first: серверы показываются первыми
   const remoteStorages = computed(() =>
@@ -53,6 +67,81 @@ export const useStorages = (options: UseStoragesOptions) => {
   const showLocalSection = computed(
     () => hasLocalVaults.value && (options.localStorageVisible?.value ?? true),
   );
+
+  const isNetworkErrorMessage = (message: string) => {
+    const text = message.toLowerCase();
+    return (
+      text.includes("error sending request") ||
+      text.includes("failed to fetch") ||
+      text.includes("network") ||
+      text.includes("connection refused") ||
+      text.includes("connection") ||
+      text.includes("dns") ||
+      text.includes("timed out") ||
+      text.includes("timeout")
+    );
+  };
+
+  const resolveIdentityMessage = (message: string) => {
+    if (message === "server_identity_invalid") {
+      return options.t("errors.server_identity_invalid");
+    }
+    if (message === "server_identity_missing") {
+      return options.t("errors.server_identity_missing");
+    }
+    if (message.startsWith("server_time_skew:")) {
+      const seconds = Number(message.split(":")[1] ?? 0);
+      const minutes = Math.max(1, Math.round(seconds / 60));
+      return options.t("errors.server_time_skew", { minutes });
+    }
+    return null;
+  };
+
+  const resolveSyncErrorMessage = (kind: string, message?: string | null) => {
+    const text = message ?? "";
+    const identityMessage = resolveIdentityMessage(text);
+    if (identityMessage) {
+      return identityMessage;
+    }
+    if (kind === "session_expired") {
+      return options.t("errors.session_expired");
+    }
+    if (kind === "vault_key_mismatch") {
+      return options.t("errors.vault_key_mismatch");
+    }
+    if (kind === "vault_list_failed") {
+      return options.t("errors.vault_list_failed");
+    }
+    if (kind === "system_info_failed" && isNetworkErrorMessage(text)) {
+      return options.t("errors.server_unreachable");
+    }
+    if (kind === "server_unreachable") {
+      return options.t("errors.server_unreachable");
+    }
+    return text || options.t("errors.remote_error");
+  };
+
+  const retryableErrorKinds = new Set([
+    "vault_list_failed",
+    "vault_get_failed",
+    "sync_push_failed",
+    "vault_key_update_failed",
+  ]);
+
+  const queueSync = (storageId: string | null) => {
+    queuedSyncRequested = true;
+    queuedSyncStorageId = storageId;
+  };
+
+  const flushQueuedSync = () => {
+    if (!queuedSyncRequested) {
+      return;
+    }
+    queuedSyncRequested = false;
+    const nextStorage = queuedSyncStorageId;
+    queuedSyncStorageId = null;
+    void runRemoteSync(nextStorage);
+  };
 
   const loadStorages = async () => {
     if (!options.initialized.value || !options.unlocked.value) {
@@ -102,6 +191,20 @@ export const useStorages = (options: UseStoragesOptions) => {
       ? storages.value.filter((s) => s.id === storageId && s.kind === "remote")
       : storages.value.filter((s) => s.kind === "remote");
 
+    if (targetStorages.length === 0) {
+      return false;
+    }
+
+    if (isOffline.value) {
+      const offlineMessage = options.t("errors.server_unreachable");
+      for (const storage of targetStorages) {
+        storageSyncStatus.value.set(storage.id, "error");
+        storageSyncErrors.value.set(storage.id, offlineMessage);
+      }
+      queueSync(storageId);
+      return false;
+    }
+
     for (const storage of targetStorages) {
       storageSyncStatus.value.set(storage.id, "syncing");
       storageSyncErrors.value.delete(storage.id);
@@ -110,17 +213,15 @@ export const useStorages = (options: UseStoragesOptions) => {
 
     syncBusy.value = true;
     let success = false;
+    let retryableFailure = false;
     try {
       const response = await invoke<ApiResponse<{ locked_vaults?: string[] }>>("remote_sync", {
         storageId: storageId ?? null,
       });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        const message =
-          key === "vault_key_mismatch"
-            ? options.t(`errors.${key}`)
-            : response.error?.message ?? options.t(`errors.${key}`);
-        throw new Error(message);
+        const message = resolveSyncErrorMessage(key, response.error?.message);
+        throw new SyncError(key, message);
       }
       const lockedVaults = response.data?.locked_vaults ?? [];
       if (lockedVaults.length > 0) {
@@ -132,15 +233,34 @@ export const useStorages = (options: UseStoragesOptions) => {
       for (const storage of targetStorages) {
         storageSyncStatus.value.set(storage.id, "synced");
       }
+      isServerReachable.value = true;
 
       await loadStorages();
       await options.onReloadVaults();
       await options.onReloadItems();
       success = true;
     } catch (err) {
-      const errorMsg = String(err);
+      let errorMsg = String(err);
+      let errorKind = "unknown";
+      let isOfflineError = false;
 
-      if (errorMsg.includes("session_expired") || errorMsg.includes("token not set")) {
+      if (err instanceof SyncError) {
+        errorKind = err.kind;
+        errorMsg = err.message;
+        if (errorKind === "system_info_failed" && isNetworkErrorMessage(errorMsg)) {
+          isOfflineError = true;
+        }
+      } else if (isNetworkErrorMessage(errorMsg)) {
+        errorKind = "server_unreachable";
+        errorMsg = options.t("errors.server_unreachable");
+        isOfflineError = true;
+      }
+
+      if (
+        errorKind === "session_expired" ||
+        errorMsg.includes("session_expired") ||
+        errorMsg.includes("token not set")
+      ) {
         const storage = targetStorages[0];
         await options.onSessionExpired?.(storage?.server_url ?? null);
         for (const storage of targetStorages) {
@@ -154,12 +274,19 @@ export const useStorages = (options: UseStoragesOptions) => {
           storageSyncErrors.value.set(storage.id, errorMsg);
         }
       }
+      if (isOfflineError) {
+        isServerReachable.value = false;
+        queueSync(storageId);
+      }
+      retryableFailure = isOfflineError || retryableErrorKinds.has(errorKind);
     } finally {
       syncBusy.value = false;
       if (success) {
         backoffIndex = 0;
-      } else {
+      } else if (retryableFailure) {
         backoffIndex = Math.min(backoffIndex + 1, syncBackoffStepsMs.length);
+      } else {
+        backoffIndex = 0;
       }
       if (pendingSyncRequested) {
         pendingSyncRequested = false;
@@ -222,6 +349,8 @@ export const useStorages = (options: UseStoragesOptions) => {
     backoffIndex = 0;
     pendingSyncRequested = false;
     pendingSyncStorageId = null;
+    queuedSyncRequested = false;
+    queuedSyncStorageId = null;
   };
 
   const clearSyncErrors = (storageId?: string | null) => {
@@ -313,6 +442,32 @@ export const useStorages = (options: UseStoragesOptions) => {
     }
   };
 
+  const handleOnline = () => {
+    isNetworkOnline.value = true;
+    isServerReachable.value = true;
+    flushQueuedSync();
+  };
+
+  const handleOffline = () => {
+    isNetworkOnline.value = false;
+  };
+
+  onMounted(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+  });
+
+  onUnmounted(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.removeEventListener("online", handleOnline);
+    window.removeEventListener("offline", handleOffline);
+  });
+
   return {
     storages,
     remoteStorages,
@@ -322,6 +477,7 @@ export const useStorages = (options: UseStoragesOptions) => {
     storageSyncStatus,
     storageSyncErrors,
     storagePersonalLocked,
+    isOffline,
     syncBusy,
     syncError,
     loadStorages,

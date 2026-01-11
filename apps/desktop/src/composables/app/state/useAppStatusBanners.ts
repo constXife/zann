@@ -5,6 +5,7 @@ type AppStatusBannersOptions = {
   selectedStorageId: Ref<string>;
   storageSyncErrors: Ref<Map<string, string>>;
   storagePersonalLocked: Ref<Map<string, boolean>>;
+  isOffline: Ref<boolean>;
   localStorageId: string;
 };
 
@@ -12,15 +13,12 @@ export function useAppStatusBanners({
   selectedStorageId,
   storageSyncErrors,
   storagePersonalLocked,
+  isOffline,
   localStorageId,
 }: AppStatusBannersOptions) {
   const showOfflineBanner = computed(() => {
     if (selectedStorageId.value === localStorageId) return false;
-    const error = storageSyncErrors.value.get(selectedStorageId.value);
-    return !!(
-      error &&
-      (error.includes("error sending request") || error.includes("server_unavailable"))
-    );
+    return isOffline.value;
   });
 
   const showSessionExpiredBanner = computed(() => {

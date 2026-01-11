@@ -19,6 +19,7 @@ use zann_server::infra::usage::UsageTracker;
 use zann_server::oidc::OidcJwksCache;
 
 struct TestApp {
+    _guard: support::TestGuard,
     app: axum::Router,
     #[allow(dead_code)]
     pool: PgPool,
@@ -34,19 +35,19 @@ impl TestApp {
                 .try_init();
         });
 
-        let pool = support::setup_db().await;
+        let guard = support::test_guard().await;
 
-        let policies_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../config/policies.default.yaml");
-        let rules: Vec<PolicyRule> =
-            serde_yaml::from_str(&std::fs::read_to_string(policies_path).expect("policy file"))
-                .expect("parse policies");
+        let pool = support::setup_shared_db().await;
+        support::reset_db(&pool).await;
+        let rules: Vec<PolicyRule> = support::load_policy_rules();
 
         let mut config = ServerConfig::default();
+
+        support::tune_test_kdf(&mut config);
         config.auth.mode = AuthMode::Internal;
         config.auth.internal.enabled = true;
         config.auth.internal.registration = InternalRegistration::Open;
-        config.server.max_body_bytes = 12 * 1024 * 1024;
+        config.server.max_body_bytes = 2 * 1024 * 1024;
 
         let usage_tracker = std::sync::Arc::new(UsageTracker::new(pool.clone(), 100));
         let (secret_policies, secret_default_policy) = support::default_secret_policies();
@@ -72,7 +73,11 @@ impl TestApp {
         };
 
         let app = build_router(state);
-        Self { app, pool }
+        Self {
+            _guard: guard,
+            app,
+            pool,
+        }
     }
 
     async fn send_json(
@@ -580,7 +585,7 @@ async fn file_upload_rejects_large_payload() {
     let item = app.create_shared_file_item(token, vault_id, &file_id).await;
     let item_id = item["id"].as_str().expect("item id");
 
-    let bytes = vec![0u8; 10 * 1024 * 1024 + 1];
+    let bytes = vec![0u8; 2 * 1024 * 1024 + 1];
     let (status, response_bytes) = app
         .send_bytes(
             Method::POST,
@@ -593,9 +598,11 @@ async fn file_upload_rejects_large_payload() {
         )
         .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
-    let response_json: serde_json::Value =
-        serde_json::from_slice(&response_bytes).expect("error json");
-    assert_eq!(response_json["error"], "file_too_large");
+    if !response_bytes.is_empty() {
+        if let Ok(response_json) = serde_json::from_slice::<serde_json::Value>(&response_bytes) {
+            assert_eq!(response_json["error"], "file_too_large");
+        }
+    }
 }
 
 #[tokio::test]

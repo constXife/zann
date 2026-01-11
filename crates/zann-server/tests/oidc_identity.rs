@@ -17,11 +17,7 @@ use zann_server::infra::usage::UsageTracker;
 mod support;
 
 async fn build_state(pool: PgPool, mut config: ServerConfig) -> AppState {
-    let policy_path =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config/policies.default.yaml");
-    let rules: Vec<PolicyRule> =
-        serde_yaml::from_str(&std::fs::read_to_string(policy_path).expect("policy file"))
-            .expect("parse policies");
+    let rules: Vec<PolicyRule> = support::load_policy_rules();
     config.auth.oidc.enabled = true;
     let (secret_policies, secret_default_policy) = support::default_secret_policies();
 
@@ -50,8 +46,11 @@ async fn build_state(pool: PgPool, mut config: ServerConfig) -> AppState {
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn oidc_rejects_disabled_user() {
-    let pool = support::setup_db().await;
-    let config = ServerConfig::default();
+    let _guard = support::test_guard().await;
+    let pool = support::setup_shared_db().await;
+    support::reset_db(&pool).await;
+    let mut config = ServerConfig::default();
+    support::tune_test_kdf(&mut config);
     let state = build_state(pool.clone(), config).await;
 
     let now = Utc::now();

@@ -11,14 +11,21 @@ use crate::app::AppState;
 use crate::domains::access_control::http::{find_vault, vault_role_allows, VaultScope};
 use crate::domains::access_control::policies::PolicyDecision;
 use crate::infra::metrics;
+use thiserror::Error;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Error, Clone, Copy)]
 pub enum VaultServiceError {
+    #[error("forbidden_no_body")]
     ForbiddenNoBody,
+    #[error("forbidden: {0}")]
     Forbidden(&'static str),
+    #[error("not_found")]
     NotFound,
+    #[error("bad_request: {0}")]
     BadRequest(&'static str),
+    #[error("db_error")]
     DbError,
+    #[error("internal: {0}")]
     Internal(&'static str),
 }
 

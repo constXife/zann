@@ -1,8 +1,9 @@
 use base64::Engine;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sqlx_core::query::query;
 use sqlx_postgres::Postgres;
 use std::collections::HashSet;
+use thiserror::Error;
 use uuid::Uuid;
 use zann_core::api::auth::{
     LoginRequest, LoginResponse, LogoutRequest, OidcLoginRequest, PreloginResponse, RefreshRequest,
@@ -43,14 +44,26 @@ pub struct AuthRequestContext {
     pub user_agent: Option<String>,
 }
 
+struct SessionTokens {
+    session: Session,
+    access_token: String,
+    refresh_token: String,
+}
+
 #[allow(dead_code)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Error, Clone, Copy)]
 pub enum AuthError {
+    #[error("forbidden: {0}")]
     Forbidden(&'static str),
+    #[error("unauthorized: {0}")]
     Unauthorized(&'static str),
+    #[error("bad_request: {0}")]
     BadRequest(&'static str),
+    #[error("conflict: {0}")]
     Conflict(&'static str),
+    #[error("not_found")]
     NotFound,
+    #[error("internal: {0}")]
     Internal(&'static str),
 }
 
@@ -239,22 +252,8 @@ pub async fn register(
         "unknown",
         now,
     );
-    let refresh_token = Uuid::now_v7().to_string();
-    let access_token = Uuid::now_v7().to_string();
-    let refresh_token_hash = hash_token(&refresh_token, &state.token_pepper);
-    let access_token_hash = hash_token(&access_token, &state.token_pepper);
-    let access_expires_at = now + chrono::Duration::seconds(state.access_token_ttl_seconds);
-
-    let session = Session {
-        id: Uuid::now_v7(),
-        user_id: user.id,
-        device_id: device.id,
-        access_token_hash,
-        access_expires_at,
-        refresh_token_hash,
-        expires_at: now + chrono::Duration::seconds(state.refresh_token_ttl_seconds),
-        created_at: now,
-    };
+    let tokens = create_session_for_user(state, user.id, device.id, now);
+    let session = tokens.session;
 
     let mut tx = match state.db.begin().await {
         Ok(tx) => tx,
@@ -535,11 +534,11 @@ pub async fn register(
         "Registration succeeded"
     );
 
-    Ok(LoginResponse {
-        access_token,
-        refresh_token,
-        expires_in: ttl_seconds_u64(state.access_token_ttl_seconds),
-    })
+    Ok(build_login_response(
+        state,
+        tokens.access_token,
+        tokens.refresh_token,
+    ))
 }
 
 pub async fn login_internal(
@@ -684,22 +683,8 @@ pub async fn login_internal(
         return Err(AuthError::Internal("db_error"));
     }
 
-    let refresh_token = Uuid::now_v7().to_string();
-    let access_token = Uuid::now_v7().to_string();
-    let refresh_token_hash = hash_token(&refresh_token, &state.token_pepper);
-    let access_token_hash = hash_token(&access_token, &state.token_pepper);
-    let access_expires_at = now + chrono::Duration::seconds(state.access_token_ttl_seconds);
-
-    let session = Session {
-        id: Uuid::now_v7(),
-        user_id: user.id,
-        device_id: device.id,
-        access_token_hash,
-        access_expires_at,
-        refresh_token_hash,
-        expires_at: now + chrono::Duration::seconds(state.refresh_token_ttl_seconds),
-        created_at: now,
-    };
+    let tokens = create_session_for_user(state, user.id, device.id, now);
+    let session = tokens.session;
 
     let session_repo = SessionRepo::new(&state.db);
     if session_repo.create(&session).await.is_err() {
@@ -747,11 +732,11 @@ pub async fn login_internal(
         "Login succeeded"
     );
 
-    Ok(LoginResponse {
-        access_token,
-        refresh_token,
-        expires_in: ttl_seconds_u64(state.access_token_ttl_seconds),
-    })
+    Ok(build_login_response(
+        state,
+        tokens.access_token,
+        tokens.refresh_token,
+    ))
 }
 
 pub async fn login_oidc(
@@ -860,22 +845,8 @@ pub async fn login_oidc(
         return Err(AuthError::Internal("db_error"));
     }
 
-    let refresh_token = Uuid::now_v7().to_string();
-    let access_token = Uuid::now_v7().to_string();
-    let refresh_token_hash = hash_token(&refresh_token, &state.token_pepper);
-    let access_token_hash = hash_token(&access_token, &state.token_pepper);
-    let access_expires_at = now + chrono::Duration::seconds(state.access_token_ttl_seconds);
-
-    let session = Session {
-        id: Uuid::now_v7(),
-        user_id: identity.user_id,
-        device_id: device.id,
-        access_token_hash,
-        access_expires_at,
-        refresh_token_hash,
-        expires_at: now + chrono::Duration::seconds(state.refresh_token_ttl_seconds),
-        created_at: now,
-    };
+    let tokens = create_session_for_user(state, identity.user_id, device.id, now);
+    let session = tokens.session;
 
     let session_repo = SessionRepo::new(&state.db);
     if session_repo.create(&session).await.is_err() {
@@ -915,11 +886,11 @@ pub async fn login_oidc(
         request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
         "Login succeeded"
     );
-    Ok(LoginResponse {
-        access_token,
-        refresh_token,
-        expires_in: ttl_seconds_u64(state.access_token_ttl_seconds),
-    })
+    Ok(build_login_response(
+        state,
+        tokens.access_token,
+        tokens.refresh_token,
+    ))
 }
 
 pub async fn refresh(
@@ -1005,11 +976,11 @@ pub async fn refresh(
         ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
         "Refresh succeeded"
     );
-    Ok(LoginResponse {
-        access_token: new_access_token,
-        refresh_token: new_refresh_token,
-        expires_in: ttl_seconds_u64(state.access_token_ttl_seconds),
-    })
+    Ok(build_login_response(
+        state,
+        new_access_token,
+        new_refresh_token,
+    ))
 }
 
 pub async fn logout(
@@ -1292,6 +1263,48 @@ async fn service_account_vault_keys(
     }
 
     Ok(keys)
+}
+
+fn create_session_for_user(
+    state: &AppState,
+    user_id: Uuid,
+    device_id: Uuid,
+    now: DateTime<Utc>,
+) -> SessionTokens {
+    let refresh_token = Uuid::now_v7().to_string();
+    let access_token = Uuid::now_v7().to_string();
+    let refresh_token_hash = hash_token(&refresh_token, &state.token_pepper);
+    let access_token_hash = hash_token(&access_token, &state.token_pepper);
+    let access_expires_at = now + chrono::Duration::seconds(state.access_token_ttl_seconds);
+
+    let session = Session {
+        id: Uuid::now_v7(),
+        user_id,
+        device_id,
+        access_token_hash,
+        access_expires_at,
+        refresh_token_hash,
+        expires_at: now + chrono::Duration::seconds(state.refresh_token_ttl_seconds),
+        created_at: now,
+    };
+
+    SessionTokens {
+        session,
+        access_token,
+        refresh_token,
+    }
+}
+
+fn build_login_response(
+    state: &AppState,
+    access_token: String,
+    refresh_token: String,
+) -> LoginResponse {
+    LoginResponse {
+        access_token,
+        refresh_token,
+        expires_in: ttl_seconds_u64(state.access_token_ttl_seconds),
+    }
 }
 
 fn service_account_prefix(token: &str) -> String {
