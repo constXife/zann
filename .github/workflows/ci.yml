@@ -123,6 +123,58 @@ jobs:
         if: always()
         run: sccache --show-stats
 
+  coverage:
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    env:
+      ZANN_CONFIG_PATH: config/ci.yaml
+      ZANN_DB_URL: postgres://zann:zann@127.0.0.1:5432/zann
+      TEST_DATABASE_URL: postgres://zann:zann@127.0.0.1:5432/zann
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      CARGO_INCREMENTAL: "0"
+    services:
+      postgres:
+        image: docker.io/library/postgres:16
+        env:
+          POSTGRES_USER: zann
+          POSTGRES_PASSWORD: zann
+          POSTGRES_DB: zann
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U zann -d zann"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: llvm-tools-preview
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Migrate DB
+        run: |
+          cargo run -p zann-server --bin zann-server -- migrate
+      - name: Coverage
+        run: |
+          cargo llvm-cov --workspace --all-features --summary-only | tee /tmp/coverage.txt
+          {
+            echo "## Coverage"
+            echo
+            echo '```'
+            cat /tmp/coverage.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
   audit:
     needs: changes
     if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
