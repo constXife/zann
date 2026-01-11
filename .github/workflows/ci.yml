@@ -114,7 +114,7 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Migrate DB
         run: |
-          cargo run -p zann-server -- migrate
+          cargo run -p zann-server --bin zann-server -- migrate
       - name: Tests
         run: cargo test
       - name: Tests (zann-db Postgres)
