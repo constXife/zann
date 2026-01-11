@@ -1,4 +1,7 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
+use base64::Engine;
+use data_encoding::BASE32_NOPAD;
+use ed25519_dalek::Signer;
 use schemars::JsonSchema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -7,15 +10,25 @@ use zann_core::SecurityProfile;
 
 use crate::app::AppState;
 use crate::config::AuthMode;
+use crate::runtime;
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct SystemInfoResponse {
     pub(crate) version: &'static str,
     pub(crate) build_commit: Option<&'static str>,
+    pub(crate) server_id: String,
+    pub(crate) identity: SystemIdentity,
     pub(crate) server_name: Option<String>,
     pub(crate) server_fingerprint: String,
     pub(crate) auth_methods: Vec<&'static str>,
     pub(crate) personal_vaults_enabled: bool,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub(crate) struct SystemIdentity {
+    pub(crate) public_key: String,
+    pub(crate) timestamp: i64,
+    pub(crate) signature: String,
 }
 
 pub fn router() -> Router<AppState> {
@@ -27,13 +40,16 @@ pub fn router() -> Router<AppState> {
 async fn info(State(state): State<AppState>) -> impl IntoResponse {
     let version = env!("CARGO_PKG_VERSION");
     let build_commit = option_env!("GIT_COMMIT");
-    let fingerprint = if let Some(value) = state.config.server.fingerprint.clone() {
-        value
-    } else {
-        let mut hasher = Sha256::new();
-        hasher.update(state.token_pepper.as_bytes());
-        format!("sha256:{}", hex::encode(hasher.finalize()))
-    };
+    let fingerprint = runtime::server_fingerprint(&state);
+    let verifying_key = state.identity_key.verifying_key();
+    let public_key_bytes = verifying_key.to_bytes();
+    let public_key = base64::engine::general_purpose::STANDARD.encode(public_key_bytes);
+    let hash = Sha256::digest(public_key_bytes);
+    let server_id = BASE32_NOPAD.encode(&hash).to_ascii_lowercase();
+    let timestamp = chrono::Utc::now().timestamp();
+    let message = format!("zann-id:v1:{server_id}:{timestamp}");
+    let signature = state.identity_key.sign(message.as_bytes());
+    let signature_b64 = base64::engine::general_purpose::STANDARD.encode(signature.to_bytes());
 
     let mut auth_methods = Vec::new();
     if state.config.auth.internal.enabled && !matches!(state.config.auth.mode, AuthMode::Oidc) {
@@ -52,6 +68,12 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
         Json(SystemInfoResponse {
             version,
             build_commit,
+            server_id,
+            identity: SystemIdentity {
+                public_key,
+                timestamp,
+                signature: signature_b64,
+            },
             server_name: state.config.server.name.clone(),
             server_fingerprint: fingerprint,
             auth_methods,

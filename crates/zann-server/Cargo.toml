@@ -10,7 +10,9 @@ axum-prometheus = "0.7"
 aide = { version = "0.13", features = ["axum"] }
 argon2 = "0.5"
 base64 = "0.22"
+data-encoding = "2.6"
 chrono = "0.4"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
 hex = "0.4"
 jsonwebtoken = "9"
 prometheus = { version = "0.14", features = ["process"] }

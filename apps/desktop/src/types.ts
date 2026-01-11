@@ -114,6 +114,21 @@ export type StorageInfo = {
   last_synced?: string | null;
   fingerprint?: string | null;
 };
+
+export type SystemIdentity = {
+  public_key: string;
+  timestamp: number;
+  signature: string;
+};
+
+export type SystemInfoResponse = {
+  server_fingerprint: string;
+  server_id?: string | null;
+  identity?: SystemIdentity | null;
+  server_name?: string | null;
+  personal_vaults_enabled: boolean;
+  auth_methods?: string[];
+};
 export type FieldRow = {
   key: string;
   value: string;

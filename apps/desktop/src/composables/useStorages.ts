@@ -114,12 +114,6 @@ export const useStorages = (options: UseStoragesOptions) => {
       const response = await invoke<ApiResponse<{ locked_vaults?: string[] }>>("remote_sync", {
         storageId: storageId ?? null,
       });
-      console.info("[sync] remote_sync_response", {
-        storageId: storageId ?? null,
-        ok: response.ok,
-        error: response.error ?? null,
-        lockedVaults: response.data?.locked_vaults ?? [],
-      });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
         const message =

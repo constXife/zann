@@ -39,6 +39,10 @@ pub struct ServerRuntimeConfig {
     #[serde(default)]
     pub fingerprint: Option<String>,
     #[serde(default)]
+    pub identity_key: Option<String>,
+    #[serde(default)]
+    pub identity_key_file: Option<String>,
+    #[serde(default)]
     pub master_key: Option<String>,
     #[serde(default)]
     pub master_key_file: Option<String>,
@@ -57,6 +61,8 @@ impl Default for ServerRuntimeConfig {
             attachments_gc_grace_days: default_attachments_gc_grace_days(),
             name: None,
             fingerprint: None,
+            identity_key: None,
+            identity_key_file: None,
             master_key: None,
             master_key_file: None,
             master_key_mode: MasterKeyMode::default(),

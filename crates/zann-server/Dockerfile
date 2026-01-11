@@ -33,6 +33,7 @@ FROM docker.io/library/rust:1.92.0-bookworm AS builder
 
 ARG GIT_COMMIT
 ENV GIT_COMMIT=${GIT_COMMIT}
+ENV CARGO_BUILD_JOBS=2
 
 ENV CARGO_HOME=/app/.cargo
 ENV CARGO_TARGET_DIR=/app/target

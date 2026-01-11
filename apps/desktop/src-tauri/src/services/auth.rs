@@ -5,7 +5,7 @@ use uuid::Uuid;
 use crate::infra::config::{ensure_context, load_config, save_config};
 use crate::state::{AppState, PendingLogin, PendingLoginResult, TokenEntry};
 use crate::types::{ApiResponse, OidcConfigResponse, OidcDiscovery, OidcLoginStatusResponse};
-use crate::util::storage_name_from_url;
+use crate::util::{context_name_from_url, storage_name_from_url};
 use zann_db::local::{
     LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVaultRepo, PendingChangeRepo,
     SyncCursorRepo,
@@ -80,6 +80,18 @@ pub(crate) fn fingerprint_change_for_context(
     }
 }
 
+pub(crate) fn context_name_for_server_id(
+    state: &State<'_, AppState>,
+    server_id: &str,
+) -> Option<String> {
+    let config = load_config(&state.root).ok()?;
+    config
+        .contexts
+        .iter()
+        .find(|(_, ctx)| ctx.server_id.as_deref() == Some(server_id))
+        .map(|(name, _)| name.clone())
+}
+
 pub(crate) fn insert_pending_login(
     state: &State<'_, AppState>,
     login_id: String,
@@ -95,11 +107,20 @@ pub(crate) fn insert_pending_login(
 
 pub(crate) fn update_pending_login_for_fingerprint(
     state: &State<'_, AppState>,
+    server_url: &str,
     login_id: &str,
     new_fingerprint: &str,
     result: &PendingLoginResult,
 ) -> Result<Option<String>, String> {
-    let Some(existing) = fingerprint_change_for_context(state, "desktop", new_fingerprint) else {
+    let context_name = result
+        .info
+        .server_id
+        .as_deref()
+        .and_then(|server_id| context_name_for_server_id(state, server_id))
+        .unwrap_or_else(|| context_name_from_url(server_url));
+    let Some(existing) =
+        fingerprint_change_for_context(state, &context_name, new_fingerprint)
+    else {
         return Ok(None);
     };
     let mut guard = state
@@ -156,11 +177,18 @@ pub(crate) async fn apply_login_context(
     let existing_storage_id = matching_storages.first().map(|storage| storage.id.to_string());
     let token_name = result.token_name.clone();
     let storage_id_string = {
-        let context = ensure_context(&mut config, "desktop", server_url);
+        let context_name = context_name_from_url(server_url);
+        let server_id = result.info.server_id.clone();
+        let migrated_storage_id = server_id
+            .as_deref()
+            .and_then(|server_id| migrate_context_for_server_id(&mut config, &context_name, server_id));
+
+        let context = ensure_context(&mut config, &context_name, server_url);
         if context.storage_id.is_none() {
-            context.storage_id = existing_storage_id.clone();
+            context.storage_id = migrated_storage_id.or_else(|| existing_storage_id.clone());
         }
         context.addr = server_url.to_string();
+        context.server_id = server_id;
         context.server_fingerprint = Some(result.info.server_fingerprint.clone());
         context.tokens.insert(
             token_name.clone(),
@@ -179,7 +207,7 @@ pub(crate) async fn apply_login_context(
         }
         context.storage_id.clone()
     };
-    config.current_context = Some("desktop".to_string());
+    config.current_context = Some(context_name_from_url(server_url));
     config.identity = Some(crate::state::IdentityConfig {
         kdf_salt: result.prelogin.kdf_salt.clone(),
         kdf_params: result.prelogin.kdf_params.clone(),
@@ -209,6 +237,108 @@ pub(crate) async fn apply_login_context(
             .map_err(|err| err.to_string())?;
     }
     Ok(storage_id_string)
+}
+
+pub(crate) fn migrate_context_for_server_id(
+    config: &mut crate::state::CliConfig,
+    context_name: &str,
+    server_id: &str,
+) -> Option<String> {
+    let Some((old_name, old_context)) = config
+        .contexts
+        .iter()
+        .find(|(name, ctx)| {
+            ctx.server_id.as_deref() == Some(server_id) && name.as_str() != context_name
+        })
+        .map(|(name, ctx)| (name.clone(), ctx.clone()))
+    else {
+        return None;
+    };
+
+    let can_replace = config
+        .contexts
+        .get(context_name)
+        .and_then(|ctx| ctx.server_id.as_deref())
+        .map(|existing_id| existing_id == server_id)
+        .unwrap_or(true);
+
+    if !can_replace {
+        return None;
+    }
+
+    let storage_id = old_context.storage_id.clone();
+    config.contexts.remove(&old_name);
+    config.contexts.insert(context_name.to_string(), old_context);
+    storage_id
+}
+
+#[cfg(test)]
+mod tests {
+    use super::migrate_context_for_server_id;
+    use crate::state::{CliConfig, CliContext};
+
+    #[test]
+    fn migrates_context_by_server_id() {
+        let mut config = CliConfig::default();
+        let old_ctx = CliContext {
+            addr: "https://old.example".to_string(),
+            needs_salt_update: false,
+            server_id: Some("server-1".to_string()),
+            server_fingerprint: None,
+            expected_master_key_fp: None,
+            tokens: std::collections::HashMap::new(),
+            current_token: None,
+            storage_id: Some("storage-1".to_string()),
+        };
+        config
+            .contexts
+            .insert("https://old.example".to_string(), old_ctx.clone());
+
+        let migrated =
+            migrate_context_for_server_id(&mut config, "https://new.example", "server-1");
+
+        assert_eq!(migrated.as_deref(), Some("storage-1"));
+        assert!(config.contexts.contains_key("https://new.example"));
+        assert!(!config.contexts.contains_key("https://old.example"));
+    }
+
+    #[test]
+    fn skips_migration_when_context_name_conflicts() {
+        let mut config = CliConfig::default();
+        let old_ctx = CliContext {
+            addr: "https://old.example".to_string(),
+            needs_salt_update: false,
+            server_id: Some("server-1".to_string()),
+            server_fingerprint: None,
+            expected_master_key_fp: None,
+            tokens: std::collections::HashMap::new(),
+            current_token: None,
+            storage_id: Some("storage-1".to_string()),
+        };
+        let conflicting = CliContext {
+            addr: "https://new.example".to_string(),
+            needs_salt_update: false,
+            server_id: Some("server-2".to_string()),
+            server_fingerprint: None,
+            expected_master_key_fp: None,
+            tokens: std::collections::HashMap::new(),
+            current_token: None,
+            storage_id: Some("storage-2".to_string()),
+        };
+        config
+            .contexts
+            .insert("https://old.example".to_string(), old_ctx);
+        config
+            .contexts
+            .insert("https://new.example".to_string(), conflicting);
+
+        let migrated =
+            migrate_context_for_server_id(&mut config, "https://new.example", "server-1");
+
+        assert!(migrated.is_none());
+        assert!(config.contexts.contains_key("https://old.example"));
+        assert!(config.contexts.contains_key("https://new.example"));
+    }
 }
 
 async fn cleanup_duplicate_storages(

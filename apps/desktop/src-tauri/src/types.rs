@@ -102,6 +102,10 @@ pub struct OidcExchangeResponse {
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct SystemInfoResponse {
+    #[serde(default)]
+    pub server_id: Option<String>,
+    #[serde(default)]
+    pub identity: Option<SystemIdentity>,
     pub server_fingerprint: String,
     #[serde(default)]
     pub server_name: Option<String>,
@@ -109,6 +113,13 @@ pub struct SystemInfoResponse {
     pub personal_vaults_enabled: bool,
     #[serde(default)]
     pub auth_methods: Vec<String>,
+}
+
+#[derive(Deserialize, Serialize, Clone)]
+pub struct SystemIdentity {
+    pub public_key: String,
+    pub timestamp: i64,
+    pub signature: String,
 }
 
 fn default_true() -> bool {

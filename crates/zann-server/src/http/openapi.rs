@@ -286,6 +286,12 @@ async fn system_info() -> (StatusCode, Json<SystemInfoResponse>) {
     not_implemented(SystemInfoResponse {
         version: "0.0.0",
         build_commit: None,
+        server_id: String::new(),
+        identity: crate::domains::system::http::v1::SystemIdentity {
+            public_key: String::new(),
+            timestamp: 0,
+            signature: String::new(),
+        },
         server_name: None,
         server_fingerprint: String::new(),
         auth_methods: Vec::new(),

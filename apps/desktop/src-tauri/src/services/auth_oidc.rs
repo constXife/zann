@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::constants::TOKEN_OIDC;
 use crate::infra::config::{ensure_context, load_config, save_config};
+use crate::util::context_name_from_url;
 use crate::infra::http::fetch_json;
 use crate::infra::remote::{
     exchange_authorization_code, exchange_oidc_for_session, fetch_me_email, fetch_prelogin,
@@ -181,8 +182,12 @@ pub(crate) async fn trust_fingerprint(
     };
 
     let mut config = load_config(&state.root).unwrap_or_else(|_| Default::default());
-    let context = ensure_context(&mut config, "desktop", &pending.server_url);
+    let context_name = context_name_from_url(&pending.server_url);
+    let context = ensure_context(&mut config, &context_name, &pending.server_url);
     context.server_fingerprint = Some(new_fp);
+    if let Some(result) = pending.pending_result.as_ref() {
+        context.server_id = result.info.server_id.clone();
+    }
     save_config(&state.root, &config).map_err(|err| err.to_string())?;
     let mut guard = state
         .pending_logins
@@ -425,6 +430,7 @@ async fn complete_oidc_login(
     };
     if let Some(existing) = update_pending_login_for_fingerprint(
         &state,
+        &pending.server_url,
         &login_id,
         &info.server_fingerprint,
         &result,

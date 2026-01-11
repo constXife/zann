@@ -47,6 +47,9 @@ const { settings: uiSettings } = useUiSettings();
 
 const password = ref("");
 const error = ref("");
+const identityAlertOpen = ref(false);
+const identityAlertTitle = ref("");
+const identityAlertMessage = ref("");
 const initialStorageId = uiSettings.value.lastSelectedStorageId ?? LOCAL_STORAGE_ID;
 const selectedStorageId = ref(initialStorageId);
 const selectedVaultId = ref<string | null>(
@@ -376,7 +379,41 @@ const paletteState = usePalette({
 });
 const { paletteOpen, paletteQuery, paletteIndex, paletteItems } = paletteState;
 
-const formatError = (err: unknown) => (err instanceof Error ? err.message : String(err));
+const formatError = (err: unknown) => {
+  const message = err instanceof Error ? err.message : String(err);
+  const normalized = message.toLowerCase();
+  if (normalized.startsWith("server_time_skew:")) {
+    const raw = normalized.replace("server_time_skew:", "").trim();
+    const seconds = Number.parseInt(raw, 10);
+    const minutes = Number.isFinite(seconds) ? Math.max(1, Math.round(seconds / 60)) : 0;
+    identityAlertTitle.value = t("errors.time_sync_title");
+    identityAlertMessage.value = t("errors.server_time_skew", { minutes });
+    identityAlertOpen.value = true;
+    return identityAlertMessage.value;
+  }
+  if (normalized === "server_identity_invalid") {
+    identityAlertTitle.value = t("errors.security_title");
+    identityAlertMessage.value = t("errors.server_identity_invalid");
+    identityAlertOpen.value = true;
+    return identityAlertMessage.value;
+  }
+  if (normalized === "server_identity_missing") {
+    identityAlertTitle.value = t("errors.security_title");
+    identityAlertMessage.value = t("errors.server_identity_missing");
+    identityAlertOpen.value = true;
+    return identityAlertMessage.value;
+  }
+  if (
+    normalized.includes("error sending request") ||
+    normalized.includes("connection refused") ||
+    normalized.includes("dns error") ||
+    normalized.includes("failed to lookup address") ||
+    normalized.includes("invalid url")
+  ) {
+    return t("errors.server_unreachable");
+  }
+  return message;
+};
 
 const personalUnlock = useAppPersonalUnlock({
   t,
@@ -481,6 +518,7 @@ const storageActions = useAppStorageActions({
   setupStep,
   settingsOpen,
   settingsInitialTab,
+  startConnect,
   showAuthMethodSelection,
   connectServerUrl,
   setError: (message) => {
@@ -624,6 +662,9 @@ const { shellBindings, modalBindings } = useAppBindings({
     copyToClipboard,
     password,
     error,
+    identityAlertOpen,
+    identityAlertTitle,
+    identityAlertMessage,
     settingsOpen,
     settingsInitialTab,
     openSettings,

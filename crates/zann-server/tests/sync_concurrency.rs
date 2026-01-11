@@ -48,6 +48,8 @@ impl TestApp {
             password_pepper: "pepper".to_string(),
             token_pepper: "pepper".to_string(),
             server_master_key: None,
+
+            identity_key: support::test_identity_key(),
             access_token_ttl_seconds: 3600,
             refresh_token_ttl_seconds: 3600,
             argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
