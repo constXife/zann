@@ -49,8 +49,7 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
     let timestamp = chrono::Utc::now().timestamp();
     let message = format!("zann-id:v1:{server_id}:{timestamp}");
     let signature = state.identity_key.sign(message.as_bytes());
-    let signature_b64 =
-        base64::engine::general_purpose::STANDARD.encode(signature.to_bytes());
+    let signature_b64 = base64::engine::general_purpose::STANDARD.encode(signature.to_bytes());
 
     let mut auth_methods = Vec::new();
     if state.config.auth.internal.enabled && !matches!(state.config.auth.mode, AuthMode::Oidc) {

@@ -120,7 +120,10 @@ impl Settings {
         let identity_key = match env_config::load_identity_key(&config) {
             Some(key) => Arc::new(key),
             None => {
-                warn!(event = "identity_key_missing", "identity key missing; generating ephemeral key");
+                warn!(
+                    event = "identity_key_missing",
+                    "identity key missing; generating ephemeral key"
+                );
                 let key = SigningKey::generate(&mut rand::rngs::OsRng);
                 Arc::new(key)
             }

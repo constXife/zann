@@ -5,11 +5,11 @@ use std::io::Write;
 use std::path::Path;
 
 use base64::Engine;
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
 use tracing::warn;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
-use ed25519_dalek::SigningKey;
-use rand::rngs::OsRng;
 
 use crate::config::{AuthMode, InternalRegistration, MasterKeyMode, MetricsProfile, ServerConfig};
 use crate::domains::access_control::policies::PolicySet;

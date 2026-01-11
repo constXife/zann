@@ -10,8 +10,6 @@ use crate::modules::system::http::fetch_system_info;
 use crate::modules::system::CliConfig;
 use crate::modules::system::{ensure_secure_addr, resolve_addr};
 use crate::{DEFAULT_ADDR, SERVICE_ACCOUNT_PREFIX};
-use serde_json;
-
 pub(crate) async fn handle_server_command(
     args: ServerArgs,
     addr_arg: Option<String>,

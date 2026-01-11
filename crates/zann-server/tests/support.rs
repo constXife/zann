@@ -1,10 +1,13 @@
 #![allow(dead_code)]
 
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
 use sqlx_core::pool::PoolOptions;
 use sqlx_postgres::{PgConnectOptions, Postgres};
 use std::collections::HashMap;
 use std::env;
 use std::str::FromStr;
+use std::sync::Arc;
 use uuid::Uuid;
 use zann_db::{migrate, PgPool};
 use zann_server::domains::secrets::policies::{
@@ -44,4 +47,8 @@ pub fn default_secret_policies() -> (HashMap<String, PasswordPolicy>, String) {
     let default_name = default_policy_name().to_string();
     policies.insert(default_name.clone(), default_policy());
     (policies, default_name)
+}
+
+pub fn test_identity_key() -> Arc<SigningKey> {
+    Arc::new(SigningKey::generate(&mut OsRng))
 }

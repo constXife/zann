@@ -11,9 +11,9 @@ use std::fs;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 use crate::app;
-use zann_core::crypto::SecretKey;
 use crate::config::OtelConfig;
 use crate::settings;
+use zann_core::crypto::SecretKey;
 
 #[allow(dead_code)]
 pub(crate) struct OtelGuard {
@@ -50,30 +50,6 @@ pub(crate) fn compute_fingerprint(
         hasher.update(key.as_bytes());
     }
     format!("sha256:{}", hex::encode(hasher.finalize()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn fingerprint_prefers_configured_value() {
-        let smk = SecretKey::from_bytes([1u8; 32]);
-        let value = compute_fingerprint(Some("fixed"), "pepper", Some(&smk));
-        assert_eq!(value, "fixed");
-    }
-
-    #[test]
-    fn fingerprint_changes_with_inputs() {
-        let smk_a = SecretKey::from_bytes([1u8; 32]);
-        let smk_b = SecretKey::from_bytes([2u8; 32]);
-        let fp_a = compute_fingerprint(None, "pepper-a", Some(&smk_a));
-        let fp_b = compute_fingerprint(None, "pepper-b", Some(&smk_a));
-        let fp_c = compute_fingerprint(None, "pepper-a", Some(&smk_b));
-
-        assert_ne!(fp_a, fp_b);
-        assert_ne!(fp_a, fp_c);
-    }
 }
 
 #[allow(dead_code)]
@@ -219,4 +195,28 @@ pub(crate) async fn shutdown_signal() {
         event = "shutdown_signal_received",
         "Shutdown signal received"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fingerprint_prefers_configured_value() {
+        let smk = SecretKey::from_bytes([1u8; 32]);
+        let value = compute_fingerprint(Some("fixed"), "pepper", Some(&smk));
+        assert_eq!(value, "fixed");
+    }
+
+    #[test]
+    fn fingerprint_changes_with_inputs() {
+        let smk_a = SecretKey::from_bytes([1u8; 32]);
+        let smk_b = SecretKey::from_bytes([2u8; 32]);
+        let fp_a = compute_fingerprint(None, "pepper-a", Some(&smk_a));
+        let fp_b = compute_fingerprint(None, "pepper-b", Some(&smk_a));
+        let fp_c = compute_fingerprint(None, "pepper-a", Some(&smk_b));
+
+        assert_ne!(fp_a, fp_b);
+        assert_ne!(fp_a, fp_c);
+    }
 }
