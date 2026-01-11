@@ -270,7 +270,7 @@ pub async fn register(
             return Err(AuthError::Internal("db_error"));
         }
     };
-    if let Err(err) = apply_tx_isolation(&mut *tx, state.db_tx_isolation).await {
+    if let Err(err) = apply_tx_isolation(&mut tx, state.db_tx_isolation).await {
         metrics::auth_register("db_error");
         tracing::error!(
             event = "auth_register_failed",
@@ -488,7 +488,7 @@ pub async fn register(
         return Err(AuthError::Internal("db_error"));
     }
 
-    if ensure_personal_vault_tx(state, &mut *tx, user.id, now)
+    if ensure_personal_vault_tx(state, &mut tx, user.id, now)
         .await
         .is_err()
     {

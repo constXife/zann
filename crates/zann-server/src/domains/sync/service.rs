@@ -644,13 +644,13 @@ pub(crate) async fn sync_push(
             return Err(SyncError::Db);
         }
     };
-    if let Err(err) = apply_tx_isolation(&mut *tx, state.db_tx_isolation).await {
+    if let Err(err) = apply_tx_isolation(&mut tx, state.db_tx_isolation).await {
         tracing::error!(event = "sync_push_failed", error = %err, "DB begin failed");
         return Err(SyncError::Db);
     }
 
     for change in changes {
-        match apply_change(&mut *tx, identity, device_id, vault.id, change).await {
+        match apply_change(&mut tx, identity, device_id, vault.id, change).await {
             Ok(ApplyChangeResult::Applied {
                 item_id,
                 applied_change,
