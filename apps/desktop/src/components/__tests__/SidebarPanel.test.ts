@@ -2,17 +2,18 @@ import { render, screen, cleanup } from "@testing-library/vue";
 import { createI18n } from "vue-i18n";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { StorageSummary } from "../../types";
+import { AuthMethod, StorageKind } from "../../constants/enums";
 import SidebarPanel from "../SidebarPanel.vue";
 
 const baseStorage: StorageSummary = {
   id: "remote-1",
   name: "Remote",
-  kind: "remote",
+  kind: StorageKind.Remote,
   server_url: "https://example.com",
   server_name: "Example",
   account_subject: "user@example.com",
   personal_vaults_enabled: true,
-  auth_method: "password",
+  auth_method: AuthMethod.Password,
 };
 
 const createI18nPlugin = () =>

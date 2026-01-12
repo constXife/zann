@@ -15,7 +15,9 @@ use zann_core::api::auth::{
     PreloginResponse, RefreshRequest, RegisterRequest,
 };
 use zann_core::api::vaults::VaultListResponse;
-use zann_core::{AuthSource, Identity};
+use zann_core::{
+    AuthSource, CachePolicy, ChangeType, Identity, UserStatus, VaultEncryptionType, VaultKind,
+};
 
 use crate::app::AppState;
 use crate::domains::access_control::http_admin::ReloadResponse;
@@ -403,10 +405,10 @@ async fn vaults_create(
         id: String::new(),
         slug: String::new(),
         name: String::new(),
-        kind: String::new(),
-        cache_policy: String::new(),
+        kind: VaultKind::Personal,
+        cache_policy: CachePolicy::Full,
         vault_key_enc: Vec::new(),
-        encryption_type: String::new(),
+        encryption_type: VaultEncryptionType::Client,
         tags: None,
         created_at: String::new(),
     })
@@ -417,10 +419,10 @@ async fn vaults_get(Path(_vault_id): Path<String>) -> (StatusCode, Json<VaultRes
         id: String::new(),
         slug: String::new(),
         name: String::new(),
-        kind: String::new(),
-        cache_policy: String::new(),
+        kind: VaultKind::Personal,
+        cache_policy: CachePolicy::Full,
         vault_key_enc: Vec::new(),
-        encryption_type: String::new(),
+        encryption_type: VaultEncryptionType::Client,
         tags: None,
         created_at: String::new(),
     })
@@ -552,7 +554,7 @@ async fn shared_history_get(
         version: 0,
         checksum: String::new(),
         payload: json!({}),
-        change_type: String::new(),
+        change_type: ChangeType::Update,
         created_at: String::new(),
     })
 }
@@ -640,7 +642,7 @@ async fn items_history_get(
         version: 0,
         checksum: String::new(),
         payload_enc: Vec::new(),
-        change_type: String::new(),
+        change_type: ChangeType::Update,
         created_at: String::new(),
     })
 }
@@ -838,7 +840,7 @@ async fn users_update_me(
         display_name: String::new(),
         avatar_url: None,
         avatar_initials: String::new(),
-        status: String::new(),
+        status: UserStatus::Active.as_i32(),
         created_at: String::new(),
         last_login_at: None,
     })
@@ -866,7 +868,7 @@ async fn users_create(Json(_payload): Json<CreateUserRequest>) -> (StatusCode, J
         display_name: String::new(),
         avatar_url: None,
         avatar_initials: String::new(),
-        status: String::new(),
+        status: UserStatus::Active.as_i32(),
         created_at: String::new(),
         last_login_at: None,
     })
@@ -880,7 +882,7 @@ async fn users_get(Path(_id): Path<String>) -> (StatusCode, Json<UserResponse>) 
         display_name: String::new(),
         avatar_url: None,
         avatar_initials: String::new(),
-        status: String::new(),
+        status: UserStatus::Active.as_i32(),
         created_at: String::new(),
         last_login_at: None,
     })

@@ -2,8 +2,8 @@ use chrono::Utc;
 use std::io::Write;
 use uuid::Uuid;
 use zann_db::local::{
-    LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange,
-    LocalStorage, LocalVault, LocalVaultRepo,
+    KeyWrapType, LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo,
+    LocalPendingChange, LocalStorage, LocalVault, LocalVaultRepo,
 };
 
 use crate::crypto::{decrypt_payload, payload_aad, payload_checksum};
@@ -14,6 +14,7 @@ use crate::types::{
 };
 use crate::util::{parse_rfc3339, storage_name_from_url};
 use zann_core::crypto::{encrypt_blob, SecretKey};
+use zann_core::{ChangeType, StorageKind, SyncStatus, VaultEncryptionType, VaultKind};
 
 fn append_sync_log(message: &str) {
     let Some(home) = dirs::home_dir() else {
@@ -77,7 +78,7 @@ pub(crate) fn build_remote_storage(
 ) -> LocalStorage {
     LocalStorage {
         id: storage_uuid,
-        kind: "remote".to_string(),
+        kind: StorageKind::Remote,
         name: format!("Remote ({})", storage_name_from_url(addr)),
         server_url: Some(addr.to_string()),
         server_name: system_info.and_then(|info| info.server_name.clone()),
@@ -107,21 +108,24 @@ pub(crate) async fn ensure_local_vaults(
         if exists.is_some() {
             continue;
         }
-        let key_wrap_type = if vault.encryption_type == "server" {
-            "remote_server"
+        let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
+            .map_err(|_| "invalid vault encryption type".to_string())?;
+        let key_wrap_type = if encryption_type == VaultEncryptionType::Server {
+            KeyWrapType::RemoteServer
         } else {
-            "remote_strict"
+            KeyWrapType::RemoteStrict
         };
+        let kind = VaultKind::try_from(vault.kind)
+            .map_err(|_| "invalid vault kind".to_string())?;
         let record = LocalVault {
             id: vault_id,
             storage_id: storage_uuid,
             name: vault.name.clone(),
-            kind: vault.kind.clone(),
+            kind,
             is_default: false,
             vault_key_enc: vault.vault_key_enc.clone(),
-            key_wrap_type: key_wrap_type.to_string(),
+            key_wrap_type,
             last_synced_at: None,
-            server_seq: 0,
         };
         let _ = vault_repo.create(&record).await;
     }
@@ -173,7 +177,7 @@ pub(crate) async fn handle_sync_conflict(
         existing.type_id = type_id;
         existing.payload_enc = payload_enc;
         existing.checksum = checksum;
-        existing.sync_status = "conflict".to_string();
+        existing.sync_status = SyncStatus::Conflict;
         existing.updated_at = now;
         item_repo.update(&existing).await.map_err(|err| err.to_string())?;
         return Ok(Some(existing.id));
@@ -192,7 +196,7 @@ pub(crate) async fn handle_sync_conflict(
         version: change.base_seq.unwrap_or(0) + 1,
         deleted_at: None,
         updated_at: now,
-        sync_status: "conflict".to_string(),
+        sync_status: SyncStatus::Conflict,
     };
     item_repo
         .create(&conflict_item)
@@ -208,10 +212,10 @@ pub(crate) fn build_shared_push_changes(
 ) -> Result<Vec<SyncSharedPushChange>, String> {
     let mut changes = Vec::with_capacity(pending.len());
     for change in pending {
-        if change.operation == "delete" {
+        if change.operation == ChangeType::Delete {
             changes.push(SyncSharedPushChange {
                 item_id: change.item_id.to_string(),
-                operation: change.operation.clone(),
+                operation: change.operation.as_i32(),
                 payload: None,
                 path: change.path.clone(),
                 name: change.name.clone(),
@@ -229,7 +233,7 @@ pub(crate) fn build_shared_push_changes(
         let payload_json = serde_json::to_value(payload).map_err(|err| err.to_string())?;
         changes.push(SyncSharedPushChange {
             item_id: change.item_id.to_string(),
-            operation: change.operation.clone(),
+            operation: change.operation.as_i32(),
             payload: Some(payload_json),
             path: change.path.clone(),
             name: change.name.clone(),
@@ -267,9 +271,9 @@ pub(crate) async fn apply_push_applied(
         local.updated_at = updated_at;
         local.deleted_at = deleted_at;
         local.sync_status = if deleted_at.is_some() {
-            "tombstone".to_string()
+            SyncStatus::Tombstone
         } else {
-            "synced".to_string()
+            SyncStatus::Synced
         };
         item_repo.update(&local).await.map_err(|err| err.to_string())?;
     }
@@ -314,12 +318,10 @@ pub(crate) async fn apply_pull_change(
             return Ok(false);
         }
     }
-    let operation = change.operation.as_str();
-
-    if operation == "delete" {
+    if change.operation == ChangeType::Delete.as_i32() {
         if let Some(mut local) = existing {
             local.deleted_at = Some(updated_at);
-            local.sync_status = "tombstone".to_string();
+            local.sync_status = SyncStatus::Tombstone;
             local.updated_at = updated_at;
             local.version = change.seq;
             item_repo.update(&local).await.map_err(|err| err.to_string())?;
@@ -368,7 +370,7 @@ pub(crate) async fn apply_pull_change(
         local.cache_key_fp = Some(key_fp);
         local.updated_at = updated_at;
         local.deleted_at = None;
-        local.sync_status = "synced".to_string();
+        local.sync_status = SyncStatus::Synced;
         local.version = change.seq;
         item_repo.update(&local).await.map_err(|err| err.to_string())?;
         apply_history_payloads(history_repo, storage_id, vault_id, item_id, &change.history)
@@ -389,7 +391,7 @@ pub(crate) async fn apply_pull_change(
         version: change.seq,
         deleted_at: None,
         updated_at,
-        sync_status: "synced".to_string(),
+        sync_status: SyncStatus::Synced,
     };
     item_repo.create(&item).await.map_err(|err| err.to_string())?;
     apply_history_payloads(history_repo, storage_id, vault_id, item_id, &change.history).await?;
@@ -419,12 +421,10 @@ pub(crate) async fn apply_shared_pull_change(
             return Ok(false);
         }
     }
-    let operation = change.operation.as_str();
-
-    if operation == "delete" {
+    if change.operation == ChangeType::Delete.as_i32() {
         if let Some(mut local) = existing {
             local.deleted_at = Some(updated_at);
-            local.sync_status = "tombstone".to_string();
+            local.sync_status = SyncStatus::Tombstone;
             local.updated_at = updated_at;
             local.version = change.seq;
             item_repo.update(&local).await.map_err(|err| err.to_string())?;
@@ -456,7 +456,7 @@ pub(crate) async fn apply_shared_pull_change(
         local.cache_key_fp = Some(key_fp);
         local.updated_at = updated_at;
         local.deleted_at = None;
-        local.sync_status = "synced".to_string();
+        local.sync_status = SyncStatus::Synced;
         local.version = change.seq;
         item_repo.update(&local).await.map_err(|err| err.to_string())?;
         apply_shared_history_payloads(
@@ -484,7 +484,7 @@ pub(crate) async fn apply_shared_pull_change(
         version: change.seq,
         deleted_at: None,
         updated_at,
-        sync_status: "synced".to_string(),
+        sync_status: SyncStatus::Synced,
     };
     item_repo
         .create(&item)
@@ -517,9 +517,11 @@ async fn apply_history_payloads(
         ));
         return Ok(());
     }
-    let entries = history
-        .iter()
-        .map(|entry| LocalItemHistory {
+    let mut entries = Vec::with_capacity(history.len());
+    for entry in history {
+        let change_type = ChangeType::try_from(entry.change_type)
+            .map_err(|_| "invalid change type".to_string())?;
+        entries.push(LocalItemHistory {
             id: Uuid::now_v7(),
             storage_id,
             vault_id,
@@ -527,14 +529,14 @@ async fn apply_history_payloads(
             payload_enc: entry.payload_enc.clone(),
             checksum: entry.checksum.clone(),
             version: entry.version,
-            change_type: entry.change_type.clone(),
+            change_type,
             changed_by_email: entry.changed_by_email.clone(),
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,
             changed_by_device_name: None,
             created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
-        })
-        .collect::<Vec<_>>();
+        });
+    }
     match history_repo
         .replace_by_item(storage_id, item_id, &entries)
         .await
@@ -592,6 +594,8 @@ async fn apply_shared_history_payloads(
     for entry in history {
         let (payload_enc, checksum) =
             encrypt_payload_for_cache(master_key, vault_id, item_id, &entry.payload)?;
+        let change_type = ChangeType::try_from(entry.change_type)
+            .map_err(|_| "invalid change type".to_string())?;
         entries.push(LocalItemHistory {
             id: Uuid::now_v7(),
             storage_id,
@@ -600,7 +604,7 @@ async fn apply_shared_history_payloads(
             payload_enc,
             checksum,
             version: entry.version,
-            change_type: entry.change_type.clone(),
+            change_type,
             changed_by_email: entry.changed_by_email.clone(),
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,

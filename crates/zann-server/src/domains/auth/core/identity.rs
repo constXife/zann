@@ -224,8 +224,14 @@ pub async fn identity_from_session_token(
     let (user_id, device_id, service_account_id, source) = if let Some(session) = session_repo
         .get_by_access_token_hash(&token_hash)
         .await
-        .map_err(|_| "db_error")?
-    {
+        .map_err(|err| {
+            tracing::error!(
+                event = "auth_session_lookup_failed",
+                error = %err,
+                "Failed to load session by access token"
+            );
+            "db_error"
+        })? {
         if session.access_expires_at < Utc::now() {
             return Err("token_expired");
         }
@@ -238,7 +244,14 @@ pub async fn identity_from_session_token(
     } else if let Some(session) = service_account_session_repo
         .get_by_access_token_hash(&token_hash)
         .await
-        .map_err(|_| "db_error")?
+        .map_err(|err| {
+            tracing::error!(
+                event = "auth_sa_session_lookup_failed",
+                error = %err,
+                "Failed to load service account session by access token"
+            );
+            "db_error"
+        })?
     {
         if session.expires_at < Utc::now() {
             return Err("token_expired");
@@ -246,7 +259,14 @@ pub async fn identity_from_session_token(
         let account = service_account_repo
             .get_by_id(session.service_account_id)
             .await
-            .map_err(|_| "db_error")?
+            .map_err(|err| {
+                tracing::error!(
+                    event = "auth_sa_lookup_failed",
+                    error = %err,
+                    "Failed to load service account"
+                );
+                "db_error"
+            })?
             .ok_or("invalid_token")?;
         if account.revoked_at.is_some() {
             return Err("token_revoked");
@@ -283,7 +303,14 @@ async fn identity_from_user(
     let user = user_repo
         .get_by_id(user_id)
         .await
-        .map_err(|_| "db_error")?
+        .map_err(|err| {
+            tracing::error!(
+                event = "auth_user_lookup_failed",
+                error = %err,
+                "Failed to load user"
+            );
+            "db_error"
+        })?
         .ok_or("user_not_found")?;
 
     let status_allowed = matches!(user.status, UserStatus::Active)
@@ -297,13 +324,23 @@ async fn identity_from_user(
     for member in group_member_repo
         .list_by_user(user.id)
         .await
-        .map_err(|_| "db_error")?
+        .map_err(|err| {
+            tracing::error!(
+                event = "auth_group_membership_lookup_failed",
+                error = %err,
+                "Failed to load group memberships"
+            );
+            "db_error"
+        })?
     {
-        if let Some(group) = group_repo
-            .get_by_id(member.group_id)
-            .await
-            .map_err(|_| "db_error")?
-        {
+        if let Some(group) = group_repo.get_by_id(member.group_id).await.map_err(|err| {
+            tracing::error!(
+                event = "auth_group_lookup_failed",
+                error = %err,
+                "Failed to load group"
+            );
+            "db_error"
+        })? {
             groups.push(group.slug);
         }
     }

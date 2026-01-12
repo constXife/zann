@@ -40,6 +40,7 @@ const clearDataConfirm = ref("");
 const factoryResetConfirm = ref("");
 const signOutEraseCache = ref(true);
 const busy = ref(false);
+const hideCreateLocalVault = computed(() => props.remoteStorages.length === 0);
 
 watch(
   () => props.localStorage,
@@ -315,7 +316,7 @@ const handleResetCursor = async (storageId: string) => {
     </div>
 
     <!-- Create Local Vault (shown when no local vaults exist) -->
-    <div v-else-if="!showLocalSection">
+    <div v-else-if="!showLocalSection && !hideCreateLocalVault">
       <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-4">
         {{ t("storage.onThisDevice") }}
       </h4>
@@ -331,7 +332,7 @@ const handleResetCursor = async (storageId: string) => {
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
           </svg>
-          {{ hasLocalVaults ? t("storage.showLocalVaults") : t("storage.createLocalVault") }}
+          {{ t("storage.createLocalVault") }}
         </button>
       </div>
     </div>

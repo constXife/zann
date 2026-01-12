@@ -112,7 +112,7 @@ pub struct SystemInfoResponse {
     #[serde(default = "default_true")]
     pub personal_vaults_enabled: bool,
     #[serde(default)]
-    pub auth_methods: Vec<String>,
+    pub auth_methods: Vec<i32>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -160,8 +160,8 @@ pub struct VaultSummaryResponse {
     pub id: String,
     pub slug: String,
     pub name: String,
-    pub kind: String,
-    pub cache_policy: String,
+    pub kind: i32,
+    pub cache_policy: i32,
     pub tags: Option<Vec<String>>,
 }
 
@@ -171,10 +171,10 @@ pub struct VaultDetailResponse {
     pub id: String,
     pub slug: String,
     pub name: String,
-    pub kind: String,
-    pub cache_policy: String,
+    pub kind: i32,
+    pub cache_policy: i32,
     pub vault_key_enc: Vec<u8>,
-    pub encryption_type: String,
+    pub encryption_type: i32,
     pub tags: Option<Vec<String>>,
     pub created_at: String,
 }
@@ -201,7 +201,7 @@ pub struct SyncPullResponse {
 pub struct SyncHistoryEntry {
     pub version: i64,
     pub checksum: String,
-    pub change_type: String,
+    pub change_type: i32,
     pub changed_by_name: Option<String>,
     pub changed_by_email: String,
     pub created_at: String,
@@ -212,7 +212,7 @@ pub struct SyncHistoryEntry {
 #[derive(Deserialize)]
 pub struct SyncPullChange {
     pub item_id: String,
-    pub operation: String,
+    pub operation: i32,
     pub seq: i64,
     pub updated_at: String,
     pub checksum: String,
@@ -237,7 +237,7 @@ pub struct SyncSharedPullResponse {
 #[derive(Deserialize)]
 pub struct SyncSharedPullChange {
     pub item_id: String,
-    pub operation: String,
+    pub operation: i32,
     pub seq: i64,
     pub updated_at: String,
     pub payload: Option<serde_json::Value>,
@@ -254,7 +254,7 @@ pub struct SyncSharedPullChange {
 pub struct SyncSharedHistoryEntry {
     pub version: i64,
     pub checksum: String,
-    pub change_type: String,
+    pub change_type: i32,
     pub changed_by_name: Option<String>,
     pub changed_by_email: String,
     pub created_at: String,
@@ -270,7 +270,7 @@ pub struct SyncPushRequest {
 #[derive(Serialize)]
 pub struct SyncPushChange {
     pub item_id: String,
-    pub operation: String,
+    pub operation: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload_enc: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -294,7 +294,7 @@ pub struct SyncSharedPushRequest {
 #[derive(Serialize)]
 pub struct SyncSharedPushChange {
     pub item_id: String,
-    pub operation: String,
+    pub operation: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -405,7 +405,7 @@ pub struct BootstrapResponse {
 pub struct VaultSummary {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    pub kind: i32,
     pub is_default: bool,
 }
 
@@ -413,7 +413,7 @@ pub struct VaultSummary {
 pub struct StorageSummary {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    pub kind: i32,
     pub server_url: Option<String>,
     pub server_name: Option<String>,
     pub account_subject: Option<String>,
@@ -424,7 +424,7 @@ pub struct StorageSummary {
 pub struct StorageInfoResponse {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    pub kind: i32,
     pub file_path: Option<String>,
     pub file_size: Option<u64>,
     pub last_modified: Option<String>,
@@ -438,10 +438,11 @@ pub struct StorageInfoResponse {
 #[derive(Serialize)]
 pub struct ItemSummary {
     pub id: String,
+    pub vault_id: String,
     pub path: String,
     pub name: String,
     pub type_id: String,
-    pub sync_status: Option<String>,
+    pub sync_status: Option<i32>,
     pub updated_at: String,
     pub deleted_at: Option<String>,
 }
@@ -460,7 +461,7 @@ pub struct ItemDetail {
 pub struct ItemHistorySummary {
     pub version: i64,
     pub checksum: String,
-    pub change_type: String,
+    pub change_type: i32,
     pub changed_by_name: Option<String>,
     pub changed_by_email: String,
     pub created_at: String,
@@ -523,9 +524,9 @@ pub struct VaultCreateRequest {
     pub storage_id: String,
     pub name: String,
     #[serde(default)]
-    pub kind: Option<String>,
+    pub kind: Option<i32>,
     #[serde(default)]
-    pub cache_policy: Option<String>,
+    pub cache_policy: Option<i32>,
     #[serde(default)]
     pub is_default: Option<bool>,
 }
@@ -572,8 +573,8 @@ pub struct VaultCreatePayload {
     pub id: Option<String>,
     pub slug: String,
     pub name: String,
-    pub kind: String,
-    pub cache_policy: String,
+    pub kind: i32,
+    pub cache_policy: i32,
     #[serde(default)]
     pub vault_key_enc: Option<Vec<u8>>,
     #[serde(default)]
@@ -584,7 +585,7 @@ pub struct VaultCreatePayload {
 pub struct VaultCreateResponse {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    pub kind: i32,
     pub vault_key_enc: Vec<u8>,
 }
 

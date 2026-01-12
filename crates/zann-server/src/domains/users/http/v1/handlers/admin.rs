@@ -47,7 +47,7 @@ pub(crate) async fn list_users(
     Query(query): Query<ListUsersQuery>,
 ) -> impl IntoResponse {
     let command = ListUsersCommand {
-        status: query.status.clone(),
+        status: query.status,
         sort: query.sort.clone(),
         limit: query.limit,
         offset: query.offset,

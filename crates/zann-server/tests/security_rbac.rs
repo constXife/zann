@@ -3,6 +3,7 @@ use axum::http::{Method, Request, StatusCode};
 use chrono::Utc;
 use tower::ServiceExt;
 use uuid::Uuid;
+use zann_core::{CachePolicy, ChangeType, VaultKind};
 
 use tracing_subscriber::EnvFilter;
 mod support;
@@ -157,8 +158,8 @@ impl TestApp {
             if let Some(vault) = vaults.iter().find(|vault| {
                 vault
                     .get("kind")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|value| value.eq_ignore_ascii_case("personal"))
+                    .and_then(|value| value.as_i64())
+                    .is_some_and(|value| value == i64::from(VaultKind::Personal.as_i32()))
             }) {
                 return vault.clone();
             }
@@ -167,8 +168,8 @@ impl TestApp {
         let payload = serde_json::json!({
             "slug": slug,
             "name": "Test Vault",
-            "kind": "personal",
-            "cache_policy": "full",
+            "kind": VaultKind::Personal.as_i32(),
+            "cache_policy": CachePolicy::Full.as_i32(),
             "vault_key_enc": [1, 2, 3],
         });
         let (status, json) = self
@@ -241,7 +242,7 @@ async fn readonly_member_cannot_push_sync() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": Uuid::now_v7(),
-            "operation": "upsert",
+            "operation": ChangeType::Update.as_i32(),
         }],
     });
 

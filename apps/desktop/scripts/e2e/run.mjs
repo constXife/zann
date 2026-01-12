@@ -35,6 +35,33 @@ const runCommand = (command, args, options = {}) =>
     });
   });
 
+const runCommandWithTimeout = (command, args, timeoutMs, options = {}) =>
+  new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: "inherit", ...options });
+    let timer;
+    const commandLabel = `${command} ${args.join(" ")}`;
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        if (!child.killed) {
+          child.kill("SIGKILL");
+        }
+        reject(new Error(`command timed out after ${timeoutMs}ms: ${commandLabel}`));
+      }, timeoutMs);
+    }
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      reject(new Error(`command failed: ${commandLabel}\n${error.message}`));
+    });
+    child.on("exit", (code) => {
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`command failed: ${commandLabel} (code ${code})`));
+      }
+    });
+  });
+
 const runCommandQuiet = (command, args, options = {}) =>
   new Promise((resolve, reject) => {
     const child = spawn(command, args, { stdio: "ignore", ...options });
@@ -73,17 +100,28 @@ const resolveCommandPath = (command) =>
     });
   });
 
-const cleanupComposeArtifacts = async (composeBin, namePrefix, serverPort) => {
+const cleanupComposeArtifacts = async (composeBin, namePrefix, ports) => {
   const nameFilter = `^${namePrefix}`;
-  const portFilter = String(serverPort);
-  const script =
-    `ids=$(${composeBin} ps -aq --filter name=${nameFilter});` +
-    `port_ids=$(${composeBin} ps -aq --filter publish=${portFilter});` +
-    'all="$ids $port_ids";' +
-    'if [ -n "$all" ]; then ' +
-    `${composeBin} rm -f $all >/dev/null 2>&1 || true; ` +
-    "fi";
-  await runCommandQuiet("sh", ["-c", script]);
+  const portFilters = ports.map((port) => String(port));
+  const bins = [composeBin, "podman", "docker"];
+
+  for (const bin of bins) {
+    if (!bin) continue;
+    const portFiltersScript = portFilters
+      .map((port) => `$(${bin} ps -aq --filter publish=${port})`)
+      .join(" ");
+    const script =
+      `ids=$(${bin} ps -aq --filter name=${nameFilter});` +
+      `port_ids="${portFiltersScript}";` +
+      'all="$ids $port_ids";' +
+      'if [ -n "$all" ]; then ' +
+      `${bin} rm -f $all >/dev/null 2>&1 || true; ` +
+      "fi";
+    try {
+      await runCommandQuiet("sh", ["-c", script]);
+      break;
+    } catch {}
+  }
 };
 
 const startXvfb = async () => {
@@ -263,18 +301,24 @@ const imageExists = async (composeBin, imageName) => {
   }
 };
 
-const startCompose = async (serverPort) => {
+const startCompose = async (serverPort, dbPort) => {
+  if (process.env.TAURI_E2E_FLOW === "local") {
+    process.env.TAURI_E2E_SKIP_SERVER = "1";
+  }
   if (process.env.TAURI_E2E_SKIP_SERVER === "1") {
     return null;
   }
 
   const composeFile = process.env.TAURI_E2E_COMPOSE_FILE ?? path.join(REPO_ROOT, "compose.e2e.yaml");
-  const projectName = process.env.TAURI_E2E_PROJECT ?? `zann-e2e-${Date.now()}`;
+  const projectName = process.env.TAURI_E2E_PROJECT ?? "zann-e2e";
   const compose = await resolveComposeCommand();
   const imageName = process.env.TAURI_E2E_SERVER_IMAGE ?? "zann-e2e/server:dev";
   const shouldBuild = process.env.TAURI_E2E_BUILD_SERVER === "1";
 
-  await cleanupComposeArtifacts(compose.bin, "zann-e2e-", serverPort);
+  await cleanupComposeArtifacts(compose.bin, "zann-e2e-", [serverPort, dbPort]);
+
+  const downArgs = [...compose.args, "-f", composeFile, "-p", projectName, "down", "-v"];
+  await runCommandQuiet(compose.bin, downArgs, { cwd: REPO_ROOT });
 
   if (shouldBuild || !(await imageExists(compose.bin, imageName))) {
     const buildArgs = [...compose.args, "-f", composeFile, "-p", projectName, "build"];
@@ -288,6 +332,7 @@ const startCompose = async (serverPort) => {
     env: {
       ...process.env,
       TAURI_E2E_SERVER_PORT: String(serverPort),
+      TAURI_E2E_DB_PORT: String(dbPort),
     },
   });
 
@@ -400,6 +445,10 @@ const logActiveHandles = (label) => {
 
 const main = async () => {
   ensureSupportedPlatform();
+  if (process.env.TAURI_E2E_ENABLE !== "1") {
+    console.log("[e2e] TAURI_E2E_ENABLE not set; skipping e2e tests.");
+    return;
+  }
   const driverBin = await resolveDriverBin();
   if (!process.env.TAURI_E2E_HEADLESS) {
     process.env.TAURI_E2E_HEADLESS = "1";
@@ -426,8 +475,10 @@ const main = async () => {
     process.env.VITE_E2E = "1";
   }
   const driverPort = Number(process.env.TAURI_DRIVER_PORT ?? 4444);
+  const testArgs = process.argv.slice(2);
   const serverUrl = process.env.TAURI_E2E_SERVER_URL ?? "http://127.0.0.1:18081";
   const serverPort = Number(process.env.TAURI_E2E_SERVER_PORT ?? 18081);
+  const dbPort = Number(process.env.TAURI_E2E_DB_PORT ?? 15433);
   const e2eHome =
     process.env.TAURI_E2E_HOME ??
     (await mkdtemp(path.join(os.tmpdir(), "zann-e2e-")));
@@ -439,7 +490,7 @@ const main = async () => {
   await ensureXvfbAvailable();
   const nativeDriverBin = await resolveNativeDriverBin();
 
-  const composeState = await startCompose(serverPort);
+  const composeState = await startCompose(serverPort, dbPort);
   if (composeState) {
     await waitForPort(serverPort, 60000);
   }
@@ -457,6 +508,7 @@ const main = async () => {
       throw new Error(`Tauri app binary not found at ${appPath}`);
     }
 
+    console.log("[e2e] Starting test runner");
     const driverArgs = ["--port", String(driverPort)];
     if (nativeDriverBin) {
       driverArgs.push("--native-driver", nativeDriverBin);
@@ -531,9 +583,11 @@ const main = async () => {
     try {
       await waitForPort(driverPort);
       const bunBin = process.env.BUN_BIN ?? "bun";
-      await runCommand(
+      const testTimeoutMs = Number(process.env.TAURI_E2E_TEST_TIMEOUT_MS ?? 240000);
+      await runCommandWithTimeout(
         bunBin,
-        ["test", path.join(APP_ROOT, "e2e", "tauri.e2e.test.mjs")],
+        ["test", path.join(APP_ROOT, "e2e", "tauri.e2e.test.mjs"), ...testArgs],
+        testTimeoutMs,
         {
           cwd: APP_ROOT,
           env: {

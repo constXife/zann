@@ -1,8 +1,9 @@
 import { computed, nextTick, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
-import type { ApiResponse, EncryptedPayload, FieldKind, FieldValue, ItemDetail, VaultSummary } from "../types";
+import type { ApiResponse, EncryptedPayload, FieldKind, FieldValue, ItemDetail, ItemSummary, VaultSummary } from "../types";
 import { getFieldSchema, getSchemaFieldDefs, resolveSchemaLabel, type FieldType } from "../data/secretSchemas";
+import { CachePolicy, VaultKind } from "../constants/enums";
 
 type Translator = (key: string) => string;
 
@@ -15,11 +16,17 @@ type FieldInput = {
   isSecret: boolean;
 };
 
+const MAX_ITEM_NAME_LEN = 200;
+const MAX_ITEM_PATH_LEN = 500;
+const MAX_ITEM_PATH_SEGMENTS = 32;
+const ITEM_NAME_ALLOWED = /^[A-Za-z0-9_-]+$/;
+
 type UseCreateModalOptions = {
   selectedStorageId: Ref<string>;
   selectedVaultId: Ref<string | null>;
   selectedItemId: Ref<string | null>;
   vaults: Ref<VaultSummary[]>;
+  items: Ref<ItemSummary[]>;
   selectedItem: Ref<ItemDetail | null>;
   selectedCategory: Ref<string | null>;
   lastCreateItemType: Ref<string>;
@@ -47,8 +54,8 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   const advancedOpen = ref(false);
   const kvFilter = ref("");
   const createVaultName = ref("");
-  const createVaultKind = ref("personal");
-  const createVaultCachePolicy = ref("full");
+  const createVaultKind = ref<VaultKind>(VaultKind.Personal);
+  const createVaultCachePolicy = ref<CachePolicy>(CachePolicy.Full);
   const createVaultDefault = ref(false);
   const createVaultError = ref("");
   const createVaultBusy = ref(false);
@@ -320,8 +327,8 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   const resetCreateVaultState = () => {
     createVaultName.value = "";
     createVaultKind.value =
-      options.selectedStorageId.value === options.localStorageId ? "personal" : "shared";
-    createVaultCachePolicy.value = "full";
+      options.selectedStorageId.value === options.localStorageId ? VaultKind.Personal : VaultKind.Shared;
+    createVaultCachePolicy.value = CachePolicy.Full;
     createVaultDefault.value = false;
     createVaultError.value = "";
     createVaultBusy.value = false;
@@ -336,8 +343,8 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     if (mode === "vault") {
       createVaultName.value = "";
       createVaultKind.value =
-        options.selectedStorageId.value === options.localStorageId ? "personal" : "shared";
-      createVaultCachePolicy.value = "full";
+        options.selectedStorageId.value === options.localStorageId ? VaultKind.Personal : VaultKind.Shared;
+      createVaultCachePolicy.value = CachePolicy.Full;
       createVaultDefault.value = options.vaults.value.length === 0;
     } else {
       await loadTypeOptions();
@@ -395,7 +402,7 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createVaultBusy.value = true;
     try {
       const kind =
-        options.selectedStorageId.value === options.localStorageId ? createVaultKind.value : "shared";
+        options.selectedStorageId.value === options.localStorageId ? createVaultKind.value : VaultKind.Shared;
       const response = await invoke<ApiResponse<VaultSummary>>("vault_create", {
         req: {
           storage_id: options.selectedStorageId.value,
@@ -463,6 +470,111 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   const hasFieldValues = () =>
     createItemFields.value.some((field) => field.key.trim() && field.value.trim());
 
+  const validatePath = (folder: string, title: string) => {
+    const segments = [
+      ...folder
+        .split("/")
+        .map((segment) => segment.trim())
+        .filter(Boolean),
+      title,
+    ];
+    for (const segment of segments) {
+      if (segment === ".") {
+        continue;
+      }
+      if (segment === "..") {
+        return { ok: false, key: "path_invalid" };
+      }
+      if (segment.startsWith(".")) {
+        return { ok: false, key: "path_segment_invalid" };
+      }
+      if (!ITEM_NAME_ALLOWED.test(segment)) {
+        return { ok: false, key: "path_segment_invalid_chars" };
+      }
+      if (segment.length > MAX_ITEM_NAME_LEN) {
+        return { ok: false, key: "name_too_long" };
+      }
+    }
+    const normalized = segments.filter((segment) => segment !== ".").join("/");
+    if (segments.length > MAX_ITEM_PATH_SEGMENTS) {
+      return { ok: false, key: "path_segments_limit" };
+    }
+    if (normalized.length > MAX_ITEM_PATH_LEN) {
+      return { ok: false, key: "path_too_long" };
+    }
+    return { ok: true };
+  };
+
+  const buildPath = (folder: string, title: string) => {
+    const segments = [
+      ...folder
+        .split("/")
+        .map((segment) => segment.trim())
+        .filter(Boolean),
+      title,
+    ];
+    return segments.join("/");
+  };
+
+  const hasDuplicatePath = (folder: string, title: string) => {
+    if (!createItemVaultId.value) return false;
+    const normalized = buildPath(folder, title).toLowerCase();
+    return options.items.value.some((item) => {
+      if (item.deleted_at) return false;
+      if (item.vault_id !== createItemVaultId.value) return false;
+      if (createEditingItemId.value && item.id === createEditingItemId.value) return false;
+      return item.path.toLowerCase() === normalized;
+    });
+  };
+
+  const validateNameAndPath = (folder: string, title: string) => {
+    if (!ITEM_NAME_ALLOWED.test(title)) {
+      return { ok: false, key: "name_invalid_chars" };
+    }
+    if (title.length > MAX_ITEM_NAME_LEN) {
+      return { ok: false, key: "name_too_long" };
+    }
+    const pathCheck = validatePath(folder, title);
+    if (!pathCheck.ok) {
+      return pathCheck;
+    }
+    if (hasDuplicatePath(folder, title)) {
+      return { ok: false, key: "item_exists" };
+    }
+    return { ok: true };
+  };
+
+  const validateFieldKeys = () => {
+    const keys = createItemFields.value
+      .map((field) => field.key.trim())
+      .filter(Boolean);
+    for (const key of keys) {
+      if (!ITEM_NAME_ALLOWED.test(key)) {
+        return { ok: false, key: "field_key_invalid" };
+      }
+    }
+    const normalized = keys.map((key) => key.toLowerCase());
+    const unique = new Set(normalized);
+    if (unique.size !== normalized.length) {
+      return { ok: false, key: "field_key_duplicate" };
+    }
+    return { ok: true };
+  };
+
+  const createItemValid = computed(() => {
+    if (!createItemVaultId.value) return false;
+    const title = createItemTitle.value.trim();
+    if (!title) return false;
+    const folder = createItemFolder.value.trim();
+    const validation = validateNameAndPath(folder, title);
+    if (!validation.ok) return false;
+    const keyValidation = validateFieldKeys();
+    if (!keyValidation.ok) return false;
+    return true;
+  });
+
+  const createVaultValid = computed(() => Boolean(createVaultName.value.trim()));
+
   const hasPasswordChange = (prev: EncryptedPayload, next: EncryptedPayload) => {
     const prevFields = prev.fields ?? {};
     const nextFields = next.fields ?? {};
@@ -493,16 +605,71 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     }
   });
 
-  watch(
-    createItemFields,
-    () => {
-      if (hasFieldValues() && createItemErrorKey.value === "fields_required") {
+  const nameErrorKeys = new Set([
+    "name_required",
+    "name_invalid_chars",
+    "name_too_long",
+    "item_exists",
+    "path_invalid",
+    "path_segment_invalid",
+    "path_segments_limit",
+    "path_too_long",
+  ]);
+  const fieldKeyErrorKeys = new Set([
+    "field_key_invalid",
+    "field_key_duplicate",
+  ]);
+  const refreshNameErrors = () => {
+    if (!createModalOpen.value || createMode.value !== "item") return;
+    if (createItemErrorKey.value === "vault_required" && !createItemVaultId.value) {
+      return;
+    }
+    const title = createItemTitle.value.trim();
+    const folder = createItemFolder.value.trim();
+    if (!title) {
+      if (createItemErrorKey.value === "name_required") {
         createItemErrorKey.value = "";
         createItemError.value = "";
       }
-    },
-    { deep: true },
+      return;
+    }
+    const validation = validateNameAndPath(folder, title);
+    if (!validation.ok) {
+      createItemErrorKey.value = validation.key ?? "";
+      createItemError.value = validation.key ? options.t(`errors.${validation.key}`) : "";
+      return;
+    }
+    if (createItemErrorKey.value && nameErrorKeys.has(createItemErrorKey.value)) {
+      createItemErrorKey.value = "";
+      createItemError.value = "";
+    }
+  };
+
+  watch(createItemTitle, refreshNameErrors);
+  watch(createItemFolder, refreshNameErrors);
+  watch(createItemVaultId, refreshNameErrors);
+  watch(
+    () => options.items.value.length,
+    refreshNameErrors,
   );
+  const refreshFieldErrors = () => {
+    if (!createModalOpen.value || createMode.value !== "item") return;
+    if (createItemErrorKey.value && nameErrorKeys.has(createItemErrorKey.value)) {
+      return;
+    }
+    const validation = validateFieldKeys();
+    if (!validation.ok) {
+      createItemErrorKey.value = validation.key ?? "";
+      createItemError.value = validation.key ? options.t(`errors.${validation.key}`) : "";
+      return;
+    }
+    if (createItemErrorKey.value && fieldKeyErrorKeys.has(createItemErrorKey.value)) {
+      createItemErrorKey.value = "";
+      createItemError.value = "";
+    }
+  };
+
+  watch(createItemFields, refreshFieldErrors, { deep: true });
 
   const submitCreateItem = async () => {
     createItemError.value = "";
@@ -519,16 +686,20 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
       return;
     }
     const folder = createItemFolder.value.trim();
-    const path = folder ? `${folder}/${title}` : title;
-
-    const hasValue = createItemFields.value.some(
-      (field) => field.key.trim() && field.value.trim(),
-    );
-    if (!hasValue) {
-      createItemError.value = options.t("errors.fields_required");
-      createItemErrorKey.value = "fields_required";
+    const validation = validateNameAndPath(folder, title);
+    if (!validation.ok) {
+      createItemError.value = options.t(`errors.${validation.key}`);
+      createItemErrorKey.value = validation.key;
       return;
     }
+    const keyValidation = validateFieldKeys();
+    if (!keyValidation.ok) {
+      createItemError.value = options.t(`errors.${keyValidation.key}`);
+      createItemErrorKey.value = keyValidation.key;
+      return;
+    }
+    const path = buildPath(folder, title);
+
     const payload = buildPayload(createItemType.value);
     createItemBusy.value = true;
     let optimisticVersion: number | null = null;
@@ -643,6 +814,7 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createItemError,
     createItemErrorKey,
     createItemBusy,
+    createItemValid,
     advancedOpen,
     kvFilter,
     createVaultName,
@@ -651,6 +823,7 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createVaultDefault,
     createVaultError,
     createVaultBusy,
+    createVaultValid,
     typeOptions,
     typeGroups,
     currentSchema,

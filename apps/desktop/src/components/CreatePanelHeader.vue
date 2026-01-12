@@ -6,6 +6,8 @@ const props = defineProps<{
   vaultName: string;
   pathTokens: string[];
   busy: boolean;
+  submitDisabled: boolean;
+  submitTitle: string;
   isEditing: boolean;
   typeMenuOpen: boolean;
   typeOptions: string[];
@@ -31,7 +33,9 @@ const props = defineProps<{
     <div class="max-w-2xl mx-auto px-6 py-3">
       <div class="flex items-center justify-between gap-4">
         <div class="flex flex-wrap items-center gap-2 text-sm text-[var(--text-secondary)]">
-          <span class="font-semibold text-[var(--text-tertiary)]">🔒 {{ props.vaultName }}</span>
+          <span class="font-semibold text-[var(--text-tertiary)]" data-testid="create-vault-label">
+            🔒 {{ props.vaultName }}
+          </span>
           <template v-for="(token, idx) in props.pathTokens" :key="`${token}-${idx}-breadcrumb`">
             <span class="text-[var(--text-tertiary)]">/</span>
             <span>📂 {{ token }}</span>
@@ -92,13 +96,15 @@ const props = defineProps<{
             class="rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
             data-tauri-drag-region="false"
             @click="props.onCancel"
+            data-testid="create-cancel"
           >
             {{ props.t("common.cancel") }}
           </button>
           <button
             type="button"
             class="flex items-center gap-2 rounded-lg bg-gray-800 dark:bg-gray-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            :disabled="props.busy"
+            :disabled="props.busy || props.submitDisabled"
+            :title="props.submitTitle"
             data-tauri-drag-region="false"
             @click="props.onSubmit"
             data-testid="create-submit"

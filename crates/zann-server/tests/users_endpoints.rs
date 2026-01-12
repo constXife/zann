@@ -9,7 +9,7 @@ mod support;
 
 use chrono::Utc;
 use tokio::sync::Semaphore;
-use zann_core::{Group, GroupMember};
+use zann_core::{Group, GroupMember, UserStatus};
 use zann_db::repo::{GroupMemberRepo, GroupRepo, UserRepo};
 use zann_db::PgPool;
 use zann_server::app::{build_router, AppState};
@@ -298,7 +298,10 @@ async fn admin_user_lifecycle() {
         .get_json(&format!("/v1/users/{}", user_id), Some(&admin_token))
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(user["status"], "blocked");
+    assert_eq!(
+        user["status"].as_i64(),
+        Some(i64::from(UserStatus::Disabled.as_i32()))
+    );
 
     let (status, _user) = app
         .send_json(
@@ -313,7 +316,10 @@ async fn admin_user_lifecycle() {
         .get_json(&format!("/v1/users/{}", user_id), Some(&admin_token))
         .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(user["status"], "active");
+    assert_eq!(
+        user["status"].as_i64(),
+        Some(i64::from(UserStatus::Active.as_i32()))
+    );
 
     let payload = json!({ "password": "reset-1" });
     let (status, reset) = app

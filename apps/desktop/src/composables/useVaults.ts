@@ -2,6 +2,7 @@ import { computed, ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, VaultSummary } from "../types";
+import { VaultKind } from "../constants/enums";
 
 type Translator = (key: string) => string;
 
@@ -19,10 +20,10 @@ export const useVaults = (options: UseVaultsOptions) => {
   const vaults = ref<VaultSummary[]>([]);
 
   const personalVaults = computed(() =>
-    vaults.value.filter((v) => v.kind === "personal"),
+    vaults.value.filter((v) => v.kind === VaultKind.Personal),
   );
   const sharedVaults = computed(() =>
-    vaults.value.filter((v) => v.kind === "shared"),
+    vaults.value.filter((v) => v.kind === VaultKind.Shared),
   );
 
   const loadVaults = async () => {

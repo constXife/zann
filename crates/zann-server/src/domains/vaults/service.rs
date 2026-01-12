@@ -39,8 +39,8 @@ pub struct CreateVaultCommand {
     pub id: Option<String>,
     pub slug: String,
     pub name: String,
-    pub kind: String,
-    pub cache_policy: String,
+    pub kind: VaultKind,
+    pub cache_policy: CachePolicy,
     pub vault_key_enc: Option<Vec<u8>>,
     pub tags: Option<Vec<String>>,
 }
@@ -121,14 +121,8 @@ pub async fn create_vault(
         return Err(VaultServiceError::BadRequest("invalid_name"));
     }
 
-    let kind = cmd
-        .kind
-        .parse::<VaultKind>()
-        .map_err(|_| VaultServiceError::BadRequest("invalid_kind"))?;
-    let cache_policy = cmd
-        .cache_policy
-        .parse::<CachePolicy>()
-        .map_err(|_| VaultServiceError::BadRequest("invalid_cache_policy"))?;
+    let kind = cmd.kind;
+    let cache_policy = cmd.cache_policy;
 
     let repo = VaultRepo::new(&state.db);
     if kind == VaultKind::Personal {

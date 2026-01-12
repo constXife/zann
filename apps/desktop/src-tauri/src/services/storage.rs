@@ -1,7 +1,7 @@
 use tauri::State;
 use tauri_plugin_biometry::BiometryExt;
 use uuid::Uuid;
-use zann_core::StoragesService;
+use zann_core::{StorageKind, StoragesService};
 use zann_db::local::{
     LocalItemRepo, LocalStorageRepo, LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
 };
@@ -32,7 +32,7 @@ pub async fn storages_list(
             .map(|storage| StorageSummary {
                 id: storage.id.to_string(),
                 name: storage.name,
-                kind: storage.kind.as_str().to_string(),
+                kind: storage.kind.as_i32(),
                 server_url: storage.server_url,
                 server_name: storage.server_name,
                 account_subject: storage.account_subject,
@@ -61,7 +61,7 @@ pub async fn storage_info(
     let mut last_synced = None;
     let mut fingerprint = None;
 
-    if storage.kind == "local" {
+    if storage.kind == StorageKind::LocalOnly {
         let db_path = crate::state::local_db_path(&state.root);
         file_path = Some(db_path.display().to_string());
         if let Ok(metadata) = std::fs::metadata(&db_path) {
@@ -77,8 +77,7 @@ pub async fn storage_info(
         if let Ok(vaults) = vault_repo.list_by_storage(storage_uuid).await {
             let mut latest_sync: Option<chrono::DateTime<chrono::Utc>> = None;
             for vault in vaults {
-                if let Ok(Some(cursor)) = cursor_repo.get(&storage_id, &vault.id.to_string()).await
-                {
+                if let Ok(Some(cursor)) = cursor_repo.get(storage_uuid, vault.id).await {
                     if let Some(sync_at) = cursor.last_sync_at {
                         if latest_sync.is_none() || sync_at > latest_sync.unwrap() {
                             latest_sync = Some(sync_at);
@@ -95,7 +94,7 @@ pub async fn storage_info(
     Ok(ApiResponse::ok(StorageInfoResponse {
         id: storage.id.to_string(),
         name: storage.name,
-        kind: storage.kind,
+        kind: storage.kind.as_i32(),
         file_path,
         file_size,
         last_modified,
@@ -133,7 +132,7 @@ pub async fn storage_delete(
             &format!("failed to delete pending changes: {err}"),
         ));
     }
-    if let Err(err) = cursor_repo.delete_by_storage(&storage_id).await {
+    if let Err(err) = cursor_repo.delete_by_storage(storage_uuid).await {
         return Ok(ApiResponse::err(
             "db_error",
             &format!("failed to delete sync cursors: {err}"),
@@ -158,7 +157,7 @@ pub async fn storage_delete(
         ));
     }
 
-    if storage.kind == "remote" {
+    if storage.kind == StorageKind::Remote {
         if let Ok(mut config) = load_config(&state.root) {
             let contexts_to_remove: Vec<String> = config
                 .contexts
@@ -207,7 +206,7 @@ pub async fn storage_disconnect(
             &format!("failed to delete pending changes: {err}"),
         ));
     }
-    if let Err(err) = cursor_repo.delete_by_storage(&storage_id).await {
+    if let Err(err) = cursor_repo.delete_by_storage(storage_uuid).await {
         return Ok(ApiResponse::err(
             "db_error",
             &format!("failed to delete sync cursors: {err}"),
@@ -232,7 +231,7 @@ pub async fn storage_disconnect(
         ));
     }
 
-    if storage.kind == "remote" {
+    if storage.kind == StorageKind::Remote {
         if let Ok(mut config) = load_config(&state.root) {
             let contexts_to_remove: Vec<String> = config
                 .contexts
@@ -269,7 +268,7 @@ pub async fn storage_reveal(
         Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
     };
 
-    if storage.kind != "local" {
+    if storage.kind != StorageKind::LocalOnly {
         return Ok(ApiResponse::err("not_local", "can only reveal local storages"));
     }
 
@@ -321,7 +320,7 @@ pub async fn storage_sign_out(
         Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
     };
 
-    if storage.kind != "remote" {
+    if storage.kind != StorageKind::Remote {
         return Ok(ApiResponse::err(
             "not_remote",
             "sign out only works for remote storages",
@@ -345,7 +344,7 @@ pub async fn storage_sign_out(
         let pending_repo = PendingChangeRepo::new(&state.pool);
 
         let _ = pending_repo.delete_by_storage(storage_uuid).await;
-        let _ = cursor_repo.delete_by_storage(&storage_id).await;
+        let _ = cursor_repo.delete_by_storage(storage_uuid).await;
         let _ = item_repo.delete_by_storage(storage_uuid).await;
         let _ = vault_repo.delete_by_storage(storage_uuid).await;
     }
@@ -376,7 +375,7 @@ pub async fn local_clear_data(
     let storages = storage_repo.list().await.map_err(|e| e.to_string())?;
 
     for storage in &storages {
-        let should_clear = if storage.kind == "local" {
+        let should_clear = if storage.kind == StorageKind::LocalOnly {
             true
         } else {
             also_clear_remote_cache
@@ -384,12 +383,14 @@ pub async fn local_clear_data(
 
         if should_clear {
             let _ = pending_repo.delete_by_storage(storage.id).await;
-            let _ = cursor_repo.delete_by_storage(&storage.id.to_string()).await;
+            let _ = cursor_repo.delete_by_storage(storage.id).await;
             let _ = item_repo.delete_by_storage(storage.id).await;
             let _ = vault_repo.delete_by_storage(storage.id).await;
         }
 
-        if storage.kind == "local" || (storage.kind == "remote" && also_remove_connections) {
+        if storage.kind == StorageKind::LocalOnly
+            || (storage.kind == StorageKind::Remote && also_remove_connections)
+        {
             let _ = storage_repo.delete(storage.id).await;
         }
     }
@@ -419,7 +420,7 @@ pub async fn local_factory_reset(
 
     for storage in &storages {
         let _ = pending_repo.delete_by_storage(storage.id).await;
-        let _ = cursor_repo.delete_by_storage(&storage.id.to_string()).await;
+        let _ = cursor_repo.delete_by_storage(storage.id).await;
         let _ = item_repo.delete_by_storage(storage.id).await;
         let _ = vault_repo.delete_by_storage(storage.id).await;
         let _ = storage_repo.delete(storage.id).await;

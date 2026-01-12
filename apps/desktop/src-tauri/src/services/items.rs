@@ -7,7 +7,7 @@ use crate::types::{
     ApiResponse, ItemDeleteRequest, ItemDetail, ItemGetRequest, ItemPutRequest, ItemSummary,
     ItemUpdateRequest, ItemsEmptyTrashRequest, ItemsListRequest, ItemsTrashPurgeRequest,
 };
-use zann_core::{EncryptedPayload, ItemListParams, ItemsService};
+use zann_core::{ChangeType, EncryptedPayload, ItemListParams, ItemsService, SyncStatus};
 use zann_db::local::{LocalItemRepo, LocalPendingChange, LocalVaultRepo, PendingChangeRepo};
 use zann_db::services::LocalServices;
 
@@ -242,7 +242,7 @@ pub async fn items_resolve_conflict(
     let _ = pending_repo.delete_by_item(storage_id, item_id).await;
 
     let now = Utc::now();
-    item.sync_status = "modified".to_string();
+    item.sync_status = SyncStatus::Modified;
     item.updated_at = now;
     item_repo
         .update(&item)
@@ -254,7 +254,7 @@ pub async fn items_resolve_conflict(
         storage_id,
         vault_id: item.vault_id,
         item_id: item.id,
-        operation: "create".to_string(),
+        operation: ChangeType::Create,
         payload_enc: Some(item.payload_enc.clone()),
         checksum: Some(item.checksum.clone()),
         path: Some(item.path.clone()),
@@ -303,10 +303,11 @@ async fn list_items(
         .into_iter()
         .map(|item| ItemSummary {
             id: item.id.to_string(),
+            vault_id: item.vault_id.to_string(),
             path: item.path,
             name: item.name,
             type_id: item.type_id,
-            sync_status: Some(item.sync_status),
+            sync_status: Some(item.sync_status.as_i32()),
             updated_at: item.updated_at.to_rfc3339(),
             deleted_at: item.deleted_at.map(|value| value.to_rfc3339()),
         })

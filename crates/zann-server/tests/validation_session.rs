@@ -6,6 +6,7 @@ use uuid::Uuid;
 mod support;
 
 use tokio::sync::Semaphore;
+use zann_core::{CachePolicy, ChangeType, VaultKind};
 use zann_core::{Device, Session, User, UserStatus};
 use zann_db::repo::{DeviceRepo, SessionRepo, UserRepo};
 use zann_db::PgPool;
@@ -180,8 +181,8 @@ impl TestApp {
             if let Some(vault) = vaults.iter().find(|vault| {
                 vault
                     .get("kind")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|value| value.eq_ignore_ascii_case("personal"))
+                    .and_then(|value| value.as_i64())
+                    .is_some_and(|value| value == i64::from(VaultKind::Personal.as_i32()))
             }) {
                 return vault.clone();
             }
@@ -190,8 +191,8 @@ impl TestApp {
         let payload = serde_json::json!({
             "slug": slug,
             "name": "Test Vault",
-            "kind": "personal",
-            "cache_policy": "full",
+            "kind": VaultKind::Personal.as_i32(),
+            "cache_policy": CachePolicy::Full.as_i32(),
             "vault_key_enc": [1, 2, 3],
         });
         let (status, json) = self
@@ -221,7 +222,7 @@ async fn payload_too_large_is_rejected() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": Uuid::now_v7(),
-            "operation": "create",
+            "operation": ChangeType::Create.as_i32(),
             "payload_enc": payload_enc,
             "checksum": "checksum",
             "path": "dos/path",
@@ -249,7 +250,7 @@ async fn invalid_item_is_rejected() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": Uuid::now_v7(),
-            "operation": "create",
+            "operation": ChangeType::Create.as_i32(),
             "payload_enc": [1, 2, 3],
             "checksum": "checksum",
             "path": "",

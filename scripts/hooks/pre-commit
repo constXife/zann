@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if command -v cargo >/dev/null 2>&1; then
+  cargo fmt
+else
+  echo "cargo not found; skipping rustfmt" >&2
+fi

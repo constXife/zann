@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { StorageKind } from "../constants/enums";
 import type { Ref } from "vue";
 import SidebarPanel from "./SidebarPanel.vue";
 import ItemListPanel from "./ItemListPanel.vue";
@@ -100,7 +101,9 @@ type AppShellProps = {
   createItemError: unknown;
   createItemErrorKey: unknown;
   createItemBusy: unknown;
+  createItemValid: unknown;
   createVaultBusy: unknown;
+  createVaultValid: unknown;
   createEditingItemId: unknown;
   revealedFields: unknown;
   altRevealAll: unknown;
@@ -152,6 +155,9 @@ type AppShellProps = {
 
 const props = defineProps<AppShellProps>();
 const t = props.t;
+const isLocalStorage = computed(
+  () => (props.currentStorage as { kind?: number } | null)?.kind === StorageKind.LocalOnly,
+);
 
 const modelRef = <T>(key: keyof AppShellProps) =>
   computed<T>({
@@ -255,6 +261,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :selected-item-id="selectedItemId"
       :vault-context-label="vaultContextLabel"
       :is-shared-vault="isSharedVault"
+      :is-local-storage="isLocalStorage"
       :on-list-scroll="onListScroll"
       :select-item="selectItemById"
       :open-create-item="() => openCreateModal('item')"
@@ -308,7 +315,9 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :create-item-error="createItemError"
       :create-item-error-key="createItemErrorKey"
       :create-item-busy="createItemBusy"
+      :create-item-valid="createItemValid"
       :create-vault-busy="createVaultBusy"
+      :create-vault-valid="createVaultValid"
       :create-editing-item-id="createEditingItemId"
       :revealed-fields="revealedFields"
       :alt-reveal-all="altRevealAll"

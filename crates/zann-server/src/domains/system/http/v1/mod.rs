@@ -6,7 +6,7 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use zann_core::SecurityProfile;
+use zann_core::{AuthMethod, SecurityProfile};
 
 use crate::app::AppState;
 use crate::config::AuthMode;
@@ -20,7 +20,7 @@ pub(crate) struct SystemInfoResponse {
     pub(crate) identity: SystemIdentity,
     pub(crate) server_name: Option<String>,
     pub(crate) server_fingerprint: String,
-    pub(crate) auth_methods: Vec<&'static str>,
+    pub(crate) auth_methods: Vec<AuthMethod>,
     pub(crate) personal_vaults_enabled: bool,
 }
 
@@ -53,13 +53,13 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
 
     let mut auth_methods = Vec::new();
     if state.config.auth.internal.enabled && !matches!(state.config.auth.mode, AuthMode::Oidc) {
-        auth_methods.push("password");
-        auth_methods.push("service_account");
+        auth_methods.push(AuthMethod::Password);
+        auth_methods.push(AuthMethod::ServiceAccount);
     }
     if state.config.auth.oidc.enabled && !matches!(state.config.auth.mode, AuthMode::Internal) {
-        auth_methods.push("oidc");
-        if !auth_methods.contains(&"service_account") {
-            auth_methods.push("service_account");
+        auth_methods.push(AuthMethod::Oidc);
+        if !auth_methods.contains(&AuthMethod::ServiceAccount) {
+            auth_methods.push(AuthMethod::ServiceAccount);
         }
     }
 

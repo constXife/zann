@@ -16,6 +16,7 @@ macro_rules! query_as {
     }};
 }
 
+mod enums;
 mod item_history_repo;
 mod item_repo;
 mod metadata_repo;
@@ -25,6 +26,7 @@ mod storage_repo;
 mod sync_cursor_repo;
 mod vault_repo;
 
+pub use enums::KeyWrapType;
 pub use item_history_repo::LocalItemHistoryRepo;
 pub use item_repo::LocalItemRepo;
 pub use metadata_repo::MetadataRepo;

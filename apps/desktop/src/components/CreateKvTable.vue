@@ -2,6 +2,7 @@
 import { ref, watch } from "vue";
 import GeneratorPopover from "./GeneratorPopover.vue";
 import type { FieldInput, Translator } from "../types/createForm";
+import { allowTokenBeforeInput, allowTokenKeydown, handleTokenPaste } from "../utils/inputSanitizer";
 
 const generatorOpenId = defineModel<string | null>("generatorOpenId", { required: true });
 const generatorLength = defineModel<number>("generatorLength", { required: true });
@@ -108,6 +109,9 @@ watch(
             class="min-w-0 w-full rounded bg-[var(--bg-secondary)] px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
             :placeholder="props.t('create.fieldKeyPlaceholder')"
             :data-testid="`kv-key-${idx}`"
+            @beforeinput="allowTokenBeforeInput"
+            @keydown="allowTokenKeydown"
+            @paste="handleTokenPaste"
           />
           <input
             v-model="field.value"

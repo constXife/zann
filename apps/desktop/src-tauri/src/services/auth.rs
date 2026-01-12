@@ -6,6 +6,7 @@ use crate::infra::config::{ensure_context, load_config, save_config};
 use crate::state::{AppState, PendingLogin, PendingLoginResult, TokenEntry};
 use crate::types::{ApiResponse, OidcConfigResponse, OidcDiscovery, OidcLoginStatusResponse};
 use crate::util::{context_name_from_url, storage_name_from_url};
+use zann_core::StorageKind;
 use zann_db::local::{
     LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVaultRepo, PendingChangeRepo,
     SyncCursorRepo,
@@ -223,7 +224,7 @@ pub(crate) async fn apply_login_context(
         let name = format!("Remote ({})", storage_name_from_url(server_url));
         let storage = LocalStorage {
             id: storage_uuid,
-            kind: "remote".to_string(),
+            kind: StorageKind::Remote,
             name,
             server_url: Some(server_url.to_string()),
             server_name: result.info.server_name.clone(),
@@ -365,7 +366,7 @@ async fn cleanup_duplicate_storages(
             continue;
         }
         let _ = pending_repo.delete_by_storage(storage.id).await;
-        let _ = cursor_repo.delete_by_storage(&storage.id.to_string()).await;
+        let _ = cursor_repo.delete_by_storage(storage.id).await;
         let _ = item_repo.delete_by_storage(storage.id).await;
         let _ = vault_repo.delete_by_storage(storage.id).await;
         let _ = storage_repo.delete(storage.id).await;

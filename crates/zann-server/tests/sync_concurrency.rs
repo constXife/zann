@@ -6,6 +6,7 @@ use uuid::Uuid;
 mod support;
 
 use tokio::sync::Semaphore;
+use zann_core::{CachePolicy, ChangeType, VaultKind};
 use zann_server::app::{build_router, AppState};
 use zann_server::config::{AuthMode, InternalRegistration, ServerConfig};
 use zann_server::domains::access_control::policies::{PolicyRule, PolicySet};
@@ -125,8 +126,8 @@ impl TestApp {
             if let Some(vault) = vaults.iter().find(|vault| {
                 vault
                     .get("kind")
-                    .and_then(|value| value.as_str())
-                    .is_some_and(|value| value.eq_ignore_ascii_case("personal"))
+                    .and_then(|value| value.as_i64())
+                    .is_some_and(|value| value == i64::from(VaultKind::Personal.as_i32()))
             }) {
                 return vault.clone();
             }
@@ -135,8 +136,8 @@ impl TestApp {
         let payload = serde_json::json!({
             "slug": slug,
             "name": "Test Vault",
-            "kind": "personal",
-            "cache_policy": "full",
+            "kind": VaultKind::Personal.as_i32(),
+            "cache_policy": CachePolicy::Full.as_i32(),
             "vault_key_enc": [1, 2, 3],
         });
         let (status, json) = self
@@ -198,7 +199,7 @@ async fn sync_push_is_atomic_on_error() {
         "changes": [
             {
                 "item_id": Uuid::now_v7(),
-                "operation": "create",
+                "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [1, 2, 3],
                 "checksum": "checksum-1",
                 "path": "dup/path",
@@ -207,7 +208,7 @@ async fn sync_push_is_atomic_on_error() {
             },
             {
                 "item_id": Uuid::now_v7(),
-                "operation": "create",
+                "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [4, 5, 6],
                 "path": "dup/path",
                 "name": "Item B",
@@ -246,7 +247,7 @@ async fn sync_push_conflict_is_atomic() {
         "changes": [
             {
                 "item_id": Uuid::now_v7(),
-                "operation": "create",
+                "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [1, 2, 3],
                 "checksum": "checksum-1",
                 "path": "dup/path",
@@ -254,7 +255,7 @@ async fn sync_push_conflict_is_atomic() {
             },
             {
                 "item_id": Uuid::now_v7(),
-                "operation": "create",
+                "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [4, 5, 6],
                 "checksum": "checksum-2",
                 "path": "dup/path",
@@ -294,7 +295,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": item_id,
-            "operation": "create",
+            "operation": ChangeType::Create.as_i32(),
             "payload_enc": [9, 9, 9],
             "checksum": "checksum-create",
             "path": "race/path",
@@ -314,7 +315,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": item_id,
-            "operation": "update",
+            "operation": ChangeType::Update.as_i32(),
             "payload_enc": [8],
             "checksum": "checksum-warmup",
             "base_seq": base_seq
@@ -332,7 +333,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": item_id,
-            "operation": "update",
+            "operation": ChangeType::Update.as_i32(),
             "payload_enc": [1],
             "checksum": "checksum-one",
             "base_seq": current_seq
@@ -342,7 +343,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": item_id,
-            "operation": "update",
+            "operation": ChangeType::Update.as_i32(),
             "payload_enc": [2],
             "checksum": "checksum-two",
             "base_seq": base_seq

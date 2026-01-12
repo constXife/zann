@@ -11,12 +11,8 @@ use sqlx_sqlite::SqliteRow;
 use super::*;
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-fn parse_enum<T: std::str::FromStr<Err = EnumParseError>>(
-    value: &str,
-) -> Result<T, sqlx_core::Error> {
-    value
-        .parse()
-        .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))
+fn parse_enum<T: TryFrom<i32, Error = EnumParseError>>(value: i16) -> Result<T, sqlx_core::Error> {
+    T::try_from(i32::from(value)).map_err(|err| sqlx_core::Error::Decode(Box::new(err)))
 }
 
 macro_rules! impl_from_row {
@@ -38,7 +34,7 @@ macro_rules! impl_from_row {
 }
 
 impl_from_row!(User, row => {
-        let status: String = row.try_get("status")?;
+        let status: i16 = row.try_get("status")?;
         Ok(Self {
             id: row.try_get("id")?,
             email: row.try_get("email")?,
@@ -50,7 +46,7 @@ impl_from_row!(User, row => {
             kdf_memory_kb: row.try_get("kdf_memory_kb")?,
             kdf_parallelism: row.try_get("kdf_parallelism")?,
             recovery_key_hash: row.try_get("recovery_key_hash")?,
-            status: parse_enum(&status)?,
+            status: parse_enum(status)?,
             deleted_at: row.try_get("deleted_at")?,
             deleted_by_user_id: row.try_get("deleted_by_user_id")?,
             deleted_by_device_id: row.try_get("deleted_by_device_id")?,
@@ -166,17 +162,17 @@ impl_from_row!(Session, row => {
 );
 
 impl_from_row!(Vault, row => {
-        let kind: String = row.try_get("kind")?;
-        let encryption_type: String = row.try_get("encryption_type")?;
-        let cache_policy: String = row.try_get("cache_policy")?;
+        let kind: i16 = row.try_get("kind")?;
+        let encryption_type: i16 = row.try_get("encryption_type")?;
+        let cache_policy: i16 = row.try_get("cache_policy")?;
         Ok(Self {
             id: row.try_get("id")?,
             slug: row.try_get("slug")?,
             name: row.try_get("name")?,
-            kind: parse_enum(&kind)?,
-            encryption_type: parse_enum(&encryption_type)?,
+            kind: parse_enum(kind)?,
+            encryption_type: parse_enum(encryption_type)?,
             vault_key_enc: row.try_get("vault_key_enc")?,
-            cache_policy: parse_enum(&cache_policy)?,
+            cache_policy: parse_enum(cache_policy)?,
             tags: row.try_get("tags")?,
             deleted_at: row.try_get("deleted_at")?,
             deleted_by_user_id: row.try_get("deleted_by_user_id")?,
@@ -188,18 +184,18 @@ impl_from_row!(Vault, row => {
 );
 
 impl_from_row!(VaultMember, row => {
-        let role: String = row.try_get("role")?;
+        let role: i16 = row.try_get("role")?;
         Ok(Self {
             vault_id: row.try_get("vault_id")?,
             user_id: row.try_get("user_id")?,
-            role: parse_enum(&role)?,
+            role: parse_enum(role)?,
             created_at: row.try_get("created_at")?,
         })
     }
 );
 
 impl_from_row!(Item, row => {
-        let sync_status: String = row.try_get("sync_status")?;
+        let sync_status: i16 = row.try_get("sync_status")?;
         Ok(Self {
             id: row.try_get("id")?,
             vault_id: row.try_get("vault_id")?,
@@ -213,7 +209,7 @@ impl_from_row!(Item, row => {
             version: row.try_get("version")?,
             row_version: row.try_get("row_version")?,
             device_id: row.try_get("device_id")?,
-            sync_status: parse_enum(&sync_status)?,
+            sync_status: parse_enum(sync_status)?,
             deleted_at: row.try_get("deleted_at")?,
             deleted_by_user_id: row.try_get("deleted_by_user_id")?,
             deleted_by_device_id: row.try_get("deleted_by_device_id")?,
@@ -235,14 +231,14 @@ impl_from_row!(ItemUsage, row => {
 );
 
 impl_from_row!(ItemHistory, row => {
-        let change_type: String = row.try_get("change_type")?;
+        let change_type: i16 = row.try_get("change_type")?;
         Ok(Self {
             id: row.try_get("id")?,
             item_id: row.try_get("item_id")?,
             payload_enc: row.try_get("payload_enc")?,
             checksum: row.try_get("checksum")?,
             version: row.try_get("version")?,
-            change_type: parse_enum(&change_type)?,
+            change_type: parse_enum(change_type)?,
             fields_changed: row.try_get("fields_changed")?,
             changed_by_user_id: row.try_get("changed_by_user_id")?,
             changed_by_email: row.try_get("changed_by_email")?,
@@ -286,12 +282,12 @@ impl_from_row!(ItemConflict, row => {
 );
 
 impl_from_row!(Change, row => {
-        let op: String = row.try_get("op")?;
+        let op: i16 = row.try_get("op")?;
         Ok(Self {
             seq: row.try_get("seq")?,
             vault_id: row.try_get("vault_id")?,
             item_id: row.try_get("item_id")?,
-            op: parse_enum(&op)?,
+            op: parse_enum(op)?,
             version: row.try_get("version")?,
             device_id: row.try_get("device_id")?,
             created_at: row.try_get("created_at")?,
@@ -311,12 +307,12 @@ impl_from_row!(AppliedOp, row => {
 );
 
 impl_from_row!(Invite, row => {
-        let role: String = row.try_get("role")?;
+        let role: i16 = row.try_get("role")?;
         Ok(Self {
             id: row.try_get("id")?,
             vault_id: row.try_get("vault_id")?,
             token_hash: row.try_get("token_hash")?,
-            role: parse_enum(&role)?,
+            role: parse_enum(role)?,
             uses_left: row.try_get("uses_left")?,
             expires_at: row.try_get("expires_at")?,
             created_at: row.try_get("created_at")?,

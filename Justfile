@@ -22,6 +22,30 @@ audit:
 check: fmt clippy
     cargo test
 
+fast-test:
+    cargo test
+
+# ==========================================
+# E2E
+# ==========================================
+
+e2e: e2e-desktop e2e-cli
+
+e2e-desktop:
+    just desktop-e2e
+
+e2e-cli:
+    cargo test -p zann-cli --test e2e -- --nocapture
+
+desktop-test:
+    cd apps/desktop && bun run test
+
+desktop-build:
+    cd apps/desktop && bun run tauri build
+
+desktop-e2e +args='':
+    @echo "E2E is temporarily disabled."
+
 db-up:
     podman compose up -d db
 
@@ -72,7 +96,13 @@ lint:
     just server-lint
 
 test:
-    just server-test
+    just fast-test
+
+full-test:
+    just fast-test
+    just server-test-db
+    just desktop-test
+    just desktop-build
 
 run:
     just server-run

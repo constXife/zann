@@ -1,6 +1,12 @@
 import { UI_TIMEOUT } from "./tauri.e2e.config.mjs";
 
+const TIMEOUT_SLACK = Number(process.env.TAURI_E2E_TIMEOUT_SLACK ?? 0);
+
 const logStep = (message) => {
+  if (globalThis.__e2eTimedOut) {
+    throw new Error("e2e timed out");
+  }
+  globalThis.__e2eLastStep = message;
   console.log(`[e2e] ${message}`);
 };
 
@@ -14,15 +20,39 @@ const getBodyText = async (browser) => {
   return "";
 };
 
-const withTimeout = async (promise, timeoutMs, label) => {
+const withTimeout = async (promiseOrFactory, timeoutMs, label) => {
+  const forced = Number(process.env.TAURI_E2E_FORCE_TIMEOUT_MS ?? 0);
+  const effectiveTimeout = forced > 0 ? forced : timeoutMs;
+  if (forced > 0) {
+    console.log(`[e2e] force-timeout ${label}: ${effectiveTimeout}ms`);
+  }
+  const controller = typeof promiseOrFactory === "function" ? new AbortController() : null;
+  const work =
+    typeof promiseOrFactory === "function"
+      ? promiseOrFactory(controller.signal)
+      : promiseOrFactory;
   let timer;
   try {
     return await Promise.race([
-      promise,
+      work,
       new Promise((_, reject) => {
         timer = setTimeout(() => {
-          reject(new Error(`${label} timed out after ${timeoutMs}ms`));
-        }, timeoutMs);
+          globalThis.__e2eTimedOut = true;
+          if (controller) {
+            controller.abort();
+          }
+          const lastStep = globalThis.__e2eLastStep;
+          const lastStepInfo = lastStep ? ` (last step: ${lastStep})` : "";
+          const error = new Error(
+            `${label} timed out after ${effectiveTimeout}ms${lastStepInfo}`,
+          );
+          globalThis.__e2eTimeoutError = error;
+          console.log(`[e2e] timeout fired: ${label}${lastStepInfo}`);
+          if (process.env.TAURI_E2E_FORCE_EXIT_ON_TIMEOUT === "1") {
+            process.exit(1);
+          }
+          reject(error);
+        }, effectiveTimeout);
       }),
     ]);
   } finally {
@@ -83,7 +113,7 @@ const clickByXPath = async (browser, selector, timeout = UI_TIMEOUT, label = sel
       }
       throw lastError;
     })(),
-    timeout + 5000,
+    timeout + TIMEOUT_SLACK,
     `click ${label}`,
   );
 };
@@ -121,7 +151,7 @@ const clickWhenReady = async (browser, selector, timeout = UI_TIMEOUT) => {
       }
       throw lastError;
     })(),
-    timeout + 5000,
+    timeout + TIMEOUT_SLACK,
     `click ${selector}`,
   );
 };
@@ -190,7 +220,7 @@ const setInputValueForElement = async (
       }
       throw lastError;
     })(),
-    timeout + 5000,
+    timeout + TIMEOUT_SLACK,
     `set ${label}`,
   );
 };
@@ -220,7 +250,7 @@ const setInputValue = async (browser, selector, value, timeout = UI_TIMEOUT) => 
       );
       return element;
     })(),
-    timeout + 5000,
+    timeout + TIMEOUT_SLACK,
     `set ${selector}`,
   );
 };

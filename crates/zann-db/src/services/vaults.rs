@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use zann_core::crypto::SecretKey;
 use zann_core::vault_crypto as core_crypto;
-use zann_core::{ServiceError, ServiceResult, VaultSummary, VaultsService};
+use zann_core::{ServiceError, ServiceResult, VaultKind, VaultSummary, VaultsService};
 
 use crate::local::{LocalVault, LocalVaultRepo};
 
@@ -52,7 +52,7 @@ impl<'a> VaultsService for LocalServices<'a> {
         &self,
         storage_id: Uuid,
         name: &str,
-        kind: &str,
+        kind: VaultKind,
         is_default: bool,
     ) -> ServiceResult<VaultSummary> {
         let repo = LocalVaultRepo::new(self.pool);
@@ -64,12 +64,11 @@ impl<'a> VaultsService for LocalServices<'a> {
             id: vault_id,
             storage_id,
             name: name.to_string(),
-            kind: kind.to_string(),
+            kind,
             is_default,
             vault_key_enc: payload,
-            key_wrap_type: "master".to_string(),
+            key_wrap_type: crate::local::KeyWrapType::Master,
             last_synced_at: None,
-            server_seq: 0,
         };
         repo.create(&vault)
             .await
@@ -99,7 +98,7 @@ impl<'a> VaultsService for LocalServices<'a> {
                 is_default: existing.is_default,
             });
         }
-        self.create_vault(storage_id, "Personal (Local)", "personal", true)
+        self.create_vault(storage_id, "Personal (Local)", VaultKind::Personal, true)
             .await
     }
 }

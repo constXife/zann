@@ -1,6 +1,7 @@
 import { computed } from "vue";
 import type { ComputedRef, Ref } from "vue";
 import type { StorageSummary, VaultSummary } from "../../../types";
+import { StorageKind } from "../../../constants/enums";
 
 type AppVaultContextOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
@@ -36,7 +37,7 @@ export function useAppVaultContext({
   const vaultContextLabel = computed(() => {
     const storage = currentStorage.value;
     const parts: string[] = [];
-    if (storage?.kind === "remote") {
+    if (storage?.kind === StorageKind.Remote) {
       parts.push(storage.server_name ?? storage.name ?? storage.server_url ?? t("nav.vaults"));
       parts.push(isSharedVault.value ? t("nav.shared") : t("nav.personal"));
     } else if (storage) {

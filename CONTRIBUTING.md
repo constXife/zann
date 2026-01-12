@@ -11,6 +11,9 @@ Thanks for contributing! This guide explains how to work in this repo and what w
 
 We use **squash merge**, so the PR title becomes the commit message in `main`.
 
+Optional: enable local git hooks (pre-commit runs `cargo fmt`):
+`scripts/setup-hooks.sh`
+
 ## Repository layout
 
 - `crates/` — Rust crates (`zann-cli`, `zann-server`, `zann-core`, `zann-db`, `zann-keystore`)
@@ -28,9 +31,17 @@ Requirements:
 
 Workspace (Rust):
 - Build: `cargo build`
-- Tests: `cargo test`
+- Tests: `cargo test` (fast, no DB)
 - Format: `cargo fmt`
 - Lint: `cargo clippy --all-targets --all-features`
+
+Just (optional):
+- Fast tests: `just fast-test` (same as `cargo test`)
+- Full tests: `just full-test` (fast tests + Postgres integration tests)
+- Default test: `just test` (same as `just fast-test`)
+- Desktop build: `just desktop-build` (Tauri build)
+- Desktop e2e: `just desktop-e2e` (Webdriver-based)
+- DB tests require Podman and `compose.test.yaml`.
 
 Desktop (Tauri) from `apps/desktop`:
 - Install deps: `bun install`

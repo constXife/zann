@@ -36,10 +36,10 @@ impl<'a> VaultRepo<'a> {
             vault.id,
             vault.slug.as_str(),
             vault.name.as_str(),
-            vault.kind.as_str(),
-            vault.encryption_type.as_str(),
+            vault.kind.as_i32(),
+            vault.encryption_type.as_i32(),
             &vault.vault_key_enc,
-            vault.cache_policy.as_str(),
+            vault.cache_policy.as_i32(),
             &tags,
             vault.deleted_at,
             vault.deleted_by_user_id,
@@ -194,11 +194,12 @@ impl<'a> VaultRepo<'a> {
                 v.created_at as "created_at"
             FROM vaults v
             INNER JOIN vault_members vm ON vm.vault_id = v.id
-            WHERE vm.user_id = $1 AND v.kind = 'personal' AND v.deleted_at IS NULL
+            WHERE vm.user_id = $1 AND v.kind = $2 AND v.deleted_at IS NULL
             ORDER BY v.created_at ASC
             LIMIT 1
             "#,
-            user_id
+            user_id,
+            zann_core::VaultKind::Personal.as_i32()
         )
         .fetch_optional(self.pool)
         .await
@@ -319,7 +320,7 @@ impl<'a> VaultMemberRepo<'a> {
             "#,
             member.vault_id,
             member.user_id,
-            member.role.as_str(),
+            member.role.as_i32(),
             member.created_at
         )
         .execute(self.pool)

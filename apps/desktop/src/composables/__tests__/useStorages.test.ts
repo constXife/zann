@@ -2,6 +2,7 @@ import { render, cleanup } from "@testing-library/vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, nextTick, ref } from "vue";
 import type { StorageSummary } from "../../types";
+import { StorageKind } from "../../constants/enums";
 import { useStorages } from "../useStorages";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -13,7 +14,7 @@ type StorageApi = ReturnType<typeof useStorages>;
 const remoteStorage: StorageSummary = {
   id: "remote-1",
   name: "Remote",
-  kind: "remote",
+  kind: StorageKind.Remote,
   server_url: "https://example.com",
   personal_vaults_enabled: true,
 };

@@ -70,8 +70,8 @@ impl<'a> AppService for LocalServices<'a> {
         sqlx_core::query::query::<Sqlite>(
             r#"
             INSERT INTO storages (id, kind, name)
-            VALUES (?1, 'local_only', 'Local')
-            ON CONFLICT(id) DO UPDATE SET kind = 'local_only', name = 'Local'
+            VALUES (?1, 1, 'Local')
+            ON CONFLICT(id) DO UPDATE SET kind = 1, name = 'Local'
             "#,
         )
         .bind(storage_id)
@@ -106,10 +106,9 @@ impl<'a> AppService for LocalServices<'a> {
                     is_default,
                     vault_key_enc,
                     key_wrap_type,
-                    last_synced_at,
-                    server_seq
+                    last_synced_at
                 )
-                VALUES (?1, ?2, 'Personal (Local)', 'personal', 1, ?3, 'master', NULL, 0)
+                VALUES (?1, ?2, 'Personal (Local)', 1, 1, ?3, 1, NULL)
                 "#,
             )
             .bind(vault_id)

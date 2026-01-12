@@ -299,7 +299,7 @@ impl<'a> InviteRepo<'a> {
             invite.id,
             invite.vault_id,
             invite.token_hash.as_str(),
-            invite.role.as_str(),
+            invite.role.as_i32(),
             invite.uses_left,
             invite.expires_at,
             invite.created_at

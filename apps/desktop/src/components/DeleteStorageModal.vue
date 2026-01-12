@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import type { StorageInfo } from "../types";
+import { StorageKind } from "../constants/enums";
 
 type Translator = (key: string, params?: Record<string, unknown>) => string;
 
@@ -30,8 +31,10 @@ watch(
   }
 );
 
-const isLocal = computed(() => props.storage?.kind === "local_only");
-const canConfirm = computed(() => isLocal.value ? confirmText.value === "DELETE" : true);
+const isLocal = computed(() => props.storage?.kind === StorageKind.LocalOnly);
+const canConfirm = computed(() =>
+  isLocal.value ? confirmText.value === "DELETE" : true,
+);
 
 const formatFileSize = (bytes: number | null | undefined): string => {
   if (!bytes) return "";

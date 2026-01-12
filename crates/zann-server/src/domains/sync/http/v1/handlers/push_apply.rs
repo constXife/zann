@@ -51,7 +51,7 @@ async fn insert_item_history(
         &history.payload_enc,
         history.checksum.as_str(),
         history.version,
-        history.change_type.as_str(),
+        history.change_type.as_i32(),
         history.fields_changed.as_ref(),
         history.changed_by_user_id,
         history.changed_by_email.as_str(),
@@ -81,7 +81,7 @@ pub(crate) async fn apply_change(
     vault_id: Uuid,
     change: SyncPushChange,
 ) -> Result<ApplyChangeResult, ApplyChangeError> {
-    let operation = change.operation.as_str();
+    let operation = change.operation;
     let base_seq = change.base_seq.unwrap_or(0);
     let max_seq_row = query!(
         r#"
@@ -179,7 +179,7 @@ pub(crate) async fn apply_change(
 
     let now = Utc::now();
     let item_version = match (operation, existing) {
-        ("create", None) => {
+        (ChangeType::Create, None) => {
             let payload_enc = match change.payload_enc {
                 Some(payload) => payload,
                 None => {
@@ -281,7 +281,7 @@ pub(crate) async fn apply_change(
                 item.version,
                 item.row_version,
                 item.device_id,
-                item.sync_status.as_str(),
+                item.sync_status.as_i32(),
                 item.deleted_at,
                 item.deleted_by_user_id,
                 item.deleted_by_device_id,
@@ -301,7 +301,7 @@ pub(crate) async fn apply_change(
             }
             item_version
         }
-        ("create", Some(_)) => {
+        (ChangeType::Create, Some(_)) => {
             return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                 item_id: change.item_id.to_string(),
                 reason: "already_exists",
@@ -309,7 +309,7 @@ pub(crate) async fn apply_change(
                 server_updated_at: now.to_rfc3339(),
             }));
         }
-        ("update", Some(mut item)) => {
+        (ChangeType::Update, Some(mut item)) => {
             let payload_changed = match (change.payload_enc.as_ref(), change.checksum.as_deref()) {
                 (Some(_), Some(checksum)) => {
                     let trimmed = checksum.trim();
@@ -435,7 +435,7 @@ pub(crate) async fn apply_change(
             }
             item_version
         }
-        ("restore", Some(mut item)) => {
+        (ChangeType::Restore, Some(mut item)) => {
             let actor = actor_snapshot(conn, identity, Some(device_id)).await;
             let history = zann_core::ItemHistory {
                 id: Uuid::now_v7(),
@@ -525,7 +525,7 @@ pub(crate) async fn apply_change(
                 item.version,
                 item.row_version,
                 item.device_id,
-                item.sync_status.as_str(),
+                item.sync_status.as_i32(),
                 item.deleted_at,
                 item.deleted_by_user_id,
                 item.deleted_by_device_id,
@@ -549,7 +549,7 @@ pub(crate) async fn apply_change(
             }
             item_version
         }
-        ("delete", Some(mut item)) => {
+        (ChangeType::Delete, Some(mut item)) => {
             let actor = actor_snapshot(conn, identity, Some(device_id)).await;
             let history = zann_core::ItemHistory {
                 id: Uuid::now_v7(),
@@ -603,7 +603,7 @@ pub(crate) async fn apply_change(
                 item.version,
                 item.row_version,
                 item.device_id,
-                item.sync_status.as_str(),
+                item.sync_status.as_i32(),
                 item.deleted_at,
                 item.deleted_by_user_id,
                 item.deleted_by_device_id,
@@ -635,18 +635,12 @@ pub(crate) async fn apply_change(
                 server_updated_at: now.to_rfc3339(),
             }));
         }
-        _ => {
-            return Err(ApplyChangeError {
-                status: StatusCode::BAD_REQUEST,
-                error: "invalid_operation",
-            });
-        }
     };
 
     let op = match operation {
-        "delete" => ChangeOp::Delete,
-        "update" => ChangeOp::Update,
-        _ => ChangeOp::Create,
+        ChangeType::Delete => ChangeOp::Delete,
+        ChangeType::Update | ChangeType::Restore => ChangeOp::Update,
+        ChangeType::Create => ChangeOp::Create,
     };
     let inserted = query!(
         r#"
@@ -656,7 +650,7 @@ pub(crate) async fn apply_change(
         "#,
         vault_id,
         change.item_id,
-        op.as_str(),
+        op.as_i32(),
         item_version,
         device_id,
         now
@@ -681,7 +675,7 @@ pub(crate) async fn apply_change(
         );
         db_error()
     })?;
-    let deleted_at = if operation == "delete" {
+    let deleted_at = if operation == ChangeType::Delete {
         Some(now.to_rfc3339())
     } else {
         None

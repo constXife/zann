@@ -29,7 +29,7 @@ pub(super) async fn list_item_versions(
                 .map(|history| ItemHistorySummary {
                     version: history.version,
                     checksum: history.checksum,
-                    change_type: history.change_type.as_str().to_string(),
+                    change_type: history.change_type,
                     changed_by_name: history.changed_by_name,
                     changed_by_email: history.changed_by_email,
                     created_at: history.created_at.to_rfc3339(),
@@ -57,7 +57,7 @@ pub(super) async fn get_item_version(
         version: history.version,
         checksum: history.checksum,
         payload_enc: history.payload_enc,
-        change_type: history.change_type.as_str().to_string(),
+        change_type: history.change_type,
         created_at: history.created_at.to_rfc3339(),
     };
     Json(response).into_response()

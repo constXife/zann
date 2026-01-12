@@ -5,6 +5,7 @@ use serde_json::json;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
 use zann_core::ItemsService;
+use zann_core::SyncStatus;
 
 use client_workflow_support::{
     decrypt_payload, encrypt_vault_key, key_fingerprint, login_payload, LocalClient, TestApp,
@@ -204,7 +205,7 @@ async fn personal_pull_populates_cache_with_key_fp() {
         .await
         .expect("cache get")
         .expect("cache item");
-    assert_eq!(item.sync_status, "synced");
+    assert_eq!(item.sync_status, SyncStatus::Synced);
     assert!(!item.payload_enc.is_empty(), "payload cached");
     assert_eq!(
         item.cache_key_fp.as_deref(),

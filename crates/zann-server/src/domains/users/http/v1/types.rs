@@ -9,7 +9,7 @@ pub(crate) struct ErrorResponse {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct ListUsersQuery {
     #[serde(default)]
-    pub(crate) status: Option<String>,
+    pub(crate) status: Option<i32>,
     #[serde(default)]
     pub(crate) sort: Option<String>,
     #[serde(default)]
@@ -57,7 +57,7 @@ pub(crate) struct UserResponse {
     pub(crate) display_name: String,
     pub(crate) avatar_url: Option<String>,
     pub(crate) avatar_initials: String,
-    pub(crate) status: String,
+    pub(crate) status: i32,
     pub(crate) created_at: String,
     pub(crate) last_login_at: Option<String>,
 }

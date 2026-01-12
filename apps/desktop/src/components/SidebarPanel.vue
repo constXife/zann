@@ -3,6 +3,7 @@ import CategoryIcon from "./CategoryIcon.vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import type { FolderNode, StorageSummary, VaultSummary } from "../types";
+import { StorageKind } from "../constants/enums";
 
 type Category = { id: string; icon: string; label: string };
 type SyncStatus = "idle" | "syncing" | "synced" | "error";
@@ -53,7 +54,7 @@ const props = defineProps<{
 }>();
 
 const staleSyncLevel = computed(() => {
-  if (!props.lastSyncTime || props.currentStorage?.kind !== "remote") {
+  if (!props.lastSyncTime || props.currentStorage?.kind !== StorageKind.Remote) {
     return null;
   }
   const last = new Date(props.lastSyncTime);
@@ -79,6 +80,21 @@ const staleSyncTitle = computed(() => {
     return "";
   }
   return `${t("storage.lastSynced")}: ${last.toLocaleDateString()}`;
+});
+
+const hideVaultSelector = computed(() => {
+  const allLocal = props.storages.length > 0 &&
+    props.storages.every((storage) => storage.kind === StorageKind.LocalOnly);
+  return (
+    allLocal &&
+    props.currentStorage?.kind === StorageKind.LocalOnly &&
+    props.vaults.length <= 1
+  );
+});
+
+const hideCreateLocalVault = computed(() => {
+  return props.storages.length > 0 &&
+    props.storages.every((storage) => storage.kind === StorageKind.LocalOnly);
 });
 </script>
 
@@ -119,9 +135,10 @@ const staleSyncTitle = computed(() => {
         class="flex-1 min-w-0 flex items-center gap-2 rounded-lg px-2 py-1.5 -ml-2 hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors text-left"
         @click.stop="toggleStorageDropdown"
         data-tauri-drag-region="false"
+        data-testid="storage-dropdown-toggle"
       >
         <span class="flex-shrink-0 text-sm">
-          {{ currentStorage?.kind === 'remote' ? '☁️' : '📁' }}
+          {{ currentStorage?.kind === StorageKind.Remote ? '☁️' : '📁' }}
         </span>
 
         <div class="flex-1 min-w-0">
@@ -129,11 +146,11 @@ const staleSyncTitle = computed(() => {
             {{ currentStorage?.name ?? t('nav.vaults') }}
           </div>
           <div class="text-xs text-[var(--text-secondary)] truncate">
-            {{ currentStorage?.kind === 'local_only' ? t('storage.localVault') : (currentStorage?.server_name ?? currentStorage?.server_url ?? t('nav.sections')) }}
+            {{ currentStorage?.kind === StorageKind.LocalOnly ? t('storage.localVault') : (currentStorage?.server_name ?? currentStorage?.server_url ?? t('nav.sections')) }}
           </div>
         </div>
 
-        <span v-if="currentStorage?.kind === 'remote'" class="flex-shrink-0">
+        <span v-if="currentStorage?.kind === StorageKind.Remote" class="flex-shrink-0">
           <svg
             v-if="getSyncStatus(currentStorage.id) === 'syncing'"
             class="h-4 w-4 animate-spin text-[var(--accent)]"
@@ -300,6 +317,7 @@ const staleSyncTitle = computed(() => {
                   : 'hover:bg-[var(--bg-hover)]'
               "
               @click="switchStorage(localStorage.id)"
+              data-testid="storage-local-entry"
             >
               <span class="text-sm flex-shrink-0">📱</span>
 
@@ -325,18 +343,19 @@ const staleSyncTitle = computed(() => {
           </template>
 
           <!-- Create local vault (if no local vaults yet) -->
-          <template v-if="!showLocalSection">
+          <template v-if="!showLocalSection && !hasLocalVaults && !hideCreateLocalVault">
             <div class="border-t border-[var(--border-color)] my-1"></div>
             <button
               type="button"
               class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-secondary)]"
               @click="openCreateLocalVault"
+              data-testid="storage-create-local-vault"
             >
               <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
               </svg>
               <span class="text-sm">
-                {{ hasLocalVaults ? t('storage.showLocalVaults') : t('storage.createLocalVault') }}
+                {{ t('storage.createLocalVault') }}
               </span>
             </button>
           </template>
@@ -364,7 +383,7 @@ const staleSyncTitle = computed(() => {
       @click="closeStorageDropdown"
     ></div>
 
-    <div class="relative px-3 pb-2">
+    <div v-if="!hideVaultSelector" class="relative px-3 pb-2">
       <button
         type="button"
         class="w-full flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors text-left"
