@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use zann_core::FieldsChanged;
+use zann_core::{ChangeType, FieldsChanged};
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct ErrorResponse {
@@ -98,7 +98,7 @@ pub(crate) struct HistoryListQuery {
 pub(crate) struct ItemHistorySummary {
     pub(crate) version: i64,
     pub(crate) checksum: String,
-    pub(crate) change_type: String,
+    pub(crate) change_type: ChangeType,
     pub(crate) changed_by_name: Option<String>,
     pub(crate) changed_by_email: String,
     pub(crate) created_at: String,
@@ -114,7 +114,7 @@ pub(crate) struct ItemHistoryDetailResponse {
     pub(crate) version: i64,
     pub(crate) checksum: String,
     pub(crate) payload_enc: Vec<u8>,
-    pub(crate) change_type: String,
+    pub(crate) change_type: ChangeType,
     pub(crate) created_at: String,
 }
 

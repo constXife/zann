@@ -1,7 +1,7 @@
 use sqlx_core::query_as::query_as;
 use sqlx_postgres::Postgres;
 use zann_core::vault_crypto as core_crypto;
-use zann_core::{Identity, VaultEncryptionType, VaultKind};
+use zann_core::{ChangeOp, ChangeType, Identity, VaultEncryptionType, VaultKind};
 use zann_db::repo::{ChangeRepo, ItemHistoryRepo, ItemRepo, VaultRepo};
 
 use crate::app::AppState;
@@ -187,8 +187,9 @@ pub(crate) async fn sync_pull(
     let history_repo = ItemHistoryRepo::new(&state.db);
     for row in rows {
         let seq = row.seq;
-        let op = row.op;
-        let payload_enc = if op == "delete" {
+        let op = ChangeOp::try_from(row.op)
+            .map_err(|_| SyncError::BadRequest("invalid_operation"))?;
+        let payload_enc = if op == ChangeOp::Delete {
             None
         } else {
             Some(row.payload_enc)
@@ -203,7 +204,7 @@ pub(crate) async fn sync_pull(
                     .map(|entry| SyncHistoryEntry {
                         version: entry.version,
                         checksum: entry.checksum,
-                        change_type: entry.change_type.as_str().to_string(),
+                        change_type: entry.change_type,
                         changed_by_name: entry.changed_by_name,
                         changed_by_email: entry.changed_by_email,
                         created_at: entry.created_at,
@@ -227,9 +228,14 @@ pub(crate) async fn sync_pull(
             }
         };
         last_seq = seq;
+        let operation = match op {
+            ChangeOp::Create => ChangeType::Create,
+            ChangeOp::Update => ChangeType::Update,
+            ChangeOp::Delete => ChangeType::Delete,
+        };
         changes.push(SyncPullChange {
             item_id: row.item_id.to_string(),
-            operation: op,
+            operation,
             seq,
             updated_at: row.updated_at,
             checksum: row.checksum,
@@ -451,7 +457,7 @@ pub(crate) async fn sync_shared_pull(
                         mapped.push(SyncSharedHistoryEntry {
                             version: entry.version,
                             checksum: entry.checksum,
-                            change_type: entry.change_type.as_str().to_string(),
+                            change_type: entry.change_type,
                             changed_by_name: entry.changed_by_name,
                             changed_by_email: entry.changed_by_email,
                             created_at: entry.created_at.to_rfc3339(),
@@ -477,9 +483,9 @@ pub(crate) async fn sync_shared_pull(
             changes.push(SyncSharedPullChange {
                 item_id: item.id.to_string(),
                 operation: if item.deleted_at.is_some() {
-                    "delete".to_string()
+                    ChangeType::Delete
                 } else {
-                    "upsert".to_string()
+                    ChangeType::Update
                 },
                 seq: last_seq,
                 updated_at: item.updated_at.to_rfc3339(),
@@ -505,8 +511,9 @@ pub(crate) async fn sync_shared_pull(
     let history_repo = ItemHistoryRepo::new(&state.db);
     for row in rows {
         let seq = row.seq;
-        let op = row.op;
-        let payload = if op == "delete" {
+        let op = ChangeOp::try_from(row.op)
+            .map_err(|_| SyncError::BadRequest("invalid_operation"))?;
+        let payload = if op == ChangeOp::Delete {
             None
         } else {
             match core_crypto::decrypt_payload_bytes(
@@ -567,7 +574,7 @@ pub(crate) async fn sync_shared_pull(
                     mapped.push(SyncSharedHistoryEntry {
                         version: entry.version,
                         checksum: entry.checksum,
-                        change_type: entry.change_type.as_str().to_string(),
+                        change_type: entry.change_type,
                         changed_by_name: entry.changed_by_name,
                         changed_by_email: entry.changed_by_email,
                         created_at: entry.created_at.to_rfc3339(),
@@ -591,9 +598,14 @@ pub(crate) async fn sync_shared_pull(
             }
         };
         last_seq = seq;
+        let operation = match op {
+            ChangeOp::Create => ChangeType::Create,
+            ChangeOp::Update => ChangeType::Update,
+            ChangeOp::Delete => ChangeType::Delete,
+        };
         changes.push(SyncSharedPullChange {
             item_id: row.item_id.to_string(),
-            operation: op,
+            operation,
             seq,
             updated_at: row.updated_at.to_rfc3339(),
             checksum: row.checksum,
@@ -776,8 +788,7 @@ pub(crate) async fn sync_shared_push(
 
     let mut payload_changes = Vec::with_capacity(changes.len());
     for change in changes {
-        let operation = change.operation.as_str();
-        if operation == "delete" {
+        if change.operation == ChangeType::Delete {
             payload_changes.push(SyncPushChange {
                 item_id: change.item_id,
                 operation: change.operation,

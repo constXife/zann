@@ -65,7 +65,7 @@ pub(super) async fn tokens_list(
             vault_id: description.as_ref().map(|value| value.vault_id.clone()),
             vault_slug: description.as_ref().map(|value| value.vault_slug.clone()),
             vault_name: vault.as_ref().map(|value| value.name.clone()),
-            vault_kind: vault.as_ref().map(|value| value.kind.as_str().to_string()),
+            vault_kind: vault.as_ref().map(|value| value.kind.as_i32().to_string()),
             scopes: scope_summary.scopes,
             scope_summary: scope_summary.summary,
         });

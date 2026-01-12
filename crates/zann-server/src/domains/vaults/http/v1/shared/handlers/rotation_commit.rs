@@ -307,7 +307,7 @@ pub(crate) async fn rotate_commit(
 
     let history_id = Uuid::now_v7();
     let now = Utc::now();
-    let change_type = "update";
+    let change_type = zann_core::ChangeType::Update.as_i32();
     let _ = sqlx_core::query::query(
         r#"
         INSERT INTO item_history (

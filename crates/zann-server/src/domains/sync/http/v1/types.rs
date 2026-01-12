@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
+use zann_core::ChangeType;
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct ErrorResponse {
@@ -44,7 +45,7 @@ pub(crate) struct SyncSharedPullResponse {
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct SyncPullChange {
     pub(crate) item_id: String,
-    pub(crate) operation: String,
+    pub(crate) operation: ChangeType,
     pub(crate) seq: i64,
     pub(crate) updated_at: DateTime<Utc>,
     pub(crate) checksum: String,
@@ -59,7 +60,7 @@ pub(crate) struct SyncPullChange {
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct SyncSharedPullChange {
     pub(crate) item_id: String,
-    pub(crate) operation: String,
+    pub(crate) operation: ChangeType,
     pub(crate) seq: i64,
     pub(crate) updated_at: String,
     pub(crate) payload: Option<JsonValue>,
@@ -75,7 +76,7 @@ pub(crate) struct SyncSharedPullChange {
 pub(crate) struct SyncHistoryEntry {
     pub(crate) version: i64,
     pub(crate) checksum: String,
-    pub(crate) change_type: String,
+    pub(crate) change_type: ChangeType,
     pub(crate) changed_by_name: Option<String>,
     pub(crate) changed_by_email: String,
     pub(crate) created_at: DateTime<Utc>,
@@ -86,7 +87,7 @@ pub(crate) struct SyncHistoryEntry {
 pub(crate) struct SyncSharedHistoryEntry {
     pub(crate) version: i64,
     pub(crate) checksum: String,
-    pub(crate) change_type: String,
+    pub(crate) change_type: ChangeType,
     pub(crate) changed_by_name: Option<String>,
     pub(crate) changed_by_email: String,
     pub(crate) created_at: String,
@@ -108,7 +109,7 @@ pub(crate) struct SyncSharedPushRequest {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SyncPushChange {
     pub(crate) item_id: Uuid,
-    pub(crate) operation: String,
+    pub(crate) operation: ChangeType,
     pub(crate) payload_enc: Option<Vec<u8>>,
     pub(crate) checksum: Option<String>,
     pub(crate) path: Option<String>,
@@ -121,7 +122,7 @@ pub(crate) struct SyncPushChange {
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SyncSharedPushChange {
     pub(crate) item_id: Uuid,
-    pub(crate) operation: String,
+    pub(crate) operation: ChangeType,
     #[serde(default)]
     pub(crate) payload: Option<JsonValue>,
     #[serde(default)]
@@ -160,7 +161,7 @@ pub(crate) struct SyncPushConflict {
 
 pub(crate) struct SyncPullRow {
     pub(crate) seq: i64,
-    pub(crate) op: String,
+    pub(crate) op: i32,
     pub(crate) item_id: Uuid,
     pub(crate) path: String,
     pub(crate) name: String,

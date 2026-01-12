@@ -4,10 +4,10 @@ use chrono::Utc;
 use serde_json::json;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
-use zann_core::{EncryptedPayload, ItemsService};
+use zann_core::{AuthMethod, EncryptedPayload, ItemsService, StorageKind, VaultKind};
 use zann_db::local::{
-    LocalStorage, LocalStorageRepo, LocalSyncCursor, LocalVault, LocalVaultRepo, PendingChangeRepo,
-    SyncCursorRepo,
+    KeyWrapType, LocalStorage, LocalStorageRepo, LocalSyncCursor, LocalVault, LocalVaultRepo,
+    PendingChangeRepo, SyncCursorRepo,
 };
 use zann_db::{connect_sqlite_with_max, migrate_local, SqlitePool};
 
@@ -49,14 +49,14 @@ impl LocalClient {
         let storage_id = Uuid::now_v7();
         let storage = LocalStorage {
             id: storage_id,
-            kind: "remote".to_string(),
+            kind: StorageKind::Remote,
             name: "Remote Test".to_string(),
             server_url: Some(server_url.to_string()),
             server_name: None,
             server_fingerprint: None,
             account_subject: None,
             personal_vaults_enabled: true,
-            auth_method: None,
+            auth_method: Some(AuthMethod::Password),
         };
         let storage_repo = LocalStorageRepo::new(&pool);
         storage_repo.upsert(&storage).await.expect("storage upsert");
@@ -73,12 +73,11 @@ impl LocalClient {
             id: vault_id,
             storage_id: self.storage_id,
             name: "Personal Vault".to_string(),
-            kind: "personal".to_string(),
+            kind: VaultKind::Personal,
             is_default: false,
             vault_key_enc,
-            key_wrap_type: "remote_strict".to_string(),
+            key_wrap_type: KeyWrapType::RemoteStrict,
             last_synced_at: None,
-            server_seq: 0,
         };
         let repo = LocalVaultRepo::new(&self.pool);
         let _ = repo.create(&vault).await;
@@ -89,12 +88,11 @@ impl LocalClient {
             id: vault_id,
             storage_id: self.storage_id,
             name: "Shared Vault".to_string(),
-            kind: "shared".to_string(),
+            kind: VaultKind::Shared,
             is_default: false,
             vault_key_enc,
-            key_wrap_type: "remote_server".to_string(),
+            key_wrap_type: KeyWrapType::RemoteServer,
             last_synced_at: None,
-            server_seq: 0,
         };
         let repo = LocalVaultRepo::new(&self.pool);
         let _ = repo.create(&vault).await;
@@ -198,12 +196,12 @@ impl LocalClient {
     pub async fn pull_personal(&self, app: &TestApp, token: &str, vault_id: Uuid) -> PullOutcome {
         let cursor_repo = SyncCursorRepo::new(&self.pool);
         let cursor_row = cursor_repo
-            .get(&self.storage_id.to_string(), &vault_id.to_string())
+            .get(self.storage_id, vault_id)
             .await
             .expect("cursor")
             .unwrap_or(LocalSyncCursor {
-                storage_id: self.storage_id.to_string(),
-                vault_id: vault_id.to_string(),
+                storage_id: self.storage_id,
+                vault_id,
                 cursor: None,
                 last_sync_at: None,
             });
@@ -236,8 +234,8 @@ impl LocalClient {
         }
 
         let cursor = LocalSyncCursor {
-            storage_id: self.storage_id.to_string(),
-            vault_id: vault_id.to_string(),
+            storage_id: self.storage_id,
+            vault_id,
             cursor: json["next_cursor"].as_str().map(|value| value.to_string()),
             last_sync_at: Some(Utc::now()),
         };
@@ -290,12 +288,12 @@ impl LocalClient {
 
         let cursor_repo = SyncCursorRepo::new(&self.pool);
         let cursor_row = cursor_repo
-            .get(&self.storage_id.to_string(), &vault_id.to_string())
+            .get(self.storage_id, vault_id)
             .await
             .expect("cursor")
             .unwrap_or(LocalSyncCursor {
-                storage_id: self.storage_id.to_string(),
-                vault_id: vault_id.to_string(),
+                storage_id: self.storage_id,
+                vault_id,
                 cursor: None,
                 last_sync_at: None,
             });
@@ -327,8 +325,8 @@ impl LocalClient {
             .await;
         }
         let cursor = LocalSyncCursor {
-            storage_id: self.storage_id.to_string(),
-            vault_id: vault_id.to_string(),
+            storage_id: self.storage_id,
+            vault_id,
             cursor: json["next_cursor"].as_str().map(|value| value.to_string()),
             last_sync_at: Some(Utc::now()),
         };

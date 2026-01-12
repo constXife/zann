@@ -5,7 +5,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 use client_workflow_support::{key_fingerprint, login_payload, LocalClient, TestApp};
-use zann_core::ItemsService;
+use zann_core::{ChangeType, ItemsService, SyncStatus};
 
 async fn create_item(
     app: &TestApp,
@@ -163,7 +163,7 @@ async fn shared_push_conflict_on_path_collision() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": change_id.to_string(),
-                    "operation": "create",
+                    "operation": ChangeType::Create.as_i32(),
                     "payload": client_payload,
                     "path": "login",
                     "name": "login",
@@ -377,7 +377,7 @@ async fn shared_pull_populates_cache_with_key_fp() {
         .await
         .expect("cache get")
         .expect("cache item");
-    assert_eq!(item.sync_status, "synced");
+    assert_eq!(item.sync_status, SyncStatus::Synced);
     assert!(!item.payload_enc.is_empty(), "payload cached");
     assert_eq!(
         item.cache_key_fp.as_deref(),

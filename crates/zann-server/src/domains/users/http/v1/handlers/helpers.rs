@@ -1,4 +1,4 @@
-use zann_core::{User, UserStatus};
+use zann_core::User;
 
 use crate::infra::user_display::{avatar_initials_for_user, display_name_for_user};
 
@@ -16,16 +16,8 @@ pub(crate) fn user_response(user: User) -> UserResponse {
         display_name,
         avatar_url: None,
         avatar_initials,
-        status: user_status_label(user.status).to_string(),
+        status: user.status.as_i32(),
         created_at: user.created_at.to_rfc3339(),
         last_login_at: user.last_login_at.map(|value| value.to_rfc3339()),
-    }
-}
-
-fn user_status_label(status: UserStatus) -> &'static str {
-    match status {
-        UserStatus::Active => "active",
-        UserStatus::Disabled => "blocked",
-        UserStatus::System => "system",
     }
 }

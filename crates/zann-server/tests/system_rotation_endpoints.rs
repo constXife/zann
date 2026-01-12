@@ -8,6 +8,7 @@ mod support;
 
 use tokio::sync::Semaphore;
 use zann_core::crypto::SecretKey;
+use zann_core::{CachePolicy, VaultKind};
 use zann_server::app::{build_router, AppState};
 use zann_server::config::{AuthMode, InternalRegistration, ServerConfig};
 use zann_server::domains::access_control::policies::{PolicyRule, PolicySet};
@@ -152,8 +153,8 @@ impl TestApp {
         let payload = json!({
             "slug": slug,
             "name": "Shared Vault",
-            "kind": "shared",
-            "cache_policy": "full",
+            "kind": VaultKind::Shared.as_i32(),
+            "cache_policy": CachePolicy::Full.as_i32(),
         });
         let (status, json) = self
             .send_json(Method::POST, "/v1/vaults", Some(token), payload)

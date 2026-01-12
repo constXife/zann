@@ -25,7 +25,7 @@ pub(super) async fn find_path_conflict(
         FROM items
         WHERE vault_id = $1
           AND path = $2
-          AND sync_status = 'active'
+          AND sync_status = 1
           AND ($3::uuid IS NULL OR id <> $3)
         LIMIT 1
         "#,
@@ -44,9 +44,10 @@ pub(super) async fn find_path_conflict(
 
 impl FromRow<'_, PgRow> for SyncPullRow {
     fn from_row(row: &PgRow) -> Result<Self, sqlx_core::Error> {
+        let op: i16 = row.try_get("op")?;
         Ok(Self {
             seq: row.try_get("seq")?,
-            op: row.try_get("op")?,
+            op: i32::from(op),
             item_id: row.try_get("item_id")?,
             path: row.try_get("path")?,
             name: row.try_get("name")?,

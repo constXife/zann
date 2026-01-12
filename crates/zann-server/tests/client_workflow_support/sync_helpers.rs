@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde_json::json;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
+use zann_core::{ChangeType, SyncStatus};
 use zann_core::vault_crypto as core_crypto;
 use zann_db::local::{LocalItem, LocalItemRepo, LocalPendingChange, LocalVaultRepo};
 use zann_db::SqlitePool;
@@ -49,14 +50,15 @@ pub(super) async fn apply_shared_pull_change(
     let updated_at = DateTime::parse_from_rfc3339(updated_at)
         .expect("updated_at")
         .with_timezone(&Utc);
-    let operation = change["operation"].as_str().unwrap_or("");
+    let operation = change["operation"].as_i64().unwrap_or(0) as i32;
+    let operation = ChangeType::try_from(operation).ok();
     let repo = LocalItemRepo::new(pool);
     let existing = repo.get_by_id(storage_id, item_id).await.expect("get");
 
-    if operation == "delete" {
+    if operation == Some(ChangeType::Delete) {
         if let Some(mut local) = existing {
             local.deleted_at = Some(updated_at);
-            local.sync_status = "tombstone".to_string();
+            local.sync_status = SyncStatus::Tombstone;
             local.updated_at = updated_at;
             local.version = change["seq"].as_i64().unwrap_or(0);
             let _ = repo.update(&local).await;
@@ -86,7 +88,7 @@ pub(super) async fn apply_shared_pull_change(
         local.cache_key_fp = Some(key_fp.get(0..12).unwrap_or(&key_fp).to_string());
         local.updated_at = updated_at;
         local.deleted_at = None;
-        local.sync_status = "synced".to_string();
+        local.sync_status = SyncStatus::Synced;
         local.version = version;
         let _ = repo.update(&local).await;
         return;
@@ -105,7 +107,7 @@ pub(super) async fn apply_shared_pull_change(
         version,
         deleted_at: None,
         updated_at,
-        sync_status: "synced".to_string(),
+        sync_status: SyncStatus::Synced,
     };
     let _ = repo.create(&item).await;
 }
@@ -123,14 +125,15 @@ pub(super) async fn apply_personal_pull_change(
     let updated_at = DateTime::parse_from_rfc3339(updated_at)
         .expect("updated_at")
         .with_timezone(&Utc);
-    let operation = change["operation"].as_str().unwrap_or("");
+    let operation = change["operation"].as_i64().unwrap_or(0) as i32;
+    let operation = ChangeType::try_from(operation).ok();
     let repo = LocalItemRepo::new(pool);
     let existing = repo.get_by_id(storage_id, item_id).await.expect("get");
 
-    if operation == "delete" {
+    if operation == Some(ChangeType::Delete) {
         if let Some(mut local) = existing {
             local.deleted_at = Some(updated_at);
-            local.sync_status = "tombstone".to_string();
+            local.sync_status = SyncStatus::Tombstone;
             local.updated_at = updated_at;
             local.version = change["seq"].as_i64().unwrap_or(0);
             let _ = repo.update(&local).await;
@@ -175,7 +178,7 @@ pub(super) async fn apply_personal_pull_change(
         local.cache_key_fp = Some(key_fp);
         local.updated_at = updated_at;
         local.deleted_at = None;
-        local.sync_status = "synced".to_string();
+        local.sync_status = SyncStatus::Synced;
         local.version = version;
         let _ = repo.update(&local).await;
         return;
@@ -194,7 +197,7 @@ pub(super) async fn apply_personal_pull_change(
         version,
         deleted_at: None,
         updated_at,
-        sync_status: "synced".to_string(),
+        sync_status: SyncStatus::Synced,
     };
     let _ = repo.create(&item).await;
 }
@@ -206,7 +209,7 @@ pub(super) async fn build_shared_push_changes(
 ) -> Vec<serde_json::Value> {
     let mut changes = Vec::with_capacity(pending.len());
     for change in pending {
-        if change.operation == "delete" {
+        if change.operation == ChangeType::Delete {
             changes.push(json!({
                 "item_id": change.item_id.to_string(),
                 "operation": change.operation,

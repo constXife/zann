@@ -12,7 +12,7 @@ use crate::domains::auth::core::passwords::{
 use crate::infra::metrics;
 
 pub struct ListUsersCommand {
-    pub status: Option<String>,
+    pub status: Option<i32>,
     pub sort: Option<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
@@ -97,13 +97,11 @@ pub async fn list_users(
     ensure_internal(identity, resource, "list")?;
     ensure_policy(state, identity, resource, "list")?;
 
-    let status = if let Some(query_status) = cmd.status.as_deref() {
-        Some(match query_status {
-            "active" => UserStatus::Active,
-            "blocked" | "disabled" => UserStatus::Disabled,
-            "system" => UserStatus::System,
-            _ => return Err(AdminUserError::BadRequest("invalid_query")),
-        })
+    let status = if let Some(query_status) = cmd.status {
+        Some(
+            UserStatus::try_from(query_status)
+                .map_err(|_| AdminUserError::BadRequest("invalid_query"))?,
+        )
     } else {
         None
     };

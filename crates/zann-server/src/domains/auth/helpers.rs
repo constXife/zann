@@ -94,12 +94,13 @@ pub(crate) async fn ensure_personal_vault_tx(
         SELECT v.id
         FROM vaults v
         INNER JOIN vault_members vm ON vm.vault_id = v.id
-        WHERE vm.user_id = $1 AND v.kind = 'personal' AND v.deleted_at IS NULL
+        WHERE vm.user_id = $1 AND v.kind = $2 AND v.deleted_at IS NULL
         ORDER BY v.created_at ASC
         LIMIT 1
         "#,
     )
     .bind(user_id)
+    .bind(VaultKind::Personal.as_i32())
     .fetch_optional(&mut *conn)
     .await
     .map_err(|_| "db_error")?;
@@ -121,10 +122,10 @@ pub(crate) async fn ensure_personal_vault_tx(
     .bind(vault_id)
     .bind(format!("personal-{}", user_id))
     .bind("Personal")
-    .bind(VaultKind::Personal.as_str())
-    .bind(VaultEncryptionType::Client.as_str())
+    .bind(VaultKind::Personal.as_i32())
+    .bind(VaultEncryptionType::Client.as_i32())
     .bind(Vec::<u8>::new())
-    .bind(CachePolicy::Full.as_str())
+    .bind(CachePolicy::Full.as_i32())
     .bind(&tags)
     .bind(None::<DateTime<Utc>>)
     .bind(None::<Uuid>)
@@ -140,7 +141,7 @@ pub(crate) async fn ensure_personal_vault_tx(
             SELECT v.id
             FROM vaults v
             INNER JOIN vault_members vm ON vm.vault_id = v.id
-            WHERE vm.user_id = $1 AND v.kind = 'personal' AND v.deleted_at IS NULL
+            WHERE vm.user_id = $1 AND v.kind = 1 AND v.deleted_at IS NULL
             ORDER BY v.created_at ASC
             LIMIT 1
             "#,
@@ -163,7 +164,7 @@ pub(crate) async fn ensure_personal_vault_tx(
     )
     .bind(vault_id)
     .bind(user_id)
-    .bind(VaultMemberRole::Admin.as_str())
+    .bind(VaultMemberRole::Admin.as_i32())
     .bind(now)
     .execute(&mut *conn)
     .await

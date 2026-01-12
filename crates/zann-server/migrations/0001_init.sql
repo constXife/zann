@@ -9,7 +9,7 @@ CREATE TABLE users (
     kdf_memory_kb BIGINT NOT NULL DEFAULT 65536,
     kdf_parallelism BIGINT NOT NULL DEFAULT 4,
     recovery_key_hash TEXT,
-    status TEXT NOT NULL DEFAULT 'active',
+    status SMALLINT NOT NULL DEFAULT 1,
     deleted_at TIMESTAMPTZ,
     deleted_by_user_id UUID,
     deleted_by_device_id UUID,
@@ -27,7 +27,7 @@ VALUES (
     '00000000-0000-0000-0000-000000000000',
     'system@zann.internal',
     'System',
-    'system',
+    3,
     'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=',
     now(),
     now(),
@@ -144,10 +144,10 @@ CREATE TABLE vaults (
     id UUID PRIMARY KEY NOT NULL,
     slug TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
-    kind TEXT NOT NULL,
-    encryption_type TEXT NOT NULL DEFAULT 'client',
+    kind SMALLINT NOT NULL,
+    encryption_type SMALLINT NOT NULL DEFAULT 1,
     vault_key_enc BYTEA NOT NULL,
-    cache_policy TEXT NOT NULL,
+    cache_policy SMALLINT NOT NULL,
     tags JSONB NOT NULL DEFAULT '[]'::jsonb,
     deleted_at TIMESTAMPTZ,
     deleted_by_user_id UUID,
@@ -161,7 +161,7 @@ CREATE TABLE vaults (
 CREATE TABLE vault_members (
     vault_id UUID NOT NULL,
     user_id UUID NOT NULL,
-    role TEXT NOT NULL,
+    role SMALLINT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (vault_id, user_id),
     FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE,
@@ -183,7 +183,7 @@ CREATE TABLE items (
     version BIGINT NOT NULL,
     row_version BIGINT NOT NULL DEFAULT 1,
     device_id UUID NOT NULL,
-    sync_status TEXT NOT NULL DEFAULT 'active',
+    sync_status SMALLINT NOT NULL DEFAULT 1,
     deleted_at TIMESTAMPTZ,
     deleted_by_user_id UUID,
     deleted_by_device_id UUID,
@@ -197,8 +197,8 @@ CREATE TABLE items (
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL,
     CONSTRAINT chk_sync_tombstone CHECK (
-        (sync_status = 'tombstone' AND deleted_at IS NOT NULL) OR
-        (sync_status = 'active' AND deleted_at IS NULL)
+        (sync_status = 2 AND deleted_at IS NOT NULL) OR
+        (sync_status = 1 AND deleted_at IS NULL)
     ),
     CONSTRAINT chk_deleted_by CHECK (
         (deleted_at IS NULL AND deleted_by_user_id IS NULL) OR
@@ -213,7 +213,7 @@ CREATE TABLE items (
 
 CREATE UNIQUE INDEX idx_items_vault_path_active
     ON items(vault_id, path)
-    WHERE sync_status = 'active';
+    WHERE sync_status = 1;
 CREATE INDEX idx_items_vault_id ON items(vault_id);
 
 CREATE TABLE item_usage (
@@ -233,7 +233,7 @@ CREATE TABLE item_history (
     version BIGINT NOT NULL,
     payload_enc BYTEA NOT NULL,
     checksum TEXT NOT NULL,
-    change_type TEXT NOT NULL,
+    change_type SMALLINT NOT NULL,
     fields_changed JSONB,
     changed_by_user_id UUID NOT NULL,
     changed_by_email TEXT NOT NULL,
@@ -255,14 +255,17 @@ CREATE TABLE attachments (
     filename TEXT NOT NULL,
     size BIGINT NOT NULL,
     mime_type TEXT NOT NULL,
+    enc_mode TEXT NOT NULL DEFAULT 'plain',
     content_enc BYTEA NOT NULL,
     checksum TEXT NOT NULL,
     storage_url TEXT,
+    deleted_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,
     FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
 );
 
 CREATE INDEX idx_attachments_item_id ON attachments(item_id);
+CREATE INDEX idx_attachments_deleted_at ON attachments(deleted_at);
 
 CREATE TABLE item_conflicts (
     id UUID PRIMARY KEY NOT NULL,
@@ -284,7 +287,7 @@ CREATE TABLE changes (
     seq BIGSERIAL PRIMARY KEY,
     vault_id UUID NOT NULL,
     item_id UUID NOT NULL,
-    op TEXT NOT NULL,
+    op SMALLINT NOT NULL,
     version BIGINT NOT NULL,
     device_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
@@ -312,7 +315,7 @@ CREATE TABLE invites (
     id UUID PRIMARY KEY NOT NULL,
     vault_id UUID NOT NULL,
     token_hash TEXT NOT NULL,
-    role TEXT NOT NULL,
+    role SMALLINT NOT NULL,
     uses_left BIGINT NOT NULL,
     expires_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,

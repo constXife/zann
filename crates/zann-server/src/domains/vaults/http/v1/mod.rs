@@ -5,7 +5,7 @@ use axum::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use zann_core::api::vaults::VaultListResponse;
-use zann_core::{Identity, Vault};
+use zann_core::{CachePolicy, Identity, Vault, VaultEncryptionType, VaultKind};
 
 use crate::app::AppState;
 use crate::domains::vaults::service::{
@@ -37,8 +37,8 @@ pub(crate) struct CreateVaultRequest {
     id: Option<String>,
     slug: String,
     name: String,
-    kind: String,
-    cache_policy: String,
+    kind: VaultKind,
+    cache_policy: CachePolicy,
     #[serde(default)]
     vault_key_enc: Option<Vec<u8>>,
     #[serde(default)]
@@ -55,10 +55,10 @@ pub(crate) struct VaultResponse {
     pub(crate) id: String,
     pub(crate) slug: String,
     pub(crate) name: String,
-    pub(crate) kind: String,
-    pub(crate) cache_policy: String,
+    pub(crate) kind: VaultKind,
+    pub(crate) cache_policy: CachePolicy,
     pub(crate) vault_key_enc: Vec<u8>,
-    pub(crate) encryption_type: String,
+    pub(crate) encryption_type: VaultEncryptionType,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) created_at: String,
 }
@@ -163,10 +163,10 @@ fn vault_response(vault: Vault) -> VaultResponse {
         id: vault.id.to_string(),
         slug: vault.slug,
         name: vault.name,
-        kind: vault.kind.as_str().to_string(),
-        cache_policy: vault.cache_policy.as_str().to_string(),
+        kind: vault.kind,
+        cache_policy: vault.cache_policy,
         vault_key_enc: vault.vault_key_enc,
-        encryption_type: vault.encryption_type.as_str().to_string(),
+        encryption_type: vault.encryption_type,
         tags: vault.tags.map(|tags| tags.0),
         created_at: vault.created_at.to_rfc3339(),
     }

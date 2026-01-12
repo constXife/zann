@@ -9,6 +9,7 @@ mod support;
 
 use tokio::sync::Semaphore;
 use zann_core::crypto::SecretKey;
+use zann_core::{CachePolicy, VaultKind};
 use zann_db::PgPool;
 use zann_server::app::{build_router, AppState};
 use zann_server::config::{AuthMode, InternalRegistration, ServerConfig};
@@ -184,8 +185,8 @@ impl TestApp {
         let payload = json!({
             "slug": slug,
             "name": "Shared Vault",
-            "kind": "shared",
-            "cache_policy": "full",
+            "kind": VaultKind::Shared.as_i32(),
+            "cache_policy": CachePolicy::Full.as_i32(),
         });
         let (status, json) = self
             .send_json(Method::POST, "/v1/vaults", Some(token), payload)
@@ -205,8 +206,8 @@ impl TestApp {
         if let Some(vaults) = json.get("vaults").and_then(|v| v.as_array()) {
             if let Some(vault) = vaults.iter().find(|v| {
                 v.get("kind")
-                    .and_then(|k| k.as_str())
-                    .is_some_and(|k| k.eq_ignore_ascii_case("personal"))
+                    .and_then(|k| k.as_i64())
+                    .is_some_and(|k| k == i64::from(VaultKind::Personal.as_i32()))
             }) {
                 return vault.clone();
             }
@@ -215,8 +216,8 @@ impl TestApp {
         let payload = json!({
             "slug": slug,
             "name": "Personal Vault",
-            "kind": "personal",
-            "cache_policy": "full",
+            "kind": VaultKind::Personal.as_i32(),
+            "cache_policy": CachePolicy::Full.as_i32(),
             "vault_key_enc": [1, 2, 3],
         });
         let (status, json) = self
