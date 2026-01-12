@@ -4,30 +4,23 @@ use super::models::{
     parse_description, parse_scope_for_list, resolve_owner, resolve_vault_for_list, ParsedScope,
     ScopeSummary, TokenListRow,
 };
-use super::{tokens_usage, SYSTEM_OWNER_EMAIL};
+use super::{TokenListArgs, SYSTEM_OWNER_EMAIL};
 
-pub(super) async fn tokens_list(
-    db: &zann_db::PgPool,
-    mut args: impl Iterator<Item = String>,
-) -> Result<(), String> {
-    let mut owner_email: Option<String> = None;
-    let mut owner_id: Option<String> = None;
-    while let Some(arg) = args.next() {
-        match arg.as_str() {
-            "--owner-email" => owner_email = args.next(),
-            "--owner-id" => owner_id = args.next(),
-            _ => return Err(tokens_usage(&format!("unknown arg: {arg}"))),
-        }
-    }
+pub(super) async fn tokens_list(db: &zann_db::PgPool, args: &TokenListArgs) -> Result<(), String> {
+    let mut owner_email = args.owner_email.as_deref();
+    let owner_id = args.owner_id.as_deref();
     if owner_email.is_none() && owner_id.is_none() {
-        owner_email = Some(SYSTEM_OWNER_EMAIL.to_string());
+        owner_email = Some(SYSTEM_OWNER_EMAIL);
     }
-    let owner = resolve_owner(db, owner_email.as_deref(), owner_id.as_deref()).await?;
+    let owner = resolve_owner(db, owner_email, owner_id).await?;
     let repo = ServiceAccountRepo::new(db);
     let accounts = repo
         .list_by_owner(owner, 200, 0, "desc")
         .await
-        .map_err(|_| "service_account_list_failed".to_string())?;
+        .map_err(|err| {
+            tracing::error!(event = "service_account_list_failed", error = %err);
+            "service_account_list_failed".to_string()
+        })?;
 
     let user_repo = UserRepo::new(db);
     let mut rows = Vec::new();
@@ -76,7 +69,10 @@ pub(super) async fn tokens_list(
     });
     println!(
         "{}",
-        serde_json::to_string_pretty(&output).map_err(|err| err.to_string())?
+        serde_json::to_string_pretty(&output).map_err(|err| {
+            tracing::error!(event = "token_list_output_failed", error = %err);
+            err.to_string()
+        })?
     );
     Ok(())
 }
