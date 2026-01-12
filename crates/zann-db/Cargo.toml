@@ -17,6 +17,7 @@ uuid = { version = "1", features = ["v7"] }
 serde_json = "1"
 tracing = "0.1"
 zann-core = { path = "../zann-core", default-features = false }
+zann-crypto = { path = "../zann-crypto" }
 
 [features]
 default = []

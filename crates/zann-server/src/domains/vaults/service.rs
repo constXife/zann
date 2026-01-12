@@ -2,9 +2,9 @@ use chrono::Utc;
 use sqlx_core::types::Json as SqlxJson;
 use uuid::Uuid;
 use zann_core::api::vaults::VaultSummary;
-use zann_core::crypto::SecretKey;
-use zann_core::vault_crypto as core_crypto;
 use zann_core::{CachePolicy, Identity, Vault, VaultEncryptionType, VaultKind};
+use zann_crypto::crypto::SecretKey;
+use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{VaultMemberRepo, VaultRepo};
 
 use crate::app::AppState;

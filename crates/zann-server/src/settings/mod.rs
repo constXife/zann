@@ -9,7 +9,7 @@ use ipnet::IpNet;
 use std::env;
 use std::sync::Arc;
 use tracing::warn;
-use zann_core::crypto::SecretKey;
+use zann_crypto::crypto::SecretKey;
 
 mod env_config;
 #[cfg(test)]

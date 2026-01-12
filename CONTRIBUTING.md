@@ -118,20 +118,14 @@ Overkill for this repo (for now):
 - Required approvals / CODEOWNERS validation in solo mode.
 
 Audit-surface (current targets):
-- `crates/zann-core/src/crypto.rs`
-- `crates/zann-core/src/vault_crypto.rs`
+- `crates/zann-crypto/**`
 - `crates/zann-core/src/auth.rs`
-- `crates/zann-core/src/secrets.rs`
 - `crates/zann-server/src/domains/auth/core/**`
 - `crates/zann-server/src/domains/access_control/**`
 - `crates/zann-keystore/**`
 - `crates/zann-server/src/infra/audit.rs`
 
-Architectural option: extract `zann-crypto` crate
-- Rationale: tighter boundaries, smaller audit scope, minimal deps, reuse.
-- Proposed modules: `blob`, `keys`, `vault`, `password`, `token`, `payload`.
-- `zann-core` re-exports crypto types; `zann-server` uses `zann-crypto` directly.
-- Move `EncryptedPayload` into `zann-crypto` (pure serialized structure).
+Audit status + blessed releases live in `docs/audit-surface.md`.
 
 Implementation phases (high level):
 1. Create `zann-crypto` and migrate crypto/password/token/payload code.

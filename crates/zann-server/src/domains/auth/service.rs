@@ -9,8 +9,8 @@ use zann_core::api::auth::{
     LoginRequest, LoginResponse, LogoutRequest, OidcLoginRequest, PreloginResponse, RefreshRequest,
     RegisterRequest,
 };
-use zann_core::vault_crypto as core_crypto;
 use zann_core::{Session, User, UserStatus, VaultEncryptionType, VaultKind};
+use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{
     DeviceRepo, ServiceAccountRepo, ServiceAccountSessionRepo, SessionRepo, UserRepo, VaultRepo,
 };

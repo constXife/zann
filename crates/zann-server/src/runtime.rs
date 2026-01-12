@@ -13,7 +13,7 @@ use tracing_subscriber::{prelude::*, EnvFilter};
 use crate::app;
 use crate::config::OtelConfig;
 use crate::settings;
-use zann_core::crypto::SecretKey;
+use zann_crypto::crypto::SecretKey;
 
 #[allow(dead_code)]
 pub(crate) struct OtelGuard {

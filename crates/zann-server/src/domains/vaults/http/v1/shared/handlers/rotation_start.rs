@@ -1,8 +1,8 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
 use chrono::Utc;
 use uuid::Uuid;
-use zann_core::vault_crypto as core_crypto;
 use zann_core::{FieldKind, Identity};
+use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{ItemRepo, VaultRepo};
 
 use crate::app::AppState;

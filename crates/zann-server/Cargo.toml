@@ -43,6 +43,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower-http = { version = "0.5", features = ["catch-panic", "request-id", "trace", "util"] }
 uuid = { version = "1", features = ["v7"] }
 zann-core = { path = "../zann-core", default-features = false, features = ["postgres"] }
+zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", default-features = false, features = ["postgres"] }
 
 [dev-dependencies]

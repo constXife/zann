@@ -2,12 +2,12 @@ use chrono::Utc;
 use serde_json::Value as JsonValue;
 use sqlx_core::types::Json as SqlxJson;
 use uuid::Uuid;
-use zann_core::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob};
-use zann_core::vault_crypto as core_crypto;
 use zann_core::{
     Attachment, Change, ChangeOp, ChangeType, FieldsChanged, Identity, Item, ItemHistory,
     SyncStatus, Vault, VaultEncryptionType,
 };
+use zann_crypto::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob};
+use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{
     AttachmentRepo, ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, UserRepo, VaultRepo,
 };

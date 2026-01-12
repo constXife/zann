@@ -2,9 +2,9 @@ use chrono::{DateTime, Utc};
 use rand::seq::SliceRandom;
 use sqlx_core::row::Row;
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
-use zann_core::vault_crypto as core_crypto;
 use zann_core::{Identity, Vault, VaultEncryptionType, VaultKind};
+use zann_crypto::crypto::SecretKey;
+use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{DeviceRepo, ServiceAccountRepo, UserRepo};
 
 use super::{ROTATION_STATE_ROTATING, ROTATION_STATE_STALE};

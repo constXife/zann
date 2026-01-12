@@ -17,6 +17,7 @@ jobs:
       server: ${{ steps.filter.outputs.server }}
       docker: ${{ steps.filter.outputs.docker }}
       js: ${{ steps.filter.outputs.js }}
+      audit_surface: ${{ steps.filter.outputs.audit_surface }}
       ci: ${{ steps.filter.outputs.ci }}
     steps:
       - name: Checkout
@@ -53,6 +54,13 @@ jobs:
               - 'apps/desktop/**'
               - 'bun.lockb'
               - 'apps/desktop/bun.lock'
+            audit_surface:
+              - 'crates/zann-crypto/**'
+              - 'crates/zann-core/src/auth.rs'
+              - 'crates/zann-server/src/domains/auth/core/**'
+              - 'crates/zann-server/src/domains/access_control/**'
+              - 'crates/zann-server/src/infra/audit.rs'
+              - 'crates/zann-keystore/**'
             ci:
               - '.github/workflows/**'
 
@@ -71,6 +79,26 @@ jobs:
         uses: ./.github/actions/rust-cache
       - name: Rust fmt
         run: cargo fmt --check
+
+  audit-surface:
+    needs: changes
+    if: needs.changes.outputs.audit_surface == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: clippy
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+      - name: Dependency guard
+        run: scripts/check-audit-surface-deps.sh
+      - name: Clippy (audit-surface)
+        run: cargo clippy -p zann-crypto -p zann-core -p zann-server -p zann-keystore --all-targets -- -D warnings
+      - name: Tests (audit-surface)
+        run: cargo test -p zann-crypto
 
   test:
     needs: changes

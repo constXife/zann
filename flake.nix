@@ -13,6 +13,7 @@
     {
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
+          k6
           pkg-config
           openssl
           libxkbcommon

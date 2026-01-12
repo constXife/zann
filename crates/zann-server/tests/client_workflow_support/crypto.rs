@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
-use zann_core::vault_crypto as core_crypto;
 use zann_core::EncryptedPayload;
+use zann_crypto::crypto::SecretKey;
+use zann_crypto::vault_crypto as core_crypto;
 
 pub fn key_fingerprint(key: &SecretKey) -> String {
     let hex = blake3::hash(key.as_bytes()).to_hex().to_string();
