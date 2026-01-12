@@ -1,23 +1,88 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::EncryptedPayload;
+use crate::{EncryptedPayload, VaultKind, SyncStatus};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(try_from = "i32", into = "i32")]
 pub enum StorageKind {
-    LocalOnly,
-    Remote,
+    LocalOnly = 1,
+    Remote = 2,
 }
 
 impl StorageKind {
+    pub const LOCAL_ONLY: i32 = Self::LocalOnly as i32;
+    pub const REMOTE: i32 = Self::Remote as i32;
+
     #[must_use]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::LocalOnly => "local_only",
-            Self::Remote => "remote",
+    pub const fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+impl From<StorageKind> for i32 {
+    fn from(value: StorageKind) -> Self {
+        value as i32
+    }
+}
+
+impl TryFrom<i32> for StorageKind {
+    type Error = crate::EnumParseError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::LocalOnly),
+            2 => Ok(Self::Remote),
+            _ => Err(crate::EnumParseError::new(
+                "storage_kind",
+                value.to_string(),
+            )),
+        }
+    }
+}
+
+#[repr(i32)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
+#[serde(try_from = "i32", into = "i32")]
+pub enum AuthMethod {
+    Password = 1,
+    Oidc = 2,
+    ServiceAccount = 3,
+}
+
+impl AuthMethod {
+    pub const PASSWORD: i32 = Self::Password as i32;
+    pub const OIDC: i32 = Self::Oidc as i32;
+    pub const SERVICE_ACCOUNT: i32 = Self::ServiceAccount as i32;
+
+    #[must_use]
+    pub const fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+impl From<AuthMethod> for i32 {
+    fn from(value: AuthMethod) -> Self {
+        value as i32
+    }
+}
+
+impl TryFrom<i32> for AuthMethod {
+    type Error = crate::EnumParseError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Password),
+            2 => Ok(Self::Oidc),
+            3 => Ok(Self::ServiceAccount),
+            _ => Err(crate::EnumParseError::new(
+                "auth_method",
+                value.to_string(),
+            )),
         }
     }
 }
@@ -57,7 +122,7 @@ pub struct StorageSummary {
     pub server_name: Option<String>,
     pub account_subject: Option<String>,
     pub personal_vaults_enabled: bool,
-    pub auth_method: Option<String>,
+    pub auth_method: Option<AuthMethod>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,7 +130,7 @@ pub struct VaultSummary {
     pub id: Uuid,
     pub storage_id: Uuid,
     pub name: String,
-    pub kind: String,
+    pub kind: VaultKind,
     pub is_default: bool,
 }
 
@@ -76,7 +141,7 @@ pub struct ItemPreview {
     pub path: String,
     pub name: String,
     pub type_id: String,
-    pub sync_status: String,
+    pub sync_status: SyncStatus,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
@@ -140,7 +205,7 @@ pub trait VaultsService {
         &self,
         storage_id: Uuid,
         name: &str,
-        kind: &str,
+        kind: VaultKind,
         is_default: bool,
     ) -> ServiceResult<VaultSummary>;
     async fn ensure_default_local_personal(&self) -> ServiceResult<VaultSummary>;
