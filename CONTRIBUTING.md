@@ -28,9 +28,17 @@ Requirements:
 
 Workspace (Rust):
 - Build: `cargo build`
-- Tests: `cargo test`
+- Tests: `cargo test` (fast, no DB)
 - Format: `cargo fmt`
 - Lint: `cargo clippy --all-targets --all-features`
+
+Just (optional):
+- Fast tests: `just fast-test` (same as `cargo test`)
+- Full tests: `just full-test` (fast tests + Postgres integration tests)
+- Default test: `just test` (same as `just fast-test`)
+- Desktop build: `just desktop-build` (Tauri build)
+- Desktop e2e: `just desktop-e2e` (Webdriver-based)
+- DB tests require Podman and `compose.test.yaml`.
 
 Desktop (Tauri) from `apps/desktop`:
 - Install deps: `bun install`
