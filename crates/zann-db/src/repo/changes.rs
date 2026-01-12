@@ -29,7 +29,7 @@ impl<'a> ChangeRepo<'a> {
             "#,
             change.vault_id,
             change.item_id,
-            change.op.as_str(),
+            change.op.as_i32(),
             change.version,
             change.device_id,
             change.created_at

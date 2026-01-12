@@ -19,6 +19,7 @@ macro_rules! query_as {
 mod item_history_repo;
 mod item_repo;
 mod metadata_repo;
+mod enums;
 mod models;
 mod pending_change_repo;
 mod storage_repo;
@@ -28,6 +29,7 @@ mod vault_repo;
 pub use item_history_repo::LocalItemHistoryRepo;
 pub use item_repo::LocalItemRepo;
 pub use metadata_repo::MetadataRepo;
+pub use enums::KeyWrapType;
 pub use models::{
     LocalItem, LocalItemHistory, LocalPendingChange, LocalStorage, LocalSyncCursor, LocalVault,
 };

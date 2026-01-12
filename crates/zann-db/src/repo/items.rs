@@ -46,7 +46,7 @@ impl<'a> ItemRepo<'a> {
             item.version,
             item.row_version,
             item.device_id,
-            item.sync_status.as_str(),
+            item.sync_status.as_i32(),
             item.deleted_at,
             item.deleted_by_user_id,
             item.deleted_by_device_id,
@@ -152,7 +152,7 @@ impl<'a> ItemRepo<'a> {
         let where_clause = if include_deleted {
             "WHERE vault_id = $1"
         } else {
-            "WHERE vault_id = $1 AND sync_status = 'active'"
+            "WHERE vault_id = $1 AND sync_status = 1"
         };
         let query = format!(
             r#"
@@ -230,7 +230,7 @@ impl<'a> ItemRepo<'a> {
             item.checksum.as_str(),
             item.version,
             item.device_id,
-            item.sync_status.as_str(),
+            item.sync_status.as_i32(),
             item.deleted_at,
             item.deleted_by_user_id,
             item.deleted_by_device_id,
@@ -322,7 +322,7 @@ impl<'a> ItemHistoryRepo<'a> {
             &history.payload_enc,
             history.checksum.as_str(),
             history.version,
-            history.change_type.as_str(),
+            history.change_type.as_i32(),
             history.fields_changed.as_ref(),
             history.changed_by_user_id,
             history.changed_by_email.as_str(),

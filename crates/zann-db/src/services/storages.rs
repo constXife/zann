@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use zann_core::{ServiceError, ServiceResult, StorageKind, StorageSummary, StoragesService};
+use zann_core::{ServiceError, ServiceResult, StorageSummary, StoragesService};
 
 use crate::local::LocalStorageRepo;
 
@@ -20,11 +20,7 @@ impl<'a> StoragesService for LocalServices<'a> {
             .map(|storage| StorageSummary {
                 id: storage.id,
                 name: storage.name,
-                kind: if storage.kind == "remote" {
-                    StorageKind::Remote
-                } else {
-                    StorageKind::LocalOnly
-                },
+                kind: storage.kind,
                 server_url: storage.server_url,
                 server_name: storage.server_name,
                 account_subject: storage.account_subject,
@@ -44,11 +40,7 @@ impl<'a> StoragesService for LocalServices<'a> {
         Ok(StorageSummary {
             id: storage.id,
             name: storage.name,
-            kind: if storage.kind == "remote" {
-                StorageKind::Remote
-            } else {
-                StorageKind::LocalOnly
-            },
+            kind: storage.kind,
             server_url: storage.server_url,
             server_name: storage.server_name,
             account_subject: storage.account_subject,

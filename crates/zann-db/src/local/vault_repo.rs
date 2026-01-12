@@ -28,8 +28,7 @@ impl<'a> LocalVaultRepo<'a> {
                 is_default,
                 vault_key_enc,
                 key_wrap_type,
-                last_synced_at as "last_synced_at",
-                server_seq as "server_seq"
+                last_synced_at as "last_synced_at"
             FROM local_vaults
             WHERE storage_id = ?1 AND id = ?2
             "#,
@@ -44,19 +43,18 @@ impl<'a> LocalVaultRepo<'a> {
         query!(
             r#"
             INSERT INTO local_vaults (
-                id, storage_id, name, kind, is_default, vault_key_enc, key_wrap_type, last_synced_at, server_seq
+                id, storage_id, name, kind, is_default, vault_key_enc, key_wrap_type, last_synced_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             vault.id,
             vault.storage_id,
             vault.name.as_str(),
-            vault.kind.as_str(),
+            vault.kind.as_i32(),
             vault.is_default,
             &vault.vault_key_enc,
-            vault.key_wrap_type.as_str(),
-            vault.last_synced_at,
-            vault.server_seq
+            vault.key_wrap_type.as_i32(),
+            vault.last_synced_at
         )
         .execute(self.pool)
         .await
@@ -79,8 +77,7 @@ impl<'a> LocalVaultRepo<'a> {
                 is_default,
                 vault_key_enc,
                 key_wrap_type,
-                last_synced_at as "last_synced_at",
-                server_seq as "server_seq"
+                last_synced_at as "last_synced_at"
             FROM local_vaults
             WHERE storage_id = ?1 AND name = ?2
             "#,
@@ -106,8 +103,7 @@ impl<'a> LocalVaultRepo<'a> {
                 is_default,
                 vault_key_enc,
                 key_wrap_type,
-                last_synced_at as "last_synced_at",
-                server_seq as "server_seq"
+                last_synced_at as "last_synced_at"
             FROM local_vaults
             WHERE storage_id = ?1
             ORDER BY name
@@ -123,7 +119,7 @@ impl<'a> LocalVaultRepo<'a> {
         storage_id: Uuid,
         vault_id: Uuid,
         vault_key_enc: &[u8],
-        key_wrap_type: &str,
+        key_wrap_type: crate::local::KeyWrapType,
     ) -> Result<u64, sqlx_core::Error> {
         query!(
             r#"
@@ -135,7 +131,7 @@ impl<'a> LocalVaultRepo<'a> {
             storage_id,
             vault_id,
             vault_key_enc,
-            key_wrap_type
+            key_wrap_type.as_i32()
         )
         .execute(self.pool)
         .await

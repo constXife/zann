@@ -25,7 +25,7 @@ impl<'a> PendingChangeRepo<'a> {
             change.storage_id,
             change.vault_id,
             change.item_id,
-            change.operation.as_str(),
+            change.operation.as_i32(),
             change.payload_enc.as_deref(),
             change.checksum.as_deref(),
             change.path.as_deref(),

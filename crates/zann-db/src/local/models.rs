@@ -2,6 +2,9 @@ use chrono::{DateTime, Utc};
 use sqlx_core::row::Row;
 use sqlx_sqlite::SqliteRow;
 use uuid::Uuid;
+use zann_core::{AuthMethod, StorageKind, SyncStatus, VaultKind, ChangeType};
+
+use super::KeyWrapType;
 
 fn parse_uuid(row: &SqliteRow, column: &str) -> Result<Uuid, sqlx_core::Error> {
     match row.try_get::<String, _>(column) {
@@ -18,12 +21,11 @@ pub struct LocalVault {
     pub id: Uuid,
     pub storage_id: Uuid,
     pub name: String,
-    pub kind: String,
+    pub kind: VaultKind,
     pub is_default: bool,
     pub vault_key_enc: Vec<u8>,
-    pub key_wrap_type: String,
+    pub key_wrap_type: KeyWrapType,
     pub last_synced_at: Option<i64>,
-    pub server_seq: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -40,13 +42,13 @@ pub struct LocalItem {
     pub version: i64,
     pub deleted_at: Option<DateTime<Utc>>,
     pub updated_at: DateTime<Utc>,
-    pub sync_status: String,
+    pub sync_status: SyncStatus,
 }
 
 #[derive(Debug, Clone)]
 pub struct LocalSyncCursor {
-    pub storage_id: String,
-    pub vault_id: String,
+    pub storage_id: Uuid,
+    pub vault_id: Uuid,
     pub cursor: Option<String>,
     pub last_sync_at: Option<DateTime<Utc>>,
 }
@@ -57,7 +59,7 @@ pub struct LocalPendingChange {
     pub storage_id: Uuid,
     pub vault_id: Uuid,
     pub item_id: Uuid,
-    pub operation: String,
+    pub operation: ChangeType,
     pub payload_enc: Option<Vec<u8>>,
     pub checksum: Option<String>,
     pub path: Option<String>,
@@ -70,14 +72,14 @@ pub struct LocalPendingChange {
 #[derive(Debug, Clone)]
 pub struct LocalStorage {
     pub id: Uuid,
-    pub kind: String,
+    pub kind: StorageKind,
     pub name: String,
     pub server_url: Option<String>,
     pub server_name: Option<String>,
     pub server_fingerprint: Option<String>,
     pub account_subject: Option<String>,
     pub personal_vaults_enabled: bool,
-    pub auth_method: Option<String>,
+    pub auth_method: Option<AuthMethod>,
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +91,7 @@ pub struct LocalItemHistory {
     pub payload_enc: Vec<u8>,
     pub checksum: String,
     pub version: i64,
-    pub change_type: String,
+    pub change_type: ChangeType,
     pub changed_by_email: String,
     pub changed_by_name: Option<String>,
     pub changed_by_device_id: Option<Uuid>,
@@ -99,25 +101,31 @@ pub struct LocalItemHistory {
 
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalVault {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
+        let kind: i32 = row.try_get("kind")?;
+        let key_wrap_type: i32 = row.try_get("key_wrap_type")?;
         Ok(Self {
             id: parse_uuid(row, "id")?,
             storage_id: parse_uuid(row, "storage_id")?,
             name: row.try_get("name")?,
-            kind: row.try_get("kind")?,
+            kind: VaultKind::try_from(kind)
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
             is_default: row.try_get("is_default")?,
             vault_key_enc: row.try_get("vault_key_enc")?,
-            key_wrap_type: row.try_get("key_wrap_type")?,
+            key_wrap_type: KeyWrapType::try_from(key_wrap_type)
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
             last_synced_at: row.try_get("last_synced_at")?,
-            server_seq: row.try_get("server_seq")?,
         })
     }
 }
 
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalStorage {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
+        let kind: i32 = row.try_get("kind")?;
+        let auth_method: Option<i32> = row.try_get("auth_method")?;
         Ok(Self {
             id: parse_uuid(row, "id")?,
-            kind: row.try_get("kind")?,
+            kind: StorageKind::try_from(kind)
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
             name: row.try_get("name")?,
             server_url: row.try_get("server_url")?,
             server_name: row.try_get("server_name")?,
@@ -126,13 +134,17 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalStorage {
             personal_vaults_enabled: row
                 .try_get::<bool, _>("personal_vaults_enabled")
                 .unwrap_or(true),
-            auth_method: row.try_get("auth_method")?,
+            auth_method: auth_method
+                .map(AuthMethod::try_from)
+                .transpose()
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
         })
     }
 }
 
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItem {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
+        let sync_status: i32 = row.try_get("sync_status")?;
         Ok(Self {
             id: parse_uuid(row, "id")?,
             storage_id: parse_uuid(row, "storage_id")?,
@@ -146,7 +158,8 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItem {
             version: row.try_get("version")?,
             deleted_at: row.try_get("deleted_at")?,
             updated_at: row.try_get("updated_at")?,
-            sync_status: row.try_get("sync_status")?,
+            sync_status: SyncStatus::try_from(sync_status)
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
         })
     }
 }
@@ -154,8 +167,8 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItem {
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalSyncCursor {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
         Ok(Self {
-            storage_id: row.try_get("storage_id")?,
-            vault_id: row.try_get("vault_id")?,
+            storage_id: parse_uuid(row, "storage_id")?,
+            vault_id: parse_uuid(row, "vault_id")?,
             cursor: row.try_get("cursor")?,
             last_sync_at: row.try_get("last_sync_at")?,
         })
@@ -164,12 +177,14 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalSyncCursor {
 
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalPendingChange {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
+        let operation: i32 = row.try_get("operation")?;
         Ok(Self {
             id: parse_uuid(row, "id")?,
             storage_id: parse_uuid(row, "storage_id")?,
             vault_id: parse_uuid(row, "vault_id")?,
             item_id: parse_uuid(row, "item_id")?,
-            operation: row.try_get("operation")?,
+            operation: ChangeType::try_from(operation)
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
             payload_enc: row.try_get("payload_enc")?,
             checksum: row.try_get("checksum")?,
             path: row.try_get("path")?,
@@ -183,6 +198,7 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalPendingChange {
 
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItemHistory {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
+        let change_type: i32 = row.try_get("change_type")?;
         Ok(Self {
             id: parse_uuid(row, "id")?,
             storage_id: parse_uuid(row, "storage_id")?,
@@ -191,7 +207,8 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItemHistory {
             payload_enc: row.try_get("payload_enc")?,
             checksum: row.try_get("checksum")?,
             version: row.try_get("version")?,
-            change_type: row.try_get("change_type")?,
+            change_type: ChangeType::try_from(change_type)
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
             changed_by_email: row.try_get("changed_by_email")?,
             changed_by_name: row.try_get("changed_by_name")?,
             changed_by_device_id: row.try_get("changed_by_device_id")?,

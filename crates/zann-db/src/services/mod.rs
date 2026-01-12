@@ -3,11 +3,13 @@ use uuid::Uuid;
 
 use zann_core::crypto::SecretKey;
 use zann_core::vault_crypto as core_crypto;
-use zann_core::{EncryptedPayload, ServiceError, ServiceResult};
+use zann_core::{
+    ChangeType, EncryptedPayload, ServiceError, ServiceResult, StorageKind, SyncStatus, VaultKind,
+};
 
 use crate::local::{
-    LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange, LocalVault,
-    LocalVaultRepo, PendingChangeRepo,
+    KeyWrapType, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange,
+    LocalStorageRepo, LocalVault, LocalVaultRepo, PendingChangeRepo,
 };
 use crate::SqlitePool;
 
@@ -15,6 +17,11 @@ pub struct LocalServices<'a> {
     pool: &'a SqlitePool,
     master_key: &'a SecretKey,
 }
+
+pub const MAX_ITEM_NAME_LEN: usize = 200;
+pub const MAX_ITEM_PATH_LEN: usize = 500;
+pub const MAX_ITEM_PATH_SEGMENTS: usize = 32;
+pub const MAX_ITEM_PAYLOAD_BYTES: usize = 262_144;
 
 const ITEM_HISTORY_LIMIT: i64 = 5;
 
@@ -37,6 +44,120 @@ impl<'a> LocalServices<'a> {
             .to_string()
     }
 
+    fn normalize_path(path: &str) -> ServiceResult<String> {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            return Err(ServiceError::new("path_required", "path is required"));
+        }
+        let mut segments: Vec<String> = Vec::new();
+        for raw in trimmed.split('/') {
+            let part = raw.trim();
+            if part.is_empty() {
+                continue;
+            }
+            if part == "." {
+                continue;
+            }
+            if part == ".." {
+                return Err(ServiceError::new("path_invalid", "path cannot include .."));
+            }
+            if part.starts_with('.') {
+                return Err(ServiceError::new(
+                    "path_segment_invalid",
+                    "path segment is reserved",
+                ));
+            }
+            if part.len() > MAX_ITEM_NAME_LEN {
+                return Err(ServiceError::new("name_too_long", "name is too long"));
+            }
+            segments.push(part.to_string());
+        }
+        if segments.is_empty() {
+            return Err(ServiceError::new("path_required", "path is required"));
+        }
+        if segments.len() > MAX_ITEM_PATH_SEGMENTS {
+            return Err(ServiceError::new(
+                "path_segments_limit",
+                "path has too many segments",
+            ));
+        }
+        let normalized = segments.join("/");
+        if normalized.len() > MAX_ITEM_PATH_LEN {
+            return Err(ServiceError::new("path_too_long", "path is too long"));
+        }
+        Ok(normalized)
+    }
+
+    fn validate_payload_size(payload: &EncryptedPayload) -> ServiceResult<()> {
+        let bytes = serde_json::to_vec(payload)
+            .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
+        if bytes.len() > MAX_ITEM_PAYLOAD_BYTES {
+            return Err(ServiceError::new(
+                "payload_too_large",
+                "payload exceeds size limit",
+            ));
+        }
+        Ok(())
+    }
+
+    fn split_path(path: &str) -> (String, String) {
+        match path.rsplit_once('/') {
+            Some((folder, name)) => (folder.to_string(), name.to_string()),
+            None => ("".to_string(), path.to_string()),
+        }
+    }
+
+    fn join_path(folder: &str, name: &str) -> String {
+        if folder.is_empty() {
+            name.to_string()
+        } else {
+            format!("{}/{}", folder, name)
+        }
+    }
+
+    async fn unique_restored_path(
+        &self,
+        storage_id: Uuid,
+        vault_id: Uuid,
+        item_id: Uuid,
+        base_path: &str,
+    ) -> ServiceResult<String> {
+        let repo = LocalItemRepo::new(self.pool);
+        let (folder, name) = Self::split_path(base_path);
+        for idx in 0..50 {
+            let suffix = if idx == 0 {
+                " (restored)".to_string()
+            } else {
+                format!(" (restored {})", idx + 1)
+            };
+            let max_name_len = MAX_ITEM_NAME_LEN.saturating_sub(suffix.len());
+            if max_name_len == 0 {
+                return Err(ServiceError::new("name_too_long", "name is too long"));
+            }
+            let base_name = if name.chars().count() > max_name_len {
+                name.chars().take(max_name_len).collect::<String>()
+            } else {
+                name.clone()
+            };
+            let candidate_name = format!("{base_name}{suffix}");
+            let candidate_path = Self::join_path(&folder, &candidate_name);
+            if candidate_path.len() > MAX_ITEM_PATH_LEN {
+                continue;
+            }
+            let existing = repo
+                .get_active_by_vault_path(storage_id, vault_id, &candidate_path)
+                .await
+                .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?;
+            if existing.map_or(true, |item| item.id == item_id) {
+                return Ok(candidate_path);
+            }
+        }
+        Err(ServiceError::new(
+            "item_conflict",
+            "could not generate unique restore path",
+        ))
+    }
+
     async fn track_pending(
         &self,
         storage_id: Uuid,
@@ -47,13 +168,27 @@ impl<'a> LocalServices<'a> {
             return Ok(());
         }
         let repo = PendingChangeRepo::new(self.pool);
-        repo.create(&change)
+        let mut merged = change;
+        let existing = repo
+            .list_by_item(storage_id, merged.item_id)
+            .await
+            .map_err(|err| ServiceError::new("pending_change_failed", err.to_string()))?;
+        if let Some(first) = existing.first() {
+            if first.operation == ChangeType::Create {
+                merged.operation = ChangeType::Create;
+                merged.base_seq = None;
+            } else if first.base_seq.is_some() {
+                merged.base_seq = first.base_seq;
+            }
+            let _ = repo.delete_by_item(storage_id, merged.item_id).await;
+        }
+        repo.create(&merged)
             .await
             .map_err(|err| ServiceError::new("pending_change_failed", err.to_string()))
     }
 
     fn decrypt_vault_key(&self, vault: &LocalVault) -> ServiceResult<SecretKey> {
-        if vault.key_wrap_type == "remote_server" {
+        if vault.key_wrap_type == KeyWrapType::RemoteServer {
             return Ok(SecretKey::from_bytes(*self.master_key.as_bytes()));
         }
         match core_crypto::decrypt_vault_key(self.master_key, vault.id, &vault.vault_key_enc) {
@@ -104,12 +239,12 @@ impl<'a> LocalServices<'a> {
             "[item_debug] decrypt_start item_id={} vault_id={} kind={} key_wrap_type={} vault_key_len={} checksum={}",
             item_id,
             vault_id,
-            vault.kind,
-            vault.key_wrap_type,
+            vault.kind.as_i32(),
+            vault.key_wrap_type.as_i32(),
             vault.vault_key_enc.len(),
             checksum
         ));
-        let (primary_key, primary_source) = if vault.kind == "shared" {
+        let (primary_key, primary_source) = if vault.kind == VaultKind::Shared {
             (SecretKey::from_bytes(*self.master_key.as_bytes()), "master")
         } else {
             (self.decrypt_vault_key(&vault)?, "vault")
@@ -129,7 +264,7 @@ impl<'a> LocalServices<'a> {
         ) {
             Ok(value) => value,
             Err(err) => {
-                if vault.kind == "shared" && !vault.vault_key_enc.is_empty() {
+        if vault.kind == VaultKind::Shared && !vault.vault_key_enc.is_empty() {
                     Self::item_debug(format_args!(
                         "[item_debug] shared_decrypt_fallback item_id={} vault_id={} checksum={}",
                         item_id, vault_id, checksum
@@ -240,7 +375,7 @@ impl<'a> LocalServices<'a> {
             .await
             .map_err(|err| ServiceError::new("vault_lookup_failed", err.to_string()))?
             .ok_or_else(|| ServiceError::new("vault_not_found", "vault not found"))?;
-        let (key, source) = if vault.kind == "shared" {
+        let (key, source) = if vault.kind == VaultKind::Shared {
             (SecretKey::from_bytes(*self.master_key.as_bytes()), "master")
         } else {
             (self.decrypt_vault_key(&vault)?, "vault")
@@ -249,8 +384,8 @@ impl<'a> LocalServices<'a> {
         Self::item_debug(format_args!(
             "[item_debug] payload_key vault_id={} kind={} key_wrap_type={} vault_key_len={} source={} key_fp={}",
             vault.id,
-            vault.kind,
-            vault.key_wrap_type,
+            vault.kind.as_i32(),
+            vault.key_wrap_type.as_i32(),
             vault.vault_key_enc.len(),
             source,
             key_fp
@@ -281,6 +416,8 @@ impl<'a> LocalServices<'a> {
         type_id: String,
         payload: EncryptedPayload,
     ) -> ServiceResult<Uuid> {
+        let normalized_path = Self::normalize_path(&path)?;
+        Self::validate_payload_size(&payload)?;
         let repo = LocalItemRepo::new(self.pool);
         let Some(mut item) = repo
             .get_by_id(storage_id, item_id)
@@ -292,9 +429,9 @@ impl<'a> LocalServices<'a> {
         if item.deleted_at.is_some() {
             return Err(ServiceError::new("item_deleted", "item is deleted"));
         }
-        if item.path != path {
+        if item.path != normalized_path {
             if let Some(existing) = repo
-                .get_by_vault_path(storage_id, item.vault_id, &path)
+                .get_active_by_vault_path(storage_id, item.vault_id, &normalized_path)
                 .await
                 .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?
             {
@@ -321,34 +458,41 @@ impl<'a> LocalServices<'a> {
         item.cache_key_fp = Some(key_fp);
         item.version = item.version.saturating_add(1);
         item.updated_at = now;
-        item.name = Self::name_from_path(&path);
-        item.path = path.clone();
+        item.name = Self::name_from_path(&normalized_path);
+        item.path = normalized_path.clone();
         item.type_id = type_id;
-        item.sync_status = "modified".to_string();
+        item.sync_status = SyncStatus::Modified;
         repo.update(&item)
             .await
             .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
         if !Self::payloads_equal(&prev_payload, &payload)? {
-            let history_repo = LocalItemHistoryRepo::new(self.pool);
-            let history = LocalItemHistory {
-                id: Uuid::now_v7(),
-                storage_id,
-                vault_id: item.vault_id,
-                item_id: item.id,
-                payload_enc: prev_payload_enc,
-                checksum: prev_checksum,
-                version: prev_version,
-                change_type: "update".to_string(),
-                changed_by_email: "local".to_string(),
-                changed_by_name: None,
-                changed_by_device_id: None,
-                changed_by_device_name: None,
-                created_at: now,
+            let storage_repo = LocalStorageRepo::new(self.pool);
+            let is_local_only = match storage_repo.get(storage_id).await {
+                Ok(Some(storage)) => storage.kind == StorageKind::LocalOnly,
+                _ => false,
             };
-            let _ = history_repo.create(&history).await;
-            let _ = history_repo
-                .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
-                .await;
+            if is_local_only {
+                let history_repo = LocalItemHistoryRepo::new(self.pool);
+                let history = LocalItemHistory {
+                    id: Uuid::now_v7(),
+                    storage_id,
+                    vault_id: item.vault_id,
+                    item_id: item.id,
+                    payload_enc: prev_payload_enc,
+                    checksum: prev_checksum,
+                    version: prev_version,
+                    change_type: ChangeType::Update,
+                    changed_by_email: "local".to_string(),
+                    changed_by_name: None,
+                    changed_by_device_id: None,
+                    changed_by_device_name: None,
+                    created_at: now,
+                };
+                let _ = history_repo.create(&history).await;
+                let _ = history_repo
+                    .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
+                    .await;
+            }
         }
         self.track_pending(
             storage_id,
@@ -357,7 +501,7 @@ impl<'a> LocalServices<'a> {
                 storage_id,
                 vault_id: item.vault_id,
                 item_id: item.id,
-                operation: "update".to_string(),
+                operation: ChangeType::Update,
                 payload_enc: Some(item.payload_enc.clone()),
                 checksum: Some(item.checksum.clone()),
                 path: Some(item.path.clone()),
@@ -407,7 +551,7 @@ impl<'a> LocalServices<'a> {
             payload_enc: item.payload_enc.clone(),
             checksum: item.checksum.clone(),
             version: prev_version,
-            change_type: "restore".to_string(),
+            change_type: ChangeType::Restore,
             changed_by_email: "local".to_string(),
             changed_by_name: None,
             changed_by_device_id: None,
@@ -427,7 +571,7 @@ impl<'a> LocalServices<'a> {
         item.version = item.version.saturating_add(1);
         item.updated_at = now;
         item.deleted_at = None;
-        item.sync_status = "modified".to_string();
+        item.sync_status = SyncStatus::Modified;
         repo.update(&item)
             .await
             .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
@@ -439,7 +583,7 @@ impl<'a> LocalServices<'a> {
                 storage_id,
                 vault_id: item.vault_id,
                 item_id: item.id,
-                operation: "update".to_string(),
+                operation: ChangeType::Update,
                 payload_enc: Some(item.payload_enc.clone()),
                 checksum: Some(item.checksum.clone()),
                 path: Some(item.path.clone()),
@@ -473,12 +617,25 @@ impl<'a> LocalServices<'a> {
             .map_err(|err| ServiceError::new("pending_change_failed", err.to_string()))?;
         let has_pending_create = pending
             .iter()
-            .any(|change| change.operation == "create" && change.base_seq.is_none());
-        let was_local_only_delete = item.sync_status == "local_deleted";
+            .any(|change| change.operation == ChangeType::Create && change.base_seq.is_none());
+        let was_local_only_delete = item.sync_status == SyncStatus::LocalDeleted;
+        if let Some(existing) = repo
+            .get_active_by_vault_path(storage_id, item.vault_id, &item.path)
+            .await
+            .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?
+        {
+            if existing.id != item.id {
+                let updated_path = self
+                    .unique_restored_path(storage_id, item.vault_id, item.id, &item.path)
+                    .await?;
+                item.path = updated_path;
+                item.name = Self::name_from_path(&item.path);
+            }
+        }
         let _ = pending_repo.delete_by_item(storage_id, item_id).await;
         let prev_version = item.version;
         item.deleted_at = None;
-        item.sync_status = "modified".to_string();
+        item.sync_status = SyncStatus::Modified;
         item.updated_at = Utc::now();
         item.version = item.version.saturating_add(1);
         repo.update(&item)
@@ -492,7 +649,7 @@ impl<'a> LocalServices<'a> {
                     storage_id,
                     vault_id: item.vault_id,
                     item_id: item.id,
-                    operation: "create".to_string(),
+                    operation: ChangeType::Create,
                     payload_enc: Some(item.payload_enc.clone()),
                     checksum: Some(item.checksum.clone()),
                     path: Some(item.path.clone()),
@@ -511,7 +668,7 @@ impl<'a> LocalServices<'a> {
                     storage_id,
                     vault_id: item.vault_id,
                     item_id: item.id,
-                    operation: "restore".to_string(),
+                    operation: ChangeType::Restore,
                     payload_enc: Some(item.payload_enc.clone()),
                     checksum: Some(item.checksum.clone()),
                     path: Some(item.path.clone()),

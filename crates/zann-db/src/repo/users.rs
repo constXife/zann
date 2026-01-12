@@ -46,7 +46,7 @@ impl<'a> UserRepo<'a> {
             user.kdf_memory_kb,
             user.kdf_parallelism,
             user.recovery_key_hash.as_deref(),
-            user.status.as_str(),
+            user.status.as_i32(),
             user.deleted_at,
             user.deleted_by_user_id,
             user.deleted_by_device_id,
@@ -185,9 +185,9 @@ impl<'a> UserRepo<'a> {
             "DESC"
         };
         let where_clause = if status.is_some() {
-            "WHERE status = $3 AND status != 'system' AND deleted_at IS NULL"
+            "WHERE status = $3 AND status != 3 AND deleted_at IS NULL"
         } else {
-            "WHERE status != 'system' AND deleted_at IS NULL"
+            "WHERE status != 3 AND deleted_at IS NULL"
         };
         let query = format!(
             r#"
@@ -220,7 +220,7 @@ impl<'a> UserRepo<'a> {
         );
         let mut query = query_as!(User, &query, limit, offset);
         if let Some(status) = status {
-            query = query.bind(status.as_str());
+            query = query.bind(status.as_i32());
         }
         query.fetch_all(self.pool).await
     }
@@ -241,7 +241,7 @@ impl<'a> UserRepo<'a> {
             "#,
             user_id,
             row_version,
-            status.as_str(),
+            status.as_i32(),
             Utc::now()
         )
         .execute(self.pool)

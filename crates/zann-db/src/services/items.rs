@@ -3,18 +3,16 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use zann_core::{
-    EncryptedPayload, ItemDetail, ItemListParams, ItemPreview, ItemPreviewPage, ItemsService,
-    ServiceError, ServiceResult,
+    ChangeType, EncryptedPayload, ItemDetail, ItemListParams, ItemPreview, ItemPreviewPage,
+    ItemsService, ServiceError, ServiceResult, StorageKind, SyncStatus,
 };
 
 use crate::local::{
     LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange,
-    PendingChangeRepo,
+    LocalStorageRepo, PendingChangeRepo,
 };
 
 use super::LocalServices;
-
-const ITEM_HISTORY_LIMIT: i64 = 5;
 
 #[async_trait]
 impl<'a> ItemsService for LocalServices<'a> {
@@ -62,7 +60,7 @@ impl<'a> ItemsService for LocalServices<'a> {
             return Ok(None);
         };
         Self::item_debug(format_args!(
-            "[item_debug] get_item_by_path item_id={} vault_id={} checksum={} cache_key_fp={} updated_at={} sync_status={} payload_len={}",
+            "[item_debug] get_item_by_path item_id={} vault_id={} checksum={} cache_key_fp={} updated_at={} sync_status={:?} payload_len={}",
             item.id,
             item.vault_id,
             item.checksum,
@@ -94,7 +92,7 @@ impl<'a> ItemsService for LocalServices<'a> {
             .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?
             .ok_or_else(|| ServiceError::new("item_not_found", "item not found"))?;
         Self::item_debug(format_args!(
-            "[item_debug] get_item item_id={} vault_id={} checksum={} cache_key_fp={} updated_at={} sync_status={} payload_len={}",
+            "[item_debug] get_item item_id={} vault_id={} checksum={} cache_key_fp={} updated_at={} sync_status={:?} payload_len={}",
             item.id,
             item.vault_id,
             item.checksum,
@@ -126,75 +124,20 @@ impl<'a> ItemsService for LocalServices<'a> {
         type_id: String,
         payload: EncryptedPayload,
     ) -> ServiceResult<Uuid> {
+        let normalized_path = Self::normalize_path(&path)?;
+        Self::validate_payload_size(&payload)?;
         let repo = LocalItemRepo::new(self.pool);
-        let existing = repo
-            .get_by_vault_path(storage_id, vault_id, &path)
+        if let Some(existing) = repo
+            .get_active_by_vault_path(storage_id, vault_id, &normalized_path)
             .await
-            .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?;
-        let now = Utc::now();
-        if let Some(mut item) = existing {
-            let prev_version = item.version;
-            let prev_payload_enc = item.payload_enc.clone();
-            let prev_checksum = item.checksum.clone();
-            let prev_payload = self
-                .decrypt_payload(storage_id, vault_id, item.id, &item.payload_enc)
-                .await?;
-            let (payload_enc, key_fp) = self
-                .encrypt_payload(storage_id, vault_id, item.id, &payload)
-                .await?;
-            item.payload_enc = payload_enc;
-            item.checksum = Self::payload_checksum(&item.payload_enc);
-            item.cache_key_fp = Some(key_fp);
-            item.version = item.version.saturating_add(1);
-            item.updated_at = now;
-            item.name = Self::name_from_path(&path);
-            item.type_id = type_id;
-            item.sync_status = "modified".to_string();
-            repo.update(&item)
-                .await
-                .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
-            if !Self::payloads_equal(&prev_payload, &payload)? {
-                let history_repo = LocalItemHistoryRepo::new(self.pool);
-                let history = LocalItemHistory {
-                    id: Uuid::now_v7(),
-                    storage_id,
-                    vault_id,
-                    item_id: item.id,
-                    payload_enc: prev_payload_enc,
-                    checksum: prev_checksum,
-                    version: prev_version,
-                    change_type: "update".to_string(),
-                    changed_by_email: "local".to_string(),
-                    changed_by_name: None,
-                    changed_by_device_id: None,
-                    changed_by_device_name: None,
-                    created_at: now,
-                };
-                let _ = history_repo.create(&history).await;
-                let _ = history_repo
-                    .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
-                    .await;
-            }
-            self.track_pending(
-                storage_id,
-                LocalPendingChange {
-                    id: Uuid::now_v7(),
-                    storage_id,
-                    vault_id,
-                    item_id: item.id,
-                    operation: "update".to_string(),
-                    payload_enc: Some(item.payload_enc.clone()),
-                    checksum: Some(item.checksum.clone()),
-                    path: Some(item.path.clone()),
-                    name: Some(item.name.clone()),
-                    type_id: Some(item.type_id.clone()),
-                    base_seq: Some(prev_version),
-                    created_at: now,
-                },
-            )
-            .await?;
-            return Ok(item.id);
+            .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?
+        {
+            return Err(ServiceError::new(
+                "item_exists",
+                format!("item already exists at {}", existing.path),
+            ));
         }
+        let now = Utc::now();
 
         let item_id = Uuid::now_v7();
         let (payload_enc, key_fp) = self
@@ -205,8 +148,8 @@ impl<'a> ItemsService for LocalServices<'a> {
             id: item_id,
             storage_id,
             vault_id,
-            path: path.clone(),
-            name: Self::name_from_path(&path),
+            path: normalized_path.clone(),
+            name: Self::name_from_path(&normalized_path),
             type_id,
             payload_enc,
             checksum,
@@ -214,11 +157,35 @@ impl<'a> ItemsService for LocalServices<'a> {
             version: 1,
             deleted_at: None,
             updated_at: now,
-            sync_status: "modified".to_string(),
+            sync_status: SyncStatus::Modified,
         };
         repo.create(&item)
             .await
             .map_err(|err| ServiceError::new("item_create_failed", err.to_string()))?;
+        let storage_repo = LocalStorageRepo::new(self.pool);
+        let is_local_only = match storage_repo.get(storage_id).await {
+            Ok(Some(storage)) => storage.kind == StorageKind::LocalOnly,
+            _ => false,
+        };
+        if is_local_only {
+            let history_repo = LocalItemHistoryRepo::new(self.pool);
+            let history = LocalItemHistory {
+                id: Uuid::now_v7(),
+                storage_id,
+                vault_id,
+                item_id,
+                payload_enc: item.payload_enc.clone(),
+                checksum: item.checksum.clone(),
+                version: item.version,
+                change_type: ChangeType::Create,
+                changed_by_email: "local".to_string(),
+                changed_by_name: None,
+                changed_by_device_id: None,
+                changed_by_device_name: None,
+                created_at: now,
+            };
+            let _ = history_repo.create(&history).await;
+        }
         self.track_pending(
             storage_id,
             LocalPendingChange {
@@ -226,7 +193,7 @@ impl<'a> ItemsService for LocalServices<'a> {
                 storage_id,
                 vault_id,
                 item_id,
-                operation: "create".to_string(),
+                operation: ChangeType::Create,
                 payload_enc: Some(item.payload_enc.clone()),
                 checksum: Some(item.checksum.clone()),
                 path: Some(item.path.clone()),
@@ -256,11 +223,11 @@ impl<'a> ItemsService for LocalServices<'a> {
             .map_err(|err| ServiceError::new("pending_change_failed", err.to_string()))?;
         let has_pending_create = pending
             .iter()
-            .any(|change| change.operation == "create" && change.base_seq.is_none());
+            .any(|change| change.operation == ChangeType::Create && change.base_seq.is_none());
         if has_pending_create {
             let _ = pending_repo.delete_by_item(storage_id, item_id).await;
             item.deleted_at = Some(Utc::now());
-            item.sync_status = "local_deleted".to_string();
+            item.sync_status = SyncStatus::LocalDeleted;
             item.updated_at = Utc::now();
             item.version = item.version.saturating_add(1);
             repo.update(&item)
@@ -270,7 +237,7 @@ impl<'a> ItemsService for LocalServices<'a> {
         }
         let prev_version = item.version;
         item.deleted_at = Some(Utc::now());
-        item.sync_status = "tombstone".to_string();
+        item.sync_status = SyncStatus::Tombstone;
         item.updated_at = Utc::now();
         item.version = item.version.saturating_add(1);
         repo.update(&item)
@@ -283,7 +250,7 @@ impl<'a> ItemsService for LocalServices<'a> {
                 storage_id,
                 vault_id: item.vault_id,
                 item_id: item.id,
-                operation: "delete".to_string(),
+                operation: ChangeType::Delete,
                 payload_enc: None,
                 checksum: None,
                 path: Some(item.path.clone()),

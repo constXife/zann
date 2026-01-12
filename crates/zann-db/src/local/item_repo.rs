@@ -35,7 +35,7 @@ impl<'a> LocalItemRepo<'a> {
             item.version,
             item.deleted_at,
             item.updated_at,
-            item.sync_status.as_str()
+            item.sync_status.as_i32()
         )
         .execute(self.pool)
         .await
@@ -72,7 +72,7 @@ impl<'a> LocalItemRepo<'a> {
             item.version,
             item.deleted_at,
             item.updated_at,
-            item.sync_status.as_str()
+            item.sync_status.as_i32()
         )
         .execute(self.pool)
         .await
@@ -170,6 +170,40 @@ impl<'a> LocalItemRepo<'a> {
                 sync_status
             FROM items_cache
             WHERE storage_id = ?1 AND vault_id = ?2 AND path = ?3
+            "#,
+            storage_id,
+            vault_id,
+            path
+        )
+        .fetch_optional(self.pool)
+        .await
+    }
+
+    pub async fn get_active_by_vault_path(
+        &self,
+        storage_id: Uuid,
+        vault_id: Uuid,
+        path: &str,
+    ) -> Result<Option<LocalItem>, sqlx_core::Error> {
+        query_as!(
+            LocalItem,
+            r#"
+            SELECT
+                id as "id",
+                storage_id as "storage_id",
+                vault_id as "vault_id",
+                path,
+                name,
+                type_id,
+                payload_enc,
+                checksum,
+                cache_key_fp,
+                version as "version",
+                deleted_at as "deleted_at",
+                updated_at as "updated_at",
+                sync_status
+            FROM items_cache
+            WHERE storage_id = ?1 AND vault_id = ?2 AND path = ?3 AND deleted_at IS NULL
             "#,
             storage_id,
             vault_id,

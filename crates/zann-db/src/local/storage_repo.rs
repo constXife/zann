@@ -53,14 +53,14 @@ impl<'a> LocalStorageRepo<'a> {
                 auth_method = excluded.auth_method
             "#,
             storage.id,
-            storage.kind.as_str(),
+            storage.kind.as_i32(),
             storage.name.as_str(),
             storage.server_url.as_deref(),
             storage.server_name.as_deref(),
             storage.server_fingerprint.as_deref(),
             storage.account_subject.as_deref(),
             storage.personal_vaults_enabled,
-            storage.auth_method.as_deref()
+            storage.auth_method.map(|value| value.as_i32())
         )
         .execute(self.pool)
         .await
