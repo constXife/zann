@@ -4,8 +4,8 @@ use serde_json::json;
 use tower::ServiceExt;
 
 use tracing_subscriber::EnvFilter;
-use zann_crypto::crypto::SecretKey;
 use zann_core::{CachePolicy, VaultKind};
+use zann_crypto::crypto::SecretKey;
 mod support;
 
 use tokio::sync::Semaphore;

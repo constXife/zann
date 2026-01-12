@@ -1,11 +1,11 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use zann_crypto::crypto::SecretKey;
-use zann_crypto::vault_crypto as core_crypto;
 use zann_core::{
     AppService, AppStatus, ServiceError, ServiceResult, StoragesService, VaultsService,
 };
+use zann_crypto::crypto::SecretKey;
+use zann_crypto::vault_crypto as core_crypto;
 
 use crate::local::MetadataRepo;
 

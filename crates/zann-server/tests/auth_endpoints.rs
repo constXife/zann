@@ -8,8 +8,8 @@ use uuid::Uuid;
 mod support;
 
 use tokio::sync::Semaphore;
-use zann_crypto::crypto::SecretKey;
 use zann_core::ServiceAccount;
+use zann_crypto::crypto::SecretKey;
 use zann_db::repo::{DeviceRepo, ServiceAccountRepo, SessionRepo, UserRepo};
 use zann_db::PgPool;
 use zann_server::app::{build_router, AppState};
