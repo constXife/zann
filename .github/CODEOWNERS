@@ -1,0 +1,7 @@
+# Audit-surface owners
+/crates/zann-crypto/ @constXife
+/crates/zann-core/src/auth.rs @constXife
+/crates/zann-server/src/domains/auth/core/ @constXife
+/crates/zann-server/src/domains/access_control/ @constXife
+/crates/zann-server/src/infra/audit.rs @constXife
+/crates/zann-keystore/ @constXife
