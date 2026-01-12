@@ -11,6 +11,9 @@ Thanks for contributing! This guide explains how to work in this repo and what w
 
 We use **squash merge**, so the PR title becomes the commit message in `main`.
 
+Optional: enable local git hooks (pre-commit runs `cargo fmt`):
+`scripts/setup-hooks.sh`
+
 ## Repository layout
 
 - `crates/` — Rust crates (`zann-cli`, `zann-server`, `zann-core`, `zann-db`, `zann-keystore`)
