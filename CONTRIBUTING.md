@@ -58,6 +58,7 @@ Use the same Conventional Commits format for issue titles:
 `<type>(<scope>): <subject>`.
 
 Types map to `t:` labels (feature, bug, refactor, discussion, security, chore, docs).
+Priorities map to `p:` labels (urgent, critical, high, medium, low).
 Scopes map to `s:` labels (desktop, cli, server, core, db, keystore, ci, repo).
 
 Issue templates add the type label automatically and the issue-labeler workflow
