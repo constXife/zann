@@ -148,7 +148,7 @@ impl<'a> LocalServices<'a> {
                 .get_active_by_vault_path(storage_id, vault_id, &candidate_path)
                 .await
                 .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?;
-            if existing.map_or(true, |item| item.id == item_id) {
+            if existing.is_none_or(|item| item.id == item_id) {
                 return Ok(candidate_path);
             }
         }
