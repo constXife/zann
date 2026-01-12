@@ -59,7 +59,10 @@ async fn main() {
     let sentry_enabled = sentry_guard.is_some();
     let otel_guard = bootstrap::init_tracing(sentry_enabled, &settings);
     let metrics_config = settings.config.metrics.clone();
-    if matches!(run_mode, cli::RunMode::Server) {
+    if matches!(
+        run_mode,
+        cli::RunMode::Server | cli::RunMode::Init(_) | cli::RunMode::Token(_)
+    ) {
         if let Err(missing) = settings::preflight(&settings) {
             tracing::error!(
                 event = "preflight_failed",
@@ -87,8 +90,15 @@ async fn main() {
         tracing::info!("migrations applied");
         return;
     }
-    if let cli::RunMode::Tokens(token_args) = run_mode {
+    if let cli::RunMode::Token(token_args) = run_mode {
         if let Err(err) = cli::tokens::run(&settings, &db, &token_args).await {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let cli::RunMode::Init(init_args) = run_mode {
+        if let Err(err) = cli::init::run(&settings, &db, &init_args).await {
             eprintln!("{err}");
             std::process::exit(1);
         }
