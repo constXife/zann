@@ -375,7 +375,7 @@ pub async fn register(
     .bind(user.kdf_memory_kb)
     .bind(user.kdf_parallelism)
     .bind(user.recovery_key_hash.as_deref())
-        .bind(user.status.as_i32())
+    .bind(user.status.as_i32())
     .bind(user.deleted_at)
     .bind(user.deleted_by_user_id)
     .bind(user.deleted_by_device_id)

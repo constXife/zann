@@ -1,7 +1,10 @@
 use super::*;
 #[test]
 fn enum_roundtrips() {
-    assert_eq!(VaultKind::try_from(1).expect("valid vault kind"), VaultKind::Personal);
+    assert_eq!(
+        VaultKind::try_from(1).expect("valid vault kind"),
+        VaultKind::Personal
+    );
     assert_eq!(VaultKind::Personal.as_i32(), 1);
 
     assert_eq!(
@@ -27,7 +30,10 @@ fn enum_roundtrips() {
     );
     assert_eq!(CachePolicy::MetadataOnly.as_i32(), 2);
 
-    assert_eq!(ChangeOp::try_from(2).expect("valid change op"), ChangeOp::Update);
+    assert_eq!(
+        ChangeOp::try_from(2).expect("valid change op"),
+        ChangeOp::Update
+    );
     assert_eq!(ChangeOp::Update.as_i32(), 2);
 
     assert_eq!(

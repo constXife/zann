@@ -4,10 +4,12 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
-use zann_core::{ChangeType, EncryptedPayload, FieldKind, FieldValue, ItemsService, StorageKind, VaultKind};
+use zann_core::{
+    ChangeType, EncryptedPayload, FieldKind, FieldValue, ItemsService, StorageKind, VaultKind,
+};
 use zann_db::local::{
-    LocalItemHistoryRepo, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVault, LocalVaultRepo,
-    PendingChangeRepo,
+    LocalItemHistoryRepo, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVault,
+    LocalVaultRepo, PendingChangeRepo,
 };
 use zann_db::services::{
     LocalServices, MAX_ITEM_NAME_LEN, MAX_ITEM_PATH_SEGMENTS, MAX_ITEM_PAYLOAD_BYTES,
@@ -104,7 +106,9 @@ async fn local_history_records_payload_updates() {
         .expect("history list");
     assert_eq!(history.len(), 2, "expected create + update history entries");
     assert!(
-        history.iter().any(|entry| entry.change_type == ChangeType::Create),
+        history
+            .iter()
+            .any(|entry| entry.change_type == ChangeType::Create),
         "missing create history entry"
     );
     let update_entry = history
@@ -224,11 +228,15 @@ async fn local_history_restore_replaces_payload() {
         "restore snapshot records prior version"
     );
     assert!(
-        history.iter().any(|entry| entry.change_type == ChangeType::Update),
+        history
+            .iter()
+            .any(|entry| entry.change_type == ChangeType::Update),
         "original update still present"
     );
     assert!(
-        history.iter().any(|entry| entry.change_type == ChangeType::Create),
+        history
+            .iter()
+            .any(|entry| entry.change_type == ChangeType::Create),
         "original create still present"
     );
 }
@@ -436,7 +444,10 @@ async fn local_pending_changes_coalesce_create_and_update() {
         ChangeType::Create,
         "create should stay create"
     );
-    assert!(pending[0].base_seq.is_none(), "create should keep base_seq empty");
+    assert!(
+        pending[0].base_seq.is_none(),
+        "create should keep base_seq empty"
+    );
 }
 
 #[tokio::test]

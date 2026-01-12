@@ -264,7 +264,7 @@ impl<'a> LocalServices<'a> {
         ) {
             Ok(value) => value,
             Err(err) => {
-        if vault.kind == VaultKind::Shared && !vault.vault_key_enc.is_empty() {
+                if vault.kind == VaultKind::Shared && !vault.vault_key_enc.is_empty() {
                     Self::item_debug(format_args!(
                         "[item_debug] shared_decrypt_fallback item_id={} vault_id={} checksum={}",
                         item_id, vault_id, checksum

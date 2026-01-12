@@ -15,7 +15,9 @@ use zann_core::api::auth::{
     PreloginResponse, RefreshRequest, RegisterRequest,
 };
 use zann_core::api::vaults::VaultListResponse;
-use zann_core::{AuthSource, ChangeType, CachePolicy, Identity, UserStatus, VaultEncryptionType, VaultKind};
+use zann_core::{
+    AuthSource, CachePolicy, ChangeType, Identity, UserStatus, VaultEncryptionType, VaultKind,
+};
 
 use crate::app::AppState;
 use crate::domains::access_control::http_admin::ReloadResponse;

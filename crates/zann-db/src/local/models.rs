@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use sqlx_core::row::Row;
 use sqlx_sqlite::SqliteRow;
 use uuid::Uuid;
-use zann_core::{AuthMethod, StorageKind, SyncStatus, VaultKind, ChangeType};
+use zann_core::{AuthMethod, ChangeType, StorageKind, SyncStatus, VaultKind};
 
 use super::KeyWrapType;
 

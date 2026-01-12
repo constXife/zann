@@ -187,8 +187,8 @@ pub(crate) async fn sync_pull(
     let history_repo = ItemHistoryRepo::new(&state.db);
     for row in rows {
         let seq = row.seq;
-        let op = ChangeOp::try_from(row.op)
-            .map_err(|_| SyncError::BadRequest("invalid_operation"))?;
+        let op =
+            ChangeOp::try_from(row.op).map_err(|_| SyncError::BadRequest("invalid_operation"))?;
         let payload_enc = if op == ChangeOp::Delete {
             None
         } else {
@@ -511,8 +511,8 @@ pub(crate) async fn sync_shared_pull(
     let history_repo = ItemHistoryRepo::new(&state.db);
     for row in rows {
         let seq = row.seq;
-        let op = ChangeOp::try_from(row.op)
-            .map_err(|_| SyncError::BadRequest("invalid_operation"))?;
+        let op =
+            ChangeOp::try_from(row.op).map_err(|_| SyncError::BadRequest("invalid_operation"))?;
         let payload = if op == ChangeOp::Delete {
             None
         } else {

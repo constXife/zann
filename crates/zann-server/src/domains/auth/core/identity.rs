@@ -231,8 +231,7 @@ pub async fn identity_from_session_token(
                 "Failed to load session by access token"
             );
             "db_error"
-        })?
-    {
+        })? {
         if session.access_expires_at < Utc::now() {
             return Err("token_expired");
         }
@@ -334,18 +333,14 @@ async fn identity_from_user(
             "db_error"
         })?
     {
-        if let Some(group) = group_repo
-            .get_by_id(member.group_id)
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    event = "auth_group_lookup_failed",
-                    error = %err,
-                    "Failed to load group"
-                );
-                "db_error"
-            })?
-        {
+        if let Some(group) = group_repo.get_by_id(member.group_id).await.map_err(|err| {
+            tracing::error!(
+                event = "auth_group_lookup_failed",
+                error = %err,
+                "Failed to load group"
+            );
+            "db_error"
+        })? {
             groups.push(group.slug);
         }
     }

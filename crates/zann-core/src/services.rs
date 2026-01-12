@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{EncryptedPayload, VaultKind, SyncStatus};
+use crate::{EncryptedPayload, SyncStatus, VaultKind};
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
@@ -79,10 +79,7 @@ impl TryFrom<i32> for AuthMethod {
             1 => Ok(Self::Password),
             2 => Ok(Self::Oidc),
             3 => Ok(Self::ServiceAccount),
-            _ => Err(crate::EnumParseError::new(
-                "auth_method",
-                value.to_string(),
-            )),
+            _ => Err(crate::EnumParseError::new("auth_method", value.to_string())),
         }
     }
 }

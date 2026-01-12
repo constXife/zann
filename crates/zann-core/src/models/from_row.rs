@@ -11,9 +11,7 @@ use sqlx_sqlite::SqliteRow;
 use super::*;
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
-fn parse_enum<T: TryFrom<i32, Error = EnumParseError>>(
-    value: i16,
-) -> Result<T, sqlx_core::Error> {
+fn parse_enum<T: TryFrom<i32, Error = EnumParseError>>(value: i16) -> Result<T, sqlx_core::Error> {
     T::try_from(i32::from(value)).map_err(|err| sqlx_core::Error::Decode(Box::new(err)))
 }
 

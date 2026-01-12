@@ -4,8 +4,8 @@ mod support;
 use serde_json::json;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
-use zann_core::SyncStatus;
 use zann_core::ItemsService;
+use zann_core::SyncStatus;
 
 use client_workflow_support::{
     decrypt_payload, encrypt_vault_key, key_fingerprint, login_payload, LocalClient, TestApp,

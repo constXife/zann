@@ -54,11 +54,11 @@ impl<'a> SyncCursorRepo<'a> {
         .map(|_| ())
     }
 
-    pub async fn delete_by_storage(
-        &self,
-        storage_id: uuid::Uuid,
-    ) -> Result<u64, sqlx_core::Error> {
-        query!(r#"DELETE FROM sync_cursors WHERE storage_id = ?1"#, storage_id)
+    pub async fn delete_by_storage(&self, storage_id: uuid::Uuid) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"DELETE FROM sync_cursors WHERE storage_id = ?1"#,
+            storage_id
+        )
         .execute(self.pool)
         .await
         .map(|result| result.rows_affected())
