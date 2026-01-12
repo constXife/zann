@@ -57,7 +57,7 @@ Scopes: pick the primary area (`desktop`, `cli`, `server`, `core`, `db`, `keysto
 Use the same Conventional Commits format for issue titles:
 `<type>(<scope>): <subject>`.
 
-Types map to `t:` labels (feature, bug, refactor, discussion, chore, docs).
+Types map to `t:` labels (feature, bug, refactor, discussion, security, chore, docs).
 Scopes map to `s:` labels (desktop, cli, server, core, db, keystore, ci, repo).
 
 Issue templates add the type label automatically and the issue-labeler workflow
@@ -80,6 +80,53 @@ Allowed.
 - Explain dependency changes.
 - CI enforces Rust license policy via `deny.toml`.
 - Do not commit secrets (use `config.example.yaml`).
+
+## Audit-surface plan (draft)
+
+Goal: isolate security-critical code (audit-surface) so we can trust the core
+without constant re-audits, prevent architectural drift, and track "blessed"
+versions at release time.
+
+Principles:
+- "Hard core, flexible shell" — isolate audit-surface from the rest.
+- High value / low cost — keep the surface minimal.
+- Low bureaucracy — automate, keep manual steps few.
+
+High-value components:
+- Dependency guard to keep the audit-surface isolated.
+- Auto-labeler to highlight security-impacting changes.
+- Strict clippy on audit-surface paths.
+- Property tests for crypto invariants.
+- Repository rulesets (no direct pushes to `main`).
+
+Overkill for this repo (for now):
+- SHA pinning for actions.
+- Hash manifests in CI (Git already gives integrity).
+- Formal break-glass process.
+- Required approvals / CODEOWNERS validation in solo mode.
+
+Audit-surface (current targets):
+- `crates/zann-core/src/crypto.rs`
+- `crates/zann-core/src/vault_crypto.rs`
+- `crates/zann-core/src/auth.rs`
+- `crates/zann-core/src/secrets.rs`
+- `crates/zann-server/src/domains/auth/core/**`
+- `crates/zann-server/src/domains/access_control/**`
+- `crates/zann-keystore/**`
+- `crates/zann-server/src/infra/audit.rs`
+
+Architectural option: extract `zann-crypto` crate
+- Rationale: tighter boundaries, smaller audit scope, minimal deps, reuse.
+- Proposed modules: `blob`, `keys`, `vault`, `password`, `token`, `payload`.
+- `zann-core` re-exports crypto types; `zann-server` uses `zann-crypto` directly.
+- Move `EncryptedPayload` into `zann-crypto` (pure serialized structure).
+
+Implementation phases (high level):
+1. Create `zann-crypto` and migrate crypto/password/token/payload code.
+2. Add dependency guard for `zann-crypto` isolation.
+3. Add `CODEOWNERS`, audit-surface labels, and auto-labeler.
+4. Add CI gate for audit-surface (strict clippy + property tests).
+5. Add audit status doc and "blessed" release notes.
 
 ## Reporting vulnerabilities
 
