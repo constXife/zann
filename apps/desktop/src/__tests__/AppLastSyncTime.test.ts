@@ -460,18 +460,12 @@ describe("App last sync time", () => {
       lastSyncTime: { value: string | null };
       runRemoteSync: () => Promise<boolean>;
     };
-    const runWithRefresh = async () => {
-      const result = await core.runRemoteSync();
-      const info = await mockGetStorageInfo();
-      core.lastSyncTime.value = info?.last_synced ?? null;
-      return result;
-    };
-
-    await runWithRefresh();
     await waitFor(() => {
       expect(core.lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
     });
-    await runWithRefresh();
-    expect(core.lastSyncTime.value).toBe("2024-02-01T00:00:00Z");
+    await core.runRemoteSync();
+    await waitFor(() => {
+      expect(core.lastSyncTime.value).toBe("2024-02-01T00:00:00Z");
+    });
   });
 });
