@@ -5,10 +5,10 @@ use sqlx_core::query::query;
 use sqlx_core::query_scalar::query_scalar;
 use sqlx_postgres::Postgres;
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
-use zann_core::vault_crypto;
 use zann_core::{CachePolicy, UserStatus, VaultEncryptionType, VaultKind, VaultMemberRole};
 use zann_core::{Group, GroupMember, User, Vault, VaultMember};
+use zann_crypto::crypto::SecretKey;
+use zann_crypto::vault_crypto;
 
 use crate::config::AuthMode;
 use crate::domains::auth::core::passwords::{

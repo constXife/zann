@@ -8,7 +8,7 @@ use tokio::sync::Semaphore;
 use tower::ServiceExt;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
+use zann_crypto::crypto::SecretKey;
 use zann_core::{CachePolicy, VaultKind, VaultMember, VaultMemberRole};
 use zann_server::app::{build_router, AppState};
 use zann_server::config::{AuthMode, InternalRegistration, ServerConfig};

@@ -1,6 +1,6 @@
 use proptest::collection::vec;
 use proptest::prelude::*;
-use zann_core::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
+use zann_crypto::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
 
 proptest! {
     #[test]

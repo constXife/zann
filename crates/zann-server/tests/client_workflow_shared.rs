@@ -328,7 +328,7 @@ async fn shared_cache_key_mismatch_fails_decrypt() {
         .put_item(vault_id, "login", login_payload("pw-a"))
         .await;
 
-    let other_master = zann_core::crypto::SecretKey::generate();
+    let other_master = zann_crypto::crypto::SecretKey::generate();
     let services = zann_db::services::LocalServices::new(&client.pool, &other_master);
     let err = services
         .get_item(client.storage_id, item_id)

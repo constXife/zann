@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
+use zann_crypto::crypto::SecretKey;
 use zann_core::{
     ChangeType, EncryptedPayload, FieldKind, FieldValue, ItemsService, StorageKind, VaultKind,
 };

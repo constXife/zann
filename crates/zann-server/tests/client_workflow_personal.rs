@@ -3,7 +3,7 @@ mod support;
 
 use serde_json::json;
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
+use zann_crypto::crypto::SecretKey;
 use zann_core::ItemsService;
 use zann_core::SyncStatus;
 

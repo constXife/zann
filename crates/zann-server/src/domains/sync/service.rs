@@ -1,7 +1,7 @@
 use sqlx_core::query_as::query_as;
 use sqlx_postgres::Postgres;
-use zann_core::vault_crypto as core_crypto;
 use zann_core::{ChangeOp, ChangeType, Identity, VaultEncryptionType, VaultKind};
+use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{ChangeRepo, ItemHistoryRepo, ItemRepo, VaultRepo};
 
 use crate::app::AppState;

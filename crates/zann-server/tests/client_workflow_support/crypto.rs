@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
-use zann_core::vault_crypto as core_crypto;
+use zann_crypto::crypto::SecretKey;
+use zann_crypto::vault_crypto as core_crypto;
 use zann_core::EncryptedPayload;
 
 pub fn key_fingerprint(key: &SecretKey) -> String {

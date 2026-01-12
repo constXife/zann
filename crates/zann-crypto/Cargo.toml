@@ -1,0 +1,23 @@
+[package]
+name = "zann-crypto"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+argon2 = "0.5"
+base64 = "0.22"
+blake3 = "1"
+chacha20poly1305 = "0.10"
+hex = "0.4"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2.6"
+tracing = "0.1"
+uuid = { version = "1", features = ["v7"] }
+zeroize = { version = "1.7", features = ["derive"] }
+
+[dev-dependencies]
+proptest = "1.5.0"

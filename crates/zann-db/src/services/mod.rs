@@ -1,8 +1,8 @@
 use chrono::{Duration as ChronoDuration, Utc};
 use uuid::Uuid;
 
-use zann_core::crypto::SecretKey;
-use zann_core::vault_crypto as core_crypto;
+use zann_crypto::crypto::SecretKey;
+use zann_crypto::vault_crypto as core_crypto;
 use zann_core::{
     ChangeType, EncryptedPayload, ServiceError, ServiceResult, StorageKind, SyncStatus, VaultKind,
 };

@@ -5,8 +5,8 @@ use axum::{
     Extension, Json,
 };
 use uuid::Uuid;
-use zann_core::vault_crypto as core_crypto;
 use zann_core::Identity;
+use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{ItemHistoryRepo, ItemRepo, VaultRepo};
 
 use crate::app::AppState;

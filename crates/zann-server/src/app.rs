@@ -11,8 +11,8 @@ use crate::infra::usage::UsageTracker;
 use crate::settings::DbTxIsolation;
 use ed25519_dalek::SigningKey;
 use std::sync::Arc;
-use zann_core::crypto::SecretKey;
 use zann_core::SecurityProfileRegistry;
+use zann_crypto::crypto::SecretKey;
 use zann_db::PgPool;
 
 #[derive(Clone)]

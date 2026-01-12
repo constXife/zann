@@ -5,7 +5,7 @@ use sqlx_core::row::Row;
 use tower::ServiceExt;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
+use zann_crypto::crypto::SecretKey;
 use zann_core::{CachePolicy, VaultKind};
 
 mod support;

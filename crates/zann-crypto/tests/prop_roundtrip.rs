@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use zann_core::{EncryptedPayload, FieldKind, FieldValue};
+use zann_crypto::{EncryptedPayload, FieldKind, FieldValue};
 
 #[test]
 fn payload_bytes_roundtrip() {

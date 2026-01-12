@@ -9,7 +9,7 @@ use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use tracing::warn;
 use uuid::Uuid;
-use zann_core::crypto::SecretKey;
+use zann_crypto::crypto::SecretKey;
 
 use crate::config::{AuthMode, InternalRegistration, MasterKeyMode, MetricsProfile, ServerConfig};
 use crate::domains::access_control::policies::PolicySet;
