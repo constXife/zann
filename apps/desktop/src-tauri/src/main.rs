@@ -26,8 +26,8 @@ use commands::items_history::{
     items_history_get, items_history_list, items_history_restore,
 };
 use commands::session::{
-    app_status, bootstrap, get_settings, initialize_master_password, keystore_disable,
-    keystore_enable, keystore_status, session_autolock_config, session_lock,
+    app_status, bootstrap, get_settings, initialize_local_identity, initialize_master_password,
+    keystore_disable, keystore_enable, keystore_status, session_autolock_config, session_lock,
     session_rebind_biometrics, session_status, session_unlock_with_biometrics,
     session_unlock_with_password, status, system_locale, unlock, update_settings,
 };
@@ -58,6 +58,7 @@ fn main() {
             session_status,
             session_unlock_with_password,
             initialize_master_password,
+            initialize_local_identity,
             session_unlock_with_biometrics,
             session_rebind_biometrics,
             session_lock,
@@ -121,24 +122,7 @@ fn main() {
                 }
             };
 
-            let settings_item = MenuItem::with_id(app, "settings", "Settings", true, Some("CmdOrCtrl+,"))?;
-            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, Some("CmdOrCtrl+Q"))?;
-            let app_menu = SubmenuBuilder::new(app, "App")
-                .item(&settings_item)
-                .separator()
-                .item(&quit_item)
-                .build()?;
-            let menu = MenuBuilder::new(app)
-                .item(&app_menu)
-                .build()?;
-            app.set_menu(menu)?;
-            app_handle.on_menu_event(move |app, event| match event.id.as_ref() {
-                "settings" => open_settings(app),
-                "quit" => {
-                    app.exit(0);
-                }
-                _ => {}
-            });
+            app.set_menu(MenuBuilder::new(app).build()?)?;
 
             // Create tray menu
             let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;

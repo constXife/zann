@@ -2,18 +2,51 @@ use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
 use tauri::{Emitter, State};
 use tauri_plugin_biometry::{AuthOptions, BiometryExt};
+use rand::rngs::OsRng;
+use rand::RngCore;
 
 use crate::constants::DWK_AAD;
-use crate::infra::config::{load_config, load_settings, save_settings};
+use crate::infra::config::{load_config, load_settings, save_config, save_settings};
 use crate::state::AppState;
 use crate::types::{
     ApiResponse, AppStatusResponse, AutolockConfig, BootstrapResponse, DesktopSettings,
     KeystoreStatusResponse, StatusResponse,
 };
 use zann_core::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
-use zann_core::AppService;
+use zann_core::{AppService, StorageKind, VaultKind};
 use zann_db::local::{LocalItemRepo, LocalStorageRepo, LocalVaultRepo, MetadataRepo};
 use zann_db::services::LocalServices;
+
+fn default_local_kdf_params() -> zann_core::api::auth::KdfParams {
+    zann_core::api::auth::KdfParams {
+        algorithm: "argon2id".to_string(),
+        iterations: 3,
+        memory_kb: 65536,
+        parallelism: 4,
+    }
+}
+
+fn generate_kdf_salt() -> String {
+    let mut salt = [0u8; 32];
+    OsRng.fill_bytes(&mut salt);
+    base64::engine::general_purpose::STANDARD.encode(salt)
+}
+
+pub async fn initialize_local_identity(state: State<'_, AppState>) -> Result<ApiResponse<()>, String> {
+    let mut config = load_config(&state.root).map_err(|err| err.to_string())?;
+    if config.identity.is_some() {
+        return Ok(ApiResponse::ok(()));
+    }
+    config.identity = Some(crate::state::IdentityConfig {
+        kdf_salt: generate_kdf_salt(),
+        kdf_params: default_local_kdf_params(),
+        salt_fingerprint: None,
+        first_seen_at: None,
+        email: None,
+    });
+    save_config(&state.root, &config).map_err(|err| err.to_string())?;
+    Ok(ApiResponse::ok(()))
+}
 
 pub async fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapResponse, String> {
     let settings = load_settings(&state.root).map_err(|err| err.to_string())?;
@@ -408,14 +441,14 @@ async fn handle_master_key_change(
             let item_repo = LocalItemRepo::new(&state.pool);
             let storages = storage_repo.list().await.map_err(|err| err.to_string())?;
             for storage in storages {
-                if storage.kind != "remote" {
+                if storage.kind != StorageKind::Remote {
                     continue;
                 }
                 let vaults = vault_repo
                     .list_by_storage(storage.id)
                     .await
                     .map_err(|err| err.to_string())?;
-                for vault in vaults.iter().filter(|vault| vault.kind == "shared") {
+                for vault in vaults.iter().filter(|vault| vault.kind == VaultKind::Shared) {
                     let _ = item_repo
                         .delete_by_storage_vault(storage.id, vault.id)
                         .await;

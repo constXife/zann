@@ -2,6 +2,7 @@ import { ref, computed, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, StorageSummary, StorageInfo } from "../types";
+import { StorageKind } from "../constants/enums";
 
 type Translator = (key: string, params?: Record<string, string | number>) => string;
 
@@ -52,12 +53,12 @@ export const useStorages = (options: UseStoragesOptions) => {
 
   // Remote-first: серверы показываются первыми
   const remoteStorages = computed(() =>
-    storages.value.filter((s) => s.kind === "remote")
+    storages.value.filter((s) => s.kind === StorageKind.Remote),
   );
 
   // Local storage (всегда существует в БД, но может быть скрыт в UI)
   const localStorage = computed(() =>
-    storages.value.find((s) => s.kind === "local_only")
+    storages.value.find((s) => s.kind === StorageKind.LocalOnly),
   );
 
   // Флаг для проверки наличия local vaults (устанавливается извне через checkLocalVaults)
@@ -157,10 +158,12 @@ export const useStorages = (options: UseStoragesOptions) => {
       }
       storages.value = response.data;
       const existing = storages.value.find((entry) => entry.id === options.selectedStorageId.value);
-      const remoteList = storages.value.filter((entry) => entry.kind === "remote");
+      const remoteList = storages.value.filter(
+        (entry) => entry.kind === StorageKind.Remote,
+      );
 
       // Remote-first: если выбран local, но есть remote — переключиться на remote
-      if (existing?.kind === "local_only" && remoteList.length > 0) {
+      if (existing?.kind === StorageKind.LocalOnly && remoteList.length > 0) {
         options.selectedStorageId.value = remoteList[0].id;
       } else if (!existing) {
         // Fallback: первый remote, или первый storage, или local
@@ -188,8 +191,10 @@ export const useStorages = (options: UseStoragesOptions) => {
     }
 
     const targetStorages = storageId
-      ? storages.value.filter((s) => s.id === storageId && s.kind === "remote")
-      : storages.value.filter((s) => s.kind === "remote");
+      ? storages.value.filter(
+          (s) => s.id === storageId && s.kind === StorageKind.Remote,
+        )
+      : storages.value.filter((s) => s.kind === StorageKind.Remote);
 
     if (targetStorages.length === 0) {
       return false;

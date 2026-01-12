@@ -2,6 +2,7 @@ import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
 import type { EncryptedPayload, FieldValue, VaultSummary } from "../types";
 import type { FieldInput, Translator } from "../types/createForm";
 import { jsonPlaceholders, typeMeta } from "./createFormDefaults";
+import { sanitizeToken } from "../utils/inputSanitizer";
 
 type UseCreateFormOptions = {
   variant?: "modal" | "panel";
@@ -471,7 +472,14 @@ export const useCreateForm = (options: UseCreateFormOptions) => {
       return;
     }
     event.preventDefault();
-    const parts = text.split("/").filter(Boolean);
+    applyPathInsert(text);
+  };
+
+  const applyPathInsert = (text: string) => {
+    const parts = text
+      .split("/")
+      .map((part) => sanitizeToken(part))
+      .filter(Boolean);
     if (parts.length === 0) {
       return;
     }
@@ -670,6 +678,7 @@ export const useCreateForm = (options: UseCreateFormOptions) => {
     handlePaste,
     handlePathKeydown,
     handlePathPaste,
+    applyPathInsert,
     isPanel,
     jsonPlaceholderText,
     closeRawEditor,

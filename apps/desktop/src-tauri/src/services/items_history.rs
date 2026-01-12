@@ -69,7 +69,7 @@ async fn list_item_history(
         .map(|entry| ItemHistorySummary {
             version: entry.version,
             checksum: entry.checksum,
-            change_type: entry.change_type,
+            change_type: entry.change_type.as_i32(),
             changed_by_name: entry.changed_by_name,
             changed_by_email: entry.changed_by_email,
             created_at: entry.created_at.to_rfc3339(),

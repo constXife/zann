@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { UiSettings } from "../../useUiSettings";
 import type { ApiResponse, AppStatus, StorageSummary } from "../../../types";
+import { AuthMethod, StorageKind } from "../../../constants/enums";
 
 type ConfirmOptions = {
   title: string;
@@ -26,6 +27,7 @@ type AppAuthFlowOptions = {
   appStatus: Ref<AppStatus | null>;
   unlocked: ComputedRef<boolean>;
   selectedStorageId: Ref<string>;
+  localStorageId: string;
   showSessionExpiredBanner: ComputedRef<boolean>;
   sessionExpiredStorage: ComputedRef<StorageSummary | undefined>;
   syncError: Ref<string>;
@@ -47,6 +49,7 @@ export function useAppAuthFlow({
   appStatus,
   unlocked,
   selectedStorageId,
+  localStorageId,
   showSessionExpiredBanner,
   sessionExpiredStorage,
   syncError,
@@ -77,7 +80,7 @@ export function useAppAuthFlow({
   const connectNewFp = ref("");
   const connectBusy = ref(false);
   const authMethodOpen = ref(false);
-  const availableMethods = ref<string[]>([]);
+  const availableMethods = ref<AuthMethod[]>([]);
   const passwordLoginOpen = ref(false);
   const passwordLoginBusy = ref(false);
   const passwordLoginError = ref("");
@@ -138,6 +141,15 @@ export function useAppAuthFlow({
     }
     setupBusy.value = true;
     try {
+      if (setupFlow.value === "local") {
+        const identityResponse = await invoke<ApiResponse<null>>(
+          "initialize_local_identity",
+        );
+        if (!identityResponse.ok) {
+          const key = identityResponse.error?.kind ?? "generic";
+          throw new Error(t(`errors.${key}`));
+        }
+      }
       const response = await invoke<ApiResponse<null>>(
         "initialize_master_password",
         { password: setupPassword.value },
@@ -151,11 +163,16 @@ export function useAppAuthFlow({
       await refreshStatus();
       await refreshAppStatus();
       await loadStorages();
+      if (setupFlow.value === "local") {
+        selectedStorageId.value = localStorageId;
+      }
       syncError.value = "";
-      const syncOk = await runRemoteSync();
-      if (!syncOk && syncError.value) {
-        setupError.value = syncError.value;
-        return;
+      if (setupFlow.value === "remote") {
+        const syncOk = await runRemoteSync();
+        if (!syncOk && syncError.value) {
+          setupError.value = syncError.value;
+          return;
+        }
       }
       uiSettings.value.showLocalStorage = true;
       if (appStatus.value?.initialized) {
@@ -201,7 +218,7 @@ export function useAppAuthFlow({
     connectBusy.value = true;
 
     try {
-      const response = await invoke<ApiResponse<{ auth_methods: string[] }>>(
+      const response = await invoke<ApiResponse<{ auth_methods: AuthMethod[] }>>(
         "get_server_info",
         {
           serverUrl: normalized,
@@ -216,7 +233,7 @@ export function useAppAuthFlow({
 
       const methods = response.data.auth_methods;
       const interactiveMethods = methods.filter(
-        (method) => method === "password" || method === "oidc",
+        (method) => method === AuthMethod.Password || method === AuthMethod.Oidc,
       );
       availableMethods.value = interactiveMethods;
       connectBusy.value = false;
@@ -227,12 +244,12 @@ export function useAppAuthFlow({
       }
 
       if (interactiveMethods.length === 1) {
-        if (interactiveMethods[0] === "oidc") {
+        if (interactiveMethods[0] === AuthMethod.Oidc) {
           await beginOidcConnect();
           if (connectVerification.value) {
             await openExternal(connectVerification.value);
           }
-        } else if (interactiveMethods[0] === "password") {
+        } else if (interactiveMethods[0] === AuthMethod.Password) {
           passwordLoginError.value = "";
           passwordLoginOpen.value = true;
         }
@@ -356,7 +373,7 @@ export function useAppAuthFlow({
     const storage = sessionExpiredStorage.value;
     const hasActiveSession =
       payload.mode === "register" &&
-      storage?.kind === "remote" &&
+      storage?.kind === StorageKind.Remote &&
       !!storage.account_subject &&
       !showSessionExpiredBanner.value;
 

@@ -50,6 +50,13 @@ pub async fn initialize_master_password(
 }
 
 #[tauri::command]
+pub async fn initialize_local_identity(
+    state: State<'_, AppState>,
+) -> Result<ApiResponse<()>, String> {
+    session_service::initialize_local_identity(state).await
+}
+
+#[tauri::command]
 pub async fn session_lock(state: State<'_, AppState>) -> Result<ApiResponse<()>, String> {
     session_service::session_lock(state).await
 }

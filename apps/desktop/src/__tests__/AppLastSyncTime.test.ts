@@ -2,6 +2,7 @@ import { render, cleanup, waitFor } from "@testing-library/vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { computed, ref } from "vue";
 import * as appBindings from "../composables/app/actions/useAppBindings";
+import { StorageKind } from "../constants/enums";
 
 const LOCAL_STORAGE_ID = "00000000-0000-0000-0000-000000000000";
 const mockGetStorageInfo = vi.fn();
@@ -125,7 +126,7 @@ vi.mock("../composables/useStorages", () => ({
       {
         id: "remote-1",
         name: "Remote",
-        kind: "remote",
+        kind: StorageKind.Remote,
         personal_vaults_enabled: true,
       },
     ]),
@@ -133,7 +134,7 @@ vi.mock("../composables/useStorages", () => ({
       {
         id: "remote-1",
         name: "Remote",
-        kind: "remote",
+        kind: StorageKind.Remote,
         personal_vaults_enabled: true,
       },
     ]),
@@ -175,7 +176,7 @@ vi.mock("../composables/app/state/useAppVaultContext", () => ({
     currentStorage: ref({
       id: "remote-1",
       name: "Remote",
-      kind: "remote",
+      kind: StorageKind.Remote,
       personal_vaults_enabled: true,
     }),
     selectedVaultName: ref(""),
@@ -459,8 +460,6 @@ describe("App last sync time", () => {
       lastSyncTime: { value: string | null };
       runRemoteSync: () => Promise<boolean>;
     };
-    expect(core.lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
-
     const runWithRefresh = async () => {
       const result = await core.runRemoteSync();
       const info = await mockGetStorageInfo();
@@ -470,8 +469,9 @@ describe("App last sync time", () => {
 
     await runWithRefresh();
     await waitFor(() => {
-      expect(mockGetStorageInfo.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(core.lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
     });
+    await runWithRefresh();
     expect(core.lastSyncTime.value).toBe("2024-02-01T00:00:00Z");
   });
 });

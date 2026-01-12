@@ -14,9 +14,10 @@ use crate::types::{
 };
 use zann_core::crypto::SecretKey;
 use zann_core::vault_crypto as core_crypto;
-use zann_core::VaultsService;
+use zann_core::{CachePolicy, StorageKind, VaultKind, VaultsService};
 use zann_db::local::{
-    LocalItemRepo, LocalStorageRepo, LocalVault, LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
+    KeyWrapType, LocalItemRepo, LocalStorageRepo, LocalVault, LocalVaultRepo, PendingChangeRepo,
+    SyncCursorRepo,
 };
 use zann_db::services::LocalServices;
 
@@ -46,30 +47,30 @@ pub async fn vault_create(
     if name.is_empty() {
         return Ok(ApiResponse::err("name_required", "name is required"));
     }
-    let kind = req
-        .kind
-        .clone()
-        .unwrap_or_else(|| "personal".to_string())
-        .to_lowercase();
-    let cache_policy = req
-        .cache_policy
-        .clone()
-        .unwrap_or_else(|| "full".to_string())
-        .to_lowercase();
+    let kind = match req.kind {
+        Some(value) => VaultKind::try_from(value)
+            .map_err(|_| "invalid vault kind".to_string())?,
+        None => VaultKind::Personal,
+    };
+    let cache_policy = match req.cache_policy {
+        Some(value) => CachePolicy::try_from(value)
+            .map_err(|_| "invalid cache policy".to_string())?,
+        None => CachePolicy::Full,
+    };
     let storage_repo = LocalStorageRepo::new(&state.pool);
     let storage = storage_repo
         .get(storage_id)
         .await
         .map_err(|err| err.to_string())?
         .ok_or_else(|| "storage not found".to_string())?;
-    if storage.kind == "remote" {
+    if storage.kind == StorageKind::Remote {
         match create_remote_vault(
             &state,
             &storage,
             master_key.as_ref(),
             name,
-            &kind,
-            &cache_policy,
+            kind,
+            cache_policy,
         )
         .await
         {
@@ -80,13 +81,13 @@ pub async fn vault_create(
         let is_default = req.is_default.unwrap_or(false);
         let services = LocalServices::new(&state.pool, master_key.as_ref());
         match services
-            .create_vault(storage_id, name, &kind, is_default)
+            .create_vault(storage_id, name, kind, is_default)
             .await
         {
             Ok(vault) => Ok(ApiResponse::ok(VaultSummary {
                 id: vault.id.to_string(),
                 name: vault.name,
-                kind: vault.kind,
+                kind: vault.kind.as_i32(),
                 is_default: vault.is_default,
             })),
             Err(err) => Ok(ApiResponse::err(&err.kind, &err.message)),
@@ -106,7 +107,7 @@ pub async fn vault_reset_personal(
         .await
         .map_err(|err| err.to_string())?
         .ok_or_else(|| "storage not found".to_string())?;
-    if storage.kind != "remote" {
+    if storage.kind != StorageKind::Remote {
         return Ok(ApiResponse::err(
             "storage_not_remote",
             "storage is not remote",
@@ -150,7 +151,7 @@ pub async fn vault_reset_personal(
     let personal_vaults = vaults
         .vaults
         .into_iter()
-        .filter(|vault| vault.kind == "personal")
+        .filter(|vault| vault.kind == VaultKind::Personal.as_i32())
         .collect::<Vec<_>>();
 
     for vault in &personal_vaults {
@@ -175,7 +176,7 @@ pub async fn vault_reset_personal(
         .await
         .map_err(|err| err.to_string())?
         .into_iter()
-        .filter(|vault| vault.kind == "personal")
+        .filter(|vault| vault.kind == VaultKind::Personal)
         .map(|vault| vault.id)
         .collect::<Vec<_>>();
     let mut personal_ids = HashSet::new();
@@ -194,7 +195,7 @@ pub async fn vault_reset_personal(
             .delete_by_storage_vault(storage_uuid, vault_id)
             .await;
         let _ = cursor_repo
-            .delete_by_storage_vault(&storage_id, &vault_id.to_string())
+            .delete_by_storage_vault(storage_uuid, vault_id)
             .await;
         let _ = vault_repo
             .delete_by_storage_vault(storage_uuid, vault_id)
@@ -240,7 +241,7 @@ async fn list_vaults(
         .map(|vault| VaultSummary {
             id: vault.id.to_string(),
             name: vault.name,
-            kind: vault.kind,
+            kind: vault.kind.as_i32(),
             is_default: vault.is_default,
         })
         .collect())
@@ -273,17 +274,9 @@ async fn create_remote_vault(
     storage: &zann_db::local::LocalStorage,
     master_key: &SecretKey,
     name: &str,
-    kind: &str,
-    cache_policy: &str,
+    kind: VaultKind,
+    cache_policy: CachePolicy,
 ) -> Result<VaultSummary, String> {
-    let kind = match kind {
-        "personal" | "shared" => kind,
-        _ => "personal",
-    };
-    let cache_policy = match cache_policy {
-        "full" | "metadata_only" | "none" => cache_policy,
-        _ => "full",
-    };
     let mut config = load_config(&state.root).unwrap_or_default();
     let context_name = config
         .current_context
@@ -312,7 +305,7 @@ async fn create_remote_vault(
     }
     let client_vault_id = Uuid::now_v7();
     let vault_key = SecretKey::generate();
-    let vault_key_enc = if kind == "personal" {
+    let vault_key_enc = if kind == VaultKind::Personal {
         Some(
             core_crypto::encrypt_vault_key(master_key, client_vault_id, &vault_key)
                 .map_err(|err| err.to_string())?,
@@ -324,8 +317,8 @@ async fn create_remote_vault(
         id: Some(client_vault_id.to_string()),
         slug,
         name: name.to_string(),
-        kind: kind.to_string(),
-        cache_policy: cache_policy.to_string(),
+        kind: kind.as_i32(),
+        cache_policy: cache_policy.as_i32(),
         vault_key_enc,
         tags: None,
     };
@@ -350,33 +343,32 @@ async fn create_remote_vault(
         .await
         .map_err(|err| err.to_string())?;
     let vault_id = Uuid::parse_str(&created.id).map_err(|err| err.to_string())?;
-    if kind == "personal" && vault_id != client_vault_id {
+    if kind == VaultKind::Personal && vault_id != client_vault_id {
         return Err("server did not honor vault id".to_string());
     }
-    let (vault_key_enc_local, wrap_type) = if kind == "personal" {
+    let (vault_key_enc_local, wrap_type) = if kind == VaultKind::Personal {
         let vault_key_enc = core_crypto::encrypt_vault_key(master_key, vault_id, &vault_key)
             .map_err(|err| err.to_string())?;
-        (vault_key_enc, "remote_strict")
+        (vault_key_enc, KeyWrapType::RemoteStrict)
     } else {
-        (created.vault_key_enc.clone(), "remote_server")
+        (created.vault_key_enc.clone(), KeyWrapType::RemoteServer)
     };
     let vault_repo = LocalVaultRepo::new(&state.pool);
     let record = LocalVault {
         id: vault_id,
         storage_id: storage_uuid,
         name: created.name.clone(),
-        kind: created.kind.clone(),
+        kind,
         is_default: false,
         vault_key_enc: vault_key_enc_local,
-        key_wrap_type: wrap_type.to_string(),
+        key_wrap_type: wrap_type,
         last_synced_at: None,
-        server_seq: 0,
     };
     let _ = vault_repo.create(&record).await;
     Ok(VaultSummary {
         id: created.id,
         name: created.name,
-        kind: created.kind,
+        kind: kind.as_i32(),
         is_default: false,
     })
 }

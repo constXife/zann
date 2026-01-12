@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import type { KeystoreStatus, Settings, StorageSummary, StorageInfo } from "../../types";
+import { StorageKind } from "../../constants/enums";
 import SettingsTabGeneral from "./SettingsTabGeneral.vue";
 import SettingsTabSecurity from "./SettingsTabSecurity.vue";
 import SettingsTabAccounts from "./SettingsTabAccounts.vue";
@@ -53,8 +54,12 @@ const tabs: { id: Tab; icon: string; labelKey: string }[] = [
   { id: "about", icon: "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z", labelKey: "settings.tabs.about" },
 ];
 
-const localStorage = computed(() => props.storages.find((s) => s.kind === "local_only"));
-const remoteStorages = computed(() => props.storages.filter((s) => s.kind === "remote"));
+const localStorage = computed(() =>
+  props.storages.find((s) => s.kind === StorageKind.LocalOnly),
+);
+const remoteStorages = computed(() =>
+  props.storages.filter((s) => s.kind === StorageKind.Remote),
+);
 
 watch(() => props.open, (isOpen) => {
   if (isOpen) {

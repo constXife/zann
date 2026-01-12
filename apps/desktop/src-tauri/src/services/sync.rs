@@ -2,8 +2,8 @@ use chrono::Utc;
 use tauri::State;
 use uuid::Uuid;
 use zann_db::local::{
-    LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange, LocalStorage, LocalStorageRepo,
-    LocalSyncCursor, LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
+    KeyWrapType, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange, LocalStorage,
+    LocalStorageRepo, LocalSyncCursor, LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
 };
 
 use crate::crypto::{decrypt_vault_key_with_master, vault_key_aad};
@@ -17,6 +17,7 @@ use crate::types::{
     SyncPushResponse, SyncSharedPullResponse, SyncSharedPushRequest, VaultListResponse,
 };
 use zann_core::crypto::{encrypt_blob, SecretKey};
+use zann_core::{StorageKind, VaultEncryptionType, VaultKind};
 
 use crate::services::sync_helpers::{
     apply_pull_change, apply_push_applied, apply_shared_pull_change, build_remote_storage,
@@ -119,7 +120,7 @@ pub async fn remote_sync(
                 let cursor_repo = SyncCursorRepo::new(&state.pool);
                 let _ = item_repo.delete_by_storage(storage_uuid).await;
                 let _ = vault_repo.delete_by_storage(storage_uuid).await;
-                let _ = cursor_repo.delete_by_storage(&storage_uuid.to_string()).await;
+                let _ = cursor_repo.delete_by_storage(storage_uuid).await;
                 let _ = pending_repo.delete_by_storage(storage_uuid).await;
             }
         }
@@ -153,7 +154,11 @@ pub async fn remote_sync(
     ensure_local_vaults(&vault_repo, storage_uuid, &vault_details).await?;
 
     for vault in &vault_details {
-        if vault.encryption_type != "client" || vault.kind != "personal" {
+        let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
+            .map_err(|_| "invalid vault encryption type".to_string())?;
+        let kind = VaultKind::try_from(vault.kind)
+            .map_err(|_| "invalid vault kind".to_string())?;
+        if encryption_type != VaultEncryptionType::Client || kind != VaultKind::Personal {
             continue;
         }
         if !personal_allowed {
@@ -194,7 +199,7 @@ pub async fn remote_sync(
             }
         }
         let _ = vault_repo
-            .update_key(storage_uuid, vault_id, &blob.to_bytes(), "remote_strict")
+            .update_key(storage_uuid, vault_id, &blob.to_bytes(), KeyWrapType::RemoteStrict)
             .await;
     }
 
@@ -208,14 +213,19 @@ pub async fn remote_sync(
         let Ok(Some(local_vault)) = vault_repo.get_by_id(storage_uuid, vault_id).await else {
             continue;
         };
-        let should_be_shared = vault.encryption_type == "server" && vault.kind == "shared";
+        let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
+            .map_err(|_| "invalid vault encryption type".to_string())?;
+        let kind = VaultKind::try_from(vault.kind)
+            .map_err(|_| "invalid vault kind".to_string())?;
+        let should_be_shared =
+            encryption_type == VaultEncryptionType::Server && kind == VaultKind::Shared;
         let desired_wrap = if should_be_shared {
-            "remote_server"
+            KeyWrapType::RemoteServer
         } else {
-            "remote_strict"
+            KeyWrapType::RemoteStrict
         };
         if local_vault.key_wrap_type != desired_wrap {
-            let key_bytes = if desired_wrap == "remote_server" {
+            let key_bytes = if desired_wrap == KeyWrapType::RemoteServer {
                 Vec::new()
             } else {
                 local_vault.vault_key_enc.clone()
@@ -234,13 +244,13 @@ pub async fn remote_sync(
         } else {
             match decrypt_vault_key_with_master(master_key.as_ref(), &local_vault) {
                 Ok(key) => {
-                    if local_vault.key_wrap_type != "remote_strict" {
+                    if local_vault.key_wrap_type != KeyWrapType::RemoteStrict {
                         let _ = vault_repo
                             .update_key(
                                 storage_uuid,
                                 vault_id,
                                 &local_vault.vault_key_enc,
-                                "remote_strict",
+                                KeyWrapType::RemoteStrict,
                             )
                             .await;
                     }
@@ -260,12 +270,12 @@ pub async fn remote_sync(
         };
 
         let cursor_row = cursor_repo
-            .get(&storage_uuid.to_string(), &vault.id)
+            .get(storage_uuid, vault_id)
             .await
             .map_err(|err| err.to_string())?
             .unwrap_or(LocalSyncCursor {
-                storage_id: storage_uuid.to_string(),
-                vault_id: vault.id.clone(),
+                storage_id: storage_uuid,
+                vault_id,
                 cursor: None,
                 last_sync_at: None,
             });
@@ -296,7 +306,7 @@ pub async fn remote_sync(
                     .iter()
                     .map(|change| SyncPushChange {
                         item_id: change.item_id.to_string(),
-                        operation: change.operation.clone(),
+                        operation: change.operation.as_i32(),
                         payload_enc: change.payload_enc.clone(),
                         checksum: change.checksum.clone(),
                         path: change.path.clone(),
@@ -452,8 +462,8 @@ pub async fn remote_sync(
         }
 
         let cursor = LocalSyncCursor {
-            storage_id: storage_uuid.to_string(),
-            vault_id: vault.id.clone(),
+            storage_id: storage_uuid,
+            vault_id,
             cursor: cursor_value.clone(),
             last_sync_at: Some(Utc::now()),
         };
@@ -487,7 +497,7 @@ pub async fn remote_reset(
     else {
         return Ok(ApiResponse::err("storage_not_found", "storage not found"));
     };
-    if storage.kind != "remote" {
+    if storage.kind != StorageKind::Remote {
         return Ok(ApiResponse::err(
             "not_remote",
             "reset only supported for remote storages",
@@ -507,9 +517,7 @@ pub async fn remote_reset(
     let cursor_repo = SyncCursorRepo::new(&state.pool);
     let pending_repo = PendingChangeRepo::new(&state.pool);
     let _ = pending_repo.delete_by_storage(storage_uuid).await;
-    let _ = cursor_repo
-        .delete_by_storage(&storage_uuid.to_string())
-        .await;
+    let _ = cursor_repo.delete_by_storage(storage_uuid).await;
     let _ = item_repo.delete_by_storage(storage_uuid).await;
     let _ = vault_repo.delete_by_storage(storage_uuid).await;
 
@@ -541,7 +549,7 @@ pub async fn sync_reset_cursor(
     else {
         return Ok(ApiResponse::err("storage_not_found", "storage not found"));
     };
-    if storage.kind != "remote" {
+    if storage.kind != StorageKind::Remote {
         return Ok(ApiResponse::err(
             "not_remote",
             "reset only supported for remote storages",
@@ -549,9 +557,7 @@ pub async fn sync_reset_cursor(
     }
 
     let cursor_repo = SyncCursorRepo::new(&state.pool);
-    cursor_repo
-        .delete_by_storage(&storage_id)
-        .await
+    cursor_repo.delete_by_storage(storage_uuid).await
         .map_err(|err| err.to_string())?;
 
     Ok(ApiResponse::ok(()))

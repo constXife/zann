@@ -1,6 +1,7 @@
 import { computed } from "vue";
 import type { ComputedRef, Ref } from "vue";
 import type { AppStatus, ItemDetail, ItemSummary, Settings, Status } from "../../../types";
+import { SyncStatus } from "../../../constants/enums";
 
 type AppComputedOptions = {
   settings: Ref<Settings | null>;
@@ -38,7 +39,7 @@ export function useAppComputed({
   );
   const selectedItemDeleted = computed(() => !!selectedItemSummary.value?.deleted_at);
   const selectedItemConflict = computed(
-    () => selectedItemSummary.value?.sync_status === "conflict",
+    () => selectedItemSummary.value?.sync_status === SyncStatus.Conflict,
   );
   const hasPasswordField = computed(() => {
     if (

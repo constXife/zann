@@ -136,6 +136,7 @@ const strengthBarWidth = computed(() => {
               type="button"
               class="w-full rounded-lg border border-[var(--border-color)] px-4 py-3 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
               @click="startLocalSetup"
+              data-testid="wizard-start-local"
             >
               {{ t("wizard.useOnThisDevice") }}
             </button>
@@ -257,6 +258,7 @@ const strengthBarWidth = computed(() => {
         <div
           v-if="connectStatus === 'waiting'"
           class="rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-3 text-sm space-y-2"
+          data-testid="wizard-connect-waiting"
         >
           <div class="flex items-center gap-2 font-semibold text-[var(--text-primary)]">
             <svg class="h-4 w-4 animate-spin text-[var(--accent)]" viewBox="0 0 24 24" fill="none">
@@ -336,7 +338,11 @@ const strengthBarWidth = computed(() => {
             </button>
           </div>
         </div>
-        <div v-else-if="connectBusy" class="rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-3 text-sm">
+        <div
+          v-else-if="connectBusy"
+          class="rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-3 text-sm"
+          data-testid="wizard-connect-busy"
+        >
           <div class="flex items-center gap-2 text-[var(--text-primary)]">
             <svg class="h-4 w-4 animate-spin text-[var(--accent)]" viewBox="0 0 24 24" fill="none">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
@@ -348,7 +354,7 @@ const strengthBarWidth = computed(() => {
         <p v-if="connectStatus === 'success'" class="text-xs text-[var(--text-secondary)]">
           {{ t("wizard.connected") }}
         </p>
-        <p v-if="connectError" class="text-xs text-category-security">
+        <p v-if="connectError" class="text-xs text-category-security" data-testid="wizard-connect-error">
           {{ connectError }}
         </p>
       </div>

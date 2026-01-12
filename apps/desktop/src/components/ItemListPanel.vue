@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import type { ItemSummary } from "../types";
+import { SyncStatus } from "../constants/enums";
 
 type Category = { id: string; icon: string; label: string };
 
@@ -29,6 +30,7 @@ const props = defineProps<{
   selectedItemId: string | null;
   vaultContextLabel: string;
   isSharedVault: boolean;
+  isLocalStorage: boolean;
   onListScroll: () => void;
   selectItem: (itemId: string) => void;
   openCreateItem: () => void;
@@ -38,8 +40,12 @@ const props = defineProps<{
 const emit = defineEmits<{ (e: "expandSidebar"): void }>();
 
 const listContainer = ref<HTMLDivElement | null>(null);
+const isMac = ref(false);
 
 defineExpose({ listContainer });
+
+const platformHint = `${navigator.platform ?? ""} ${navigator.userAgent ?? ""}`.toLowerCase();
+isMac.value = platformHint.includes("mac");
 
 const selectedCategoryLabel = computed(() => {
   if (props.selectedCategory && props.selectedCategory !== "all") {
@@ -47,6 +53,12 @@ const selectedCategoryLabel = computed(() => {
   }
   return "All";
 });
+
+const collapsedPaddingClass = computed(() => {
+  if (!props.sidebarCollapsed) return "";
+  return isMac.value ? "pl-[130px]" : "pl-[48px]";
+});
+const collapsedToggleOffsetClass = computed(() => (isMac.value ? "left-[84px]" : "left-[12px]"));
 
 const formattedLastSync = computed(() => {
   if (!props.lastSyncTime) return null;
@@ -86,7 +98,8 @@ const handleSelectItem = (itemId: string) => {
     <button
       v-if="sidebarCollapsed"
       type="button"
-      class="absolute left-[84px] top-[8px] rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors z-[60]"
+      class="absolute top-[8px] rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors z-[60]"
+      :class="collapsedToggleOffsetClass"
       data-tauri-drag-region="false"
       @click="emit('expandSidebar')"
       :title="t('sidebar.expand')"
@@ -99,7 +112,8 @@ const handleSelectItem = (itemId: string) => {
     <div
       v-if="showOfflineBanner"
       class="flex items-center gap-3 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5"
-      :class="{ 'pl-[130px]': sidebarCollapsed }"
+      :class="collapsedPaddingClass"
+      data-testid="offline-banner"
     >
       <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/20">
         <svg class="h-4 w-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -127,7 +141,7 @@ const handleSelectItem = (itemId: string) => {
     <div
       v-else-if="showSessionExpiredBanner"
       class="flex items-center gap-3 bg-red-500/10 border-b border-red-500/20 px-4 py-2.5"
-      :class="{ 'pl-[130px]': sidebarCollapsed }"
+      :class="collapsedPaddingClass"
     >
       <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/20">
         <svg class="h-4 w-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -151,7 +165,7 @@ const handleSelectItem = (itemId: string) => {
     <div
       v-else-if="showPersonalLockedBanner"
       class="flex items-center gap-3 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5"
-      :class="{ 'pl-[130px]': sidebarCollapsed }"
+      :class="collapsedPaddingClass"
     >
       <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/20">
         <svg class="h-4 w-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -190,7 +204,8 @@ const handleSelectItem = (itemId: string) => {
     <div
       v-else-if="showSyncErrorBanner"
       class="flex items-center gap-3 bg-red-500/10 border-b border-red-500/20 px-4 py-2.5"
-      :class="{ 'pl-[130px]': sidebarCollapsed }"
+      :class="collapsedPaddingClass"
+      data-testid="sync-error-banner"
     >
       <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/20">
         <svg class="h-4 w-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -216,7 +231,7 @@ const handleSelectItem = (itemId: string) => {
 
     <div
       class="flex items-center justify-between px-4 pt-3 pb-2"
-      :class="{ 'pl-[130px]': sidebarCollapsed }"
+      :class="collapsedPaddingClass"
       data-tauri-drag-region
     >
       <div class="flex items-center gap-3">
@@ -305,15 +320,16 @@ const handleSelectItem = (itemId: string) => {
                     {{ item.name }}
                   </div>
                   <span
-                    v-if="item.sync_status === 'conflict'"
+                    v-if="!isLocalStorage && item.sync_status === SyncStatus.Conflict"
                     class="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400"
                   >
                     {{ t("status.conflict") }}
                   </span>
                   <span
-                    v-else-if="item.sync_status && item.sync_status !== 'synced'"
+                    v-else-if="!isLocalStorage && item.sync_status && item.sync_status !== SyncStatus.Synced"
                     class="shrink-0 inline-flex items-center justify-center rounded-full bg-amber-500/15 p-1 text-amber-700 dark:text-amber-400"
                     :title="t('status.pending')"
+                    data-testid="item-sync-pending"
                   >
                     <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 15a4 4 0 0 1 .5-8 5 5 0 0 1 9.6 1.5A3.5 3.5 0 0 1 17.5 15H7z" />
@@ -323,7 +339,7 @@ const handleSelectItem = (itemId: string) => {
                 </div>
                 <div class="text-xs text-[var(--text-secondary)] truncate">
                   <template v-if="selectedCategory !== 'trash'">
-                    {{ item.path || 'no username' }}
+                    {{ item.path.includes('/') ? item.path.split('/').slice(0, -1).join('/') : '' }}
                   </template>
                   <template v-else>
                     {{ t("items.deletedAt") }}: {{ formatDeletedAt(item.deleted_at) }}

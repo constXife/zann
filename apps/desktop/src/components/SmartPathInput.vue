@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
+import { allowTokenBeforeInput, allowTokenKeydown, handleTokenPaste } from "../utils/inputSanitizer";
 
 const modelValue = defineModel<string>({ required: true });
 
@@ -20,8 +21,15 @@ const emit = defineEmits<{
   (e: "blur"): void;
   (e: "keydown", event: KeyboardEvent): void;
   (e: "paste", event: ClipboardEvent): void;
+  (e: "insert-path", value: string): void;
   (e: "apply-suggestion", value: string): void;
 }>();
+
+const inputRef = ref<HTMLInputElement | null>(null);
+
+defineExpose({
+  focusInput: () => inputRef.value?.focus(),
+});
 
 const containerClass = computed(() =>
   props.dense
@@ -44,6 +52,32 @@ const inputClass = computed(() =>
     ? "min-w-[120px] px-1 py-0.5 text-xs"
     : "min-w-[140px] px-1 py-1 text-sm",
 );
+
+const onKeydown = (event: KeyboardEvent) => {
+  allowTokenKeydown(event, { allowSlash: true });
+  if (!event.defaultPrevented) {
+    emit("keydown", event);
+  }
+};
+
+const onBeforeInput = (event: InputEvent) => {
+  const data = event.data ?? "";
+  if (data.includes("/")) {
+    event.preventDefault();
+    emit("insert-path", data);
+    return;
+  }
+  allowTokenBeforeInput(event, { allowSlash: true });
+};
+
+const onPaste = (event: ClipboardEvent) => {
+  const text = event.clipboardData?.getData("text") ?? "";
+  if (text.includes("/")) {
+    emit("paste", event);
+    return;
+  }
+  handleTokenPaste(event);
+};
 </script>
 
 <template>
@@ -75,6 +109,7 @@ const inputClass = computed(() =>
       </template>
       <input
         v-model="modelValue"
+        ref="inputRef"
         type="text"
         autocomplete="off"
         autocorrect="off"
@@ -86,8 +121,9 @@ const inputClass = computed(() =>
         :data-testid="props.inputTestId"
         @focus="emit('focus')"
         @blur="emit('blur')"
-        @keydown="emit('keydown', $event)"
-        @paste="emit('paste', $event)"
+        @beforeinput="onBeforeInput"
+        @keydown="onKeydown"
+        @paste="onPaste"
       />
     </div>
     <ul

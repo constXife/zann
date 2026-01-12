@@ -32,6 +32,7 @@ import { useClipboard } from "./composables/useClipboard";
 import { useBootstrap } from "./composables/useBootstrap";
 import { usePalette } from "./composables/usePalette";
 import { useSession } from "./composables/useSession";
+import { StorageKind } from "./constants/enums";
 import logoUrl from "./assets/logo.png";
 import AppShell from "./components/AppShell.vue";
 import AppModals from "./components/AppModals.vue";
@@ -181,7 +182,12 @@ const refreshLastSyncTime = async (storageId: string | null = selectedStorageId.
   lastSyncTime.value = info?.last_synced ?? null;
 };
 const runRemoteSync = async (storageId?: string | null) => {
-  const result = await runRemoteSyncRaw(storageId ?? null);
+  const targetId = storageId ?? selectedStorageId.value;
+  const storage = storages.value.find((entry) => entry.id === targetId);
+  if (!storage || storage.kind === StorageKind.LocalOnly) {
+    return false;
+  }
+  const result = await runRemoteSyncRaw(targetId);
   await refreshLastSyncTime(storageId ?? selectedStorageId.value);
   return result;
 };
@@ -269,6 +275,7 @@ const createState = useCreateModal({
   selectedVaultId,
   selectedItemId,
   vaults,
+  items,
   selectedItem,
   selectedCategory,
   loadItems,
@@ -468,6 +475,7 @@ const authFlow = useAppAuthFlow({
   appStatus,
   unlocked,
   selectedStorageId,
+  localStorageId: LOCAL_STORAGE_ID,
   showSessionExpiredBanner,
   sessionExpiredStorage,
   syncError,

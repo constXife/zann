@@ -30,10 +30,12 @@ export type Settings = {
   close_to_tray: boolean;
   close_to_tray_notice_shown: boolean;
 };
+import type { AuthMethod, ChangeType, StorageKind, SyncStatus, VaultKind } from "./constants/enums";
+
 export type VaultSummary = {
   id: string;
   name: string;
-  kind: string;
+  kind: VaultKind;
   is_default: boolean;
 };
 export type ItemSummary = {
@@ -42,7 +44,7 @@ export type ItemSummary = {
   path: string;
   name: string;
   type_id: string;
-  sync_status?: string | null;
+  sync_status?: SyncStatus | null;
   updated_at: string;
   deleted_at?: string | null;
   deleted_by?: string | null;
@@ -81,7 +83,7 @@ export type ItemDetail = {
 export type ItemHistorySummary = {
   version: number;
   checksum: string;
-  change_type: string;
+  change_type: ChangeType;
   changed_by_name?: string | null;
   changed_by_email: string;
   created_at: string;
@@ -91,8 +93,6 @@ export type ItemHistoryDetail = {
   version: number;
   payload: EncryptedPayload;
 };
-export type StorageKind = "local_only" | "remote";
-
 export type StorageSummary = {
   id: string;
   name: string;
@@ -101,7 +101,7 @@ export type StorageSummary = {
   server_name?: string | null;
   account_subject?: string | null;
   personal_vaults_enabled: boolean;
-  auth_method?: "oidc" | "password" | null;
+  auth_method?: AuthMethod | null;
 };
 export type StorageInfo = {
   id: string;
@@ -129,7 +129,7 @@ export type SystemInfoResponse = {
   identity?: SystemIdentity | null;
   server_name?: string | null;
   personal_vaults_enabled: boolean;
-  auth_methods?: string[];
+  auth_methods?: AuthMethod[];
 };
 export type FieldRow = {
   key: string;

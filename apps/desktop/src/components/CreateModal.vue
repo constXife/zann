@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onErrorCaptured, toRef } from "vue";
+import { computed, nextTick, onErrorCaptured, onMounted, ref, toRef, watch } from "vue";
 import CreateAdvancedFields from "./CreateAdvancedFields.vue";
 import CreateKvTable from "./CreateKvTable.vue";
 import CreateMainFields from "./CreateMainFields.vue";
@@ -11,6 +11,8 @@ import SmartPathInput from "./SmartPathInput.vue";
 import { useCreateForm } from "../composables/useCreateForm";
 import type { EncryptedPayload, VaultSummary } from "../types";
 import type { FieldInput, Translator } from "../types/createForm";
+import type { CachePolicy, VaultKind } from "../constants/enums";
+import { allowTokenBeforeInput, allowTokenKeydown, handleTokenPaste } from "../utils/inputSanitizer";
 
 const createModalOpen = defineModel<boolean>("open", { required: true });
 const createItemVaultId = defineModel<string | null>("createItemVaultId", { required: true });
@@ -20,8 +22,8 @@ const createItemFolder = defineModel<string>("createItemFolder", { required: tru
 const kvFilter = defineModel<string>("kvFilter", { required: true });
 const advancedOpen = defineModel<boolean>("advancedOpen", { required: true });
 const createVaultName = defineModel<string>("createVaultName", { required: true });
-const createVaultKind = defineModel<string>("createVaultKind", { required: true });
-const createVaultCachePolicy = defineModel<string>("createVaultCachePolicy", { required: true });
+const createVaultKind = defineModel<VaultKind>("createVaultKind", { required: true });
+const createVaultCachePolicy = defineModel<CachePolicy>("createVaultCachePolicy", { required: true });
 const createVaultDefault = defineModel<boolean>("createVaultDefault", { required: true });
 const showFolderSuggestions = defineModel<boolean>("showFolderSuggestions", { required: true });
 
@@ -41,7 +43,9 @@ const props = defineProps<{
   createItemError: string;
   createItemErrorKey: string;
   createItemBusy: boolean;
+  createItemValid: boolean;
   createVaultBusy: boolean;
+  createVaultValid: boolean;
   createEditingItemId: string | null;
   revealedFields: Set<string>;
   altRevealAll: boolean;
@@ -56,6 +60,65 @@ const props = defineProps<{
 
 const t = props.t;
 const createEditingItemId = toRef(props, "createEditingItemId");
+const submitDisabled = computed(() => {
+  if (props.createMode === "vault") {
+    return !props.createVaultValid;
+  }
+  if (props.createMode === "item") {
+    return !props.createItemValid;
+  }
+  return true;
+});
+const submitDisabledReason = computed(() => {
+  if (!submitDisabled.value) return "";
+  if (props.createMode === "vault") {
+    return t("errors.name_required");
+  }
+  if (props.createMode === "item") {
+    if (!createItemVaultId.value) return t("errors.vault_required");
+    if (!createItemTitle.value.trim()) return t("errors.name_required");
+    if (props.createItemError) return props.createItemError;
+  }
+  return t("errors.name_required");
+});
+const submitTitle = computed(() => submitDisabledReason.value || "");
+
+const nameInputEl = ref<HTMLInputElement | null>(null);
+const pathInputRef = ref<{ focusInput?: () => void } | null>(null);
+const focusTitleInput = async () => {
+  if (!createModalOpen.value || props.createMode !== "item") {
+    return;
+  }
+  await nextTick();
+  if (isPanel.value) {
+    nameInputEl.value?.focus();
+    nameInputEl.value?.select();
+  } else {
+    pathInputRef.value?.focusInput?.();
+  }
+};
+
+watch(
+  () => createModalOpen.value,
+  (open) => {
+    if (open) {
+      void focusTitleInput();
+    }
+  },
+);
+
+onMounted(() => {
+  void focusTitleInput();
+});
+
+watch(
+  () => props.createMode,
+  (mode) => {
+    if (mode === "item" && createModalOpen.value) {
+      void focusTitleInput();
+    }
+  },
+);
 
 onErrorCaptured((err, instance, info) => {
   console.error("[CreateModal] captured error", {
@@ -69,6 +132,7 @@ onErrorCaptured((err, instance, info) => {
 const {
   applyPastePayload,
   applyRawEditor,
+  applyPathInsert,
   canRemoveKvRow,
   closeModal,
   closeCopyMenu,
@@ -153,6 +217,8 @@ const {
       :vault-name="selectedVaultName()"
       :path-tokens="pathTokens"
       :busy="createItemBusy"
+      :submit-disabled="submitDisabled"
+      :submit-title="submitTitle"
       :is-editing="Boolean(props.createEditingItemId)"
       :type-menu-open="typeMenuOpen"
       :type-options="typeOptions"
@@ -191,16 +257,17 @@ const {
                 :vault-shake="vaultShake"
                 :placeholder="t('create.itemFolderPlaceholder')"
                 :suggestions="filteredPathSuggestions"
-                :has-error="props.createItemErrorKey === 'vault_required'"
+                :has-error="['vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long'].includes(props.createItemErrorKey)"
                 input-test-id="create-path"
                 @focus="showFolderSuggestions = true"
                 @blur="scheduleHideFolderSuggestions"
                 @keydown="handlePathKeydown"
                 @paste="handlePathPaste"
+                @insert-path="applyPathInsert"
                 @apply-suggestion="applySuggestion"
             />
             <span
-              v-if="props.createItemErrorKey === 'vault_required'"
+              v-if="['vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long'].includes(props.createItemErrorKey)"
               class="text-[11px] text-category-security"
             >
               {{ createItemError }}
@@ -209,18 +276,22 @@ const {
 
           <input
             v-model="nameInput"
+            ref="nameInputEl"
             type="text"
             autocomplete="off"
             autocorrect="off"
             autocapitalize="off"
             spellcheck="false"
             class="mt-6 w-full -ml-2 rounded-lg border-none bg-transparent px-2 py-1 text-3xl font-bold tracking-tight text-[var(--text-primary)] placeholder-[var(--text-secondary)] transition-colors hover:bg-zinc-800/50 focus:bg-zinc-900/80 focus:outline-none"
-            :class="props.createItemErrorKey === 'name_required' ? 'bg-category-security/10 ring-2 ring-category-security/40' : ''"
+            :class="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists'].includes(props.createItemErrorKey) ? 'bg-category-security/10 ring-2 ring-category-security/40' : ''"
             :placeholder="t('create.itemTitlePlaceholderPanel')"
             data-testid="create-name"
+            @beforeinput="allowTokenBeforeInput"
+            @keydown="allowTokenKeydown"
+            @paste="handleTokenPaste"
           />
           <span
-            v-if="props.createItemErrorKey === 'name_required'"
+            v-if="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists'].includes(props.createItemErrorKey)"
             class="text-xs text-category-security"
           >
             {{ createItemError }}
@@ -303,22 +374,24 @@ const {
             </p>
             <SmartPathInput
                 v-model="currentPathInput"
+                ref="pathInputRef"
                 :vault-name="selectedVaultName()"
                 :path-tokens="pathTokens"
                 :token-delete-armed="tokenDeleteArmed"
                 :vault-shake="vaultShake"
                 :placeholder="t('create.itemTitlePlaceholder')"
                 :suggestions="filteredPathSuggestions"
-                :has-error="['name_required', 'vault_required'].includes(props.createItemErrorKey)"
+                :has-error="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists', 'vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long'].includes(props.createItemErrorKey)"
                 input-test-id="create-path"
                 @focus="showFolderSuggestions = true"
                 @blur="scheduleHideFolderSuggestions"
                 @keydown="handlePathKeydown"
                 @paste="handlePathPaste"
+                @insert-path="applyPathInsert"
                 @apply-suggestion="applySuggestion"
             />
             <span
-              v-if="['name_required', 'vault_required'].includes(props.createItemErrorKey)"
+              v-if="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists', 'vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long'].includes(props.createItemErrorKey)"
               class="text-xs text-category-security"
             >
               {{ createItemError }}
@@ -332,7 +405,7 @@ const {
           </div>
 
           <template v-if="createItemType === 'kv'">
-            <div :class="props.createItemErrorKey === 'fields_required' ? 'rounded-lg ring-2 ring-category-security/40' : ''">
+            <div :class="['fields_required', 'field_key_invalid', 'field_key_duplicate'].includes(props.createItemErrorKey) ? 'rounded-lg ring-2 ring-category-security/40' : ''">
             <CreateKvTable
                 :fields="createItemFields"
                 :can-remove="canRemoveKvRow"
@@ -353,7 +426,7 @@ const {
               />
             </div>
             <span
-              v-if="props.createItemErrorKey === 'fields_required'"
+              v-if="['fields_required', 'field_key_invalid', 'field_key_duplicate'].includes(props.createItemErrorKey)"
               class="text-xs text-category-security"
             >
               {{ createItemError }}
@@ -363,7 +436,7 @@ const {
           <template v-else>
             <div
               class="space-y-4"
-              :class="props.createItemErrorKey === 'fields_required' ? 'rounded-lg ring-2 ring-category-security/40' : ''"
+              :class="['fields_required', 'field_key_invalid', 'field_key_duplicate'].includes(props.createItemErrorKey) ? 'rounded-lg ring-2 ring-category-security/40' : ''"
             >
               <CreateMainFields
                   :fields="mainFields"
@@ -404,7 +477,7 @@ const {
               />
             </div>
             <span
-              v-if="props.createItemErrorKey === 'fields_required'"
+              v-if="['fields_required', 'field_key_invalid', 'field_key_duplicate'].includes(props.createItemErrorKey)"
               class="text-xs text-category-security"
             >
               {{ createItemError }}
@@ -417,9 +490,10 @@ const {
           v-if="
             createVaultError ||
             (createItemError &&
-              !['vault_required', 'name_required', 'fields_required'].includes(props.createItemErrorKey))
+              !['vault_required', 'name_required', 'name_invalid_chars', 'name_too_long', 'item_exists', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long', 'fields_required', 'field_key_invalid', 'field_key_duplicate'].includes(props.createItemErrorKey))
           "
           class="mt-3 text-sm text-category-security"
+          data-testid="create-error"
         >
           {{ createVaultError || createItemError }}
         </p>
@@ -435,8 +509,10 @@ const {
           <button
               type="button"
               class="flex items-center gap-2 rounded-lg bg-gray-800 dark:bg-gray-600 px-4 py-2 text-sm font-semibold text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="createItemBusy || createVaultBusy"
+              :disabled="createItemBusy || createVaultBusy || submitDisabled"
+              :title="submitTitle"
               @click="submitCreate"
+              data-testid="create-submit"
           >
             <svg
                 v-if="createItemBusy || createVaultBusy"

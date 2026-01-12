@@ -2,6 +2,7 @@ import { computed, ref } from "vue";
 import type { ComputedRef, Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ApiResponse, StorageSummary } from "../../../types";
+import { StorageKind } from "../../../constants/enums";
 
 type ConfirmOptions = {
   title: string;
@@ -49,7 +50,7 @@ export function useAppPersonalUnlock({
 
   const handleResetPersonal = () => {
     const storage = storages.value.find((s) => s.id === selectedStorageId.value);
-    if (!storage || storage.kind !== "remote") {
+    if (!storage || storage.kind !== StorageKind.Remote) {
       showToast(t("errors.generic"));
       return;
     }

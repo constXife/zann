@@ -118,7 +118,9 @@ type AppModalsProps = {
   createItemError: unknown;
   createItemErrorKey: unknown;
   createItemBusy: unknown;
+  createItemValid: unknown;
   createVaultBusy: unknown;
+  createVaultValid: unknown;
   createEditingItemId: unknown;
   revealedFields: unknown;
   altRevealAll: unknown;
@@ -397,7 +399,9 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :create-item-error="createItemError"
     :create-item-error-key="createItemErrorKey"
     :create-item-busy="createItemBusy"
+    :create-item-valid="createItemValid"
     :create-vault-busy="createVaultBusy"
+    :create-vault-valid="createVaultValid"
     :create-editing-item-id="createEditingItemId"
     :revealed-fields="revealedFields"
     :alt-reveal-all="altRevealAll"

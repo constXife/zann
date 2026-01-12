@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
 import type { StorageSummary, StorageInfo } from "../types";
+import { StorageKind } from "../constants/enums";
 
 type Translator = (key: string, params?: Record<string, unknown>) => string;
 
@@ -22,8 +23,12 @@ const emit = defineEmits<{
 const storageInfoMap = ref<Map<string, StorageInfo | null>>(new Map());
 const loadingInfo = ref<Set<string>>(new Set());
 
-const localStorages = computed(() => props.storages.filter((s) => s.kind === "local_only"));
-const remoteStorages = computed(() => props.storages.filter((s) => s.kind === "remote"));
+const localStorages = computed(() =>
+  props.storages.filter((s) => s.kind === StorageKind.LocalOnly),
+);
+const remoteStorages = computed(() =>
+  props.storages.filter((s) => s.kind === StorageKind.Remote),
+);
 
 watch(
   () => props.open,
