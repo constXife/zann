@@ -82,9 +82,9 @@ pub(crate) fn secret_not_found_error(path: &str) -> anyhow::Error {
     anyhow::anyhow!("secret not found: {}", path)
 }
 
-pub(crate) fn payload_or_error<'a>(
-    item: &'a crate::modules::shared::SharedItemResponse,
-) -> anyhow::Result<&'a zann_core::EncryptedPayload> {
+pub(crate) fn payload_or_error(
+    item: &crate::modules::shared::SharedItemResponse,
+) -> anyhow::Result<&zann_core::EncryptedPayload> {
     item.payload.as_ref().ok_or_else(|| {
         anyhow::anyhow!(
             "payload unavailable for {} (encrypted payloads are not supported here)",
