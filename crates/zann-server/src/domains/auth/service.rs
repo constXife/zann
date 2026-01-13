@@ -489,10 +489,7 @@ pub async fn register(
         return Err(AuthError::Internal("db_error"));
     }
 
-    if ensure_personal_vault_tx(state, &mut tx, user.id, now)
-        .await
-        .is_err()
-    {
+    if let Err(err) = ensure_personal_vault_tx(state, &mut tx, user.id, now).await {
         if let Err(rollback_err) = tx.rollback().await {
             tracing::error!(
                 event = "auth_register_failed",
@@ -502,6 +499,7 @@ pub async fn register(
         }
         tracing::error!(
             event = "personal_vault_create_failed",
+            error = %err,
             user_id = "redacted",
             "Failed to ensure personal vault"
         );
@@ -668,11 +666,12 @@ pub async fn login_internal(
     );
 
     let device_repo = DeviceRepo::new(&state.db);
-    if device_repo.create(&device).await.is_err() {
+    if let Err(err) = device_repo.create(&device).await {
         metrics::auth_login("db_error", "internal");
         tracing::error!(
             event = "auth_login_failed",
             reason = "db_error",
+            error = %err,
             user_id = "redacted",
             email = "redacted",
             method = "internal",
@@ -687,11 +686,12 @@ pub async fn login_internal(
     let session = tokens.session;
 
     let session_repo = SessionRepo::new(&state.db);
-    if session_repo.create(&session).await.is_err() {
+    if let Err(err) = session_repo.create(&session).await {
         metrics::auth_login("db_error", "internal");
         tracing::error!(
             event = "auth_login_failed",
             reason = "db_error",
+            error = %err,
             user_id = "redacted",
             email = "redacted",
             method = "internal",
@@ -701,9 +701,10 @@ pub async fn login_internal(
         return Err(AuthError::Internal("db_error"));
     }
 
-    if ensure_personal_vault(state, user.id, now).await.is_err() {
+    if let Err(err) = ensure_personal_vault(state, user.id, now).await {
         tracing::error!(
             event = "personal_vault_create_failed",
+            error = %err,
             user_id = "redacted",
             "Failed to ensure personal vault"
         );
@@ -831,11 +832,12 @@ pub async fn login_oidc(
     );
 
     let device_repo = DeviceRepo::new(&state.db);
-    if device_repo.create(&device).await.is_err() {
+    if let Err(err) = device_repo.create(&device).await {
         metrics::auth_login("db_error", "oidc");
         tracing::error!(
             event = "auth_login_failed",
             reason = "db_error",
+            error = %err,
             user_id = "redacted",
             method = "oidc",
             ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
@@ -849,11 +851,12 @@ pub async fn login_oidc(
     let session = tokens.session;
 
     let session_repo = SessionRepo::new(&state.db);
-    if session_repo.create(&session).await.is_err() {
+    if let Err(err) = session_repo.create(&session).await {
         metrics::auth_login("db_error", "oidc");
         tracing::error!(
             event = "auth_login_failed",
             reason = "db_error",
+            error = %err,
             user_id = "redacted",
             method = "oidc",
             ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
@@ -863,12 +866,10 @@ pub async fn login_oidc(
         return Err(AuthError::Internal("db_error"));
     }
 
-    if ensure_personal_vault(state, identity.user_id, now)
-        .await
-        .is_err()
-    {
+    if let Err(err) = ensure_personal_vault(state, identity.user_id, now).await {
         tracing::error!(
             event = "personal_vault_create_failed",
+            error = %err,
             user_id = "redacted",
             "Failed to ensure personal vault"
         );
@@ -944,7 +945,7 @@ pub async fn refresh(
         Utc::now() + chrono::Duration::seconds(state.access_token_ttl_seconds);
     let new_expires_at = Utc::now() + chrono::Duration::seconds(state.refresh_token_ttl_seconds);
 
-    if session_repo
+    if let Err(err) = session_repo
         .update_refresh_token(
             session.id,
             &new_access_hash,
@@ -953,11 +954,11 @@ pub async fn refresh(
             new_expires_at,
         )
         .await
-        .is_err()
     {
         tracing::error!(
             event = "auth_refresh_failed",
             reason = "db_error",
+            error = %err,
             user_id = "redacted",
             device_id = %session.device_id,
             ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
@@ -997,14 +998,11 @@ pub async fn logout(
         .ok()
         .flatten();
 
-    if session_repo
-        .delete_by_refresh_token_hash(&token_hash)
-        .await
-        .is_err()
-    {
+    if let Err(err) = session_repo.delete_by_refresh_token_hash(&token_hash).await {
         tracing::error!(
             event = "auth_logout_failed",
             reason = "db_error",
+            error = %err,
             ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Logout failed"
@@ -1157,11 +1155,12 @@ pub(crate) async fn login_service_account(
         created_at: now,
     };
     let sa_session_repo = ServiceAccountSessionRepo::new(&state.db);
-    if sa_session_repo.create(&session).await.is_err() {
+    if let Err(err) = sa_session_repo.create(&session).await {
         metrics::auth_login("db_error", "service_account");
         tracing::error!(
             event = "auth_login_failed",
             reason = "db_error",
+            error = %err,
             method = "service_account",
             ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),

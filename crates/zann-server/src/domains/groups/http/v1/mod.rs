@@ -196,8 +196,8 @@ async fn create_group(
         name: name.to_string(),
         created_at: Utc::now(),
     };
-    if repo.create(&group).await.is_err() {
-        tracing::error!(event = "group_create_failed", "DB error");
+    if let Err(err) = repo.create(&group).await {
+        tracing::error!(event = "group_create_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),
@@ -497,8 +497,8 @@ async fn add_member(
         user_id: payload.user_id,
         created_at: Utc::now(),
     };
-    if member_repo.create(&member).await.is_err() {
-        tracing::error!(event = "group_member_add_failed", "DB error");
+    if let Err(err) = member_repo.create(&member).await {
+        tracing::error!(event = "group_member_add_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),

@@ -562,8 +562,8 @@ pub(crate) async fn rotate_abort(
     .bind(reason.clone())
     .execute(&state.db)
     .await;
-    if result.is_err() {
-        tracing::error!(event = "rotation_abort_failed", "DB error");
+    if let Err(err) = result {
+        tracing::error!(event = "rotation_abort_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),

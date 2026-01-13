@@ -205,8 +205,8 @@ pub async fn create_vault(
         created_at: now,
     };
 
-    if repo.create(&vault).await.is_err() {
-        tracing::error!(event = "vault_create_failed", "DB error");
+    if let Err(err) = repo.create(&vault).await {
+        tracing::error!(event = "vault_create_failed", error = %err, "DB error");
         return Err(VaultServiceError::DbError);
     }
 
@@ -217,8 +217,8 @@ pub async fn create_vault(
         role: zann_core::VaultMemberRole::Admin,
         created_at: now,
     };
-    if member_repo.create(&member).await.is_err() {
-        tracing::error!(event = "vault_member_create_failed", "DB error");
+    if let Err(err) = member_repo.create(&member).await {
+        tracing::error!(event = "vault_member_create_failed", error = %err, "DB error");
         return Err(VaultServiceError::DbError);
     }
 

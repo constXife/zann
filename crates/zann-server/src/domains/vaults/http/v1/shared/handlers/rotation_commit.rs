@@ -107,12 +107,8 @@ pub(crate) async fn rotate_commit(
                 .into_response();
         }
     };
-    if sqlx_core::query::query("BEGIN")
-        .execute(&mut *conn)
-        .await
-        .is_err()
-    {
-        tracing::error!(event = "rotation_commit_failed", "DB error");
+    if let Err(err) = sqlx_core::query::query("BEGIN").execute(&mut *conn).await {
+        tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),
@@ -380,11 +376,11 @@ pub(crate) async fn rotate_commit(
     .execute(&mut *conn)
     .await;
 
-    if updated.is_err() {
+    if let Err(err) = updated {
         let _ = sqlx_core::query::query("ROLLBACK")
             .execute(&mut *conn)
             .await;
-        tracing::error!(event = "rotation_commit_failed", "DB error");
+        tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),
@@ -392,12 +388,8 @@ pub(crate) async fn rotate_commit(
             .into_response();
     }
 
-    if sqlx_core::query::query("COMMIT")
-        .execute(&mut *conn)
-        .await
-        .is_err()
-    {
-        tracing::error!(event = "rotation_commit_failed", "DB error");
+    if let Err(err) = sqlx_core::query::query("COMMIT").execute(&mut *conn).await {
+        tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),
