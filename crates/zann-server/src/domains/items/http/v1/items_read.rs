@@ -1,4 +1,4 @@
-use axum::{extract::State, response::IntoResponse, Extension, Json};
+use axum::{extract::Query, extract::State, response::IntoResponse, Extension, Json};
 use uuid::Uuid;
 use zann_core::Identity;
 
@@ -6,18 +6,20 @@ use crate::app::AppState;
 use crate::domains::items::service;
 
 use super::items_helpers::{item_response, item_summary};
-use super::items_models::ItemsResponse;
+use super::items_models::{ItemsListQuery, ItemsResponse};
 use super::map_items_error;
 
 pub(super) async fn list_items(
     State(state): State<AppState>,
     Extension(identity): Extension<Identity>,
     axum::extract::Path(vault_id): axum::extract::Path<String>,
+    Query(query): Query<ItemsListQuery>,
 ) -> impl IntoResponse {
-    let items = match service::list_items(&state, &identity, &vault_id).await {
-        Ok(items) => items,
-        Err(error) => return map_items_error(error),
-    };
+    let items =
+        match service::list_items(&state, &identity, &vault_id, query.prefix.as_deref()).await {
+            Ok(items) => items,
+            Err(error) => return map_items_error(error),
+        };
 
     let items = items.into_iter().map(item_summary).collect::<Vec<_>>();
     tracing::info!(
@@ -34,7 +36,12 @@ pub(super) async fn get_item(
     Extension(identity): Extension<Identity>,
     axum::extract::Path((vault_id, item_id)): axum::extract::Path<(String, Uuid)>,
 ) -> impl IntoResponse {
-    let item = match service::get_item(&state, &identity, &vault_id, item_id).await {
+    let response = match service::get_item(&state, &identity, &vault_id, item_id).await {
+        Ok(response) => response,
+        Err(error) => return map_items_error(error),
+    };
+
+    let item = match item_response(&state, &response.vault, response.item) {
         Ok(item) => item,
         Err(error) => return map_items_error(error),
     };
@@ -47,5 +54,5 @@ pub(super) async fn get_item(
     });
 
     tracing::info!(event = "item_fetched", item_id = %item_id, "Item fetched");
-    Json(item_response(item)).into_response()
+    Json(item).into_response()
 }

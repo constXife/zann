@@ -5,8 +5,6 @@ import * as appBindings from "../composables/app/actions/useAppBindings";
 import { StorageKind } from "../constants/enums";
 
 const LOCAL_STORAGE_ID = "00000000-0000-0000-0000-000000000000";
-const mockGetStorageInfo = vi.fn();
-const mockRunRemoteSyncRaw = vi.fn();
 let capturedBindingsOptions: Record<string, unknown> | null = null;
 
 vi.mock("vue-i18n", () => ({
@@ -17,7 +15,7 @@ vi.mock("vue-i18n", () => ({
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn().mockResolvedValue({ ok: true, data: null }),
+  invoke: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({
@@ -36,36 +34,6 @@ vi.mock("../composables/useUiSettings", () => ({
       showLocalStorage: true,
       lastCreateItemType: "login",
     }),
-  }),
-}));
-
-vi.mock("../composables/useBootstrap", () => ({
-  useBootstrap: () => ({
-    status: ref({ unlocked: true }),
-    appStatus: ref({ initialized: true }),
-    settings: ref({
-      remember_unlock: false,
-      auto_unlock: false,
-      language: "en",
-      auto_lock_minutes: 10,
-      lock_on_focus_loss: false,
-      lock_on_hidden: false,
-      clipboard_clear_seconds: 30,
-      clipboard_clear_on_lock: false,
-      clipboard_clear_on_exit: false,
-      clipboard_clear_if_unchanged: false,
-      auto_hide_reveal_seconds: 20,
-      require_os_auth: true,
-      biometry_dwk_backup: null,
-      trash_auto_purge_days: 90,
-      close_to_tray: true,
-      close_to_tray_notice_shown: false,
-    }),
-    autoUnlockError: ref(""),
-    keystoreStatus: ref(null),
-    refreshStatus: vi.fn(),
-    refreshAppStatus: vi.fn(),
-    bootstrap: vi.fn().mockResolvedValue(undefined),
   }),
 }));
 
@@ -117,47 +85,6 @@ vi.mock("../composables/useItems", () => ({
   useItems: () => ({
     items: ref([]),
     loadItems: vi.fn(),
-  }),
-}));
-
-vi.mock("../composables/useStorages", () => ({
-  useStorages: () => ({
-    storages: ref([
-      {
-        id: "remote-1",
-        name: "Remote",
-        kind: StorageKind.Remote,
-        personal_vaults_enabled: true,
-      },
-    ]),
-    remoteStorages: ref([
-      {
-        id: "remote-1",
-        name: "Remote",
-        kind: StorageKind.Remote,
-        personal_vaults_enabled: true,
-      },
-    ]),
-    localStorage: ref(null),
-    hasLocalVaults: ref(false),
-    showLocalSection: ref(false),
-    storageSyncErrors: ref(new Map()),
-    storagePersonalLocked: ref(new Map()),
-    isOffline: ref(false),
-    syncBusy: ref(false),
-    syncError: ref(""),
-    loadStorages: vi.fn(),
-    checkLocalVaults: vi.fn(),
-    runRemoteSync: mockRunRemoteSyncRaw,
-    scheduleRemoteSync: vi.fn(),
-    startAutoSync: vi.fn(),
-    stopAutoSync: vi.fn(),
-    clearSyncErrors: vi.fn(),
-    getSyncStatus: vi.fn().mockReturnValue("idle"),
-    getStorageInfo: mockGetStorageInfo,
-    deleteStorage: vi.fn(),
-    disconnectStorage: vi.fn(),
-    revealStorage: vi.fn(),
   }),
 }));
 
@@ -429,18 +356,71 @@ const flushPromises = () => new Promise((resolve) => setTimeout(resolve, 0));
 afterEach(() => {
   cleanup();
   capturedBindingsOptions = null;
-  mockGetStorageInfo.mockReset();
-  mockRunRemoteSyncRaw.mockReset();
+  localStorage.removeItem("zann:ui-settings");
 });
 
 describe("App last sync time", () => {
   it("refreshes lastSyncTime on mount and after sync", async () => {
-    mockGetStorageInfo
-      .mockResolvedValueOnce({ last_synced: "2024-01-01T00:00:00Z" })
-      .mockResolvedValueOnce({ last_synced: "2024-02-01T00:00:00Z" })
-      .mockResolvedValue({ last_synced: "2024-02-01T00:00:00Z" });
-    mockRunRemoteSyncRaw.mockResolvedValue(true);
-
+    localStorage.setItem(
+      "zann:ui-settings",
+      JSON.stringify({ lastSelectedStorageId: "remote-1" }),
+    );
+    const { invoke } = await import("@tauri-apps/api/core");
+    const invokeMock = vi.mocked(invoke);
+    let lastSynced = "2024-01-01T00:00:00Z";
+    const invokeCalls: string[] = [];
+    invokeMock.mockImplementation(async (command) => {
+      invokeCalls.push(command);
+      if (command === "app_status") {
+        return { ok: true, data: { initialized: true } };
+      }
+      if (command === "bootstrap") {
+        return {
+          status: { unlocked: true },
+          settings: {
+            remember_unlock: false,
+            auto_unlock: false,
+            language: "en",
+            auto_lock_minutes: 10,
+            lock_on_focus_loss: false,
+            lock_on_hidden: false,
+            clipboard_clear_seconds: 30,
+            clipboard_clear_on_lock: false,
+            clipboard_clear_on_exit: false,
+            clipboard_clear_if_unchanged: false,
+            auto_hide_reveal_seconds: 20,
+            require_os_auth: true,
+            biometry_dwk_backup: null,
+            trash_auto_purge_days: 90,
+            close_to_tray: true,
+            close_to_tray_notice_shown: false,
+          },
+          auto_unlock_error: null,
+        };
+      }
+      if (command === "keystore_status") {
+        return { ok: true, data: null };
+      }
+      if (command === "storages_list") {
+        return {
+          ok: true,
+          data: [{
+            id: "remote-1",
+            name: "Remote",
+            kind: StorageKind.Remote,
+            personal_vaults_enabled: true,
+          }],
+        };
+      }
+      if (command === "remote_sync") {
+        lastSynced = "2024-02-01T00:00:00Z";
+        return { ok: true, data: { locked_vaults: [] } };
+      }
+      if (command === "storage_info") {
+        return { ok: true, data: { last_synced: lastSynced } };
+      }
+      return { ok: true, data: null };
+    });
     const App = (await import("../App.vue")).default;
     render(App, {
       global: {
@@ -456,14 +436,28 @@ describe("App last sync time", () => {
     await waitFor(() => {
       expect(capturedBindingsOptions).not.toBeNull();
     });
+    const storageState = capturedBindingsOptions?.storageState as {
+      storages: { value: Array<{ id: string; kind: number }> };
+    };
+    const selectionState = capturedBindingsOptions?.selectionState as {
+      selectedStorageId: { value: string };
+    };
+    selectionState.selectedStorageId.value = "remote-1";
+    storageState.storages.value = [{
+      id: "remote-1",
+      name: "Remote",
+      kind: StorageKind.Remote,
+      personal_vaults_enabled: true,
+    }];
     const core = capturedBindingsOptions?.core as {
       lastSyncTime: { value: string | null };
-      runRemoteSync: () => Promise<boolean>;
+      runRemoteSync: (storageId?: string | null) => Promise<boolean>;
     };
     await waitFor(() => {
       expect(core.lastSyncTime.value).toBe("2024-01-01T00:00:00Z");
     });
-    await core.runRemoteSync();
+    await core.runRemoteSync("remote-1");
+    expect(invokeCalls).toContain("remote_sync");
     await waitFor(() => {
       expect(core.lastSyncTime.value).toBe("2024-02-01T00:00:00Z");
     });

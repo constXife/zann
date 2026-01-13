@@ -408,3 +408,99 @@ async fn personal_vault_update_rejects_plaintext() {
     );
     assert_eq!(json["error"], "plaintext_not_allowed");
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn shared_vault_item_get_returns_plaintext_payload() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("shared_get_plain@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app.create_shared_vault(token, "shared-vault-get").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+
+    let (status, json) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/vaults/{}/items", vault_id),
+            Some(token),
+            json!( {
+                "path": "test",
+                "name": "test",
+                "type_id": "kv",
+                "payload": {
+                    "public": {"user": "test"},
+                    "secret": {}
+                }
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "create item failed: {:?}",
+        json
+    );
+    let item_id = json["id"].as_str().expect("item id");
+
+    let (status, json) = app
+        .get_json(
+            &format!("/v1/vaults/{}/items/{}", vault_id, item_id),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "get item failed: {:?}", json);
+    assert!(json.get("payload").is_some(), "payload missing");
+    assert!(
+        json.get("payload_enc").is_none(),
+        "payload_enc should be absent"
+    );
+    assert_eq!(json["payload"]["public"]["user"], "test");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn personal_vault_item_get_returns_encrypted_payload() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("personal_get_enc@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app.create_personal_vault(token, "personal-vault-get").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+
+    let (status, json) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/vaults/{}/items", vault_id),
+            Some(token),
+            json!( {
+                "path": "test",
+                "name": "test",
+                "type_id": "kv",
+                "payload_enc": [1, 2, 3, 4, 5],
+                "checksum": "abc123"
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "create item failed: {:?}",
+        json
+    );
+    let item_id = json["id"].as_str().expect("item id");
+
+    let (status, json) = app
+        .get_json(
+            &format!("/v1/vaults/{}/items/{}", vault_id, item_id),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "get item failed: {:?}", json);
+    assert!(json.get("payload_enc").and_then(|v| v.as_array()).is_some());
+    assert!(json.get("payload").is_none(), "payload should be absent");
+}

@@ -81,3 +81,63 @@ pub(crate) struct SecretSelector {
 pub(crate) fn secret_not_found_error(path: &str) -> anyhow::Error {
     anyhow::anyhow!("secret not found: {}", path)
 }
+
+pub(crate) fn payload_or_error(
+    item: &crate::modules::shared::SharedItemResponse,
+) -> anyhow::Result<&zann_core::EncryptedPayload> {
+    item.payload.as_ref().ok_or_else(|| {
+        anyhow::anyhow!(
+            "payload unavailable for {} (encrypted payloads are not supported here)",
+            item.path
+        )
+    })
+}
+
+pub(crate) fn normalize_prefix(prefix: Option<&str>) -> Option<String> {
+    let trimmed = prefix?.trim().trim_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+pub(crate) fn prefix_match(prefix: Option<&str>, path: &str) -> bool {
+    let Some(prefix) = prefix else {
+        return true;
+    };
+    let path = path.trim().trim_matches('/').to_string();
+    path == prefix || path.starts_with(&format!("{}/", prefix))
+}
+
+pub(crate) fn parse_cursor(cursor: &str) -> Option<(chrono::DateTime<chrono::Utc>, uuid::Uuid)> {
+    let (ts, id) = cursor.split_once('|')?;
+    let ts = chrono::DateTime::parse_from_rfc3339(ts)
+        .ok()?
+        .with_timezone(&chrono::Utc);
+    let id = uuid::Uuid::parse_str(id).ok()?;
+    Some((ts, id))
+}
+
+pub(crate) fn encode_cursor(
+    timestamp: &chrono::DateTime<chrono::Utc>,
+    item_id: uuid::Uuid,
+) -> String {
+    format!("{}|{}", timestamp.to_rfc3339(), item_id)
+}
+
+pub(crate) fn cursor_allows(
+    cursor: Option<&(chrono::DateTime<chrono::Utc>, uuid::Uuid)>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    item_id: uuid::Uuid,
+) -> bool {
+    let Some((cursor_ts, cursor_id)) = cursor else {
+        return true;
+    };
+    updated_at < *cursor_ts || (updated_at == *cursor_ts && item_id < *cursor_id)
+}
+
+pub(crate) fn parse_item_timestamp(value: &str) -> anyhow::Result<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|ts| ts.with_timezone(&chrono::Utc))
+        .map_err(|err| anyhow::anyhow!("invalid timestamp '{value}': {err}"))
+}

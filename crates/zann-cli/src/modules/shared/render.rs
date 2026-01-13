@@ -5,7 +5,9 @@ use zann_core::EncryptedPayload;
 use crate::cli_args::RenderArgs;
 use crate::modules::shared::render_fs::{read_template_source, write_render_output};
 use crate::modules::shared::TemplateToken;
-use crate::modules::shared::{fetch_shared_item, resolve_path_for_context, resolve_shared_item_id};
+use crate::modules::shared::{
+    fetch_shared_item, payload_or_error, resolve_path_for_context, resolve_shared_item_id,
+};
 use crate::modules::shared::{parse_template, parse_template_placeholder, secret_not_found_error};
 use crate::modules::system::CommandContext;
 
@@ -84,8 +86,10 @@ async fn resolve_template_placeholder(
         )
         .await
         .map_err(|_| secret_not_found_error(&path))?;
-        let item = fetch_shared_item(ctx.client, ctx.addr, &ctx.access_token, item_id).await?;
-        cache.insert((vault_id.clone(), path.clone()), item.payload);
+        let item =
+            fetch_shared_item(ctx.client, ctx.addr, &ctx.access_token, &vault_id, item_id).await?;
+        let payload = payload_or_error(&item)?.clone();
+        cache.insert((vault_id.clone(), path.clone()), payload);
         cache
             .get(&(vault_id.clone(), path.clone()))
             .ok_or_else(|| anyhow::anyhow!("failed to cache payload for {}", path))?

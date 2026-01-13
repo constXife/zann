@@ -11,7 +11,7 @@ mod util;
 
 use tauri::Emitter;
 use tauri::Manager;
-use tauri::menu::{Menu, MenuBuilder, MenuItem, SubmenuBuilder};
+use tauri::menu::{Menu, MenuBuilder, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
 use crate::infra::config::save_settings;
@@ -113,14 +113,6 @@ fn main() {
         ])
         .setup(|app| {
             let app_handle = app.app_handle();
-
-            let open_settings = |app: &tauri::AppHandle| {
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    let _ = window.emit("zann:open-settings", ());
-                }
-            };
 
             app.set_menu(MenuBuilder::new(app).build()?)?;
 

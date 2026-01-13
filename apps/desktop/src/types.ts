@@ -79,6 +79,7 @@ export type ItemDetail = {
   name: string;
   type_id: string;
   payload: EncryptedPayload;
+  payload_enc?: number[];
 };
 export type ItemHistorySummary = {
   version: number;
@@ -92,6 +93,7 @@ export type ItemHistorySummary = {
 export type ItemHistoryDetail = {
   version: number;
   payload: EncryptedPayload;
+  payload_enc?: number[];
 };
 export type StorageSummary = {
   id: string;

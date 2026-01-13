@@ -26,7 +26,10 @@ pub(super) async fn create_item(
         fields_changed: payload.fields_changed,
     };
     match service::create_item(&state, &identity, &vault_id, command).await {
-        Ok(item) => (StatusCode::CREATED, Json(item_response(item))).into_response(),
+        Ok(response) => match item_response(&state, &response.vault, response.item) {
+            Ok(item) => (StatusCode::CREATED, Json(item)).into_response(),
+            Err(error) => map_items_error(error),
+        },
         Err(error) => map_items_error(error),
     }
 }
