@@ -84,18 +84,28 @@ fn list_command_returns_items() {
 
     let list_body = json!({
         "items": [{
-            "id": "item-1",
+            "id": "00000000-0000-0000-0000-000000000001",
             "path": "alpha/one",
-            "payload": shared_payload("secret")
-        }],
-        "next_cursor": null
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
     });
     server
-        .mock("GET", "/v1/shared/items")
-        .match_query(Matcher::UrlEncoded("vault_id".into(), "vault-1".into()))
+        .mock("GET", "/v1/vaults/vault-1/items")
         .match_header("authorization", "Bearer token")
         .with_status(200)
         .with_body(list_body.to_string())
+        .create();
+
+    let item_body = json!({
+        "id": "00000000-0000-0000-0000-000000000001",
+        "path": "alpha/one",
+        "payload": shared_payload("secret")
+    });
+    server
+        .mock("GET", "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001")
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(item_body.to_string())
         .create();
 
     base_cmd(home_dir.path())
@@ -127,17 +137,12 @@ fn get_command_returns_payload() {
         "items": [{
             "id": item_id,
             "path": "alpha/one",
-            "payload": payload
-        }],
-        "next_cursor": null
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
     });
     server
-        .mock("GET", "/v1/shared/items")
-        .match_query(Matcher::AllOf(vec![
-            Matcher::UrlEncoded("vault_id".into(), "vault-1".into()),
-            Matcher::UrlEncoded("prefix".into(), "alpha/one".into()),
-            Matcher::UrlEncoded("limit".into(), "200".into()),
-        ]))
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .match_query(Matcher::UrlEncoded("prefix".into(), "alpha/one".into()))
         .match_header("authorization", "Bearer token")
         .with_status(200)
         .with_body(list_body.to_string())
@@ -146,9 +151,9 @@ fn get_command_returns_payload() {
     let item_body = json!({
         "id": item_id,
         "path": "alpha/one",
-        "payload": shared_payload("secret")
+        "payload": payload
     });
-    let item_path = format!("/v1/shared/items/{item_id}");
+    let item_path = format!("/v1/vaults/vault-1/items/{item_id}");
     server
         .mock("GET", item_path.as_str())
         .match_header("authorization", "Bearer token")
@@ -183,21 +188,28 @@ fn materialize_command_writes_files() {
 
     let list_body = json!({
         "items": [{
-            "id": "item-1",
+            "id": "00000000-0000-0000-0000-000000000001",
             "path": "alpha/one",
-            "payload": shared_payload("secret")
-        }],
-        "next_cursor": null
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
     });
     server
-        .mock("GET", "/v1/shared/items")
-        .match_query(Matcher::AllOf(vec![
-            Matcher::UrlEncoded("vault_id".into(), "vault-1".into()),
-            Matcher::UrlEncoded("limit".into(), "200".into()),
-        ]))
+        .mock("GET", "/v1/vaults/vault-1/items")
         .match_header("authorization", "Bearer token")
         .with_status(200)
         .with_body(list_body.to_string())
+        .create();
+
+    let item_body = json!({
+        "id": "00000000-0000-0000-0000-000000000001",
+        "path": "alpha/one",
+        "payload": shared_payload("secret")
+    });
+    server
+        .mock("GET", "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001")
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(item_body.to_string())
         .create();
 
     let out_dir = tempdir().expect("tempdir");
@@ -235,17 +247,12 @@ fn render_command_renders_template() {
         "items": [{
             "id": item_id,
             "path": "alpha/one",
-            "payload": shared_payload("secret")
-        }],
-        "next_cursor": null
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
     });
     server
-        .mock("GET", "/v1/shared/items")
-        .match_query(Matcher::AllOf(vec![
-            Matcher::UrlEncoded("vault_id".into(), "vault-1".into()),
-            Matcher::UrlEncoded("prefix".into(), "alpha/one".into()),
-            Matcher::UrlEncoded("limit".into(), "200".into()),
-        ]))
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .match_query(Matcher::UrlEncoded("prefix".into(), "alpha/one".into()))
         .match_header("authorization", "Bearer token")
         .with_status(200)
         .with_body(list_body.to_string())
@@ -256,7 +263,7 @@ fn render_command_renders_template() {
         "path": "alpha/one",
         "payload": shared_payload("secret")
     });
-    let item_path = format!("/v1/shared/items/{item_id}");
+    let item_path = format!("/v1/vaults/vault-1/items/{item_id}");
     server
         .mock("GET", item_path.as_str())
         .match_header("authorization", "Bearer token")
@@ -323,17 +330,12 @@ fn run_command_passes_secret_to_process() {
         "items": [{
             "id": item_id,
             "path": "alpha/one",
-            "payload": shared_payload("secret")
-        }],
-        "next_cursor": null
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
     });
     server
-        .mock("GET", "/v1/shared/items")
-        .match_query(Matcher::AllOf(vec![
-            Matcher::UrlEncoded("vault_id".into(), "vault-1".into()),
-            Matcher::UrlEncoded("prefix".into(), "alpha/one".into()),
-            Matcher::UrlEncoded("limit".into(), "200".into()),
-        ]))
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .match_query(Matcher::UrlEncoded("prefix".into(), "alpha/one".into()))
         .match_header("authorization", "Bearer access-1")
         .with_status(200)
         .with_body(list_body.to_string())
@@ -344,7 +346,7 @@ fn run_command_passes_secret_to_process() {
         "path": "alpha/one",
         "payload": shared_payload("secret")
     });
-    let item_path = format!("/v1/shared/items/{item_id}");
+    let item_path = format!("/v1/vaults/vault-1/items/{item_id}");
     server
         .mock("GET", item_path.as_str())
         .match_header("authorization", "Bearer access-1")
