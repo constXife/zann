@@ -20,6 +20,24 @@ Self-hosted password manager for individuals and small teams.
 - **Desktop app** - offline-first, works without a server (macOS, Windows)
 - **Hybrid auth** - OIDC + built-in authentication
 
+## Stability
+
+**Current status:** experimental. Until **v0.Y** (refactor milestone), the API,
+CLI, and config format may change without backward compatibility.
+
+### Policy starts at v0.Y
+
+After the refactor milestone, we will publish a stability policy and follow it
+for:
+- API compatibility
+- Config format migrations
+- Client/server version support windows
+
+### Breaking changes (pre-policy phase)
+
+- May happen without migration steps
+- Will still be noted in [CHANGELOG](CHANGELOG.md) when possible
+
 ## Screenshots
 
 ![Desktop app](docs/screenshots/desktop-app.png)
