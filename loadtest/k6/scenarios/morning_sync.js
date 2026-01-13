@@ -5,7 +5,12 @@ import { Gauge } from "k6/metrics";
 import { setupAuth } from "../lib/auth.js";
 import { buildHeaders } from "../lib/headers.js";
 import { ACCESS_TOKEN_ENV, BASE_URL, SERVICE_ACCOUNT_TOKEN } from "../lib/env.js";
-import { monitorLoop, parseIntervalSeconds } from "../lib/monitor.js";
+import {
+  calcStagesDurationSeconds,
+  monitorLoop,
+  parseDurationSeconds,
+  parseIntervalSeconds,
+} from "../lib/monitor.js";
 import { resolveStages } from "../lib/profile.js";
 import { makeRequestId } from "../lib/trace.js";
 import { systemBatch } from "../features/system.js";
@@ -31,40 +36,6 @@ const TEST_RUN_ID =
 const jsonHeaders = { "Content-Type": "application/json" };
 const sutCpu = new Gauge("sut_cpu");
 const sutMem = new Gauge("sut_mem");
-
-function parseDurationSeconds(duration) {
-  const match = duration.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/);
-  if (!match) {
-    return 0;
-  }
-  const value = Number(match[1]);
-  const unit = match[2];
-  if (Number.isNaN(value)) {
-    return 0;
-  }
-  if (unit === "ms") {
-    return value / 1000;
-  }
-  if (unit === "m") {
-    return value * 60;
-  }
-  if (unit === "h") {
-    return value * 60 * 60;
-  }
-  return value;
-}
-
-function calcStagesDurationSeconds(stages) {
-  if (!Array.isArray(stages)) {
-    return 0;
-  }
-  return stages.reduce((total, stage) => {
-    if (!stage?.duration) {
-      return total;
-    }
-    return total + parseDurationSeconds(stage.duration);
-  }, 0);
-}
 
 const loadStages = resolveStages([
   { duration: "2m", target: PEAK_VUS },

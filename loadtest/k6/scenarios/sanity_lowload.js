@@ -41,7 +41,6 @@ export const options = {
           sut_cpu: [
             {
               threshold: `value<${CPU_LIMIT}`,
-              abortOnFail: true,
               delayAbortEval: "30s",
             },
           ],

@@ -8,6 +8,7 @@ use crate::config::AuthMode;
 use crate::domains::auth::core::passwords::{
     derive_auth_hash, hash_password, kdf_params_from_user, verify_password,
 };
+use crate::domains::errors::ServiceError;
 use crate::infra::metrics;
 
 pub struct UpdateMeCommand {
@@ -23,17 +24,7 @@ pub struct RecoveryKitResult {
     pub recovery_key: String,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum MeError {
-    ForbiddenNoBody,
-    Forbidden(&'static str),
-    NotFound,
-    Db,
-    NoChanges,
-    InvalidPassword,
-    InvalidCredentials,
-    Kdf,
-}
+pub type MeError = ServiceError;
 
 pub async fn get_me(state: &AppState, identity: &Identity) -> Result<Identity, MeError> {
     let policies = state.policy_store.get();
@@ -91,7 +82,7 @@ pub async fn update_me(
         Ok(None) => return Err(MeError::NotFound),
         Err(_) => {
             tracing::error!(event = "users_me_update_failed", "DB error");
-            return Err(MeError::Db);
+            return Err(MeError::DbError);
         }
     };
 
@@ -122,7 +113,7 @@ pub async fn update_me(
         .await
     else {
         tracing::error!(event = "users_me_update_failed", "DB error");
-        return Err(MeError::Db);
+        return Err(MeError::DbError);
     };
     if affected == 0 {
         return Err(MeError::NotFound);
@@ -176,7 +167,7 @@ pub async fn change_password(
         Ok(None) => return Err(MeError::Forbidden("internal_only")),
         Err(_) => {
             tracing::error!(event = "users_me_password_failed", "DB error");
-            return Err(MeError::Db);
+            return Err(MeError::DbError);
         }
     };
 
@@ -225,7 +216,7 @@ pub async fn change_password(
         .await
     else {
         tracing::error!(event = "users_me_password_failed", "DB error");
-        return Err(MeError::Db);
+        return Err(MeError::DbError);
     };
     if affected == 0 {
         return Err(MeError::NotFound);
@@ -274,7 +265,7 @@ pub async fn create_recovery_kit(
         Ok(None) => return Err(MeError::Forbidden("internal_only")),
         Err(_) => {
             tracing::error!(event = "users_me_recovery_failed", "DB error");
-            return Err(MeError::Db);
+            return Err(MeError::DbError);
         }
     };
     if user.password_hash.is_none() {
@@ -314,7 +305,7 @@ pub async fn create_recovery_kit(
         .await
     else {
         tracing::error!(event = "users_me_recovery_failed", "DB error");
-        return Err(MeError::Db);
+        return Err(MeError::DbError);
     };
     if affected == 0 {
         return Err(MeError::NotFound);

@@ -7,6 +7,7 @@ use zann_db::repo::{ChangeRepo, ItemHistoryRepo, ItemRepo, VaultRepo};
 use crate::app::AppState;
 use crate::domains::access_control::http::{vault_role_allows, VaultScope};
 use crate::domains::access_control::policies::PolicyDecision;
+use crate::domains::errors::ServiceError;
 use crate::domains::items::service::ITEM_HISTORY_LIMIT;
 use crate::domains::sync::http::v1::handlers::push_apply::{apply_change, ApplyChangeResult};
 use crate::domains::sync::http::v1::helpers::{
@@ -24,22 +25,8 @@ pub(crate) struct SyncPrep {
     pub(crate) device_id: uuid::Uuid,
 }
 
-pub(crate) enum SyncPrepError {
-    Forbidden,
-    NotFound,
-    DbError,
-    DeviceRequired,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum SyncError {
-    Forbidden,
-    NotFound,
-    Db,
-    DeviceRequired,
-    BadRequest(&'static str),
-    Internal(&'static str),
-}
+pub(crate) type SyncPrepError = ServiceError;
+pub(crate) type SyncError = ServiceError;
 
 pub(crate) struct SyncPullResult {
     pub(crate) changes: Vec<SyncPullChange>,
@@ -95,7 +82,7 @@ pub(crate) async fn prepare_sync(
                 resource = resource,
                 "Access denied"
             );
-            return Err(SyncPrepError::Forbidden);
+            return Err(SyncPrepError::ForbiddenNoBody);
         }
         PolicyDecision::NoMatch => {
             match vault_role_allows(state, identity, vault.id, action, VaultScope::Sync).await {
@@ -108,7 +95,7 @@ pub(crate) async fn prepare_sync(
                         resource = resource,
                         "Access denied"
                     );
-                    return Err(SyncPrepError::Forbidden);
+                    return Err(SyncPrepError::ForbiddenNoBody);
                 }
                 Err(_) => {
                     tracing::error!(event = "vault_access_failed", "DB error");
@@ -129,13 +116,7 @@ pub(crate) async fn sync_pull(
     limit: i64,
 ) -> Result<SyncPullResult, SyncError> {
     let resource = "sync/pull";
-    let prep = match prepare_sync(state, identity, vault_id, "read", resource).await {
-        Ok(prep) => prep,
-        Err(SyncPrepError::DeviceRequired) => return Err(SyncError::DeviceRequired),
-        Err(SyncPrepError::NotFound) => return Err(SyncError::NotFound),
-        Err(SyncPrepError::DbError) => return Err(SyncError::Db),
-        Err(SyncPrepError::Forbidden) => return Err(SyncError::Forbidden),
-    };
+    let prep = prepare_sync(state, identity, vault_id, "read", resource).await?;
     let vault = prep.vault;
 
     let since_seq = match decode_cursor(cursor) {
@@ -173,7 +154,7 @@ pub(crate) async fn sync_pull(
         Ok(rows) => rows,
         Err(err) => {
             tracing::error!(event = "sync_pull_failed", error = %err, "DB error");
-            return Err(SyncError::Db);
+            return Err(SyncError::DbError);
         }
     };
 
@@ -276,7 +257,7 @@ pub(crate) async fn sync_shared_pull(
         Ok(None) => return Err(SyncError::NotFound),
         Err(_) => {
             tracing::error!(event = "sync_shared_pull_failed", "DB error");
-            return Err(SyncError::Db);
+            return Err(SyncError::DbError);
         }
     };
 
@@ -298,7 +279,7 @@ pub(crate) async fn sync_shared_pull(
                 resource = resource,
                 "Access denied"
             );
-            return Err(SyncError::Forbidden);
+            return Err(SyncError::ForbiddenNoBody);
         }
         PolicyDecision::NoMatch => {
             match vault_role_allows(state, identity, vault.id, "read", VaultScope::Sync).await {
@@ -311,11 +292,11 @@ pub(crate) async fn sync_shared_pull(
                         resource = resource,
                         "Access denied"
                     );
-                    return Err(SyncError::Forbidden);
+                    return Err(SyncError::ForbiddenNoBody);
                 }
                 Err(_) => {
                     tracing::error!(event = "vault_access_failed", "DB error");
-                    return Err(SyncError::Db);
+                    return Err(SyncError::DbError);
                 }
             }
         }
@@ -367,7 +348,7 @@ pub(crate) async fn sync_shared_pull(
         Ok(rows) => rows,
         Err(err) => {
             tracing::error!(event = "sync_shared_pull_failed", error = %err, "DB error");
-            return Err(SyncError::Db);
+            return Err(SyncError::DbError);
         }
     };
 
@@ -383,7 +364,7 @@ pub(crate) async fn sync_shared_pull(
             Ok(items) => items,
             Err(err) => {
                 tracing::error!(event = "sync_shared_pull_failed", error = %err, "DB error");
-                return Err(SyncError::Db);
+                return Err(SyncError::DbError);
             }
         };
 
@@ -635,13 +616,7 @@ pub(crate) async fn sync_push(
     changes: Vec<SyncPushChange>,
 ) -> Result<SyncPushResult, SyncError> {
     let resource = "sync/push";
-    let prep = match prepare_sync(state, identity, vault_id, "write", resource).await {
-        Ok(prep) => prep,
-        Err(SyncPrepError::DeviceRequired) => return Err(SyncError::DeviceRequired),
-        Err(SyncPrepError::NotFound) => return Err(SyncError::NotFound),
-        Err(SyncPrepError::DbError) => return Err(SyncError::Db),
-        Err(SyncPrepError::Forbidden) => return Err(SyncError::Forbidden),
-    };
+    let prep = prepare_sync(state, identity, vault_id, "write", resource).await?;
     let vault = prep.vault;
     let device_id = prep.device_id;
 
@@ -653,12 +628,12 @@ pub(crate) async fn sync_push(
         Ok(tx) => tx,
         Err(err) => {
             tracing::error!(event = "sync_push_failed", error = %err, "DB begin failed");
-            return Err(SyncError::Db);
+            return Err(SyncError::DbError);
         }
     };
     if let Err(err) = apply_tx_isolation(&mut tx, state.db_tx_isolation).await {
         tracing::error!(event = "sync_push_failed", error = %err, "DB begin failed");
-        return Err(SyncError::Db);
+        return Err(SyncError::DbError);
     }
 
     for change in changes {
@@ -709,7 +684,7 @@ pub(crate) async fn sync_push(
 
     if let Err(err) = tx.commit().await {
         tracing::error!(event = "sync_push_failed", error = %err, "DB commit failed");
-        return Err(SyncError::Db);
+        return Err(SyncError::DbError);
     }
 
     let change_repo = ChangeRepo::new(&state.db);
@@ -741,7 +716,7 @@ pub(crate) async fn sync_shared_push(
         Ok(None) => return Err(SyncError::NotFound),
         Err(_) => {
             tracing::error!(event = "sync_shared_push_failed", "DB error");
-            return Err(SyncError::Db);
+            return Err(SyncError::DbError);
         }
     };
 
@@ -763,7 +738,7 @@ pub(crate) async fn sync_shared_push(
                 resource = resource,
                 "Access denied"
             );
-            return Err(SyncError::Forbidden);
+            return Err(SyncError::ForbiddenNoBody);
         }
         PolicyDecision::NoMatch => {
             match vault_role_allows(state, identity, vault.id, "write", VaultScope::Sync).await {
@@ -776,11 +751,11 @@ pub(crate) async fn sync_shared_push(
                         resource = resource,
                         "Access denied"
                     );
-                    return Err(SyncError::Forbidden);
+                    return Err(SyncError::ForbiddenNoBody);
                 }
                 Err(_) => {
                     tracing::error!(event = "vault_access_failed", "DB error");
-                    return Err(SyncError::Db);
+                    return Err(SyncError::DbError);
                 }
             }
         }

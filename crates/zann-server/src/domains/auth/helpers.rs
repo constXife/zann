@@ -3,11 +3,14 @@ use sqlx_core::query::query;
 use sqlx_postgres::{PgConnection, Postgres};
 use uuid::Uuid;
 use zann_core::{
-    CachePolicy, Device, Vault, VaultEncryptionType, VaultKind, VaultMember, VaultMemberRole,
+    CachePolicy, Device, Session, Vault, VaultEncryptionType, VaultKind, VaultMember,
+    VaultMemberRole,
 };
 use zann_db::repo::{VaultMemberRepo, VaultRepo};
 
 use crate::app::AppState;
+use crate::domains::auth::core::tokens::hash_token;
+use zann_core::api::auth::LoginResponse;
 
 pub(crate) async fn ensure_personal_vault(
     state: &AppState,
@@ -235,4 +238,56 @@ pub(crate) fn build_device(
         revoked_at: None,
         created_at: now,
     }
+}
+
+pub(crate) struct SessionTokens {
+    pub(crate) session: Session,
+    pub(crate) access_token: String,
+    pub(crate) refresh_token: String,
+}
+
+pub(crate) fn create_session_for_user(
+    state: &AppState,
+    user_id: Uuid,
+    device_id: Uuid,
+    now: DateTime<Utc>,
+) -> SessionTokens {
+    let refresh_token = Uuid::now_v7().to_string();
+    let access_token = Uuid::now_v7().to_string();
+    let refresh_token_hash = hash_token(&refresh_token, &state.token_pepper);
+    let access_token_hash = hash_token(&access_token, &state.token_pepper);
+    let access_expires_at = now + chrono::Duration::seconds(state.access_token_ttl_seconds);
+
+    let session = Session {
+        id: Uuid::now_v7(),
+        user_id,
+        device_id,
+        access_token_hash,
+        access_expires_at,
+        refresh_token_hash,
+        expires_at: now + chrono::Duration::seconds(state.refresh_token_ttl_seconds),
+        created_at: now,
+    };
+
+    SessionTokens {
+        session,
+        access_token,
+        refresh_token,
+    }
+}
+
+pub(crate) fn build_login_response(
+    state: &AppState,
+    access_token: String,
+    refresh_token: String,
+) -> LoginResponse {
+    LoginResponse {
+        access_token,
+        refresh_token,
+        expires_in: ttl_seconds_u64(state.access_token_ttl_seconds),
+    }
+}
+
+pub(crate) fn ttl_seconds_u64(ttl_seconds: i64) -> u64 {
+    u64::try_from(ttl_seconds).unwrap_or(0)
 }

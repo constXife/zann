@@ -38,6 +38,40 @@ export function parseIntervalSeconds(interval) {
   return value;
 }
 
+export function parseDurationSeconds(duration) {
+  const match = duration.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/);
+  if (!match) {
+    return 0;
+  }
+  const value = Number(match[1]);
+  const unit = match[2];
+  if (Number.isNaN(value)) {
+    return 0;
+  }
+  if (unit === "ms") {
+    return value / 1000;
+  }
+  if (unit === "m") {
+    return value * 60;
+  }
+  if (unit === "h") {
+    return value * 60 * 60;
+  }
+  return value;
+}
+
+export function calcStagesDurationSeconds(stages) {
+  if (!Array.isArray(stages)) {
+    return 0;
+  }
+  return stages.reduce((total, stage) => {
+    if (!stage?.duration) {
+      return total;
+    }
+    return total + parseDurationSeconds(stage.duration);
+  }, 0);
+}
+
 export function monitorOnce({
   enabled,
   vmUrl,

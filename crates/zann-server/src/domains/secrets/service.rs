@@ -9,21 +9,12 @@ use zann_db::repo::{ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, UserRepo,
 use crate::app::AppState;
 use crate::domains::access_control::http::{find_vault, vault_role_allows, VaultScope};
 use crate::domains::access_control::policies::PolicyDecision;
+use crate::domains::errors::ServiceError;
 use crate::domains::items::service::basename_from_path;
 use crate::domains::secrets::policies::{generate_secret, PasswordPolicy};
 use crate::infra::metrics;
 
-#[derive(Debug, Clone)]
-pub enum SecretError {
-    ForbiddenNoBody,
-    Forbidden(&'static str),
-    NotFound,
-    BadRequest(&'static str),
-    Conflict(&'static str),
-    PolicyMismatch { existing: String, requested: String },
-    Db,
-    Internal(&'static str),
-}
+pub type SecretError = ServiceError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretPayload {
@@ -78,7 +69,7 @@ pub async fn get_secret(
         Ok(None) => return Err(SecretError::NotFound),
         Err(_) => {
             tracing::error!(event = "secret_get_failed", "DB error");
-            return Err(SecretError::Db);
+            return Err(SecretError::DbError);
         }
     };
 
@@ -198,7 +189,7 @@ pub async fn ensure_secret(
             let existing = item_repo
                 .get_by_vault_path(vault.id, &normalized_path)
                 .await
-                .map_err(|_| SecretError::Db)?;
+                .map_err(|_| SecretError::DbError)?;
             if let Some(existing) = existing {
                 if existing.type_id != "secret" || existing.sync_status != SyncStatus::Active {
                     return Err(SecretError::Conflict("path_in_use"));
@@ -221,7 +212,7 @@ pub async fn ensure_secret(
                 };
                 return Ok((record, false));
             }
-            return Err(SecretError::Db);
+            return Err(SecretError::DbError);
         }
     };
 
@@ -301,7 +292,7 @@ pub async fn rotate_secret(
         Ok(None) => return Err(SecretError::NotFound),
         Err(_) => {
             tracing::error!(event = "secret_rotate_failed", "DB error");
-            return Err(SecretError::Db);
+            return Err(SecretError::DbError);
         }
     };
 
@@ -348,7 +339,7 @@ pub async fn rotate_secret(
 
     let Ok(affected) = item_repo.update(&item).await else {
         tracing::error!(event = "secret_rotate_failed", "DB error");
-        return Err(SecretError::Db);
+        return Err(SecretError::DbError);
     };
     if affected == 0 {
         return Err(SecretError::Conflict("row_version_conflict"));
@@ -537,7 +528,7 @@ async fn authorize_vault_access(
         Ok(None) => return Err(SecretError::NotFound),
         Err(_) => {
             tracing::error!(event = "vault_access_failed", "DB error");
-            return Err(SecretError::Db);
+            return Err(SecretError::DbError);
         }
     };
 
@@ -568,7 +559,7 @@ async fn authorize_vault_access(
                 }
                 Err(_) => {
                     tracing::error!(event = "vault_access_failed", "DB error");
-                    return Err(SecretError::Db);
+                    return Err(SecretError::DbError);
                 }
             }
         }

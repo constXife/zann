@@ -23,18 +23,71 @@ fn map_admin_error(error: AdminUserError) -> axum::response::Response {
         AdminUserError::Forbidden(code) => {
             (StatusCode::FORBIDDEN, Json(ErrorResponse { error: code })).into_response()
         }
+        AdminUserError::Unauthorized(code) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse { error: code }),
+        )
+            .into_response(),
         AdminUserError::BadRequest(code) => {
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: code })).into_response()
         }
+        AdminUserError::Conflict(code) => {
+            (StatusCode::CONFLICT, Json(ErrorResponse { error: code })).into_response()
+        }
         AdminUserError::NotFound => StatusCode::NOT_FOUND.into_response(),
-        AdminUserError::Db => (
+        AdminUserError::PayloadTooLarge(code) => (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(ErrorResponse { error: code }),
+        )
+            .into_response(),
+        AdminUserError::DbError => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),
+        )
+            .into_response(),
+        AdminUserError::Internal(code) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: code }),
+        )
+            .into_response(),
+        AdminUserError::NoChanges => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "no_changes",
+            }),
+        )
+            .into_response(),
+        AdminUserError::InvalidPassword => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_password",
+            }),
+        )
+            .into_response(),
+        AdminUserError::InvalidCredentials => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "invalid_credentials",
+            }),
         )
             .into_response(),
         AdminUserError::Kdf => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "kdf_error" }),
+        )
+            .into_response(),
+        AdminUserError::DeviceRequired => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "device_required",
+            }),
+        )
+            .into_response(),
+        AdminUserError::PolicyMismatch { .. } => (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "policy_mismatch",
+            }),
         )
             .into_response(),
     }
