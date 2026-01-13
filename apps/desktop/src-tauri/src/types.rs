@@ -455,6 +455,8 @@ pub struct ItemDetail {
     pub name: String,
     pub type_id: String,
     pub payload: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload_enc: Option<Vec<u8>>,
 }
 
 #[derive(Serialize)]
@@ -471,6 +473,8 @@ pub struct ItemHistorySummary {
 pub struct ItemHistoryDetail {
     pub version: i64,
     pub payload: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload_enc: Option<Vec<u8>>,
 }
 
 #[derive(Deserialize)]
@@ -585,6 +589,7 @@ pub struct VaultCreatePayload {
 pub struct VaultCreateResponse {
     pub id: String,
     pub name: String,
+    #[allow(dead_code)]
     pub kind: i32,
     pub vault_key_enc: Vec<u8>,
 }

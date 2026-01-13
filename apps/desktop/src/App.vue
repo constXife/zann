@@ -173,22 +173,36 @@ const {
 } = storageState;
 
 const lastSyncTime = ref<string | null>(null);
+let lastSyncRequestId = 0;
 const refreshLastSyncTime = async (storageId: string | null = selectedStorageId.value) => {
+  const requestId = ++lastSyncRequestId;
   if (!storageId || storageId === LOCAL_STORAGE_ID) {
-    lastSyncTime.value = null;
+    if (requestId === lastSyncRequestId) {
+      lastSyncTime.value = null;
+    }
     return;
   }
   const info = await getStorageInfo(storageId);
-  lastSyncTime.value = info?.last_synced ?? null;
+  if (requestId === lastSyncRequestId) {
+    lastSyncTime.value = info?.last_synced ?? null;
+  }
 };
 const runRemoteSync = async (storageId?: string | null) => {
   const targetId = storageId ?? selectedStorageId.value;
   const storage = storages.value.find((entry) => entry.id === targetId);
-  if (!storage || storage.kind === StorageKind.LocalOnly) {
+  if (!storage) {
+    if (!targetId) {
+      return false;
+    }
+    const result = await runRemoteSyncRaw(targetId);
+    await refreshLastSyncTime(targetId);
+    return result;
+  }
+  if (storage.kind === StorageKind.LocalOnly) {
     return false;
   }
   const result = await runRemoteSyncRaw(targetId);
-  await refreshLastSyncTime(storageId ?? selectedStorageId.value);
+  await refreshLastSyncTime(targetId);
   return result;
 };
 
@@ -198,6 +212,7 @@ const runBootstrap = async () => {
   await bootstrap();
   if (status.value?.unlocked && appStatus.value?.initialized) {
     await loadStorages();
+    await refreshLastSyncTime();
     await checkLocalVaults();
     await loadVaults();
     await loadItems();
