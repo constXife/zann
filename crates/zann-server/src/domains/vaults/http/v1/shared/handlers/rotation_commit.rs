@@ -107,10 +107,7 @@ pub(crate) async fn rotate_commit(
                 .into_response();
         }
     };
-    if let Err(err) = sqlx_core::query::query("BEGIN")
-        .execute(&mut *conn)
-        .await
-    {
+    if let Err(err) = sqlx_core::query::query("BEGIN").execute(&mut *conn).await {
         tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -391,10 +388,7 @@ pub(crate) async fn rotate_commit(
             .into_response();
     }
 
-    if let Err(err) = sqlx_core::query::query("COMMIT")
-        .execute(&mut *conn)
-        .await
-    {
+    if let Err(err) = sqlx_core::query::query("COMMIT").execute(&mut *conn).await {
         tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,

@@ -998,10 +998,7 @@ pub async fn logout(
         .ok()
         .flatten();
 
-    if let Err(err) = session_repo
-        .delete_by_refresh_token_hash(&token_hash)
-        .await
-    {
+    if let Err(err) = session_repo.delete_by_refresh_token_hash(&token_hash).await {
         tracing::error!(
             event = "auth_logout_failed",
             reason = "db_error",
