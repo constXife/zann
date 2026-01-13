@@ -1,7 +1,9 @@
 "t: security":
-  - 'crates/zann-crypto/**'
-  - 'crates/zann-core/src/auth.rs'
-  - 'crates/zann-server/src/domains/auth/core/**'
-  - 'crates/zann-server/src/domains/access_control/**'
-  - 'crates/zann-server/src/infra/audit.rs'
-  - 'crates/zann-keystore/**'
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/zann-crypto/**"
+          - "crates/zann-core/src/auth.rs"
+          - "crates/zann-server/src/domains/auth/core/**"
+          - "crates/zann-server/src/domains/access_control/**"
+          - "crates/zann-server/src/infra/audit.rs"
+          - "crates/zann-keystore/**"
