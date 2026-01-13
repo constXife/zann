@@ -4,7 +4,6 @@ import starlight from "@astrojs/starlight";
 export default defineConfig({
   site: "https://constxife.github.io/zann/",
   base: "/zann/",
-  srcDir: "../",
   integrations: [
     starlight({
       title: "Zann",
