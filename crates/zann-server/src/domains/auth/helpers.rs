@@ -48,7 +48,7 @@ pub(crate) async fn ensure_personal_vault(
         created_at: now,
     };
 
-    if vault_repo.create(&vault).await.is_err() {
+    if let Err(err) = vault_repo.create(&vault).await {
         if vault_repo
             .get_personal_by_user(user_id)
             .await
@@ -57,6 +57,11 @@ pub(crate) async fn ensure_personal_vault(
         {
             return Ok(());
         }
+        tracing::error!(
+            event = "personal_vault_create_failed",
+            error = %err,
+            "DB error"
+        );
         return Err("db_error");
     }
 
@@ -67,7 +72,7 @@ pub(crate) async fn ensure_personal_vault(
         role: VaultMemberRole::Admin,
         created_at: now,
     };
-    if member_repo.create(&member).await.is_err() {
+    if let Err(err) = member_repo.create(&member).await {
         if member_repo
             .get(vault.id, user_id)
             .await
@@ -76,6 +81,11 @@ pub(crate) async fn ensure_personal_vault(
         {
             return Ok(());
         }
+        tracing::error!(
+            event = "personal_vault_member_create_failed",
+            error = %err,
+            "DB error"
+        );
         return Err("db_error");
     }
 
@@ -113,7 +123,7 @@ pub(crate) async fn ensure_personal_vault_tx(
 
     let vault_id = Uuid::now_v7();
     let tags = sqlx_core::types::Json(Vec::<String>::new());
-    if query::<Postgres>(
+    if let Err(err) = query::<Postgres>(
         r#"
         INSERT INTO vaults (
             id, slug, name, kind, encryption_type, vault_key_enc, cache_policy, tags,
@@ -137,7 +147,6 @@ pub(crate) async fn ensure_personal_vault_tx(
     .bind(now)
     .execute(&mut *conn)
     .await
-    .is_err()
     {
         let existing = query::<Postgres>(
             r#"
@@ -156,10 +165,15 @@ pub(crate) async fn ensure_personal_vault_tx(
         if existing.is_some() {
             return Ok(());
         }
+        tracing::error!(
+            event = "personal_vault_create_failed",
+            error = %err,
+            "DB error"
+        );
         return Err("db_error");
     }
 
-    if query::<Postgres>(
+    if let Err(err) = query::<Postgres>(
         r#"
         INSERT INTO vault_members (vault_id, user_id, role, created_at)
         VALUES ($1, $2, $3, $4)
@@ -171,7 +185,6 @@ pub(crate) async fn ensure_personal_vault_tx(
     .bind(now)
     .execute(&mut *conn)
     .await
-    .is_err()
     {
         let existing = query::<Postgres>(
             r#"
@@ -188,6 +201,11 @@ pub(crate) async fn ensure_personal_vault_tx(
         if existing.is_some() {
             return Ok(());
         }
+        tracing::error!(
+            event = "personal_vault_member_create_failed",
+            error = %err,
+            "DB error"
+        );
         return Err("db_error");
     }
 

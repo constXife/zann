@@ -329,8 +329,8 @@ pub async fn upload_item_file(
         deleted_at: None,
     };
 
-    if attachment_repo.create(&attachment).await.is_err() {
-        tracing::error!(event = "attachment_create_failed", "DB error");
+    if let Err(err) = attachment_repo.create(&attachment).await {
+        tracing::error!(event = "attachment_create_failed", error = %err, "DB error");
         return Err(ItemsError::DbError);
     }
 

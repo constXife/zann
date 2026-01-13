@@ -48,6 +48,13 @@ Desktop (Tauri) from `apps/desktop`:
 - Dev: `bun run tauri dev`
 - Build: `bun run tauri build`
 
+Tauri prerequisites (platform-specific):
+- **macOS**: Xcode Command Line Tools (`xcode-select --install`)
+- **Windows**: Visual Studio Build Tools (C++ workload) and WebView2 Runtime
+- **Linux**: system GTK/WebKit dependencies (see Tauri docs for your distro)
+
+Full prerequisites: https://tauri.app/start/prerequisites/
+
 ## PR process
 
 - One PR = one logical change.

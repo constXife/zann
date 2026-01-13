@@ -1,0 +1,16 @@
+{
+  "name": "zann-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "docs:sync": "bun ./scripts/sync-readme.mjs && bun ./scripts/sync-docs.mjs && bun ./scripts/sync-assets.mjs",
+    "docs:openapi": "bun ./scripts/gen-openapi.mjs",
+    "docs:dev": "bun run docs:sync && bun run docs:openapi && astro dev",
+    "docs:build": "bun run docs:sync && bun run docs:openapi && astro build",
+    "docs:preview": "astro preview"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "0.37.2",
+    "astro": "5.16.9"
+  }
+}
