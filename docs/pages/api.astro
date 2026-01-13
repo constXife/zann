@@ -1,0 +1,53 @@
+---
+const title = "Zann API Reference";
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      }
+      .api-topbar {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 16px;
+        background: #0f172a;
+        color: #e2e8f0;
+      }
+      .api-topbar a {
+        color: #e2e8f0;
+        text-decoration: none;
+        font-weight: 600;
+      }
+      .api-topbar a:hover {
+        text-decoration: underline;
+      }
+      .api-topbar span {
+        opacity: 0.7;
+        font-size: 13px;
+      }
+      html,
+      body,
+      #api-reference {
+        height: 100%;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="api-topbar">
+      <a href="/zann/">← Back to docs</a>
+      <span>API Reference</span>
+    </div>
+    <script id="api-reference" data-url="/zann/openapi.json"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+  </body>
+</html>
