@@ -1,0 +1,5 @@
+[
+  { "duration": "2m", "target": 20 },
+  { "duration": "10m", "target": 20 },
+  { "duration": "2m", "target": 0 }
+]

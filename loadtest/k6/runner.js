@@ -1,11 +1,22 @@
 import baselineScenario, {
   options as baselineOptions,
+  monitor as baselineMonitor,
   runBaseline as baselineRunBaseline,
   setup as baselineSetup,
 } from "./scenarios/baseline_normal.js";
-import signupBurstScenario, { options as signupBurstOptions } from "./scenarios/signup_burst.js";
-import signupOnboardingScenario, { options as signupOnboardingOptions } from "./scenarios/signup_onboarding.js";
-import smokeScenario, { options as smokeOptions, setup as smokeSetup } from "./scenarios/smoke.js";
+import signupBurstScenario, {
+  monitor as signupBurstMonitor,
+  options as signupBurstOptions,
+} from "./scenarios/signup_burst.js";
+import signupOnboardingScenario, {
+  monitor as signupOnboardingMonitor,
+  options as signupOnboardingOptions,
+} from "./scenarios/signup_onboarding.js";
+import smokeScenario, {
+  monitor as smokeMonitor,
+  options as smokeOptions,
+  setup as smokeSetup,
+} from "./scenarios/smoke.js";
 import sanityScenario, { options as sanityOptions, setup as sanitySetup } from "./scenarios/sanity_lowload.js";
 import morningScenario, {
   options as morningOptions,
@@ -14,6 +25,7 @@ import morningScenario, {
   load as morningLoad,
 } from "./scenarios/morning_sync.js";
 import leakScenario, {
+  monitor as leakMonitor,
   options as leakOptions,
   setup as leakSetup,
   leak as leakExec,
@@ -25,20 +37,24 @@ const registry = {
   baseline_normal: {
     options: baselineOptions,
     default: baselineScenario,
+    monitor: baselineMonitor,
     runBaseline: baselineRunBaseline,
   },
   signup_burst: {
     options: signupBurstOptions,
     default: signupBurstScenario,
+    monitor: signupBurstMonitor,
   },
   signup_onboarding: {
     options: signupOnboardingOptions,
     default: signupOnboardingScenario,
+    monitor: signupOnboardingMonitor,
   },
   smoke: {
     options: smokeOptions,
     default: smokeScenario,
     setup: smokeSetup,
+    monitor: smokeMonitor,
   },
   sanity_lowload: {
     options: sanityOptions,
@@ -57,6 +73,7 @@ const registry = {
     default: leakScenario,
     setup: leakSetup,
     leak: leakExec,
+    monitor: leakMonitor,
   },
 };
 

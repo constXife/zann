@@ -11,6 +11,9 @@ if [ -f "${script_dir}/.env.k6" ]; then
 fi
 
 export ZANN_BASE_URL="${ZANN_BASE_URL:-http://localhost:18080}"
+export K6_PROFILE="${K6_PROFILE:-low}"
+export K6_LOG_FAILURES="${K6_LOG_FAILURES:-1}"
+export K6_OUTPUTS="${K6_OUTPUTS:-experimental-prometheus-rw}"
 
 if [ -z "${ZANN_TEST_RUN_ID:-}" ]; then
   ZANN_TEST_RUN_ID="k6-$(date +%s)-${RANDOM}"
@@ -20,6 +23,11 @@ if [ -z "${K6_TAG_TEST:-}" ]; then
   K6_TAG_TEST="${ZANN_TEST_RUN_ID}"
 fi
 export K6_TAG_TEST
+if [ -z "${K6_TAG_TEST_RUN_ID:-}" ]; then
+  K6_TAG_TEST_RUN_ID="${ZANN_TEST_RUN_ID}"
+fi
+export K6_TAG_TEST_RUN_ID
+echo "K6 test_run_id=${ZANN_TEST_RUN_ID}"
 
 "${script_dir}/reset_db.sh"
 
@@ -45,9 +53,18 @@ if [ -z "${ZANN_ACCESS_TOKEN:-}" ]; then
   fi
 fi
 
+if [ -z "${ZANN_ACCESS_TOKEN:-}" ]; then
+  echo "ERROR: ZANN_ACCESS_TOKEN is required for load tests."
+  exit 1
+fi
+
 if [ "$#" -lt 1 ]; then
   echo "Usage: K6_SCENARIO=<name> K6_PROFILE=<profile> $0 run loadtest/k6/runner.js"
   exit 1
+fi
+
+if [ "${1:-}" = "--" ]; then
+  shift
 fi
 
 args=("$@")
@@ -73,5 +90,18 @@ fi
 if [ -n "${K6_TAG_TEST:-}" ] && [ -z "${seen_tags[test]+x}" ]; then
   k6_tags+=("--tag" "test=${K6_TAG_TEST}")
 fi
+if [ -n "${K6_TAG_TEST_RUN_ID:-}" ] && [ -z "${seen_tags[test_run_id]+x}" ]; then
+  k6_tags+=("--tag" "test_run_id=${K6_TAG_TEST_RUN_ID}")
+fi
 
-exec k6 "${k6_tags[@]}" "${args[@]}"
+k6_outputs=()
+if [ -n "${K6_OUTPUTS:-}" ]; then
+  IFS=',' read -r -a output_list <<< "${K6_OUTPUTS}"
+  for output in "${output_list[@]}"; do
+    if [ -n "${output}" ]; then
+      k6_outputs+=("-o" "${output}")
+    fi
+  done
+fi
+
+exec k6 "${k6_outputs[@]}" "${k6_tags[@]}" "${args[@]}"
