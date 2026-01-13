@@ -3,8 +3,8 @@ use crate::modules::auth::{
     exchange_service_account_token, load_service_token, verify_server_fingerprint,
 };
 use crate::modules::shared::{
-    fetch_shared_item, flatten_payload, is_valid_env_key, resolve_path_for_context,
-    resolve_shared_item_id,
+    fetch_shared_item, flatten_payload, is_valid_env_key, payload_or_error,
+    resolve_path_for_context, resolve_shared_item_id,
 };
 use crate::modules::system::http::fetch_system_info;
 use crate::modules::system::CliConfig;
@@ -92,9 +92,9 @@ pub(crate) async fn handle_run_command(
         resolve_shared_item_id(client, &addr, &access_token, &vault_id, None, Some(&path))
             .await
             .map_err(|_| anyhow::anyhow!("secret not found: {}", path))?;
-    let item = fetch_shared_item(client, &addr, &access_token, item_id).await?;
+    let item = fetch_shared_item(client, &addr, &access_token, &vault_id, item_id).await?;
     let mut env_values = std::collections::HashMap::new();
-    for (key, value) in flatten_payload(&item.payload) {
+    for (key, value) in flatten_payload(payload_or_error(&item)?) {
         if !is_valid_env_key(&key) {
             eprintln!(
                 "Warning: Key \"{}\" is not a valid shell identifier. Skipped.",

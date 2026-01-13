@@ -22,7 +22,21 @@ pub struct SharedItemsResponse {
 pub struct SharedItemResponse {
     pub id: String,
     pub path: String,
-    pub payload: EncryptedPayload,
+    pub payload: Option<EncryptedPayload>,
+    #[serde(default)]
+    pub payload_enc: Option<Vec<u8>>,
+}
+
+#[derive(Deserialize)]
+pub struct ItemsResponse {
+    pub items: Vec<ItemSummaryResponse>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct ItemSummaryResponse {
+    pub id: String,
+    pub path: String,
+    pub updated_at: String,
 }
 
 #[derive(Serialize)]

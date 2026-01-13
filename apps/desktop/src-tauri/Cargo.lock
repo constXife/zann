@@ -6951,16 +6951,32 @@ name = "zann-core"
 version = "0.1.0"
 dependencies = [
  "async-trait",
- "blake3",
- "chacha20poly1305",
  "chrono",
- "rand 0.8.5",
  "schemars 0.8.22",
  "serde",
  "serde_json",
  "serde_yaml",
  "sqlx-core",
  "sqlx-sqlite",
+ "tracing",
+ "uuid",
+ "zann-crypto",
+]
+
+[[package]]
+name = "zann-crypto"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "base64 0.22.1",
+ "blake3",
+ "chacha20poly1305",
+ "hex",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "sha2",
+ "subtle",
  "tracing",
  "uuid",
  "zeroize",
@@ -6981,6 +6997,7 @@ dependencies = [
  "tracing",
  "uuid",
  "zann-core",
+ "zann-crypto",
 ]
 
 [[package]]

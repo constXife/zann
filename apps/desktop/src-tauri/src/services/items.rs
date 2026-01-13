@@ -341,6 +341,7 @@ async fn get_item(
         name: item.name,
         type_id: item.type_id,
         payload: serde_json::to_value(item.payload).map_err(|err| err.to_string())?,
+        payload_enc: None,
     })
 }
 

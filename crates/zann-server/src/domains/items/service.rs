@@ -9,11 +9,14 @@ use zann_core::{
 use zann_crypto::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob};
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{
-    AttachmentRepo, ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, UserRepo, VaultRepo,
+    AttachmentRepo, ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, ServiceAccountRepo,
+    UserRepo, VaultRepo,
 };
 
 use crate::app::AppState;
-use crate::domains::access_control::http::{find_vault, vault_role_allows, VaultScope};
+use crate::domains::access_control::http::{
+    find_vault, parse_scope, vault_role_allows, ScopeRule, VaultScope,
+};
 use crate::domains::access_control::policies::PolicyDecision;
 use crate::infra::metrics;
 
@@ -30,6 +33,16 @@ pub enum ItemsError {
     PayloadTooLarge(&'static str),
     Db,
     Internal(&'static str),
+}
+
+pub struct ItemWithVault {
+    pub vault: Vault,
+    pub item: Item,
+}
+
+pub struct ItemHistoryWithVault {
+    pub vault: Vault,
+    pub history: ItemHistory,
 }
 
 pub struct CreateItemCommand {
@@ -92,6 +105,7 @@ pub async fn list_items(
     state: &AppState,
     identity: &Identity,
     vault_id: &str,
+    prefix: Option<&str>,
 ) -> Result<Vec<Item>, ItemsError> {
     let resource = format!("vaults/{vault_id}/items");
     let vault = authorize_vault_access(
@@ -104,11 +118,31 @@ pub async fn list_items(
     )
     .await?;
 
+    let prefix = normalize_prefix(prefix);
+    if let Some(service_account_id) = identity.service_account_id {
+        if !service_account_allows_prefix(
+            state,
+            service_account_id,
+            &vault,
+            "list",
+            prefix.as_deref(),
+        )
+        .await
+        {
+            metrics::forbidden_access(&resource);
+            return Err(ItemsError::ForbiddenNoBody);
+        }
+    }
+
     let item_repo = ItemRepo::new(&state.db);
-    let Ok(items) = item_repo.list_by_vault(vault.id, false).await else {
+    let Ok(mut items) = item_repo.list_by_vault(vault.id, false).await else {
         tracing::error!(event = "items_list_failed", "DB error");
         return Err(ItemsError::Db);
     };
+
+    if let Some(prefix) = prefix {
+        items.retain(|item| prefix_match(Some(&prefix), &item.path));
+    }
 
     tracing::info!(
         event = "items_listed",
@@ -123,7 +157,7 @@ pub async fn get_item(
     identity: &Identity,
     vault_id: &str,
     item_id: Uuid,
-) -> Result<Item, ItemsError> {
+) -> Result<ItemWithVault, ItemsError> {
     let resource = format!("vaults/{vault_id}/items/{item_id}");
     let vault = authorize_vault_access(
         state,
@@ -148,9 +182,16 @@ pub async fn get_item(
     if item.vault_id != vault.id {
         return Err(ItemsError::NotFound);
     }
+    if let Some(service_account_id) = identity.service_account_id {
+        if !service_account_allows_path(state, service_account_id, &vault, "read", &item.path).await
+        {
+            metrics::forbidden_access(&resource);
+            return Err(ItemsError::ForbiddenNoBody);
+        }
+    }
 
     tracing::info!(event = "item_fetched", item_id = %item_id, "Item fetched");
-    Ok(item)
+    Ok(ItemWithVault { vault, item })
 }
 
 pub async fn upload_item_file(
@@ -445,7 +486,7 @@ pub async fn create_item(
     identity: &Identity,
     vault_id: &str,
     command: CreateItemCommand,
-) -> Result<Item, ItemsError> {
+) -> Result<ItemWithVault, ItemsError> {
     let resource = format!("vaults/{vault_id}/items");
 
     let device_id = match identity.device_id {
@@ -613,7 +654,7 @@ pub async fn create_item(
     }
 
     tracing::info!(event = "item_created", item_id = %item.id, "Item created");
-    Ok(item)
+    Ok(ItemWithVault { vault, item })
 }
 
 pub async fn update_item(
@@ -622,7 +663,7 @@ pub async fn update_item(
     vault_id: &str,
     item_id: Uuid,
     command: UpdateItemCommand,
-) -> Result<Item, ItemsError> {
+) -> Result<ItemWithVault, ItemsError> {
     let resource = format!("vaults/{vault_id}/items/{item_id}");
 
     let device_id = match identity.device_id {
@@ -845,7 +886,7 @@ pub async fn update_item(
     }
 
     tracing::info!(event = "item_updated", item_id = %item_id, "Item updated");
-    Ok(item)
+    Ok(ItemWithVault { vault, item })
 }
 
 pub async fn delete_item(
@@ -1013,6 +1054,13 @@ pub async fn list_item_versions(
     if item.vault_id != vault.id {
         return Err(ItemsError::NotFound);
     }
+    if let Some(service_account_id) = identity.service_account_id {
+        if !service_account_allows_path(state, service_account_id, &vault, "read", &item.path).await
+        {
+            metrics::forbidden_access(&resource);
+            return Err(ItemsError::ForbiddenNoBody);
+        }
+    }
 
     let limit = limit
         .unwrap_or(ITEM_HISTORY_LIMIT)
@@ -1044,7 +1092,7 @@ pub async fn get_item_version(
     vault_id: &str,
     item_id: Uuid,
     version: i64,
-) -> Result<ItemHistory, ItemsError> {
+) -> Result<ItemHistoryWithVault, ItemsError> {
     let resource = format!("vaults/{vault_id}/items/{item_id}/versions/{version}");
     let vault = authorize_vault_access(
         state,
@@ -1069,6 +1117,13 @@ pub async fn get_item_version(
     if item.vault_id != vault.id {
         return Err(ItemsError::NotFound);
     }
+    if let Some(service_account_id) = identity.service_account_id {
+        if !service_account_allows_path(state, service_account_id, &vault, "read", &item.path).await
+        {
+            metrics::forbidden_access(&resource);
+            return Err(ItemsError::ForbiddenNoBody);
+        }
+    }
 
     let history_repo = ItemHistoryRepo::new(&state.db);
     let history = match history_repo.get_by_item_version(item.id, version).await {
@@ -1090,7 +1145,7 @@ pub async fn get_item_version(
         device_id = ?identity.device_id,
         "History version read"
     );
-    Ok(history)
+    Ok(ItemHistoryWithVault { vault, history })
 }
 
 pub async fn restore_item_version(
@@ -1099,7 +1154,7 @@ pub async fn restore_item_version(
     vault_id: &str,
     item_id: Uuid,
     version: i64,
-) -> Result<Item, ItemsError> {
+) -> Result<ItemWithVault, ItemsError> {
     let resource = format!("vaults/{vault_id}/items/{item_id}/versions/{version}/restore");
 
     let device_id = match identity.device_id {
@@ -1241,7 +1296,7 @@ pub async fn restore_item_version(
         "History version restored"
     );
     tracing::info!(event = "item_restored", item_id = %item_id, "Item restored");
-    Ok(item)
+    Ok(ItemWithVault { vault, item })
 }
 
 pub(crate) fn basename_from_path(path: &str) -> String {
@@ -1264,6 +1319,168 @@ pub(crate) fn replace_basename(path: &str, name: &str) -> String {
     parts.join("/")
 }
 
+fn normalize_prefix(value: Option<&str>) -> Option<String> {
+    let trimmed = value?.trim().trim_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(trimmed.to_string())
+}
+
+fn prefix_match(prefix: Option<&str>, path: &str) -> bool {
+    let Some(prefix) = prefix else {
+        return true;
+    };
+    let path = path.trim().trim_matches('/').to_string();
+    path == prefix || path.starts_with(&format!("{}/", prefix))
+}
+
+async fn service_account_scopes(state: &AppState, service_account_id: Uuid) -> Option<Vec<String>> {
+    let repo = ServiceAccountRepo::new(&state.db);
+    repo.get_by_id(service_account_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|account| account.scopes.0)
+}
+
+fn scope_matches_path(rule: &ScopeRule, vault: &Vault, path: &str) -> bool {
+    if !vault_matches_scope(vault, &rule.target) {
+        return false;
+    }
+    if let Some(prefix) = rule.prefix.as_deref() {
+        return prefix_match(Some(prefix), path);
+    }
+    true
+}
+
+fn scope_matches_prefix(rule: &ScopeRule, vault: &Vault, prefix: Option<&str>) -> bool {
+    if !vault_matches_scope(vault, &rule.target) {
+        return false;
+    }
+    if let Some(scope_prefix) = rule.prefix.as_deref() {
+        return prefix.is_some_and(|value| prefix_match(Some(scope_prefix), value));
+    }
+    true
+}
+
+fn vault_matches_scope(
+    vault: &Vault,
+    target: &crate::domains::access_control::http::ScopeTarget,
+) -> bool {
+    match target {
+        crate::domains::access_control::http::ScopeTarget::Vault(scope) => {
+            vault.slug == *scope || vault.id.to_string() == *scope
+        }
+        crate::domains::access_control::http::ScopeTarget::Tag(tag) => vault
+            .tags
+            .as_ref()
+            .is_some_and(|tags| tags.0.iter().any(|value| value == tag)),
+        crate::domains::access_control::http::ScopeTarget::Pattern(pattern) => {
+            matches_pattern(pattern, &vault.slug)
+        }
+    }
+}
+
+fn matches_pattern(pattern: &str, value: &str) -> bool {
+    if pattern == "*" || pattern == "**" {
+        return true;
+    }
+
+    let starts_with_wildcard = pattern.starts_with('*');
+    let ends_with_wildcard = pattern.ends_with('*');
+    let parts: Vec<&str> = pattern.split('*').filter(|p| !p.is_empty()).collect();
+
+    if parts.is_empty() {
+        return true;
+    }
+
+    let mut index = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if let Some(pos) = value[index..].find(part) {
+            if i == 0 && !starts_with_wildcard && pos != 0 {
+                return false;
+            }
+            index += pos + part.len();
+        } else {
+            return false;
+        }
+    }
+
+    if !ends_with_wildcard {
+        if let Some(last) = parts.last() {
+            return value.ends_with(last);
+        }
+    }
+
+    true
+}
+
+async fn service_account_allows_path(
+    state: &AppState,
+    service_account_id: Uuid,
+    vault: &Vault,
+    action: &str,
+    path: &str,
+) -> bool {
+    let Some(scopes) = service_account_scopes(state, service_account_id).await else {
+        return false;
+    };
+    scopes.iter().any(|scope| {
+        let Some(rule) = parse_scope(scope) else {
+            return false;
+        };
+        scope_allows_action(&rule.permission, action) && scope_matches_path(&rule, vault, path)
+    })
+}
+
+async fn service_account_allows_prefix(
+    state: &AppState,
+    service_account_id: Uuid,
+    vault: &Vault,
+    action: &str,
+    prefix: Option<&str>,
+) -> bool {
+    let Some(scopes) = service_account_scopes(state, service_account_id).await else {
+        return false;
+    };
+    let mut matched_rules = Vec::new();
+    for scope in &scopes {
+        let Some(rule) = parse_scope(scope) else {
+            continue;
+        };
+        if !scope_allows_action(&rule.permission, action) {
+            continue;
+        }
+        if vault_matches_scope(vault, &rule.target) {
+            matched_rules.push(rule);
+        }
+    }
+    if matched_rules.is_empty() {
+        return false;
+    }
+    if prefix.is_none() && matched_rules.iter().all(|rule| rule.prefix.is_some()) {
+        return false;
+    }
+    matched_rules
+        .iter()
+        .any(|rule| scope_matches_prefix(rule, vault, prefix))
+}
+
+fn scope_allows_action(permission: &str, action: &str) -> bool {
+    match action {
+        "read_history" => {
+            matches!(
+                permission,
+                "history_read" | "read_history" | "read_previous"
+            )
+        }
+        "read_previous" => permission == "read_previous",
+        "read" | "list" => permission == "read",
+        _ => permission == action,
+    }
+}
+
 fn file_aad(
     vault_id: Uuid,
     item_id: Uuid,
@@ -1277,10 +1494,11 @@ fn file_aad(
     format!("{vault_id}:{item_id}:{file_id}:v1:{mode}").into_bytes()
 }
 
-fn decrypt_shared_payload_bytes(
+pub(crate) fn decrypt_payload_bytes(
     state: &AppState,
     vault: &Vault,
-    item: &Item,
+    item_id: Uuid,
+    payload_enc: &[u8],
 ) -> Result<Vec<u8>, ItemsError> {
     let Some(smk) = state.server_master_key.as_ref() else {
         tracing::error!(event = "item_payload_decrypt_failed", "SMK not configured");
@@ -1297,8 +1515,27 @@ fn decrypt_shared_payload_bytes(
             return Err(ItemsError::Internal(err.as_code()));
         }
     };
-    core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item.id, &item.payload_enc)
+    core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item_id, payload_enc)
         .map_err(|_| ItemsError::Internal("payload_decrypt_failed"))
+}
+
+pub(crate) fn decrypt_payload_json(
+    state: &AppState,
+    vault: &Vault,
+    item_id: Uuid,
+    payload_enc: &[u8],
+) -> Result<JsonValue, ItemsError> {
+    let payload_bytes = decrypt_payload_bytes(state, vault, item_id, payload_enc)?;
+    serde_json::from_slice(&payload_bytes)
+        .map_err(|_| ItemsError::Internal("payload_decode_failed"))
+}
+
+fn decrypt_shared_payload_bytes(
+    state: &AppState,
+    vault: &Vault,
+    item: &Item,
+) -> Result<Vec<u8>, ItemsError> {
+    decrypt_payload_bytes(state, vault, item.id, &item.payload_enc)
 }
 
 async fn update_file_upload_state(

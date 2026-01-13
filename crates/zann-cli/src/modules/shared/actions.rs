@@ -4,8 +4,8 @@ use crate::cli_args::*;
 use crate::find_field;
 use crate::modules::shared::{
     fetch_shared_item, fetch_shared_items, flatten_payload, format_env_flat, format_kv_flat,
-    print_list_table, resolve_path_arg, resolve_shared_item_id, resolve_vault_arg,
-    secret_not_found_error,
+    payload_or_error, print_list_table, resolve_path_arg, resolve_shared_item_id,
+    resolve_vault_arg, secret_not_found_error,
 };
 use crate::modules::shared::{
     materialize_shared, render_shared_template, SharedListJsonItem, SharedListJsonResponse,
@@ -32,11 +32,13 @@ pub(crate) async fn handle_list(
             let items: Vec<SharedListJsonItem> = response
                 .items
                 .iter()
-                .map(|item| SharedListJsonItem {
-                    path: item.path.clone(),
-                    fields: flatten_payload(&item.payload),
+                .map(|item| {
+                    Ok(SharedListJsonItem {
+                        path: item.path.clone(),
+                        fields: flatten_payload(payload_or_error(item)?),
+                    })
                 })
-                .collect();
+                .collect::<anyhow::Result<Vec<_>>>()?;
             let output = SharedListJsonResponse {
                 items,
                 next_cursor: response.next_cursor.clone(),
@@ -62,8 +64,9 @@ pub(crate) async fn handle_get(args: GetArgs, ctx: &mut CommandContext<'_>) -> a
     )
     .await
     .map_err(|_| secret_not_found_error(&path))?;
-    let item = fetch_shared_item(ctx.client, ctx.addr, &ctx.access_token, item_id).await?;
-    let payload = &item.payload;
+    let item =
+        fetch_shared_item(ctx.client, ctx.addr, &ctx.access_token, &vault_id, item_id).await?;
+    let payload = payload_or_error(&item)?;
 
     if let Some(key) = args.key.as_deref() {
         let value = find_field(payload, key)

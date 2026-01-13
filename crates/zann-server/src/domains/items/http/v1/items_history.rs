@@ -9,6 +9,8 @@ use zann_core::Identity;
 use crate::app::AppState;
 use crate::domains::items::service;
 
+use zann_core::VaultEncryptionType;
+
 use super::items_helpers::item_response;
 use super::items_models::{
     HistoryListQuery, ItemHistoryDetailResponse, ItemHistoryListResponse, ItemHistorySummary,
@@ -47,18 +49,33 @@ pub(super) async fn get_item_version(
     Extension(identity): Extension<Identity>,
     axum::extract::Path((vault_id, item_id, version)): axum::extract::Path<(String, Uuid, i64)>,
 ) -> impl IntoResponse {
-    let history =
+    let response =
         match service::get_item_version(&state, &identity, &vault_id, item_id, version).await {
-            Ok(history) => history,
+            Ok(response) => response,
             Err(error) => return map_items_error(error),
         };
 
+    let (payload_enc, payload) = if response.vault.encryption_type == VaultEncryptionType::Server {
+        match service::decrypt_payload_json(
+            &state,
+            &response.vault,
+            item_id,
+            &response.history.payload_enc,
+        ) {
+            Ok(payload) => (None, Some(payload)),
+            Err(error) => return map_items_error(error),
+        }
+    } else {
+        (Some(response.history.payload_enc), None)
+    };
+
     let response = ItemHistoryDetailResponse {
-        version: history.version,
-        checksum: history.checksum,
-        payload_enc: history.payload_enc,
-        change_type: history.change_type,
-        created_at: history.created_at.to_rfc3339(),
+        version: response.history.version,
+        checksum: response.history.checksum,
+        payload_enc,
+        payload,
+        change_type: response.history.change_type,
+        created_at: response.history.created_at.to_rfc3339(),
     };
     Json(response).into_response()
 }
@@ -70,7 +87,10 @@ pub(super) async fn restore_item_version(
     axum::extract::Path((vault_id, item_id, version)): axum::extract::Path<(String, Uuid, i64)>,
 ) -> impl IntoResponse {
     match service::restore_item_version(&state, &identity, &vault_id, item_id, version).await {
-        Ok(item) => Json(item_response(item)).into_response(),
+        Ok(response) => match item_response(&state, &response.vault, response.item) {
+            Ok(item) => Json(item).into_response(),
+            Err(error) => map_items_error(error),
+        },
         Err(error) => map_items_error(error),
     }
 }

@@ -29,7 +29,10 @@ pub(super) async fn update_item(
         fields_changed: payload.fields_changed,
     };
     match service::update_item(&state, &identity, &vault_id, item_id, command).await {
-        Ok(item) => Json(item_response(item)).into_response(),
+        Ok(response) => match item_response(&state, &response.vault, response.item) {
+            Ok(item) => Json(item).into_response(),
+            Err(error) => map_items_error(error),
+        },
         Err(error) => map_items_error(error),
     }
 }

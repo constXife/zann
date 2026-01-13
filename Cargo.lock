@@ -5463,6 +5463,7 @@ dependencies = [
  "tracing",
  "uuid",
  "zann-core",
+ "zann-crypto",
 ]
 
 [[package]]

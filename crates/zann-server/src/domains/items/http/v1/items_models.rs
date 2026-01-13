@@ -73,6 +73,12 @@ pub(crate) struct ItemsResponse {
     pub(crate) items: Vec<ItemSummary>,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct ItemsListQuery {
+    #[serde(default)]
+    pub(crate) prefix: Option<String>,
+}
+
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct ItemResponse {
     pub(crate) id: String,
@@ -82,7 +88,10 @@ pub(crate) struct ItemResponse {
     pub(crate) type_id: String,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) favorite: bool,
-    pub(crate) payload_enc: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) payload_enc: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) payload: Option<JsonValue>,
     pub(crate) checksum: String,
     pub(crate) version: i64,
     pub(crate) deleted_at: Option<String>,
@@ -113,7 +122,10 @@ pub(crate) struct ItemHistoryListResponse {
 pub(crate) struct ItemHistoryDetailResponse {
     pub(crate) version: i64,
     pub(crate) checksum: String,
-    pub(crate) payload_enc: Vec<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) payload_enc: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) payload: Option<JsonValue>,
     pub(crate) change_type: ChangeType,
     pub(crate) created_at: String,
 }

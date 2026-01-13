@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
-use crate::modules::shared::fetch_shared_items;
+use crate::modules::shared::{fetch_shared_items, payload_or_error};
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn materialize_shared(
@@ -31,18 +31,19 @@ pub(crate) async fn materialize_shared(
         )
         .await?;
         for item in response.items {
+            let payload = payload_or_error(&item)?;
             let rel = normalize_output_path(&item.path)?;
             let target = out.join(&rel);
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
             let contents = if let Some(field) = field {
-                let value = crate::find_field(&item.payload, field).ok_or_else(|| {
+                let value = crate::find_field(payload, field).ok_or_else(|| {
                     anyhow::anyhow!("Field '{}' not found in {}", field, item.path)
                 })?;
                 value.value.clone()
             } else {
-                serde_json::to_string_pretty(&item.payload)?
+                serde_json::to_string_pretty(payload)?
             };
             if skip_unchanged && is_same_contents(&target, &contents)? {
                 continue;
@@ -140,7 +141,7 @@ pub(crate) fn normalize_output_path(path: &str) -> anyhow::Result<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{materialize_shared, normalize_output_path};
-    use mockito::{Matcher, Server};
+    use mockito::Server;
     use serde_json::json;
     use std::path::PathBuf;
     use tempfile::tempdir;
@@ -164,30 +165,40 @@ mod tests {
         let vault_id = "vault-1";
         let list_body = json!({
             "items": [{
-                "id": "item-1",
+                "id": "00000000-0000-0000-0000-000000000001",
                 "path": "alpha/one",
-                "payload": {
-                    "v": 1,
-                    "typeId": "kv",
-                    "fields": {
-                        "password": {
-                            "kind": "password",
-                            "value": "secret"
-                        }
-                    }
-                }
-            }],
-            "next_cursor": null
+                "updated_at": "2024-01-01T00:00:00Z"
+            }]
         });
 
         let list_mock = server
-            .mock("GET", "/v1/shared/items")
-            .match_query(Matcher::AllOf(vec![
-                Matcher::UrlEncoded("vault_id".into(), vault_id.into()),
-                Matcher::UrlEncoded("limit".into(), "200".into()),
-            ]))
+            .mock("GET", "/v1/vaults/vault-1/items")
             .with_status(200)
             .with_body(list_body.to_string())
+            .create_async()
+            .await;
+
+        let item_body = json!({
+            "id": "00000000-0000-0000-0000-000000000001",
+            "path": "alpha/one",
+            "payload": {
+                "v": 1,
+                "typeId": "kv",
+                "fields": {
+                    "password": {
+                        "kind": "password",
+                        "value": "secret"
+                    }
+                }
+            }
+        });
+        let item_mock = server
+            .mock(
+                "GET",
+                "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001",
+            )
+            .with_status(200)
+            .with_body(item_body.to_string())
             .create_async()
             .await;
 
@@ -212,5 +223,6 @@ mod tests {
         let contents = std::fs::read_to_string(target).expect("secret");
         assert_eq!(contents, "secret");
         list_mock.assert_async().await;
+        item_mock.assert_async().await;
     }
 }

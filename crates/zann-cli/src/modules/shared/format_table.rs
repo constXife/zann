@@ -5,15 +5,18 @@ pub(crate) fn print_list_table(items: &[SharedItemResponse]) {
     let mut path_width = "PATH".len();
 
     for item in items {
-        let keys = {
-            let mut list: Vec<&String> = item.payload.fields.keys().collect();
-            list.sort();
-            let joined = list
-                .iter()
-                .map(|value| value.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!("[{}]", joined)
+        let keys = match item.payload.as_ref() {
+            Some(payload) => {
+                let mut list: Vec<&String> = payload.fields.keys().collect();
+                list.sort();
+                let joined = list
+                    .iter()
+                    .map(|value| value.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("[{}]", joined)
+            }
+            None => "[encrypted]".to_string(),
         };
         path_width = path_width.max(item.path.len());
         rows.push((item.path.as_str(), keys));

@@ -107,6 +107,7 @@ async fn get_item_history(
     Ok(ItemHistoryDetail {
         version: req.version,
         payload: serde_json::to_value(payload).map_err(|err| err.to_string())?,
+        payload_enc: None,
     })
 }
 

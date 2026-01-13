@@ -102,7 +102,10 @@ fn list_command_returns_items() {
         "payload": shared_payload("secret")
     });
     server
-        .mock("GET", "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001")
+        .mock(
+            "GET",
+            "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001",
+        )
         .match_header("authorization", "Bearer token")
         .with_status(200)
         .with_body(item_body.to_string())
@@ -206,7 +209,10 @@ fn materialize_command_writes_files() {
         "payload": shared_payload("secret")
     });
     server
-        .mock("GET", "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001")
+        .mock(
+            "GET",
+            "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001",
+        )
         .match_header("authorization", "Bearer token")
         .with_status(200)
         .with_body(item_body.to_string())
