@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../../..");
 const docsRoot = path.join(repoRoot, "docs");
-const contentDocs = path.join(repoRoot, "docs", "content", "docs");
+const contentDocs = path.join(repoRoot, "docs", "starlight", "src", "content", "docs");
 
 await fs.mkdir(contentDocs, { recursive: true });
 
