@@ -9,6 +9,7 @@ use crate::config::AuthMode;
 use crate::domains::auth::core::passwords::{
     derive_auth_hash, hash_password, random_kdf_salt, KdfParams,
 };
+use crate::domains::errors::ServiceError;
 use crate::infra::metrics;
 
 pub struct ListUsersCommand {
@@ -29,15 +30,7 @@ pub struct ResetPasswordCommand {
     pub password: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum AdminUserError {
-    ForbiddenNoBody,
-    Forbidden(&'static str),
-    BadRequest(&'static str),
-    NotFound,
-    Db,
-    Kdf,
-}
+pub type AdminUserError = ServiceError;
 
 pub struct ListUsersResult {
     pub users: Vec<User>,
@@ -120,7 +113,7 @@ pub async fn list_users(
         Ok(users) => users,
         Err(_) => {
             tracing::error!(event = "users_list_failed", "DB error");
-            return Err(AdminUserError::Db);
+            return Err(AdminUserError::DbError);
         }
     };
 
@@ -206,7 +199,7 @@ pub async fn create_user(
 
     let Ok(()) = repo.create(&user).await else {
         tracing::error!(event = "users_create_failed", "DB error");
-        return Err(AdminUserError::Db);
+        return Err(AdminUserError::DbError);
     };
     tracing::info!(event = "users_create", user_id = "redacted", "User created");
     Ok(user)
@@ -231,7 +224,7 @@ pub async fn get_user(
         Ok(None) => return Err(AdminUserError::NotFound),
         Err(_) => {
             tracing::error!(event = "users_get_failed", "DB error");
-            return Err(AdminUserError::Db);
+            return Err(AdminUserError::DbError);
         }
     };
 
@@ -259,7 +252,7 @@ pub async fn delete_user(
         Ok(None) => return Err(AdminUserError::NotFound),
         Err(_) => {
             tracing::error!(event = "users_delete_failed", "DB error");
-            return Err(AdminUserError::Db);
+            return Err(AdminUserError::DbError);
         }
     };
 
@@ -275,7 +268,7 @@ pub async fn delete_user(
         .await
     else {
         tracing::error!(event = "users_delete_failed", "DB error");
-        return Err(AdminUserError::Db);
+        return Err(AdminUserError::DbError);
     };
     if affected == 0 {
         return Err(AdminUserError::NotFound);
@@ -304,7 +297,7 @@ pub async fn block_user(
         Ok(None) => return Err(AdminUserError::NotFound),
         Err(_) => {
             tracing::error!(event = "users_block_failed", "DB error");
-            return Err(AdminUserError::Db);
+            return Err(AdminUserError::DbError);
         }
     };
     let Ok(affected) = repo
@@ -312,7 +305,7 @@ pub async fn block_user(
         .await
     else {
         tracing::error!(event = "users_block_failed", "DB error");
-        return Err(AdminUserError::Db);
+        return Err(AdminUserError::DbError);
     };
     if affected == 0 {
         return Err(AdminUserError::NotFound);
@@ -341,7 +334,7 @@ pub async fn unblock_user(
         Ok(None) => return Err(AdminUserError::NotFound),
         Err(_) => {
             tracing::error!(event = "users_unblock_failed", "DB error");
-            return Err(AdminUserError::Db);
+            return Err(AdminUserError::DbError);
         }
     };
     let Ok(affected) = repo
@@ -349,7 +342,7 @@ pub async fn unblock_user(
         .await
     else {
         tracing::error!(event = "users_unblock_failed", "DB error");
-        return Err(AdminUserError::Db);
+        return Err(AdminUserError::DbError);
     };
     if affected == 0 {
         return Err(AdminUserError::NotFound);
@@ -386,7 +379,7 @@ pub async fn reset_password(
         Ok(None) => return Err(AdminUserError::NotFound),
         Err(_) => {
             tracing::error!(event = "users_reset_password_failed", "DB error");
-            return Err(AdminUserError::Db);
+            return Err(AdminUserError::DbError);
         }
     };
     if user.status == UserStatus::Disabled {
@@ -436,7 +429,7 @@ pub async fn reset_password(
         .await
     else {
         tracing::error!(event = "users_reset_password_failed", "DB error");
-        return Err(AdminUserError::Db);
+        return Err(AdminUserError::DbError);
     };
     if affected == 0 {
         return Err(AdminUserError::NotFound);

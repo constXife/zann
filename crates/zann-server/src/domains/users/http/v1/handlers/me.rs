@@ -18,10 +18,31 @@ fn map_me_error(error: MeError) -> axum::response::Response {
         MeError::Forbidden(code) => {
             (StatusCode::FORBIDDEN, Json(ErrorResponse { error: code })).into_response()
         }
+        MeError::Unauthorized(code) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse { error: code }),
+        )
+            .into_response(),
         MeError::NotFound => StatusCode::NOT_FOUND.into_response(),
-        MeError::Db => (
+        MeError::BadRequest(code) => {
+            (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: code })).into_response()
+        }
+        MeError::Conflict(code) => {
+            (StatusCode::CONFLICT, Json(ErrorResponse { error: code })).into_response()
+        }
+        MeError::PayloadTooLarge(code) => (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(ErrorResponse { error: code }),
+        )
+            .into_response(),
+        MeError::DbError => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),
+        )
+            .into_response(),
+        MeError::Internal(code) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: code }),
         )
             .into_response(),
         MeError::NoChanges => (
@@ -48,6 +69,20 @@ fn map_me_error(error: MeError) -> axum::response::Response {
         MeError::Kdf => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "kdf_error" }),
+        )
+            .into_response(),
+        MeError::DeviceRequired => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "device_required",
+            }),
+        )
+            .into_response(),
+        MeError::PolicyMismatch { .. } => (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "policy_mismatch",
+            }),
         )
             .into_response(),
     }

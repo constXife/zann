@@ -18,22 +18,13 @@ use crate::domains::access_control::http::{
     find_vault, parse_scope, vault_role_allows, ScopeRule, VaultScope,
 };
 use crate::domains::access_control::policies::PolicyDecision;
+use crate::domains::errors::ServiceError;
 use crate::infra::metrics;
 
 pub const ITEM_HISTORY_LIMIT: i64 = 5;
 const MAX_CIPHERTEXT_BYTES: usize = 10 * 1024 * 1024;
 
-#[derive(Debug, Clone, Copy)]
-pub enum ItemsError {
-    ForbiddenNoBody,
-    Forbidden(&'static str),
-    NotFound,
-    BadRequest(&'static str),
-    Conflict(&'static str),
-    PayloadTooLarge(&'static str),
-    Db,
-    Internal(&'static str),
-}
+pub type ItemsError = ServiceError;
 
 pub struct ItemWithVault {
     pub vault: Vault,
@@ -137,7 +128,7 @@ pub async fn list_items(
     let item_repo = ItemRepo::new(&state.db);
     let Ok(mut items) = item_repo.list_by_vault(vault.id, false).await else {
         tracing::error!(event = "items_list_failed", "DB error");
-        return Err(ItemsError::Db);
+        return Err(ItemsError::DbError);
     };
 
     if let Some(prefix) = prefix {
@@ -175,7 +166,7 @@ pub async fn get_item(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_get_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -232,7 +223,7 @@ pub async fn upload_item_file(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_get_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
     if item.vault_id != vault.id {
@@ -254,7 +245,7 @@ pub async fn upload_item_file(
         Ok(None) => {}
         Err(_) => {
             tracing::error!(event = "attachment_lookup_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     }
     if vault.encryption_type == VaultEncryptionType::Server {
@@ -340,7 +331,7 @@ pub async fn upload_item_file(
 
     if attachment_repo.create(&attachment).await.is_err() {
         tracing::error!(event = "attachment_create_failed", "DB error");
-        return Err(ItemsError::Db);
+        return Err(ItemsError::DbError);
     }
 
     if vault.encryption_type == VaultEncryptionType::Server {
@@ -399,7 +390,7 @@ pub async fn download_item_file(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_get_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
     if item.vault_id != vault.id {
@@ -414,7 +405,7 @@ pub async fn download_item_file(
         Ok(attachments) => attachments,
         Err(_) => {
             tracing::error!(event = "attachment_list_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
     let mut attachment = None;
@@ -594,7 +585,7 @@ pub async fn create_item(
     let item_repo = ItemRepo::new(&state.db);
     if let Err(err) = item_repo.create(&item).await {
         tracing::error!(event = "item_create_failed", error = %err, "DB error");
-        return Err(ItemsError::Db);
+        return Err(ItemsError::DbError);
     }
 
     let history_repo = ItemHistoryRepo::new(&state.db);
@@ -687,7 +678,7 @@ pub async fn update_item(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_update_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -860,7 +851,7 @@ pub async fn update_item(
 
     let Ok(affected) = item_repo.update(&item).await else {
         tracing::error!(event = "item_update_failed", "DB error");
-        return Err(ItemsError::Db);
+        return Err(ItemsError::DbError);
     };
     if affected == 0 {
         return Err(ItemsError::Conflict("row_version_conflict"));
@@ -918,7 +909,7 @@ pub async fn delete_item(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_delete_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -994,7 +985,7 @@ pub async fn delete_item(
 
     let Ok(affected) = item_repo.update(&item).await else {
         tracing::error!(event = "item_delete_failed", "DB error");
-        return Err(ItemsError::Db);
+        return Err(ItemsError::DbError);
     };
     if affected == 0 {
         return Err(ItemsError::Conflict("row_version_conflict"));
@@ -1047,7 +1038,7 @@ pub async fn list_item_versions(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_versions_list_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -1070,7 +1061,7 @@ pub async fn list_item_versions(
         Ok(rows) => rows,
         Err(_) => {
             tracing::error!(event = "item_versions_list_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -1110,7 +1101,7 @@ pub async fn get_item_version(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_version_get_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -1131,7 +1122,7 @@ pub async fn get_item_version(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_version_get_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -1178,7 +1169,7 @@ pub async fn restore_item_version(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_restore_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
     if item.vault_id != vault.id {
@@ -1191,7 +1182,7 @@ pub async fn restore_item_version(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_restore_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -1260,7 +1251,7 @@ pub async fn restore_item_version(
 
     let Ok(affected) = item_repo.update(&item).await else {
         tracing::error!(event = "item_restore_failed", "DB error");
-        return Err(ItemsError::Db);
+        return Err(ItemsError::DbError);
     };
     if affected == 0 {
         return Err(ItemsError::Conflict("row_version_conflict"));
@@ -1569,7 +1560,7 @@ async fn update_file_upload_state(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "item_get_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
     if item.vault_id != vault.id {
@@ -1695,7 +1686,7 @@ async fn authorize_vault_access(
         Ok(None) => return Err(ItemsError::NotFound),
         Err(_) => {
             tracing::error!(event = "vault_access_failed", "DB error");
-            return Err(ItemsError::Db);
+            return Err(ItemsError::DbError);
         }
     };
 
@@ -1726,7 +1717,7 @@ async fn authorize_vault_access(
                 }
                 Err(_) => {
                     tracing::error!(event = "vault_access_failed", "DB error");
-                    return Err(ItemsError::Db);
+                    return Err(ItemsError::DbError);
                 }
             }
         }

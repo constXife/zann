@@ -178,10 +178,23 @@ fn map_vault_error(error: VaultServiceError) -> axum::response::Response {
         VaultServiceError::Forbidden(code) => {
             (StatusCode::FORBIDDEN, Json(ErrorResponse { error: code })).into_response()
         }
+        VaultServiceError::Unauthorized(code) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse { error: code }),
+        )
+            .into_response(),
         VaultServiceError::NotFound => StatusCode::NOT_FOUND.into_response(),
         VaultServiceError::BadRequest(code) => {
             (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: code })).into_response()
         }
+        VaultServiceError::Conflict(code) => {
+            (StatusCode::CONFLICT, Json(ErrorResponse { error: code })).into_response()
+        }
+        VaultServiceError::PayloadTooLarge(code) => (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(ErrorResponse { error: code }),
+        )
+            .into_response(),
         VaultServiceError::DbError => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: "db_error" }),
@@ -190,6 +203,46 @@ fn map_vault_error(error: VaultServiceError) -> axum::response::Response {
         VaultServiceError::Internal(code) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse { error: code }),
+        )
+            .into_response(),
+        VaultServiceError::NoChanges => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "no_changes",
+            }),
+        )
+            .into_response(),
+        VaultServiceError::InvalidPassword => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_password",
+            }),
+        )
+            .into_response(),
+        VaultServiceError::InvalidCredentials => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "invalid_credentials",
+            }),
+        )
+            .into_response(),
+        VaultServiceError::Kdf => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse { error: "kdf_error" }),
+        )
+            .into_response(),
+        VaultServiceError::DeviceRequired => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "device_required",
+            }),
+        )
+            .into_response(),
+        VaultServiceError::PolicyMismatch { .. } => (
+            StatusCode::CONFLICT,
+            Json(ErrorResponse {
+                error: "policy_mismatch",
+            }),
         )
             .into_response(),
     }

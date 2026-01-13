@@ -1,9 +1,8 @@
 use base64::Engine;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use sqlx_core::query::query;
 use sqlx_postgres::Postgres;
 use std::collections::HashSet;
-use thiserror::Error;
 use uuid::Uuid;
 use zann_core::api::auth::{
     LoginRequest, LoginResponse, LogoutRequest, OidcLoginRequest, PreloginResponse, RefreshRequest,
@@ -26,8 +25,10 @@ use crate::domains::auth::core::passwords::{
 };
 use crate::domains::auth::core::tokens::hash_token;
 use crate::domains::auth::helpers::{
-    build_device, ensure_personal_vault, ensure_personal_vault_tx,
+    build_device, build_login_response, create_session_for_user, ensure_personal_vault,
+    ensure_personal_vault_tx, ttl_seconds_u64,
 };
+use crate::domains::errors::ServiceError;
 use crate::infra::db::apply_tx_isolation;
 use crate::infra::metrics;
 
@@ -44,28 +45,7 @@ pub struct AuthRequestContext {
     pub user_agent: Option<String>,
 }
 
-struct SessionTokens {
-    session: Session,
-    access_token: String,
-    refresh_token: String,
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Error, Clone, Copy)]
-pub enum AuthError {
-    #[error("forbidden: {0}")]
-    Forbidden(&'static str),
-    #[error("unauthorized: {0}")]
-    Unauthorized(&'static str),
-    #[error("bad_request: {0}")]
-    BadRequest(&'static str),
-    #[error("conflict: {0}")]
-    Conflict(&'static str),
-    #[error("not_found")]
-    NotFound,
-    #[error("internal: {0}")]
-    Internal(&'static str),
-}
+pub type AuthError = ServiceError;
 
 pub async fn prelogin(
     state: &AppState,
@@ -85,7 +65,7 @@ pub async fn prelogin(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Prelogin failed"
             );
-            return Err(AuthError::Internal("db_error"));
+            return Err(AuthError::DbError);
         }
     };
 
@@ -183,7 +163,7 @@ pub async fn register(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Registration failed"
             );
-            return Err(AuthError::Internal("kdf_error"));
+            return Err(AuthError::Kdf);
         }
     };
     let auth_hash = if let Ok(value) = derive_auth_hash(&payload.password, &kdf_salt, &params) {
@@ -198,7 +178,7 @@ pub async fn register(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Registration failed"
         );
-        return Err(AuthError::Internal("kdf_error"));
+        return Err(AuthError::Kdf);
     };
     let password_hash =
         if let Ok(value) = hash_password(&auth_hash, &state.password_pepper, &params) {
@@ -213,7 +193,7 @@ pub async fn register(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Registration failed"
             );
-            return Err(AuthError::Internal("kdf_error"));
+            return Err(AuthError::Kdf);
         };
 
     let user = User {
@@ -268,7 +248,7 @@ pub async fn register(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Registration failed"
             );
-            return Err(AuthError::Internal("db_error"));
+            return Err(AuthError::DbError);
         }
     };
     if let Err(err) = apply_tx_isolation(&mut tx, state.db_tx_isolation).await {
@@ -282,7 +262,7 @@ pub async fn register(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Registration failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     let existing = query::<Postgres>(
@@ -334,7 +314,7 @@ pub async fn register(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Registration failed"
             );
-            return Err(AuthError::Internal("db_error"));
+            return Err(AuthError::DbError);
         }
     }
 
@@ -403,7 +383,7 @@ pub async fn register(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Registration failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     if let Err(err) = query::<Postgres>(
@@ -446,7 +426,7 @@ pub async fn register(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Registration failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     if let Err(err) = query::<Postgres>(
@@ -486,7 +466,7 @@ pub async fn register(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Registration failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     if ensure_personal_vault_tx(state, &mut tx, user.id, now)
@@ -519,7 +499,7 @@ pub async fn register(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Registration failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     metrics::auth_register("ok");
@@ -587,7 +567,7 @@ pub async fn login_internal(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Login failed"
             );
-            return Err(AuthError::Internal("db_error"));
+            return Err(AuthError::DbError);
         }
     };
 
@@ -620,7 +600,7 @@ pub async fn login_internal(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Login failed"
             );
-            return Err(AuthError::Internal("kdf_error"));
+            return Err(AuthError::Kdf);
         }
     };
     let Ok(valid) = verify_password(&user, &payload.password, &state.password_pepper) else {
@@ -635,7 +615,7 @@ pub async fn login_internal(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Login failed"
         );
-        return Err(AuthError::Internal("kdf_error"));
+        return Err(AuthError::Kdf);
     };
 
     if !valid {
@@ -680,7 +660,7 @@ pub async fn login_internal(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Login failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     let tokens = create_session_for_user(state, user.id, device.id, now);
@@ -698,7 +678,7 @@ pub async fn login_internal(
             ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
             "Login failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     if ensure_personal_vault(state, user.id, now).await.is_err() {
@@ -842,7 +822,7 @@ pub async fn login_oidc(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Login failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     let tokens = create_session_for_user(state, identity.user_id, device.id, now);
@@ -860,7 +840,7 @@ pub async fn login_oidc(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Login failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     if ensure_personal_vault(state, identity.user_id, now)
@@ -920,7 +900,7 @@ pub async fn refresh(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Refresh failed"
             );
-            return Err(AuthError::Internal("db_error"));
+            return Err(AuthError::DbError);
         }
     };
 
@@ -964,7 +944,7 @@ pub async fn refresh(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Refresh failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     metrics::auth_tokens_issued("access");
@@ -1009,7 +989,7 @@ pub async fn logout(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Logout failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     if let Some(session) = &session {
@@ -1064,7 +1044,7 @@ pub(crate) async fn login_service_account(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Login failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     };
 
     let params = KdfParams {
@@ -1086,7 +1066,7 @@ pub(crate) async fn login_service_account(
                     request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                     "Login failed"
                 );
-                return Err(AuthError::Internal("kdf_error"));
+                return Err(AuthError::Kdf);
             }
         };
     let token_hash =
@@ -1102,7 +1082,7 @@ pub(crate) async fn login_service_account(
                 request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
                 "Login failed"
             );
-            return Err(AuthError::Internal("kdf_error"));
+            return Err(AuthError::Kdf);
         };
 
     let account = if let Some(account) = accounts.into_iter().find(|sa| sa.token_hash == token_hash)
@@ -1167,7 +1147,7 @@ pub(crate) async fn login_service_account(
             request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
             "Login failed"
         );
-        return Err(AuthError::Internal("db_error"));
+        return Err(AuthError::DbError);
     }
 
     if let Err(err) = repo
@@ -1265,52 +1245,6 @@ async fn service_account_vault_keys(
     Ok(keys)
 }
 
-fn create_session_for_user(
-    state: &AppState,
-    user_id: Uuid,
-    device_id: Uuid,
-    now: DateTime<Utc>,
-) -> SessionTokens {
-    let refresh_token = Uuid::now_v7().to_string();
-    let access_token = Uuid::now_v7().to_string();
-    let refresh_token_hash = hash_token(&refresh_token, &state.token_pepper);
-    let access_token_hash = hash_token(&access_token, &state.token_pepper);
-    let access_expires_at = now + chrono::Duration::seconds(state.access_token_ttl_seconds);
-
-    let session = Session {
-        id: Uuid::now_v7(),
-        user_id,
-        device_id,
-        access_token_hash,
-        access_expires_at,
-        refresh_token_hash,
-        expires_at: now + chrono::Duration::seconds(state.refresh_token_ttl_seconds),
-        created_at: now,
-    };
-
-    SessionTokens {
-        session,
-        access_token,
-        refresh_token,
-    }
-}
-
-fn build_login_response(
-    state: &AppState,
-    access_token: String,
-    refresh_token: String,
-) -> LoginResponse {
-    LoginResponse {
-        access_token,
-        refresh_token,
-        expires_in: ttl_seconds_u64(state.access_token_ttl_seconds),
-    }
-}
-
 fn service_account_prefix(token: &str) -> String {
     token.chars().take(SERVICE_ACCOUNT_PREFIX_LEN).collect()
-}
-
-fn ttl_seconds_u64(ttl_seconds: i64) -> u64 {
-    u64::try_from(ttl_seconds).unwrap_or(0)
 }

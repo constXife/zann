@@ -350,6 +350,14 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
             }),
         )
             .into_response(),
+        SecretError::Unauthorized(code) => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: code,
+                details: None,
+            }),
+        )
+            .into_response(),
         SecretError::PolicyMismatch {
             existing,
             requested,
@@ -364,7 +372,15 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
             }),
         )
             .into_response(),
-        SecretError::Db => (
+        SecretError::PayloadTooLarge(code) => (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(ErrorResponse {
+                error: code,
+                details: None,
+            }),
+        )
+            .into_response(),
+        SecretError::DbError => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
                 error: "db_error",
@@ -376,6 +392,46 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
                 error: code,
+                details: None,
+            }),
+        )
+            .into_response(),
+        SecretError::NoChanges => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "no_changes",
+                details: None,
+            }),
+        )
+            .into_response(),
+        SecretError::InvalidPassword => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "invalid_password",
+                details: None,
+            }),
+        )
+            .into_response(),
+        SecretError::InvalidCredentials => (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponse {
+                error: "invalid_credentials",
+                details: None,
+            }),
+        )
+            .into_response(),
+        SecretError::Kdf => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorResponse {
+                error: "kdf_error",
+                details: None,
+            }),
+        )
+            .into_response(),
+        SecretError::DeviceRequired => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: "device_required",
                 details: None,
             }),
         )
@@ -415,12 +471,40 @@ fn map_secret_error_body(error: SecretError) -> ErrorResponse {
             error: code,
             details: None,
         },
-        SecretError::Db => ErrorResponse {
+        SecretError::Unauthorized(code) => ErrorResponse {
+            error: code,
+            details: None,
+        },
+        SecretError::DbError => ErrorResponse {
             error: "db_error",
             details: None,
         },
         SecretError::Internal(code) => ErrorResponse {
             error: code,
+            details: None,
+        },
+        SecretError::PayloadTooLarge(code) => ErrorResponse {
+            error: code,
+            details: None,
+        },
+        SecretError::NoChanges => ErrorResponse {
+            error: "no_changes",
+            details: None,
+        },
+        SecretError::InvalidPassword => ErrorResponse {
+            error: "invalid_password",
+            details: None,
+        },
+        SecretError::InvalidCredentials => ErrorResponse {
+            error: "invalid_credentials",
+            details: None,
+        },
+        SecretError::Kdf => ErrorResponse {
+            error: "kdf_error",
+            details: None,
+        },
+        SecretError::DeviceRequired => ErrorResponse {
+            error: "device_required",
             details: None,
         },
     }
@@ -432,8 +516,15 @@ fn error_label(error: &SecretError) -> &'static str {
         SecretError::NotFound => "not_found",
         SecretError::BadRequest(_) => "bad_request",
         SecretError::Conflict(_) => "conflict",
+        SecretError::Unauthorized(_) => "unauthorized",
         SecretError::PolicyMismatch { .. } => "policy_mismatch",
-        SecretError::Db => "db_error",
+        SecretError::PayloadTooLarge(_) => "payload_too_large",
+        SecretError::DbError => "db_error",
         SecretError::Internal(_) => "internal",
+        SecretError::NoChanges => "no_changes",
+        SecretError::InvalidPassword => "invalid_password",
+        SecretError::InvalidCredentials => "invalid_credentials",
+        SecretError::Kdf => "kdf_error",
+        SecretError::DeviceRequired => "device_required",
     }
 }

@@ -53,6 +53,11 @@ fn map_items_error(error: ItemsError) -> axum::response::Response {
             Json(items_models::ErrorResponse { error: code }),
         )
             .into_response(),
+        ItemsError::Unauthorized(code) => (
+            StatusCode::UNAUTHORIZED,
+            Json(items_models::ErrorResponse { error: code }),
+        )
+            .into_response(),
         ItemsError::NotFound => StatusCode::NOT_FOUND.into_response(),
         ItemsError::BadRequest(code) => (
             StatusCode::BAD_REQUEST,
@@ -69,7 +74,7 @@ fn map_items_error(error: ItemsError) -> axum::response::Response {
             Json(items_models::ErrorResponse { error: code }),
         )
             .into_response(),
-        ItemsError::Db => (
+        ItemsError::DbError => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(items_models::ErrorResponse { error: "db_error" }),
         )
@@ -77,6 +82,46 @@ fn map_items_error(error: ItemsError) -> axum::response::Response {
         ItemsError::Internal(code) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(items_models::ErrorResponse { error: code }),
+        )
+            .into_response(),
+        ItemsError::NoChanges => (
+            StatusCode::BAD_REQUEST,
+            Json(items_models::ErrorResponse {
+                error: "no_changes",
+            }),
+        )
+            .into_response(),
+        ItemsError::InvalidPassword => (
+            StatusCode::BAD_REQUEST,
+            Json(items_models::ErrorResponse {
+                error: "invalid_password",
+            }),
+        )
+            .into_response(),
+        ItemsError::InvalidCredentials => (
+            StatusCode::UNAUTHORIZED,
+            Json(items_models::ErrorResponse {
+                error: "invalid_credentials",
+            }),
+        )
+            .into_response(),
+        ItemsError::Kdf => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(items_models::ErrorResponse { error: "kdf_error" }),
+        )
+            .into_response(),
+        ItemsError::DeviceRequired => (
+            StatusCode::BAD_REQUEST,
+            Json(items_models::ErrorResponse {
+                error: "device_required",
+            }),
+        )
+            .into_response(),
+        ItemsError::PolicyMismatch { .. } => (
+            StatusCode::CONFLICT,
+            Json(items_models::ErrorResponse {
+                error: "policy_mismatch",
+            }),
         )
             .into_response(),
     }
