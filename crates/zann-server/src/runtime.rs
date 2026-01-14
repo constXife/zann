@@ -198,6 +198,8 @@ pub(crate) async fn shutdown_signal() {
 }
 
 #[cfg(all(feature = "jemalloc", unix))]
+#[allow(dead_code)]
+// Used by the bin target; the lib target does not call this directly.
 fn heap_profile_dump(dir: &str) -> Result<String, String> {
     use std::ffi::CString;
     use std::path::PathBuf;
@@ -276,6 +278,8 @@ fn heap_profile_dump(dir: &str) -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+#[allow(dead_code)]
+// Used by the bin target; the lib target does not call this directly.
 pub(crate) fn start_heap_profiler() {
     #[cfg(all(feature = "jemalloc", unix))]
     {
