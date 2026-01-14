@@ -225,8 +225,34 @@ pub(crate) async fn rotate_commit(
         }
     };
 
-    let payload_enc: Vec<u8> = row.try_get("payload_enc").unwrap_or_default();
-    let previous_checksum: String = row.try_get("checksum").unwrap_or_default();
+    let payload_enc: Vec<u8> = match row.try_get("payload_enc") {
+        Ok(value) => value,
+        Err(err) => {
+            let _ = sqlx_core::query::query("ROLLBACK")
+                .execute(&mut *conn)
+                .await;
+            tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
+    let previous_checksum: String = match row.try_get("checksum") {
+        Ok(value) => value,
+        Err(err) => {
+            let _ = sqlx_core::query::query("ROLLBACK")
+                .execute(&mut *conn)
+                .await;
+            tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
     let previous_version: i64 = row.try_get("version").unwrap_or(1);
     let row_version: i64 = row.try_get("row_version").unwrap_or(1);
     let existing_device_id: Uuid = row.try_get("device_id").unwrap_or(item.device_id);
