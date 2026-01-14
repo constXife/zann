@@ -55,13 +55,11 @@ impl DbTxIsolation {
 }
 
 impl Settings {
-    #[must_use]
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self, String> {
         Self::from_env_with_options(true)
     }
 
-    #[must_use]
-    pub fn from_env_with_options(require_pepper: bool) -> Self {
+    pub fn from_env_with_options(require_pepper: bool) -> Result<Self, String> {
         let addr = match env::var("ZANN_ADDR") {
             Ok(value) => value.parse().unwrap_or_else(|_| {
                 warn!(event = "config_invalid", field = "ZANN_ADDR", value = %value);
@@ -157,15 +155,12 @@ impl Settings {
                 Arc::new(key)
             }
         };
-        let policies = env_config::load_policies(&config).unwrap_or_else(|err| {
-            panic!("Failed to load policies: {err}");
-        });
+        let policies = env_config::load_policies(&config)
+            .map_err(|err| format!("failed to load policies: {err}"))?;
         let (secret_policies, secret_default_policy) = env_config::load_secret_policies(&config)
-            .unwrap_or_else(|err| {
-                panic!("Failed to load secret policies: {err}");
-            });
+            .map_err(|err| format!("failed to load secret policies: {err}"))?;
 
-        Self {
+        Ok(Self {
             addr,
             db_url,
             db_pool_max,
@@ -183,7 +178,7 @@ impl Settings {
             policies,
             secret_policies,
             secret_default_policy,
-        }
+        })
     }
 }
 

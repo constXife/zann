@@ -106,6 +106,10 @@ pub(crate) fn init_tracing(
 
 #[allow(dead_code)]
 fn init_otel(config: &OtelConfig) -> Result<Tracer, String> {
+    if config.insecure.unwrap_or(false) && !allow_insecure_otel() {
+        return Err("otel_insecure_not_allowed".to_string());
+    }
+
     let mut exporter = opentelemetry_otlp::new_exporter().http();
     if let Some(endpoint) = config.endpoint.as_deref() {
         exporter = exporter.with_endpoint(endpoint);
@@ -159,6 +163,18 @@ fn init_otel(config: &OtelConfig) -> Result<Tracer, String> {
     let tracer = tracer_provider.tracer("zann-server");
     global::set_tracer_provider(tracer_provider);
     Ok(tracer)
+}
+
+fn allow_insecure_otel() -> bool {
+    std::env::var("ZANN_TRACING_OTEL_ALLOW_INSECURE")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 pub(crate) async fn shutdown_signal() {

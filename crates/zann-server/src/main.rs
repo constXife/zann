@@ -55,6 +55,13 @@ async fn main() {
     } else {
         settings::Settings::from_env()
     };
+    let settings = match settings {
+        Ok(settings) => settings,
+        Err(err) => {
+            tracing::error!(event = "config_load_failed", error = %err);
+            std::process::exit(1);
+        }
+    };
     let sentry_guard = bootstrap::init_sentry(&settings);
     let sentry_enabled = sentry_guard.is_some();
     let otel_guard = bootstrap::init_tracing(sentry_enabled, &settings);

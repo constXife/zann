@@ -655,6 +655,7 @@ pub(crate) async fn sync_push(
                         error = %rollback_err,
                         "DB rollback failed"
                     );
+                    return Err(SyncError::DbError);
                 }
                 return match err.status {
                     axum::http::StatusCode::BAD_REQUEST => Err(SyncError::BadRequest(err.error)),
@@ -670,6 +671,7 @@ pub(crate) async fn sync_push(
     if !conflicts.is_empty() {
         if let Err(err) = tx.rollback().await {
             tracing::error!(event = "sync_push_failed", error = %err, "DB rollback failed");
+            return Err(SyncError::DbError);
         }
         let change_repo = ChangeRepo::new(&state.db);
         let new_seq = change_repo.last_seq_for_vault(vault.id).await.unwrap_or(0);

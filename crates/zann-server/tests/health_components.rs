@@ -11,7 +11,6 @@ use zann_server::app::AppState;
 use zann_server::config::{MetricsConfig, MetricsProfile, ServerConfig};
 use zann_server::domains::access_control::policies::{PolicyRule, PolicySet};
 use zann_server::domains::access_control::policy_store::PolicyStore;
-use zann_server::infra::metrics;
 use zann_server::infra::security_profiles::load_security_profiles;
 use zann_server::infra::usage::UsageTracker;
 use zann_server::oidc::OidcJwksCache;
@@ -30,11 +29,10 @@ impl TestApp {
         let rules: Vec<PolicyRule> = support::load_policy_rules();
 
         let metrics_config = MetricsConfig {
-            enabled: true,
+            enabled: false,
             endpoint: "/metrics".to_string(),
             profile: Some(MetricsProfile::Prod),
         };
-        metrics::set_profile(metrics_config.effective_profile());
         let mut config = ServerConfig::default();
         support::tune_test_kdf(&mut config);
         let usage_tracker = std::sync::Arc::new(UsageTracker::new(pool.clone(), 100));
@@ -106,4 +104,29 @@ async fn health_includes_component_statuses() {
         .and_then(|value| value.as_str())
         .expect("oidc status");
     assert_eq!(oidc_status, "disabled");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn health_hides_details_in_production() {
+    let app = TestApp::new().await;
+    std::env::set_var("ZANN_ENV", "production");
+
+    let response = app.get("/health").await;
+    std::env::remove_var("ZANN_ENV");
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("health body");
+    let payload: Value = serde_json::from_slice(&bytes).expect("health json");
+    let components = payload.get("components").expect("components");
+
+    let db_pool_details = components
+        .get("db_pool")
+        .and_then(|value| value.get("details"));
+    assert!(db_pool_details.is_none());
+
+    let kdf_details = components.get("kdf").and_then(|value| value.get("details"));
+    assert!(kdf_details.is_none());
 }

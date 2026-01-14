@@ -30,7 +30,9 @@ impl UsageTracker {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(interval).await;
-                let _ = self.flush().await;
+                if let Err(err) = self.flush().await {
+                    tracing::error!(event = "usage_flush_failed", error = %err, "Usage flush failed");
+                }
             }
         });
     }
@@ -54,7 +56,9 @@ impl UsageTracker {
         }
 
         if flush {
-            let _ = self.flush().await;
+            if let Err(err) = self.flush().await {
+                tracing::error!(event = "usage_flush_failed", error = %err, "Usage flush failed");
+            }
         }
     }
 

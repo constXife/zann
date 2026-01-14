@@ -1,6 +1,8 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
 use chrono::{DateTime, Utc};
+use sqlx_core::pool::PoolConnection;
 use sqlx_core::row::Row;
+use sqlx_postgres::Postgres;
 use uuid::Uuid;
 use zann_core::{FieldKind, Identity};
 use zann_crypto::vault_crypto as core_crypto;
@@ -13,6 +15,19 @@ use crate::infra::metrics;
 use super::super::helpers::{actor_snapshot, decrypt_rotation_candidate, is_shared_server_vault};
 use super::super::types::{ErrorResponse, RotationCommitResponse};
 use super::super::{ROTATION_STATE_ROTATING, ROTATION_STATE_STALE};
+
+async fn rollback(conn: &mut PoolConnection<Postgres>) {
+    if let Err(err) = sqlx_core::query::query("ROLLBACK")
+        .execute(&mut **conn)
+        .await
+    {
+        tracing::error!(
+            event = "rotation_commit_failed",
+            error = %err,
+            "DB rollback failed"
+        );
+    }
+}
 
 pub(crate) async fn rotate_commit(
     State(state): State<AppState>,
@@ -140,15 +155,11 @@ pub(crate) async fn rotate_commit(
     let row = match row {
         Ok(Some(row)) => row,
         Ok(None) => {
-            let _ = sqlx_core::query::query("ROLLBACK")
-                .execute(&mut *conn)
-                .await;
+            rollback(&mut conn).await;
             return StatusCode::NOT_FOUND.into_response();
         }
         Err(_) => {
-            let _ = sqlx_core::query::query("ROLLBACK")
-                .execute(&mut *conn)
-                .await;
+            rollback(&mut conn).await;
             tracing::error!(event = "rotation_commit_failed", "DB error");
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -170,9 +181,7 @@ pub(crate) async fn rotate_commit(
         state_label,
         Some(ROTATION_STATE_ROTATING) | Some(ROTATION_STATE_STALE)
     ) {
-        let _ = sqlx_core::query::query("ROLLBACK")
-            .execute(&mut *conn)
-            .await;
+        rollback(&mut conn).await;
         return (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
@@ -183,9 +192,7 @@ pub(crate) async fn rotate_commit(
     }
     let recover_until: Option<DateTime<Utc>> = row.try_get("rotation_recover_until").ok();
     if recover_until.is_some_and(|value| Utc::now() > value) {
-        let _ = sqlx_core::query::query("ROLLBACK")
-            .execute(&mut *conn)
-            .await;
+        rollback(&mut conn).await;
         return (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
@@ -197,9 +204,7 @@ pub(crate) async fn rotate_commit(
 
     let candidate_enc: Option<Vec<u8>> = row.try_get("rotation_candidate_enc").ok();
     let Some(candidate_enc) = candidate_enc else {
-        let _ = sqlx_core::query::query("ROLLBACK")
-            .execute(&mut *conn)
-            .await;
+        rollback(&mut conn).await;
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
@@ -212,9 +217,7 @@ pub(crate) async fn rotate_commit(
     let candidate = match decrypt_rotation_candidate(smk, &vault, item.id, &candidate_enc) {
         Ok(value) => value,
         Err(_) => {
-            let _ = sqlx_core::query::query("ROLLBACK")
-                .execute(&mut *conn)
-                .await;
+            rollback(&mut conn).await;
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
@@ -225,17 +228,70 @@ pub(crate) async fn rotate_commit(
         }
     };
 
-    let payload_enc: Vec<u8> = row.try_get("payload_enc").unwrap_or_default();
-    let previous_checksum: String = row.try_get("checksum").unwrap_or_default();
-    let previous_version: i64 = row.try_get("version").unwrap_or(1);
-    let row_version: i64 = row.try_get("row_version").unwrap_or(1);
-    let existing_device_id: Uuid = row.try_get("device_id").unwrap_or(item.device_id);
+    let payload_enc: Vec<u8> = match row.try_get("payload_enc") {
+        Ok(value) => value,
+        Err(err) => {
+            rollback(&mut conn).await;
+            tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
+    let previous_checksum: String = match row.try_get("checksum") {
+        Ok(value) => value,
+        Err(err) => {
+            rollback(&mut conn).await;
+            tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
+    let previous_version: i64 = match row.try_get("version") {
+        Ok(value) => value,
+        Err(err) => {
+            rollback(&mut conn).await;
+            tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
+    let row_version: i64 = match row.try_get("row_version") {
+        Ok(value) => value,
+        Err(err) => {
+            rollback(&mut conn).await;
+            tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
+    let existing_device_id: Uuid = match row.try_get("device_id") {
+        Ok(value) => value,
+        Err(err) => {
+            rollback(&mut conn).await;
+            tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
     let vault_key = match core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc) {
         Ok(key) => key,
         Err(_) => {
-            let _ = sqlx_core::query::query("ROLLBACK")
-                .execute(&mut *conn)
-                .await;
+            rollback(&mut conn).await;
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
@@ -249,9 +305,7 @@ pub(crate) async fn rotate_commit(
         match core_crypto::decrypt_payload(&vault_key, vault.id, item.id, &payload_enc) {
             Ok(payload) => payload,
             Err(_) => {
-                let _ = sqlx_core::query::query("ROLLBACK")
-                    .execute(&mut *conn)
-                    .await;
+                rollback(&mut conn).await;
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResponse {
@@ -271,9 +325,7 @@ pub(crate) async fn rotate_commit(
         }
     }
     if !updated {
-        let _ = sqlx_core::query::query("ROLLBACK")
-            .execute(&mut *conn)
-            .await;
+        rollback(&mut conn).await;
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
@@ -287,9 +339,7 @@ pub(crate) async fn rotate_commit(
         match core_crypto::encrypt_payload(&vault_key, vault.id, item.id, &payload) {
             Ok(value) => value,
             Err(_) => {
-                let _ = sqlx_core::query::query("ROLLBACK")
-                    .execute(&mut *conn)
-                    .await;
+                rollback(&mut conn).await;
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ErrorResponse {
@@ -304,7 +354,7 @@ pub(crate) async fn rotate_commit(
     let history_id = Uuid::now_v7();
     let now = Utc::now();
     let change_type = zann_core::ChangeType::Update.as_i32();
-    let _ = sqlx_core::query::query(
+    if let Err(err) = sqlx_core::query::query(
         r#"
         INSERT INTO item_history (
             id,
@@ -342,7 +392,14 @@ pub(crate) async fn rotate_commit(
     .bind(actor.device_name.as_deref())
     .bind(now)
     .execute(&mut *conn)
-    .await;
+    .await
+    {
+        tracing::warn!(
+            event = "rotation_history_create_failed",
+            error = %err,
+            "DB error"
+        );
+    }
 
     let new_version = previous_version + 1;
     let device_id = identity.device_id.unwrap_or(existing_device_id);
@@ -377,9 +434,7 @@ pub(crate) async fn rotate_commit(
     .await;
 
     if let Err(err) = updated {
-        let _ = sqlx_core::query::query("ROLLBACK")
-            .execute(&mut *conn)
-            .await;
+        rollback(&mut conn).await;
         tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -398,9 +453,16 @@ pub(crate) async fn rotate_commit(
     }
 
     let history_repo = ItemHistoryRepo::new(&state.db);
-    let _ = history_repo
+    if let Err(err) = history_repo
         .prune_by_item(item.id, state.config.rotation.max_versions)
-        .await;
+        .await
+    {
+        tracing::warn!(
+            event = "rotation_history_prune_failed",
+            error = %err,
+            "DB error"
+        );
+    }
 
     let response = RotationCommitResponse {
         status: "committed",

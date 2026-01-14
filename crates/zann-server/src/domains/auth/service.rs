@@ -283,6 +283,8 @@ pub async fn register(
                     error = %err,
                     "DB rollback failed"
                 );
+                metrics::auth_register("db_error");
+                return Err(AuthError::DbError);
             }
             metrics::auth_register("rejected");
             tracing::warn!(
@@ -303,6 +305,8 @@ pub async fn register(
                     error = %err,
                     "DB rollback failed"
                 );
+                metrics::auth_register("db_error");
+                return Err(AuthError::DbError);
             }
             metrics::auth_register("db_error");
             tracing::error!(
@@ -372,6 +376,8 @@ pub async fn register(
                 error = %rollback_err,
                 "DB rollback failed"
             );
+            metrics::auth_register("db_error");
+            return Err(AuthError::DbError);
         }
         metrics::auth_register("db_error");
         tracing::error!(
@@ -415,6 +421,8 @@ pub async fn register(
                 error = %rollback_err,
                 "DB rollback failed"
             );
+            metrics::auth_register("db_error");
+            return Err(AuthError::DbError);
         }
         metrics::auth_register("db_error");
         tracing::error!(
@@ -455,6 +463,8 @@ pub async fn register(
                 error = %rollback_err,
                 "DB rollback failed"
             );
+            metrics::auth_register("db_error");
+            return Err(AuthError::DbError);
         }
         metrics::auth_register("db_error");
         tracing::error!(
@@ -476,6 +486,8 @@ pub async fn register(
                 error = %rollback_err,
                 "DB rollback failed"
             );
+            metrics::auth_register("db_error");
+            return Err(AuthError::DbError);
         }
         tracing::error!(
             event = "personal_vault_create_failed",

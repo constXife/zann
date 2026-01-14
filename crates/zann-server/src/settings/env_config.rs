@@ -380,7 +380,13 @@ fn generate_master_key_file(path: &Path) -> Result<SecretKey, String> {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+                fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|err| {
+                    format!(
+                        "master key dir chmod failed ({}): {}",
+                        parent.display(),
+                        err
+                    )
+                })?;
             }
         }
     }
@@ -404,7 +410,13 @@ fn generate_identity_key_file(path: &Path) -> Result<SigningKey, String> {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
+                fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|err| {
+                    format!(
+                        "identity key dir chmod failed ({}): {}",
+                        parent.display(),
+                        err
+                    )
+                })?;
             }
         }
     }
@@ -448,7 +460,13 @@ fn write_secret_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
             err
         )
     })?;
-    let _ = file.sync_all();
+    file.sync_all().map_err(|err| {
+        format!(
+            "master key file sync failed ({}): {}",
+            tmp_path.display(),
+            err
+        )
+    })?;
 
     #[cfg(unix)]
     {
@@ -473,7 +491,8 @@ fn write_secret_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o400));
+        fs::set_permissions(path, fs::Permissions::from_mode(0o400))
+            .map_err(|err| format!("master key file chmod failed ({}): {}", path.display(), err))?;
     }
 
     Ok(())
