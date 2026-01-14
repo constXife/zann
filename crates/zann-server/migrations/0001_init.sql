@@ -267,22 +267,6 @@ CREATE TABLE attachments (
 CREATE INDEX idx_attachments_item_id ON attachments(item_id);
 CREATE INDEX idx_attachments_deleted_at ON attachments(deleted_at);
 
-CREATE TABLE item_conflicts (
-    id UUID PRIMARY KEY NOT NULL,
-    item_id UUID NOT NULL,
-    vault_id UUID NOT NULL,
-    losing_version BIGINT NOT NULL,
-    losing_device_id UUID NOT NULL,
-    losing_payload_enc BYTEA NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL,
-    resolved_at TIMESTAMPTZ,
-    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE,
-    FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE,
-    FOREIGN KEY (losing_device_id) REFERENCES devices(id) ON DELETE RESTRICT
-);
-
-CREATE INDEX idx_item_conflicts_vault_id ON item_conflicts(vault_id);
-
 CREATE TABLE changes (
     seq BIGSERIAL PRIMARY KEY,
     vault_id UUID NOT NULL,
@@ -297,29 +281,3 @@ CREATE TABLE changes (
 );
 
 CREATE INDEX idx_changes_vault_seq ON changes(vault_id, seq);
-
-CREATE TABLE applied_ops (
-    op_id UUID PRIMARY KEY NOT NULL,
-    device_id UUID NOT NULL,
-    vault_id UUID NOT NULL,
-    item_id UUID NOT NULL,
-    applied_at TIMESTAMPTZ NOT NULL,
-    FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE,
-    FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE,
-    FOREIGN KEY (item_id) REFERENCES items(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_applied_ops_vault_id ON applied_ops(vault_id);
-
-CREATE TABLE invites (
-    id UUID PRIMARY KEY NOT NULL,
-    vault_id UUID NOT NULL,
-    token_hash TEXT NOT NULL,
-    role SMALLINT NOT NULL,
-    uses_left BIGINT NOT NULL,
-    expires_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL,
-    FOREIGN KEY (vault_id) REFERENCES vaults(id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_invites_vault_id ON invites(vault_id);
