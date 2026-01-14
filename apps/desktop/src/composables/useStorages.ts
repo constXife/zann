@@ -488,7 +488,8 @@ export const useStorages = (options: UseStoragesOptions) => {
       isServerReachable.value = false;
       return;
     }
-    const storage = storages.value.find((entry) => entry.id === options.selectedStorageId.value);
+    const storageList = Array.isArray(storages.value) ? storages.value : [];
+    const storage = storageList.find((entry) => entry.id === options.selectedStorageId.value);
     if (!storage || storage.kind !== StorageKind.Remote) {
       isServerReachable.value = true;
       return;
