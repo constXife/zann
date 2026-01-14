@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, StorageSummary, StorageInfo, SystemInfoResponse } from "../types";
 import { StorageKind } from "../constants/enums";
+import { attachErrorCause, createErrorWithCause } from "./errors";
 
 type Translator = (key: string, params?: Record<string, string | number>) => string;
 
@@ -173,7 +174,7 @@ export const useStorages = (options: UseStoragesOptions) => {
       if (!response.ok || !response.data) {
         const message = response.error?.message;
         const key = response.error?.kind ?? "generic";
-        throw new Error(message ?? options.t(`errors.${key}`));
+        throw createErrorWithCause(message ?? options.t(`errors.${key}`), response.error);
       }
       storages.value = response.data;
       const existing = storages.value.find((entry) => entry.id === options.selectedStorageId.value);
@@ -245,7 +246,7 @@ export const useStorages = (options: UseStoragesOptions) => {
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
         const message = resolveSyncErrorMessage(key, response.error?.message);
-        throw new SyncError(key, message);
+        throw attachErrorCause(new SyncError(key, message), response.error);
       }
       const lockedVaults = response.data?.locked_vaults ?? [];
       if (lockedVaults.length > 0) {
@@ -408,7 +409,7 @@ export const useStorages = (options: UseStoragesOptions) => {
       const response = await invoke<ApiResponse<void>>("storage_delete", { storageId, moveToTrash });
       if (!response.ok) {
         const message = response.error?.message ?? "Failed to delete storage";
-        throw new Error(message);
+        throw createErrorWithCause(message, response.error);
       }
       await loadStorages();
       await options.onReloadVaults();
@@ -425,7 +426,7 @@ export const useStorages = (options: UseStoragesOptions) => {
       const response = await invoke<ApiResponse<void>>("storage_disconnect", { storageId });
       if (!response.ok) {
         const message = response.error?.message ?? "Failed to disconnect storage";
-        throw new Error(message);
+        throw createErrorWithCause(message, response.error);
       }
       await loadStorages();
       await options.onReloadVaults();

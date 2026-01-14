@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, AppStatus, KeystoreStatus, Settings, Status } from "../types";
+import { createErrorWithCause } from "./errors";
 
 type Translator = (key: string) => string;
 
@@ -23,7 +24,7 @@ export const useBootstrap = (options: UseBootstrapOptions) => {
     const response = await invoke<ApiResponse<Status>>("session_status");
     if (!response.ok || !response.data) {
       const key = response.error?.kind ?? "generic";
-      throw new Error(options.t(`errors.${key}`));
+      throw createErrorWithCause(options.t(`errors.${key}`), response.error);
     }
     status.value = response.data;
   };
@@ -32,7 +33,7 @@ export const useBootstrap = (options: UseBootstrapOptions) => {
     const response = await invoke<ApiResponse<AppStatus>>("app_status");
     if (!response.ok || !response.data) {
       const key = response.error?.kind ?? "generic";
-      throw new Error(options.t(`errors.${key}`));
+      throw createErrorWithCause(options.t(`errors.${key}`), response.error);
     }
     appStatus.value = response.data;
   };

@@ -3,6 +3,7 @@ import type { ComputedRef, Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ApiResponse, StorageSummary } from "../../../types";
 import { StorageKind } from "../../../constants/enums";
+import { createErrorWithCause } from "../../errors";
 
 type ConfirmOptions = {
   title: string;
@@ -69,7 +70,7 @@ export function useAppPersonalUnlock({
           if (!response.ok) {
             const key = response.error?.kind ?? "generic";
             const message = response.error?.message ?? t(`errors.${key}`);
-            throw new Error(message);
+            throw createErrorWithCause(message, response.error);
           }
           storagePersonalLocked.value.set(storage.id, false);
           clearSyncErrors(storage.id);
@@ -91,7 +92,7 @@ export function useAppPersonalUnlock({
       });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       await refreshStatus();
       await refreshAppStatus();

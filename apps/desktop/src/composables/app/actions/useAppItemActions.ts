@@ -8,6 +8,7 @@ import type {
   ItemDetail,
   ItemSummary,
 } from "../../../types";
+import { createErrorWithCause } from "../../errors";
 
 type ConfirmOptions = {
   title: string;
@@ -157,7 +158,7 @@ export function useAppItemActions({
             const detail = response.error?.message
               ? `${t(`errors.${key}`)}: ${response.error.message}`
               : t(`errors.${key}`);
-            throw new Error(detail);
+            throw createErrorWithCause(detail, response.error);
           }
           await runRemoteSync(selectedStorageId.value);
           await loadItemDetail(selectedItem.value!.id);
@@ -195,7 +196,7 @@ export function useAppItemActions({
       });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       if (selectedItemId.value === itemId) {
         selectedItemId.value = null;
@@ -241,7 +242,7 @@ export function useAppItemActions({
     });
     if (!response.ok) {
       const key = response.error?.kind ?? "generic";
-      throw new Error(t(`errors.${key}`));
+      throw createErrorWithCause(t(`errors.${key}`), response.error);
     }
     if (options?.selectAfter) {
       selectedItemId.value = itemId;
@@ -277,7 +278,7 @@ export function useAppItemActions({
       });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       if (selectedItemId.value === itemId) {
         selectedItemId.value = null;
@@ -324,7 +325,7 @@ export function useAppItemActions({
       });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       selectedItemId.value = null;
       await loadItems();

@@ -13,6 +13,7 @@ import type {
   Settings,
 } from "../types";
 import { getSchemaFieldDefs, getSchemaKeys, resolveSchemaLabel } from "../data/secretSchemas";
+import { createErrorWithCause } from "./errors";
 
 type Translator = (key: string) => string;
 
@@ -105,7 +106,7 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       if (!response.ok || !response.data) {
         const key = response.error?.kind ?? "generic";
         const message = response.error?.message;
-        throw new Error(message ?? options.t(`errors.${key}`));
+        throw createErrorWithCause(message ?? options.t(`errors.${key}`), response.error);
       }
       selectedItem.value = response.data;
       historyEntries.value = [];
@@ -152,7 +153,7 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       if (!response.ok || !response.data) {
         const key = response.error?.kind ?? "generic";
         const message = response.error?.message;
-        throw new Error(message ?? options.t(`errors.${key}`));
+        throw createErrorWithCause(message ?? options.t(`errors.${key}`), response.error);
       }
       const serverEntries = response.data;
       const reconciledPending = pendingHistoryEntries.value.filter((entry) => {
@@ -203,9 +204,9 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       const key = response.error?.kind ?? "generic";
       const message = response.error?.message;
       if (key === "history_unavailable_shared") {
-        throw new Error(options.t(`errors.${key}`));
+        throw createErrorWithCause(options.t(`errors.${key}`), response.error);
       }
-      throw new Error(message ?? options.t(`errors.${key}`));
+      throw createErrorWithCause(message ?? options.t(`errors.${key}`), response.error);
     }
     historyPayloads.value.set(version, response.data.payload);
     return response.data.payload;

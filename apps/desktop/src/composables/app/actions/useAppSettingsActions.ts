@@ -1,6 +1,7 @@
 import type { Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { ApiResponse, KeystoreStatus, Settings } from "../../../types";
+import { createErrorWithCause } from "../../errors";
 
 type AppSettingsActionsOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
@@ -36,7 +37,7 @@ export function useAppSettingsActions({
           const detail = result.error?.message
             ? `${t(`errors.${key}`)}: ${result.error.message}`
             : t(`errors.${key}`);
-          throw new Error(detail);
+          throw createErrorWithCause(detail, result.error);
         }
         const ks = await invoke<ApiResponse<KeystoreStatus>>("keystore_status");
         if (ks.ok && ks.data) {
@@ -50,7 +51,7 @@ export function useAppSettingsActions({
           const detail = result.error?.message
             ? `${t(`errors.${key}`)}: ${result.error.message}`
             : t(`errors.${key}`);
-          throw new Error(detail);
+          throw createErrorWithCause(detail, result.error);
         }
       }
       settings.value = await invoke("update_settings", { settings: next });
@@ -85,7 +86,7 @@ export function useAppSettingsActions({
         const detail = result.error?.message
           ? `${t(`errors.${key}`)}: ${result.error.message}`
           : t(`errors.${key}`);
-        throw new Error(detail);
+        throw createErrorWithCause(detail, result.error);
       }
       showToast(t("settings.rebindTouchIdSuccess"), { duration: 1400 });
     } catch (err) {

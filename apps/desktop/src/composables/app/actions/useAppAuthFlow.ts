@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import type { UiSettings } from "../../useUiSettings";
 import type { ApiResponse, AppStatus, StorageSummary } from "../../../types";
 import { AuthMethod, StorageKind } from "../../../constants/enums";
+import { createErrorWithCause } from "../../errors";
 
 type ConfirmOptions = {
   title: string;
@@ -147,7 +148,7 @@ export function useAppAuthFlow({
         );
         if (!identityResponse.ok) {
           const key = identityResponse.error?.kind ?? "generic";
-          throw new Error(t(`errors.${key}`));
+          throw createErrorWithCause(t(`errors.${key}`), identityResponse.error);
         }
       }
       const response = await invoke<ApiResponse<null>>(
@@ -156,7 +157,7 @@ export function useAppAuthFlow({
       );
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       setupPassword.value = "";
       setupConfirm.value = "";
@@ -197,7 +198,7 @@ export function useAppAuthFlow({
       }>>("remote_begin_login", { serverUrl: connectServerUrl.value });
       if (!response.ok || !response.data) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       connectLoginId.value = response.data.login_id;
       console.info("[oidc] login id set", connectLoginId.value);
@@ -331,7 +332,7 @@ export function useAppAuthFlow({
         if (!response.ok || !response.data) {
           const key = response.error?.kind ?? "generic";
           const message = response.error?.message ?? t(`errors.${key}`);
-          throw new Error(message);
+          throw createErrorWithCause(message, response.error);
         }
         const data = response.data;
         if (data.status === "fingerprint_changed") {

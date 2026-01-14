@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, Settings, Status } from "../types";
+import { attachErrorCause } from "./errors";
 
 type Translator = (key: string) => string;
 
@@ -40,7 +41,7 @@ export const useSession = (options: UseSessionOptions) => {
       );
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new SessionError(options.t(`errors.${key}`));
+        throw attachErrorCause(new SessionError(options.t(`errors.${key}`)), response.error);
       }
       await options.refreshStatus();
       await options.refreshAppStatus();
@@ -61,7 +62,7 @@ export const useSession = (options: UseSessionOptions) => {
       );
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new SessionError(options.t(`errors.${key}`));
+        throw attachErrorCause(new SessionError(options.t(`errors.${key}`)), response.error);
       }
       await options.refreshStatus();
       await options.refreshAppStatus();
