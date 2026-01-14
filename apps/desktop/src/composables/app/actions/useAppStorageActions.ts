@@ -3,6 +3,7 @@ import type { ComputedRef, Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { UiSettings } from "../../useUiSettings";
 import type { ApiResponse, StorageInfo, StorageSummary } from "../../../types";
+import { createErrorWithCause } from "../../errors";
 
 type AppStorageActionsOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
@@ -134,7 +135,7 @@ export function useAppStorageActions({
       });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       setError("");
       await loadStorages();
@@ -181,7 +182,7 @@ export function useAppStorageActions({
       });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       await loadStorages();
       await loadVaults();
@@ -197,7 +198,7 @@ export function useAppStorageActions({
       const response = await invoke<ApiResponse<null>>("local_factory_reset");
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       await refreshStatus();
       await refreshAppStatus();
@@ -215,7 +216,7 @@ export function useAppStorageActions({
       const response = await invoke<ApiResponse<null>>("sync_reset_cursor", { storageId });
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(t(`errors.${key}`));
+        throw createErrorWithCause(t(`errors.${key}`), response.error);
       }
       await runRemoteSync(storageId);
       showToast(t("common.saved"));

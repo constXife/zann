@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, VaultSummary } from "../types";
 import { VaultKind } from "../constants/enums";
+import { createErrorWithCause } from "./errors";
 
 type Translator = (key: string) => string;
 
@@ -38,7 +39,7 @@ export const useVaults = (options: UseVaultsOptions) => {
       if (!response.ok || !response.data) {
         const message = response.error?.message;
         const key = response.error?.kind ?? "generic";
-        throw new Error(message ?? options.t(`errors.${key}`));
+        throw createErrorWithCause(message ?? options.t(`errors.${key}`), response.error);
       }
       vaults.value = response.data;
       if (!options.selectedVaultId.value && response.data.length > 0) {

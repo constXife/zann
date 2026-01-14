@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, ItemDetail } from "../types";
+import { createErrorWithCause } from "./errors";
 
 type Translator = (key: string) => string;
 
@@ -29,7 +30,7 @@ export const useConflictActions = (options: UseConflictActionsOptions) => {
       if (!response.ok) {
         const key = response.error?.kind ?? "generic";
         const message = response.error?.message ?? options.t(`errors.${key}`);
-        throw new Error(message);
+        throw createErrorWithCause(message, response.error);
       }
       await options.runRemoteSync(options.selectedStorageId.value);
       await options.loadItems();

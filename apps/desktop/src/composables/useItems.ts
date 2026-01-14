@@ -2,6 +2,7 @@ import { ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, ItemSummary } from "../types";
+import { createErrorWithCause } from "./errors";
 
 type Translator = (key: string) => string;
 
@@ -35,7 +36,7 @@ export const useItems = (options: UseItemsOptions) => {
       });
       if (!response.ok || !response.data) {
         const key = response.error?.kind ?? "generic";
-        throw new Error(options.t(`errors.${key}`));
+        throw createErrorWithCause(options.t(`errors.${key}`), response.error);
       }
       items.value = response.data;
       options.onAfterLoad?.();

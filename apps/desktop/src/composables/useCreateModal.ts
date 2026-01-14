@@ -4,6 +4,7 @@ import type { Ref } from "vue";
 import type { ApiResponse, EncryptedPayload, FieldKind, FieldValue, ItemDetail, ItemSummary, VaultSummary } from "../types";
 import { getFieldSchema, getSchemaFieldDefs, resolveSchemaLabel, type FieldType } from "../data/secretSchemas";
 import { CachePolicy, VaultKind } from "../constants/enums";
+import { createErrorWithCause } from "./errors";
 
 type Translator = (key: string) => string;
 
@@ -416,9 +417,9 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
         const key = response.error?.kind ?? "generic";
         const message = response.error?.message;
         if (key === "remote_error" && message) {
-          throw new Error(message);
+          throw createErrorWithCause(message, response.error);
         }
-        throw new Error(options.t(`errors.${key}`));
+        throw createErrorWithCause(options.t(`errors.${key}`), response.error);
       }
       await options.loadVaults();
       options.selectedVaultId.value = response.data.id;
@@ -734,9 +735,9 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
         const key = response.error?.kind ?? "generic";
         const message = response.error?.message;
         if (key === "remote_error" && message) {
-          throw new Error(message);
+          throw createErrorWithCause(message, response.error);
         }
-        throw new Error(options.t(`errors.${key}`));
+        throw createErrorWithCause(options.t(`errors.${key}`), response.error);
       }
       createModalOpen.value = false;
       createItemTitle.value = "";
