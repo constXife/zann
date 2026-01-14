@@ -2,14 +2,11 @@ use chrono::{DateTime, Utc};
 use sqlx_core::query::query;
 use sqlx_postgres::{PgConnection, Postgres};
 use uuid::Uuid;
-use zann_core::{
-    CachePolicy, Device, Session, Vault, VaultEncryptionType, VaultKind, VaultMember,
-    VaultMemberRole,
-};
-use zann_db::repo::{VaultMemberRepo, VaultRepo};
+use zann_core::{CachePolicy, Device, Session, VaultEncryptionType, VaultKind, VaultMemberRole};
 
 use crate::app::AppState;
 use crate::domains::auth::core::tokens::hash_token;
+use crate::infra::db::apply_tx_isolation;
 use zann_core::api::auth::LoginResponse;
 
 pub(crate) async fn ensure_personal_vault(
@@ -21,73 +18,29 @@ pub(crate) async fn ensure_personal_vault(
         return Ok(());
     }
 
-    let vault_repo = VaultRepo::new(&state.db);
-    if vault_repo
-        .get_personal_by_user(user_id)
-        .await
-        .map_err(|_| "db_error")?
-        .is_some()
-    {
-        return Ok(());
-    }
-
-    let vault_id = Uuid::now_v7();
-    let vault = Vault {
-        id: vault_id,
-        slug: format!("personal-{}", user_id),
-        name: "Personal".to_string(),
-        kind: VaultKind::Personal,
-        encryption_type: VaultEncryptionType::Client,
-        vault_key_enc: Vec::new(),
-        cache_policy: CachePolicy::Full,
-        tags: None,
-        deleted_at: None,
-        deleted_by_user_id: None,
-        deleted_by_device_id: None,
-        row_version: 1,
-        created_at: now,
-    };
-
-    if let Err(err) = vault_repo.create(&vault).await {
-        if vault_repo
-            .get_personal_by_user(user_id)
-            .await
-            .map_err(|_| "db_error")?
-            .is_some()
-        {
-            return Ok(());
-        }
+    let mut tx = state.db.begin().await.map_err(|err| {
+        tracing::error!(event = "personal_vault_create_failed", error = %err, "DB begin failed");
+        "db_error"
+    })?;
+    if let Err(err) = apply_tx_isolation(&mut tx, state.db_tx_isolation).await {
         tracing::error!(
             event = "personal_vault_create_failed",
             error = %err,
-            "DB error"
+            "DB isolation failed"
         );
         return Err("db_error");
     }
 
-    let member_repo = VaultMemberRepo::new(&state.db);
-    let member = VaultMember {
-        vault_id: vault.id,
-        user_id,
-        role: VaultMemberRole::Admin,
-        created_at: now,
-    };
-    if let Err(err) = member_repo.create(&member).await {
-        if member_repo
-            .get(vault.id, user_id)
-            .await
-            .map_err(|_| "db_error")?
-            .is_some()
-        {
-            return Ok(());
-        }
+    ensure_personal_vault_tx(state, &mut tx, user_id, now).await?;
+
+    tx.commit().await.map_err(|err| {
         tracing::error!(
-            event = "personal_vault_member_create_failed",
+            event = "personal_vault_create_failed",
             error = %err,
-            "DB error"
+            "DB commit failed"
         );
-        return Err("db_error");
-    }
+        "db_error"
+    })?;
 
     Ok(())
 }
@@ -100,6 +53,21 @@ pub(crate) async fn ensure_personal_vault_tx(
 ) -> Result<(), &'static str> {
     if !state.config.server.personal_vaults_enabled {
         return Ok(());
+    }
+
+    if let Err(err) = query::<Postgres>(
+        "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+    )
+    .bind(user_id.to_string())
+    .execute(&mut *conn)
+    .await
+    {
+        tracing::error!(
+            event = "personal_vault_lock_failed",
+            error = %err,
+            "DB error"
+        );
+        return Err("db_error");
     }
 
     let existing = query::<Postgres>(
