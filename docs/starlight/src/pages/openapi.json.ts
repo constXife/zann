@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 export async function GET() {
   const here = path.dirname(fileURLToPath(import.meta.url));
-  const docsRoot = path.resolve(here, "..");
+  const docsRoot = path.resolve(here, "../../..");
   const specPath = path.join(docsRoot, "openapi.json");
 
   try {

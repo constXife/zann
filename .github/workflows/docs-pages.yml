@@ -5,9 +5,10 @@ on:
     branches: ["main"]
     paths:
       - "docs/**"
-      - "docs/**"
       - "docs/starlight/**"
       - ".github/workflows/docs-pages.yml"
+      - "crates/zann-server/**"
+      - "crates/zann-core/**"
   workflow_dispatch:
 
 permissions:
