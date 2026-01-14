@@ -354,7 +354,7 @@ pub(crate) async fn rotate_commit(
     let history_id = Uuid::now_v7();
     let now = Utc::now();
     let change_type = zann_core::ChangeType::Update.as_i32();
-    let _ = sqlx_core::query::query(
+    if let Err(err) = sqlx_core::query::query(
         r#"
         INSERT INTO item_history (
             id,
@@ -392,7 +392,14 @@ pub(crate) async fn rotate_commit(
     .bind(actor.device_name.as_deref())
     .bind(now)
     .execute(&mut *conn)
-    .await;
+    .await
+    {
+        tracing::warn!(
+            event = "rotation_history_create_failed",
+            error = %err,
+            "DB error"
+        );
+    }
 
     let new_version = previous_version + 1;
     let device_id = identity.device_id.unwrap_or(existing_device_id);
@@ -446,9 +453,16 @@ pub(crate) async fn rotate_commit(
     }
 
     let history_repo = ItemHistoryRepo::new(&state.db);
-    let _ = history_repo
+    if let Err(err) = history_repo
         .prune_by_item(item.id, state.config.rotation.max_versions)
-        .await;
+        .await
+    {
+        tracing::warn!(
+            event = "rotation_history_prune_failed",
+            error = %err,
+            "DB error"
+        );
+    }
 
     let response = RotationCommitResponse {
         status: "committed",
