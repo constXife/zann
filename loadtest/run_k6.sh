@@ -15,6 +15,7 @@ export K6_PROFILE="${K6_PROFILE:-low}"
 export K6_SCENARIO="${K6_SCENARIO:-baseline_normal}"
 export K6_LOG_FAILURES="${K6_LOG_FAILURES:-1}"
 export K6_OUTPUTS="${K6_OUTPUTS:-experimental-prometheus-rw}"
+export K6_PROMETHEUS_RW_TREND_STATS="${K6_PROMETHEUS_RW_TREND_STATS:-p(95),p(99)}"
 
 if [ -z "${ZANN_TEST_RUN_ID:-}" ]; then
   ZANN_TEST_RUN_ID="k6-$(date +%s)-${RANDOM}"
