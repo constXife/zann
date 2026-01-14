@@ -1,7 +1,7 @@
-import { ref, computed, onMounted, onUnmounted } from "vue";
+import { ref, computed, onMounted, onUnmounted, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
-import type { ApiResponse, StorageSummary, StorageInfo } from "../types";
+import type { ApiResponse, StorageSummary, StorageInfo, SystemInfoResponse } from "../types";
 import { StorageKind } from "../constants/enums";
 
 type Translator = (key: string, params?: Record<string, string | number>) => string;
@@ -43,6 +43,7 @@ export const useStorages = (options: UseStoragesOptions) => {
   const autoSyncIntervalMs = 60000;
   const syncDebounceMs = 1500;
   const syncBackoffStepsMs = [2000, 5000, 10000, 30000, 60000];
+  const reachabilityCheckMs = 30000;
   let autoSyncTimer: number | null = null;
   let debounceTimer: number | null = null;
   let backoffIndex = 0;
@@ -50,6 +51,8 @@ export const useStorages = (options: UseStoragesOptions) => {
   let pendingSyncStorageId: string | null = null;
   let queuedSyncRequested = false;
   let queuedSyncStorageId: string | null = null;
+  let reachabilityTimer: number | null = null;
+  let reachabilityInFlight = false;
 
   // Remote-first: серверы показываются первыми
   const remoteStorages = computed(() =>
@@ -113,11 +116,23 @@ export const useStorages = (options: UseStoragesOptions) => {
     if (kind === "vault_list_failed") {
       return options.t("errors.vault_list_failed");
     }
+    if (kind === "network_timeout") {
+      return options.t("errors.network_timeout");
+    }
+    if (kind === "rate_limited") {
+      return options.t("errors.rate_limited");
+    }
+    if (kind === "temporary_unavailable") {
+      return options.t("errors.temporary_unavailable");
+    }
     if (kind === "system_info_failed" && isNetworkErrorMessage(text)) {
       return options.t("errors.server_unreachable");
     }
     if (kind === "server_unreachable") {
       return options.t("errors.server_unreachable");
+    }
+    if (kind === "db_error") {
+      return options.t("errors.remote_error");
     }
     return text || options.t("errors.remote_error");
   };
@@ -127,6 +142,10 @@ export const useStorages = (options: UseStoragesOptions) => {
     "vault_get_failed",
     "sync_push_failed",
     "vault_key_update_failed",
+    "network_timeout",
+    "rate_limited",
+    "temporary_unavailable",
+    "server_unreachable",
   ]);
 
   const queueSync = (storageId: string | null) => {
@@ -450,11 +469,46 @@ export const useStorages = (options: UseStoragesOptions) => {
   const handleOnline = () => {
     isNetworkOnline.value = true;
     isServerReachable.value = true;
+    void checkServerReachable();
     flushQueuedSync();
   };
 
   const handleOffline = () => {
     isNetworkOnline.value = false;
+  };
+
+  const checkServerReachable = async () => {
+    if (reachabilityInFlight) {
+      return;
+    }
+    if (!options.initialized.value || !options.unlocked.value) {
+      return;
+    }
+    if (!isNetworkOnline.value) {
+      isServerReachable.value = false;
+      return;
+    }
+    const storageList = Array.isArray(storages.value) ? storages.value : [];
+    const storage = storageList.find((entry) => entry.id === options.selectedStorageId.value);
+    if (!storage || storage.kind !== StorageKind.Remote) {
+      isServerReachable.value = true;
+      return;
+    }
+    if (!storage.server_url) {
+      isServerReachable.value = false;
+      return;
+    }
+    reachabilityInFlight = true;
+    try {
+      const response = await invoke<ApiResponse<SystemInfoResponse>>("get_server_info", {
+        serverUrl: storage.server_url,
+      });
+      isServerReachable.value = response.ok;
+    } catch (err) {
+      isServerReachable.value = false;
+    } finally {
+      reachabilityInFlight = false;
+    }
   };
 
   onMounted(() => {
@@ -463,6 +517,9 @@ export const useStorages = (options: UseStoragesOptions) => {
     }
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
+    reachabilityTimer = window.setInterval(() => {
+      void checkServerReachable();
+    }, reachabilityCheckMs);
   });
 
   onUnmounted(() => {
@@ -471,7 +528,19 @@ export const useStorages = (options: UseStoragesOptions) => {
     }
     window.removeEventListener("online", handleOnline);
     window.removeEventListener("offline", handleOffline);
+    if (reachabilityTimer) {
+      window.clearInterval(reachabilityTimer);
+      reachabilityTimer = null;
+    }
   });
+
+  watch(
+    () => [options.selectedStorageId.value, storages.value.length],
+    () => {
+      void checkServerReachable();
+    },
+    { immediate: true },
+  );
 
   return {
     storages,

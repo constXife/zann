@@ -13,6 +13,7 @@ type UseItemsOptions = {
   listLoading: Ref<boolean>;
   onFatalError: (message: string) => void;
   t: Translator;
+  onAfterLoad?: () => void;
 };
 
 export const useItems = (options: UseItemsOptions) => {
@@ -37,6 +38,7 @@ export const useItems = (options: UseItemsOptions) => {
         throw new Error(options.t(`errors.${key}`));
       }
       items.value = response.data;
+      options.onAfterLoad?.();
     } catch (err) {
       options.onFatalError(String(err));
     } finally {

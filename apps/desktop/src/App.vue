@@ -24,6 +24,7 @@ import { useItemDetails } from "./composables/useItemDetails";
 import { useConflictActions } from "./composables/useConflictActions";
 import { getSchemaFieldDefs } from "./data/secretSchemas";
 import { useItems } from "./composables/useItems";
+import { usePendingChanges } from "./composables/usePendingChanges";
 import { useStorages } from "./composables/useStorages";
 import { useVaults } from "./composables/useVaults";
 import { useFolders } from "./composables/useFolders";
@@ -136,6 +137,12 @@ const vaultState = useVaults({
 });
 const { vaults, personalVaults, sharedVaults, loadVaults } = vaultState;
 
+const pendingChangesState = usePendingChanges({
+  selectedStorageId,
+  initialized,
+  unlocked,
+});
+
 const itemsState = useItems({
   selectedStorageId,
   selectedVaultId,
@@ -146,6 +153,9 @@ const itemsState = useItems({
     fatalError.value = message;
   },
   t,
+  onAfterLoad: () => {
+    void pendingChangesState.refreshPendingChanges();
+  },
 });
 const { items, loadItems } = itemsState;
 
@@ -331,11 +341,12 @@ const statusBanners = useAppStatusBanners({
   storageSyncErrors,
   storagePersonalLocked,
   isOffline,
+  pendingChangesByStorage: pendingChangesState.pendingChangesByStorage,
   localStorageId: LOCAL_STORAGE_ID,
 });
 const {
   showOfflineBanner, showSessionExpiredBanner, showPersonalLockedBanner,
-  syncErrorMessage, showSyncErrorBanner,
+  syncErrorMessage, showSyncErrorBanner, pendingChangesCount,
 } = statusBanners;
 
 watch(

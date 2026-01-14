@@ -95,6 +95,7 @@ vi.mock("../composables/app/state/useAppStatusBanners", () => ({
     showPersonalLockedBanner: computed(() => false),
     syncErrorMessage: computed(() => ""),
     showSyncErrorBanner: computed(() => false),
+    pendingChangesCount: computed(() => 0),
   }),
 }));
 
@@ -408,6 +409,7 @@ describe("App last sync time", () => {
             id: "remote-1",
             name: "Remote",
             kind: StorageKind.Remote,
+            server_url: "https://example.com",
             personal_vaults_enabled: true,
           }],
         };
@@ -447,8 +449,10 @@ describe("App last sync time", () => {
       id: "remote-1",
       name: "Remote",
       kind: StorageKind.Remote,
+      server_url: "https://example.com",
       personal_vaults_enabled: true,
     }];
+    await flushPromises();
     const core = capturedBindingsOptions?.core as {
       lastSyncTime: { value: string | null };
       runRemoteSync: (storageId?: string | null) => Promise<boolean>;

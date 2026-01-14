@@ -17,6 +17,7 @@ const props = defineProps<{
   showPersonalLockedBanner: boolean;
   showSyncErrorBanner: boolean;
   syncErrorMessage: string;
+  pendingChangesCount: number;
   onSignIn: () => void;
   onUnlockPersonal: () => void;
   onResetPersonal: () => void;
@@ -127,6 +128,12 @@ const handleSelectItem = (itemId: string) => {
         </div>
         <div v-if="formattedLastSync" class="text-xs text-amber-600/80 dark:text-amber-400/80">
           {{ t("storage.lastSynced") }}: {{ formattedLastSync }}
+        </div>
+        <div
+          v-if="pendingChangesCount > 0"
+          class="text-xs text-amber-600/80 dark:text-amber-400/80"
+        >
+          {{ t("status.pendingChanges", { count: pendingChangesCount }) }}
         </div>
       </div>
       <button

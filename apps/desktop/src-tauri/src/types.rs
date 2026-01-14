@@ -486,6 +486,13 @@ pub struct ItemsListRequest {
 }
 
 #[derive(Deserialize)]
+pub struct PendingChangesCountRequest {
+    pub storage_id: String,
+    #[serde(default)]
+    pub vault_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 pub struct VaultListRequest {
     pub storage_id: String,
 }

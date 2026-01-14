@@ -67,6 +67,7 @@ type AppShellProps = {
   showPersonalLockedBanner: unknown;
   showSyncErrorBanner: unknown;
   syncErrorMessage: unknown;
+  pendingChangesCount: unknown;
   handleBannerSignIn: unknown;
   openPersonalUnlock: unknown;
   handleResetPersonal: unknown;
@@ -271,6 +272,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :show-personal-locked-banner="showPersonalLockedBanner"
       :show-sync-error-banner="showSyncErrorBanner"
       :sync-error-message="syncErrorMessage"
+      :pending-changes-count="pendingChangesCount"
       :on-sign-in="handleBannerSignIn"
       :on-unlock-personal="openPersonalUnlock"
       :on-reset-personal="handleResetPersonal"
