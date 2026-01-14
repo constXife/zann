@@ -89,7 +89,7 @@ fn default_auth_config_is_internal_open() {
     clear_metrics_env();
     set_policy_config_path();
 
-    let settings = Settings::from_env_with_options(false);
+    let settings = Settings::from_env_with_options(false).expect("settings");
     assert!(matches!(settings.config.auth.mode, AuthMode::Internal));
     assert!(matches!(
         settings.config.auth.internal.registration,
@@ -110,7 +110,7 @@ fn auth_env_overrides_apply() {
     env::set_var("ZANN_AUTH_INTERNAL_REGISTRATION", "disabled");
     env::set_var("ZANN_AUTH_OIDC_ENABLED", "true");
 
-    let settings = Settings::from_env_with_options(false);
+    let settings = Settings::from_env_with_options(false).expect("settings");
     assert!(matches!(settings.config.auth.mode, AuthMode::Oidc));
     assert!(!settings.config.auth.internal.enabled);
     assert!(matches!(
@@ -130,7 +130,7 @@ fn internal_auth_requires_password_pepper() {
     env::set_var("ZANN_TOKEN_PEPPER", "test-token-pepper");
     env::set_var("ZANN_SMK", TEST_SMK);
 
-    let settings = Settings::from_env_with_options(true);
+    let settings = Settings::from_env_with_options(true).expect("settings");
     let missing = preflight(&settings).expect_err("preflight should fail");
     assert!(missing
         .iter()
@@ -155,7 +155,7 @@ fn oidc_only_allows_missing_password_pepper() {
     env::set_var("ZANN_TOKEN_PEPPER", "test-token-pepper");
     env::set_var("ZANN_SMK", TEST_SMK);
 
-    let settings = Settings::from_env_with_options(true);
+    let settings = Settings::from_env_with_options(true).expect("settings");
     assert!(settings.password_pepper.is_empty());
     assert_eq!(settings.token_pepper, "test-token-pepper");
     assert!(preflight(&settings).is_ok());
@@ -178,7 +178,7 @@ fn oidc_only_requires_token_pepper() {
     );
     env::set_var("ZANN_SMK", TEST_SMK);
 
-    let settings = Settings::from_env_with_options(true);
+    let settings = Settings::from_env_with_options(true).expect("settings");
     let missing = preflight(&settings).expect_err("preflight should fail");
     assert!(missing
         .iter()
@@ -192,7 +192,7 @@ fn metrics_enabled_requires_profile() {
     env::set_var("ZANN_SMK", TEST_SMK);
     set_config_with_metrics("metrics:\n  enabled: true\n");
 
-    let settings = Settings::from_env_with_options(false);
+    let settings = Settings::from_env_with_options(false).expect("settings");
     let missing = preflight(&settings).expect_err("preflight should fail");
     assert!(missing
         .iter()
@@ -208,7 +208,7 @@ fn metrics_profile_prod_allowed_in_production() {
     env::set_var("ZANN_ENV", "production");
     set_config_with_metrics("metrics:\n  enabled: true\n  profile: prod\n");
 
-    let settings = Settings::from_env_with_options(false);
+    let settings = Settings::from_env_with_options(false).expect("settings");
     assert!(preflight(&settings).is_ok());
 }
 
@@ -221,7 +221,7 @@ fn metrics_profile_non_prod_blocked_in_production() {
     env::set_var("ZANN_ENV", "production");
     set_config_with_metrics("metrics:\n  enabled: true\n  profile: staging\n");
 
-    let settings = Settings::from_env_with_options(false);
+    let settings = Settings::from_env_with_options(false).expect("settings");
     let missing = preflight(&settings).expect_err("preflight should fail");
     assert!(missing
         .iter()
@@ -236,7 +236,7 @@ fn metrics_profile_debug_requires_allow_flag() {
     env::set_var("ZANN_SMK", TEST_SMK);
     set_config_with_metrics("metrics:\n  enabled: true\n  profile: debug\n");
 
-    let settings = Settings::from_env_with_options(false);
+    let settings = Settings::from_env_with_options(false).expect("settings");
     let missing = preflight(&settings).expect_err("preflight should fail");
     assert!(missing.iter().any(|value| {
         value.contains("metrics.profile=debug requires ZANN_ALLOW_METRICS_DEBUG=true")
@@ -252,7 +252,7 @@ fn metrics_profile_debug_allowed_with_flag() {
     env::set_var("ZANN_ALLOW_METRICS_DEBUG", "true");
     set_config_with_metrics("metrics:\n  enabled: true\n  profile: debug\n");
 
-    let settings = Settings::from_env_with_options(false);
+    let settings = Settings::from_env_with_options(false).expect("settings");
     assert!(preflight(&settings).is_ok());
 }
 
@@ -271,7 +271,7 @@ fn tracing_otel_config_parses() {
 "#,
     );
 
-    let settings = Settings::from_env_with_options(false);
+    let settings = Settings::from_env_with_options(false).expect("settings");
     assert!(settings.config.tracing.otel.enabled);
     assert_eq!(
         settings.config.tracing.otel.endpoint.as_deref(),
