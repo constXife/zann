@@ -261,9 +261,12 @@ pub async fn identity_from_service_account_token(
         }
     }
 
-    let _ = repo
+    if let Err(err) = repo
         .update_usage(account.id, Utc::now(), client_ip, user_agent, 1)
-        .await;
+        .await
+    {
+        tracing::warn!(event = "auth_sa_usage_update_failed", error = %err);
+    }
 
     identity_from_user(
         state,

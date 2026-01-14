@@ -233,7 +233,9 @@ pub async fn ensure_secret(
         changed_by_device_name: actor.device_name,
         created_at: now,
     };
-    let _ = history_repo.create(&history).await;
+    if let Err(err) = history_repo.create(&history).await {
+        tracing::warn!(event = "secret_history_create_failed", error = %err);
+    }
 
     let change_repo = ChangeRepo::new(&state.db);
     let change = Change {
@@ -245,7 +247,9 @@ pub async fn ensure_secret(
         device_id,
         created_at: now,
     };
-    let _ = change_repo.create(&change).await;
+    if let Err(err) = change_repo.create(&change).await {
+        tracing::warn!(event = "secret_change_create_failed", error = %err);
+    }
 
     let record = SecretRecord {
         path: item.path,
@@ -329,7 +333,9 @@ pub async fn rotate_secret(
         changed_by_device_name: actor.device_name,
         created_at: Utc::now(),
     };
-    let _ = history_repo.create(&history).await;
+    if let Err(err) = history_repo.create(&history).await {
+        tracing::warn!(event = "secret_history_create_failed", error = %err);
+    }
 
     item.payload_enc = payload_enc;
     item.checksum = checksum;
@@ -355,7 +361,9 @@ pub async fn rotate_secret(
         device_id,
         created_at: item.updated_at,
     };
-    let _ = change_repo.create(&change).await;
+    if let Err(err) = change_repo.create(&change).await {
+        tracing::warn!(event = "secret_change_create_failed", error = %err);
+    }
 
     let record = SecretRecord {
         path: item.path,
