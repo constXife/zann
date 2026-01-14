@@ -57,9 +57,14 @@ impl OidcJwksCache {
 
     pub async fn get_jwks(&self, config: &OidcConfig) -> Result<jsonwebtoken::jwk::JwkSet, String> {
         if let Some(path) = config.jwks_file.as_deref() {
-            let jwks_json = fs::read_to_string(path).map_err(|_| "oidc_jwks_read_failed")?;
-            let jwks: jsonwebtoken::jwk::JwkSet =
-                serde_json::from_str(&jwks_json).map_err(|_| "oidc_jwks_parse_failed")?;
+            let jwks_json = fs::read_to_string(path).map_err(|err| {
+                warn!(event = "oidc_jwks_read_failed", error = %err, path = %path);
+                "oidc_jwks_read_failed".to_string()
+            })?;
+            let jwks: jsonwebtoken::jwk::JwkSet = serde_json::from_str(&jwks_json).map_err(|err| {
+                warn!(event = "oidc_jwks_parse_failed", error = %err, path = %path);
+                "oidc_jwks_parse_failed".to_string()
+            })?;
             return Ok(jwks);
         }
 
@@ -117,19 +122,38 @@ impl OidcJwksCache {
         let discovery_result = self.client.get(&well_known).send().await;
         let mut state = self.state.write().await;
         state.discovery_attempted_at = Some(Instant::now());
-        let response = discovery_result.map_err(|_| "oidc_discovery_failed")?;
+        let response = discovery_result.map_err(|err| {
+            warn!(
+                event = "oidc_discovery_failed",
+                error = %err,
+                url = %well_known
+            );
+            "oidc_discovery_failed".to_string()
+        })?;
         if !response.status().is_success() {
             return Err("oidc_discovery_failed".to_string());
         }
-        let doc: OidcDiscovery = response.json().await.map_err(|_| "oidc_discovery_failed")?;
+        let doc: OidcDiscovery = response.json().await.map_err(|err| {
+            warn!(
+                event = "oidc_discovery_failed",
+                error = %err,
+                url = %well_known
+            );
+            "oidc_discovery_failed".to_string()
+        })?;
         state.jwks_uri = Some(doc.jwks_uri.clone());
         state.userinfo_uri = doc.userinfo_endpoint.clone();
         Ok(doc.jwks_uri)
     }
 
     async fn fetch_jwks(&self, jwks_uri: &str) -> Result<jsonwebtoken::jwk::JwkSet, String> {
-        let response = self.client.get(jwks_uri).send().await.map_err(|_| {
+        let response = self.client.get(jwks_uri).send().await.map_err(|err| {
             metrics::oidc_jwks_fetch("error");
+            warn!(
+                event = "oidc_jwks_fetch_failed",
+                error = %err,
+                url = %jwks_uri
+            );
             "oidc_jwks_fetch_failed".to_string()
         })?;
         if !response.status().is_success() {
@@ -139,8 +163,13 @@ impl OidcJwksCache {
         let jwks = response
             .json::<jsonwebtoken::jwk::JwkSet>()
             .await
-            .map_err(|_| {
+            .map_err(|err| {
                 metrics::oidc_jwks_fetch("error");
+                warn!(
+                    event = "oidc_jwks_parse_failed",
+                    error = %err,
+                    url = %jwks_uri
+                );
                 "oidc_jwks_parse_failed".to_string()
             })?;
         metrics::oidc_jwks_fetch("ok");
@@ -178,14 +207,28 @@ impl OidcJwksCache {
             .bearer_auth(token)
             .send()
             .await
-            .map_err(|_| "oidc_userinfo_fetch_failed")?;
+            .map_err(|err| {
+                warn!(
+                    event = "oidc_userinfo_fetch_failed",
+                    error = %err,
+                    url = %endpoint
+                );
+                "oidc_userinfo_fetch_failed".to_string()
+            })?;
         if !response.status().is_success() {
             return Err("oidc_userinfo_fetch_failed".to_string());
         }
         let payload = response
             .json::<OidcUserinfoResponse>()
             .await
-            .map_err(|_| "oidc_userinfo_parse_failed")?;
+            .map_err(|err| {
+                warn!(
+                    event = "oidc_userinfo_parse_failed",
+                    error = %err,
+                    url = %endpoint
+                );
+                "oidc_userinfo_parse_failed".to_string()
+            })?;
         Ok(payload.email)
     }
 
@@ -213,11 +256,25 @@ impl OidcJwksCache {
         let discovery_result = self.client.get(&well_known).send().await;
         let mut state = self.state.write().await;
         state.discovery_attempted_at = Some(Instant::now());
-        let response = discovery_result.map_err(|_| "oidc_discovery_failed")?;
+        let response = discovery_result.map_err(|err| {
+            warn!(
+                event = "oidc_discovery_failed",
+                error = %err,
+                url = %well_known
+            );
+            "oidc_discovery_failed".to_string()
+        })?;
         if !response.status().is_success() {
             return Err("oidc_discovery_failed".to_string());
         }
-        let doc: OidcDiscovery = response.json().await.map_err(|_| "oidc_discovery_failed")?;
+        let doc: OidcDiscovery = response.json().await.map_err(|err| {
+            warn!(
+                event = "oidc_discovery_failed",
+                error = %err,
+                url = %well_known
+            );
+            "oidc_discovery_failed".to_string()
+        })?;
         let Some(endpoint) = doc.userinfo_endpoint.clone() else {
             return Err("oidc_userinfo_missing".to_string());
         };
