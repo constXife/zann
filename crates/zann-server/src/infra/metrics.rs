@@ -235,6 +235,27 @@ static DB_POOL_CONNECTIONS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
     )
 });
 
+#[cfg(feature = "jemalloc")]
+static HEAP_ALLOCATED_BYTES: LazyLock<IntGauge> = LazyLock::new(|| {
+    gauge_or_fallback("zann_heap_allocated_bytes", "Jemalloc allocated bytes")
+});
+
+#[cfg(feature = "jemalloc")]
+static HEAP_ACTIVE_BYTES: LazyLock<IntGauge> =
+    LazyLock::new(|| gauge_or_fallback("zann_heap_active_bytes", "Jemalloc active bytes"));
+
+#[cfg(feature = "jemalloc")]
+static HEAP_RESIDENT_BYTES: LazyLock<IntGauge> =
+    LazyLock::new(|| gauge_or_fallback("zann_heap_resident_bytes", "Jemalloc resident bytes"));
+
+#[cfg(feature = "jemalloc")]
+static HEAP_MAPPED_BYTES: LazyLock<IntGauge> =
+    LazyLock::new(|| gauge_or_fallback("zann_heap_mapped_bytes", "Jemalloc mapped bytes"));
+
+#[cfg(feature = "jemalloc")]
+static HEAP_RETAINED_BYTES: LazyLock<IntGauge> =
+    LazyLock::new(|| gauge_or_fallback("zann_heap_retained_bytes", "Jemalloc retained bytes"));
+
 pub fn warmup() {
     let _ = &*AUTH_LOGINS;
     let _ = &*AUTH_REGISTERS;
@@ -251,6 +272,14 @@ pub fn warmup() {
     let _ = &*SECRETS_OPS;
     let _ = &*SECRETS_LATENCY;
     let _ = &*DB_POOL_CONNECTIONS;
+    #[cfg(feature = "jemalloc")]
+    {
+        let _ = &*HEAP_ALLOCATED_BYTES;
+        let _ = &*HEAP_ACTIVE_BYTES;
+        let _ = &*HEAP_RESIDENT_BYTES;
+        let _ = &*HEAP_MAPPED_BYTES;
+        let _ = &*HEAP_RETAINED_BYTES;
+    }
 }
 
 pub fn auth_login(result: &str, method: &str) {
@@ -370,4 +399,49 @@ pub fn start_db_pool_metrics(pool: PgPool, max_connections: u32) {
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     });
+}
+
+#[cfg(feature = "jemalloc")]
+fn refresh_heap_metrics() -> Result<(), String> {
+    use tikv_jemalloc_ctl::{epoch, stats};
+
+    epoch::advance().map_err(|err| err.to_string())?;
+
+    let allocated = stats::allocated::read().map_err(|err| err.to_string())?;
+    let active = stats::active::read().map_err(|err| err.to_string())?;
+    let resident = stats::resident::read().map_err(|err| err.to_string())?;
+    let mapped = stats::mapped::read().map_err(|err| err.to_string())?;
+    let retained = stats::retained::read().map_err(|err| err.to_string())?;
+
+    let allocated = i64::try_from(allocated).unwrap_or(i64::MAX);
+    let active = i64::try_from(active).unwrap_or(i64::MAX);
+    let resident = i64::try_from(resident).unwrap_or(i64::MAX);
+    let mapped = i64::try_from(mapped).unwrap_or(i64::MAX);
+    let retained = i64::try_from(retained).unwrap_or(i64::MAX);
+
+    HEAP_ALLOCATED_BYTES.set(allocated);
+    HEAP_ACTIVE_BYTES.set(active);
+    HEAP_RESIDENT_BYTES.set(resident);
+    HEAP_MAPPED_BYTES.set(mapped);
+    HEAP_RETAINED_BYTES.set(retained);
+
+    Ok(())
+}
+
+pub fn start_heap_metrics() {
+    #[cfg(feature = "jemalloc")]
+    {
+        if let Err(err) = refresh_heap_metrics() {
+            warn!(event = "jemalloc_metrics_failed", error = %err);
+            return;
+        }
+        tokio::spawn(async move {
+            loop {
+                if let Err(err) = refresh_heap_metrics() {
+                    warn!(event = "jemalloc_metrics_failed", error = %err);
+                }
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+        });
+    }
 }

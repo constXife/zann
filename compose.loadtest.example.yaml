@@ -16,6 +16,11 @@ services:
       retries: 10
 
   server:
+    build:
+      context: .
+      dockerfile: crates/zann-server/Dockerfile
+      args:
+        ZANN_SERVER_FEATURES: jemalloc
     ports:
       - "18080:18080"
     user: "${ZANN_UID:-1000}:${ZANN_GID:-100}"
@@ -33,10 +38,18 @@ services:
       ZANN_ADDR: 0.0.0.0:18080
       ZANN_CONFIG_PATH: /config/loadtest.yaml
       ZANN_ALLOW_METRICS_DEBUG: "true"
+      MALLOC_CONF: "prof:true,prof_active:false,prof_prefix:/data/heap/heap"
+      ZANN_HEAP_PROFILE: "1"
+      ZANN_HEAP_PROFILE_DIR: /data/heap
     mem_limit: 1g
     cpus: "2.0"
 
   migrate:
+    build:
+      context: .
+      dockerfile: crates/zann-server/Dockerfile
+      args:
+        ZANN_SERVER_FEATURES: jemalloc
     depends_on:
       db_loadtest:
         condition: service_healthy

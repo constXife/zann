@@ -197,6 +197,183 @@ pub(crate) async fn shutdown_signal() {
     );
 }
 
+#[cfg(all(feature = "jemalloc", unix))]
+fn heap_profile_dump(dir: &str) -> Result<String, String> {
+    use std::ffi::CString;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn read_bool(name: &[u8]) -> Result<bool, String> {
+        unsafe {
+            tikv_jemalloc_ctl::raw::read::<u8>(name)
+                .map(|value| value != 0)
+                .map_err(|err| err.to_string())
+        }
+    }
+
+    fn write_bool(name: &[u8], value: bool) -> Result<(), String> {
+        let value = if value { 1u8 } else { 0u8 };
+        unsafe { tikv_jemalloc_ctl::raw::write(name, value).map_err(|err| err.to_string()) }
+    }
+
+    let mut path = PathBuf::from(dir);
+    std::fs::create_dir_all(&path).map_err(|err| err.to_string())?;
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| err.to_string())?
+        .as_secs();
+    let run_id = std::env::var("ZANN_TEST_RUN_ID").ok();
+    let run_id = run_id
+        .as_deref()
+        .map(|value| {
+            value
+                .chars()
+                .map(|ch| {
+                    if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                        ch
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>()
+        })
+        .filter(|value| !value.is_empty());
+    let filename = match run_id {
+        Some(run_id) => format!("heap-{run_id}-{ts}.heap"),
+        None => format!("heap-{ts}.heap"),
+    };
+    path.push(filename);
+
+    let c_path = CString::new(path.to_string_lossy().as_bytes()).map_err(|err| err.to_string())?;
+    if read_bool(b"config.prof\0")? {
+        if !read_bool(b"prof.active\0")? {
+            write_bool(b"prof.active\0", true)?;
+        }
+        // SAFETY: jemalloc expects a valid C string pointer for prof.dump. We keep
+        // the CString alive for the duration of the call.
+        let result = unsafe {
+            tikv_jemalloc_ctl::raw::write(b"prof.dump\0", c_path.as_ptr())
+                .map_err(|err| format!("mallctl prof.dump failed: {err}"))
+        };
+        if let Err(primary_err) = result {
+            let fallback = unsafe {
+                tikv_jemalloc_ctl::raw::write(b"prof.dump\0", std::ptr::null::<i8>())
+                    .map_err(|err| format!("mallctl prof.dump (fallback) failed: {err}"))
+            };
+            if let Err(fallback_err) = fallback {
+                return Err(format!(
+                    "{primary_err}; {fallback_err} (path={})",
+                    path.display()
+                ));
+            }
+        }
+        if !path.is_file() {
+            tracing::warn!(event = "heap_profile_missing", path = %path.display());
+        }
+    } else {
+        return Err("jemalloc prof config is disabled".into());
+    }
+    Ok(path.to_string_lossy().to_string())
+}
+
+pub(crate) fn start_heap_profiler() {
+    #[cfg(all(feature = "jemalloc", unix))]
+    {
+        fn read_bool(name: &[u8]) -> Result<bool, String> {
+            unsafe {
+                tikv_jemalloc_ctl::raw::read::<u8>(name)
+                    .map(|value| value != 0)
+                    .map_err(|err| err.to_string())
+            }
+        }
+
+        fn write_bool(name: &[u8], value: bool) -> Result<(), String> {
+            let value = if value { 1u8 } else { 0u8 };
+            unsafe { tikv_jemalloc_ctl::raw::write(name, value).map_err(|err| err.to_string()) }
+        }
+
+        let enabled = std::env::var("ZANN_HEAP_PROFILE")
+            .map(|value| value != "0" && !value.is_empty())
+            .unwrap_or(false);
+        if !enabled {
+            return;
+        }
+        let dir = std::env::var("ZANN_HEAP_PROFILE_DIR").unwrap_or_else(|_| "/data/heap".into());
+        let dir_label = dir.clone();
+        {
+            let config_prof = read_bool(b"config.prof\0");
+            let opt_prof = read_bool(b"opt.prof\0");
+            let active_prof = read_bool(b"prof.active\0");
+            match (config_prof, opt_prof, active_prof) {
+                (Ok(config), Ok(opt), Ok(active)) => {
+                    tracing::info!(
+                        event = "heap_profile_prof_flags",
+                        config_prof = config,
+                        opt_prof = opt,
+                        prof_active = active,
+                        "Jemalloc profiling flags"
+                    );
+                    let want_active = std::env::var("ZANN_HEAP_PROFILE_ACTIVE")
+                        .map(|value| value != "0" && !value.is_empty())
+                        .unwrap_or(true);
+                    if config && want_active && !active {
+                        if let Err(err) = write_bool(b"prof.active\0", true) {
+                            tracing::warn!(
+                                event = "heap_profile_active_failed",
+                                error = %err
+                            );
+                        } else {
+                            tracing::info!(event = "heap_profile_active_enabled");
+                        }
+                    }
+                }
+                _ => {
+                    tracing::warn!(event = "heap_profile_prof_flags_failed");
+                }
+            }
+        }
+        tokio::spawn(async move {
+            let mut signal =
+                match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())
+                {
+                    Ok(signal) => signal,
+                    Err(err) => {
+                        tracing::warn!(
+                            event = "heap_profile_signal_failed",
+                            signal = "SIGUSR1",
+                            error = %err
+                        );
+                        return;
+                    }
+                };
+            tracing::info!(
+                event = "heap_profile_signal_ready",
+                signal = "SIGUSR1",
+                directory = %dir_label,
+                "Heap profiler signal handler ready"
+            );
+            loop {
+                signal.recv().await;
+                match heap_profile_dump(&dir) {
+                    Ok(path) => {
+                        tracing::info!(
+                            event = "heap_profile_dumped",
+                            path = %path,
+                            "Heap profile dumped"
+                        );
+                    }
+                    Err(err) => {
+                        tracing::warn!(
+                            event = "heap_profile_dump_failed",
+                            error = %err
+                        );
+                    }
+                }
+            }
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

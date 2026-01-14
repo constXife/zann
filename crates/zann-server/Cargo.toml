@@ -45,6 +45,9 @@ uuid = { version = "1", features = ["v7"] }
 zann-core = { path = "../zann-core", default-features = false, features = ["postgres"] }
 zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", default-features = false, features = ["postgres"] }
+tikv-jemalloc-ctl = { version = "0.6", optional = true, features = ["stats"] }
+tikv-jemallocator = { version = "0.6", optional = true, features = ["profiling"] }
+tikv-jemalloc-sys = { version = "0.6", optional = true, features = ["profiling"] }
 
 [dev-dependencies]
 proptest = "1.5.0"
@@ -53,3 +56,4 @@ zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"]
 
 [features]
 postgres-tests = []
+jemalloc = ["tikv-jemalloc-ctl", "tikv-jemallocator", "tikv-jemalloc-sys"]

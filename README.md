@@ -76,6 +76,12 @@ docker compose up -d
 # The server is available at http://localhost:8080
 ```
 
+## System requirements (server)
+
+- Minimum (dev / low-load): 1 vCPU, 128 MB RAM
+- Recommended (sustained load): 2 vCPU, 512 MB RAM
+- Actual requirements depend on RPS, vault size, and cache policy
+
 ## Architecture
 
 ```mermaid
