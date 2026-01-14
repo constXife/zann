@@ -11,7 +11,6 @@ use zann_server::app::AppState;
 use zann_server::config::{MetricsConfig, MetricsProfile, ServerConfig};
 use zann_server::domains::access_control::policies::{PolicyRule, PolicySet};
 use zann_server::domains::access_control::policy_store::PolicyStore;
-use zann_server::infra::metrics;
 use zann_server::infra::security_profiles::load_security_profiles;
 use zann_server::infra::usage::UsageTracker;
 use zann_server::oidc::OidcJwksCache;
@@ -30,11 +29,10 @@ impl TestApp {
         let rules: Vec<PolicyRule> = support::load_policy_rules();
 
         let metrics_config = MetricsConfig {
-            enabled: true,
+            enabled: false,
             endpoint: "/metrics".to_string(),
             profile: Some(MetricsProfile::Prod),
         };
-        metrics::set_profile(metrics_config.effective_profile());
         let mut config = ServerConfig::default();
         support::tune_test_kdf(&mut config);
         let usage_tracker = std::sync::Arc::new(UsageTracker::new(pool.clone(), 100));
