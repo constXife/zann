@@ -61,10 +61,11 @@ impl OidcJwksCache {
                 warn!(event = "oidc_jwks_read_failed", error = %err, path = %path);
                 "oidc_jwks_read_failed".to_string()
             })?;
-            let jwks: jsonwebtoken::jwk::JwkSet = serde_json::from_str(&jwks_json).map_err(|err| {
-                warn!(event = "oidc_jwks_parse_failed", error = %err, path = %path);
-                "oidc_jwks_parse_failed".to_string()
-            })?;
+            let jwks: jsonwebtoken::jwk::JwkSet =
+                serde_json::from_str(&jwks_json).map_err(|err| {
+                    warn!(event = "oidc_jwks_parse_failed", error = %err, path = %path);
+                    "oidc_jwks_parse_failed".to_string()
+                })?;
             return Ok(jwks);
         }
 

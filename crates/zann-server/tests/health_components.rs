@@ -129,8 +129,6 @@ async fn health_hides_details_in_production() {
         .and_then(|value| value.get("details"));
     assert!(db_pool_details.is_none());
 
-    let kdf_details = components
-        .get("kdf")
-        .and_then(|value| value.get("details"));
+    let kdf_details = components.get("kdf").and_then(|value| value.get("details"));
     assert!(kdf_details.is_none());
 }

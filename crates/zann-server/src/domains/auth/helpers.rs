@@ -55,12 +55,10 @@ pub(crate) async fn ensure_personal_vault_tx(
         return Ok(());
     }
 
-    if let Err(err) = query::<Postgres>(
-        "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
-    )
-    .bind(user_id.to_string())
-    .execute(&mut *conn)
-    .await
+    if let Err(err) = query::<Postgres>("SELECT pg_advisory_xact_lock(hashtext($1)::bigint)")
+        .bind(user_id.to_string())
+        .execute(&mut *conn)
+        .await
     {
         tracing::error!(
             event = "personal_vault_lock_failed",

@@ -375,9 +375,7 @@ async fn shared_rotation_commit_rejects_null_payload_enc() {
         .login("rotate-null-payload@example.com", "password-1")
         .await;
 
-    let vault = app
-        .create_shared_vault(&token, "rotate-null-payload")
-        .await;
+    let vault = app.create_shared_vault(&token, "rotate-null-payload").await;
     let vault_id = vault["id"].as_str().expect("vault id");
     let item = app
         .create_shared_item(&token, vault_id, "rotation/null-payload")
@@ -396,21 +394,17 @@ async fn shared_rotation_commit_rejects_null_payload_enc() {
     assert_eq!(status, StatusCode::OK, "start failed: {:?}", start);
 
     let pool = support::setup_shared_db().await;
-    let row = sqlx_core::query::query::<Postgres>(
-        "SELECT payload_enc FROM items WHERE id = $1",
-    )
-    .bind(item_uuid)
-    .fetch_one(&pool)
-    .await
-    .expect("fetch payload");
+    let row = sqlx_core::query::query::<Postgres>("SELECT payload_enc FROM items WHERE id = $1")
+        .bind(item_uuid)
+        .fetch_one(&pool)
+        .await
+        .expect("fetch payload");
     let payload_enc: Vec<u8> = row.get("payload_enc");
 
-    sqlx_core::query::query::<Postgres>(
-        "ALTER TABLE items ALTER COLUMN payload_enc DROP NOT NULL",
-    )
-    .execute(&pool)
-    .await
-    .expect("drop not null");
+    sqlx_core::query::query::<Postgres>("ALTER TABLE items ALTER COLUMN payload_enc DROP NOT NULL")
+        .execute(&pool)
+        .await
+        .expect("drop not null");
     sqlx_core::query::query::<Postgres>("UPDATE items SET payload_enc = NULL WHERE id = $1")
         .bind(item_uuid)
         .execute(&pool)
@@ -434,10 +428,8 @@ async fn shared_rotation_commit_rejects_null_payload_enc() {
         .execute(&pool)
         .await
         .expect("restore payload");
-    sqlx_core::query::query::<Postgres>(
-        "ALTER TABLE items ALTER COLUMN payload_enc SET NOT NULL",
-    )
-    .execute(&pool)
-    .await
-    .expect("restore not null");
+    sqlx_core::query::query::<Postgres>("ALTER TABLE items ALTER COLUMN payload_enc SET NOT NULL")
+        .execute(&pool)
+        .await
+        .expect("restore not null");
 }

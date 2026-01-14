@@ -491,13 +491,8 @@ fn write_secret_file_atomic(path: &Path, contents: &str) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o400)).map_err(|err| {
-            format!(
-                "master key file chmod failed ({}): {}",
-                path.display(),
-                err
-            )
-        })?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o400))
+            .map_err(|err| format!("master key file chmod failed ({}): {}", path.display(), err))?;
     }
 
     Ok(())

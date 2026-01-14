@@ -55,12 +55,10 @@ impl DbTxIsolation {
 }
 
 impl Settings {
-    #[must_use]
     pub fn from_env() -> Result<Self, String> {
         Self::from_env_with_options(true)
     }
 
-    #[must_use]
     pub fn from_env_with_options(require_pepper: bool) -> Result<Self, String> {
         let addr = match env::var("ZANN_ADDR") {
             Ok(value) => value.parse().unwrap_or_else(|_| {

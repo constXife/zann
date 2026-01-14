@@ -38,17 +38,16 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         .execute(&state.db)
         .await
         .is_ok();
+    let db_details = if db_ok || is_production {
+        None
+    } else {
+        Some("db_ping_failed".to_string())
+    };
     components.insert(
         "db".to_string(),
         HealthComponent {
             status: if db_ok { "ok" } else { "error" },
-            details: if db_ok {
-                None
-            } else if is_production {
-                None
-            } else {
-                Some("db_ping_failed".to_string())
-            },
+            details: db_details,
         },
     );
 

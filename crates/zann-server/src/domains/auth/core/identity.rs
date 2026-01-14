@@ -32,8 +32,7 @@ pub async fn identity_from_oidc(
                 "Failed to load OIDC identity"
             );
             "db_error"
-        })?
-    {
+        })? {
         user_repo
             .get_by_id(identity.user_id)
             .await
@@ -168,18 +167,14 @@ pub async fn identity_from_oidc(
             "db_error"
         })?
     {
-        if let Some(group) = group_repo
-            .get_by_id(member.group_id)
-            .await
-            .map_err(|err| {
-                tracing::error!(
-                    event = "auth_group_lookup_failed",
-                    error = %err,
-                    "Failed to load group"
-                );
-                "db_error"
-            })?
-        {
+        if let Some(group) = group_repo.get_by_id(member.group_id).await.map_err(|err| {
+            tracing::error!(
+                event = "auth_group_lookup_failed",
+                error = %err,
+                "Failed to load group"
+            );
+            "db_error"
+        })? {
             groups.push(group.slug);
         }
     }
@@ -219,17 +214,14 @@ pub async fn identity_from_service_account_token(
 
     let token_prefix: String = token.chars().take(SERVICE_ACCOUNT_PREFIX_LEN).collect();
     let repo = ServiceAccountRepo::new(&state.db);
-    let accounts = repo
-        .list_by_prefix(&token_prefix)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                event = "auth_sa_list_failed",
-                error = %err,
-                "Failed to list service accounts"
-            );
-            "db_error"
-        })?;
+    let accounts = repo.list_by_prefix(&token_prefix).await.map_err(|err| {
+        tracing::error!(
+            event = "auth_sa_list_failed",
+            error = %err,
+            "Failed to list service accounts"
+        );
+        "db_error"
+    })?;
 
     let params = KdfParams {
         algorithm: state.config.auth.kdf.algorithm.clone(),
