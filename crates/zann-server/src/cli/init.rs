@@ -89,7 +89,10 @@ pub async fn run(settings: &Settings, db: &zann_db::PgPool, args: &InitArgs) -> 
         "db_error".to_string()
     })?;
     if existing_user.is_some() {
-        let _ = tx.rollback().await;
+        if let Err(err) = tx.rollback().await {
+            tracing::error!(event = "init_failed", error = %err, "DB rollback failed");
+            return Err("db_error".to_string());
+        }
         return Err("users_exist".to_string());
     }
 
@@ -109,7 +112,10 @@ pub async fn run(settings: &Settings, db: &zann_db::PgPool, args: &InitArgs) -> 
         "db_error".to_string()
     })?;
     if email_exists.is_some() {
-        let _ = tx.rollback().await;
+        if let Err(err) = tx.rollback().await {
+            tracing::error!(event = "init_failed", error = %err, "DB rollback failed");
+            return Err("db_error".to_string());
+        }
         return Err("email_exists".to_string());
     }
 
@@ -129,7 +135,10 @@ pub async fn run(settings: &Settings, db: &zann_db::PgPool, args: &InitArgs) -> 
         "db_error".to_string()
     })?;
     if vault_exists.is_some() {
-        let _ = tx.rollback().await;
+        if let Err(err) = tx.rollback().await {
+            tracing::error!(event = "init_failed", error = %err, "DB rollback failed");
+            return Err("db_error".to_string());
+        }
         return Err("vault_slug_taken".to_string());
     }
 
