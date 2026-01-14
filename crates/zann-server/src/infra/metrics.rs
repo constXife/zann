@@ -236,9 +236,8 @@ static DB_POOL_CONNECTIONS: LazyLock<IntGaugeVec> = LazyLock::new(|| {
 });
 
 #[cfg(feature = "jemalloc")]
-static HEAP_ALLOCATED_BYTES: LazyLock<IntGauge> = LazyLock::new(|| {
-    gauge_or_fallback("zann_heap_allocated_bytes", "Jemalloc allocated bytes")
-});
+static HEAP_ALLOCATED_BYTES: LazyLock<IntGauge> =
+    LazyLock::new(|| gauge_or_fallback("zann_heap_allocated_bytes", "Jemalloc allocated bytes"));
 
 #[cfg(feature = "jemalloc")]
 static HEAP_ACTIVE_BYTES: LazyLock<IntGauge> =
