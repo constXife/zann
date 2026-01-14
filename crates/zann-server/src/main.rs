@@ -24,6 +24,10 @@ use std::time::Duration;
 
 use zann_db::migrate;
 
+#[cfg(feature = "jemalloc")]
+#[global_allocator]
+static ALLOC: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 mod app;
 mod bootstrap;
 mod cli;
@@ -81,6 +85,9 @@ async fn main() {
     }
     bootstrap::log_startup(&settings, &metrics_config);
     bootstrap::init_metrics_registry(&metrics_config);
+    if matches!(run_mode, cli::RunMode::Server) {
+        runtime::start_heap_profiler();
+    }
 
     let db = match bootstrap::connect_db(&settings).await {
         Ok(db) => db,

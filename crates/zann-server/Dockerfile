@@ -20,6 +20,8 @@ RUN cargo chef prepare --recipe-path recipe.json --bin zann-server
 
 FROM docker.io/library/rust:1.92.0-bookworm AS cacher
 
+ARG ZANN_SERVER_FEATURES
+ENV JEMALLOC_SYS_WITH_PROF=1
 ENV CARGO_HOME=/app/.cargo
 ENV CARGO_TARGET_DIR=/app/target
 ENV PATH="/app/.cargo/bin:${PATH}"
@@ -27,13 +29,15 @@ WORKDIR /app
 RUN mkdir -p /app/.cargo /app/target
 RUN cargo install cargo-chef --locked
 COPY --from=planner /app/recipe.json recipe.json
-RUN /bin/bash -c 'set -o pipefail; cargo chef cook --release --recipe-path recipe.json --bin zann-server 2>&1 | grep -vE "unused manifest key:|is set on .*deprecated"; status=${PIPESTATUS[0]}; if [ "$status" -ne 0 ]; then exit "$status"; fi'
+RUN /bin/bash -c 'features=""; if [ -n "${ZANN_SERVER_FEATURES:-}" ]; then features="--features ${ZANN_SERVER_FEATURES}"; fi; set -o pipefail; cargo chef cook --release --recipe-path recipe.json --bin zann-server ${features} 2>&1 | grep -vE "unused manifest key:|is set on .*deprecated"; status=${PIPESTATUS[0]}; if [ "$status" -ne 0 ]; then exit "$status"; fi'
 
 FROM docker.io/library/rust:1.92.0-bookworm AS builder
 
+ARG ZANN_SERVER_FEATURES
 ARG GIT_COMMIT
 ENV GIT_COMMIT=${GIT_COMMIT}
 ENV CARGO_BUILD_JOBS=2
+ENV JEMALLOC_SYS_WITH_PROF=1
 
 ENV CARGO_HOME=/app/.cargo
 ENV CARGO_TARGET_DIR=/app/target
@@ -56,7 +60,7 @@ RUN /bin/bash -c 'printf "%s\n" \
   > Cargo.toml'
 COPY --from=cacher /app/target /app/target
 COPY --from=cacher /app/.cargo /app/.cargo
-RUN cargo build -p zann-server --release
+RUN /bin/bash -c 'features=""; if [ -n "${ZANN_SERVER_FEATURES:-}" ]; then features="--features ${ZANN_SERVER_FEATURES}"; fi; cargo build -p zann-server --release ${features}'
 
 FROM docker.io/library/rust:1.92.0-bookworm AS fs
 RUN mkdir -p /data /config \

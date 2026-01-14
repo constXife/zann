@@ -3,6 +3,10 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+heap_dir="${ZANN_HEAP_PROFILE_DIR:-${script_dir}/data/heap}"
+heap_clean="${ZANN_HEAP_PROFILE_CLEAN:-1}"
+heap_sleep_seconds="${ZANN_HEAP_PROFILE_SLEEP:-60}"
+
 if [ -f "${script_dir}/.env.k6" ]; then
   set -a
   # shellcheck source=/dev/null
@@ -14,6 +18,7 @@ export ZANN_BASE_URL="${ZANN_BASE_URL:-http://localhost:18080}"
 export K6_PROFILE="${K6_PROFILE:-low}"
 export K6_LOG_FAILURES="${K6_LOG_FAILURES:-1}"
 export K6_OUTPUTS="${K6_OUTPUTS:-experimental-prometheus-rw}"
+export K6_PROMETHEUS_RW_TREND_STATS="${K6_PROMETHEUS_RW_TREND_STATS:-p(95),p(99)}"
 
 if [ -z "${ZANN_TEST_RUN_ID:-}" ]; then
   ZANN_TEST_RUN_ID="k6-$(date +%s)-${RANDOM}"
@@ -29,7 +34,31 @@ fi
 export K6_TAG_TEST_RUN_ID
 echo "K6 test_run_id=${ZANN_TEST_RUN_ID}"
 
+if [ "${heap_clean}" = "1" ]; then
+  rm -f "${heap_dir}"/heap-*.heap 2>/dev/null || true
+fi
+
 "${script_dir}/reset_db.sh"
+
+PROJECT_NAME="${ZANN_LOADTEST_PROJECT:-zann_loadtest}"
+compose_args=()
+if [ -n "${PROJECT_NAME}" ]; then
+  compose_args=(-p "${PROJECT_NAME}")
+fi
+
+heap_profile_auto="${ZANN_HEAP_PROFILE_AUTO:-1}"
+heap_profile_dump() {
+  local phase="$1"
+  if [ "${heap_profile_auto}" = "0" ]; then
+    return
+  fi
+  if ! command -v podman >/dev/null 2>&1; then
+    return
+  fi
+  echo "Requesting heap profile dump (${phase})..."
+  podman compose "${compose_args[@]}" -f compose.yaml -f compose.loadtest.yaml \
+    kill -s USR1 server >/dev/null 2>&1 || true
+}
 
 export ZANN_SERVICE_ACCOUNT_TOKEN="$(cat "${script_dir}/data/loadtest_sa_token")"
 
@@ -104,4 +133,12 @@ if [ -n "${K6_OUTPUTS:-}" ]; then
   done
 fi
 
-exec k6 "${k6_outputs[@]}" "${k6_tags[@]}" "${args[@]}"
+heap_profile_dump "start"
+k6 "${k6_outputs[@]}" "${k6_tags[@]}" "${args[@]}"
+status=$?
+if [ "${heap_sleep_seconds}" -gt 0 ]; then
+  echo "Waiting ${heap_sleep_seconds}s before heap profile dump (end)..."
+  sleep "${heap_sleep_seconds}"
+fi
+heap_profile_dump "end"
+exit $status

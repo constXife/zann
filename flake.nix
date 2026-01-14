@@ -16,6 +16,8 @@
           k6
           pkg-config
           openssl
+          jemalloc
+          llvm
           libxkbcommon
           wayland
           wayland-protocols

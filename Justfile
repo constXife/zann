@@ -117,8 +117,8 @@ cli:
 # Loadtest (k6)
 # ==========================================
 
-k6 +args='':
-    ./loadtest/run_k6.sh {{args}} run loadtest/k6/runner.js
+k6 scenario='baseline_normal' +args='':
+    K6_SCENARIO={{scenario}} ./loadtest/run_scenario.sh {{args}} run loadtest/k6/runner.js
 
 k6-scenario +args='':
     ./loadtest/run_scenario.sh {{args}} run loadtest/k6/runner.js

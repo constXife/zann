@@ -118,6 +118,7 @@ pub fn init_metrics_registry(metrics_config: &MetricsConfig) {
         return;
     }
     metrics::warmup();
+    metrics::start_heap_metrics();
     #[cfg(target_os = "linux")]
     {
         let process_collector = prometheus::process_collector::ProcessCollector::for_self();

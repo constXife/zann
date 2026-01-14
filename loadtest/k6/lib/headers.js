@@ -2,11 +2,7 @@ export function authHeaders(token) {
   if (!token) {
     return {};
   }
-  return {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  };
+  return buildHeaders({ token, testRunId: __ENV.ZANN_TEST_RUN_ID });
 }
 
 export function buildHeaders({ token, requestId, testRunId, extraHeaders } = {}) {

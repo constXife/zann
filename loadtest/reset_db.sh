@@ -8,6 +8,7 @@ ADMIN_PASSWORD="${ZANN_ADMIN_PASSWORD:-Loadtest123!}"
 LOADTEST_VAULT_SLUG="${ZANN_LOADTEST_VAULT_SLUG:-loadtest}"
 LOADTEST_VAULT_NAME="${ZANN_LOADTEST_VAULT_NAME:-Loadtest Shared}"
 LOADTEST_VAULT_CACHE_POLICY="${ZANN_LOADTEST_VAULT_CACHE_POLICY:-full}"
+LOADTEST_VAULT_KIND="${ZANN_LOADTEST_VAULT_KIND:-shared}"
 TOKEN_OUT="${ZANN_LOADTEST_TOKEN_OUT:-./loadtest/data/loadtest_sa_token}"
 RESET_DB="${ZANN_LOADTEST_RESET_DB:-1}"
 
@@ -91,10 +92,27 @@ if [ -z "${vault_id}" ]; then
 fi
 
 if [ -z "${vault_id}" ]; then
+  cache_policy_value="${LOADTEST_VAULT_CACHE_POLICY}"
+  if ! [[ "${cache_policy_value}" =~ ^[0-9]+$ ]]; then
+    case "${cache_policy_value}" in
+      full) cache_policy_value=1 ;;
+      metadata|metadata_only) cache_policy_value=2 ;;
+      none) cache_policy_value=3 ;;
+      *) cache_policy_value=1 ;;
+    esac
+  fi
+  vault_kind_value="${LOADTEST_VAULT_KIND}"
+  if ! [[ "${vault_kind_value}" =~ ^[0-9]+$ ]]; then
+    case "${vault_kind_value}" in
+      personal) vault_kind_value=1 ;;
+      shared) vault_kind_value=2 ;;
+      *) vault_kind_value=2 ;;
+    esac
+  fi
   create_json=$(curl -s -X POST "${BASE_URL}/v1/vaults" \
     -H "Authorization: Bearer ${access_token}" \
     -H 'Content-Type: application/json' \
-    -d "{\"slug\":\"${LOADTEST_VAULT_SLUG}\",\"name\":\"${LOADTEST_VAULT_NAME}\",\"kind\":\"shared\",\"cache_policy\":\"${LOADTEST_VAULT_CACHE_POLICY}\"}")
+    -d "{\"slug\":\"${LOADTEST_VAULT_SLUG}\",\"name\":\"${LOADTEST_VAULT_NAME}\",\"kind\":${vault_kind_value},\"cache_policy\":${cache_policy_value}}")
   vault_id=$(printf "%s" "${create_json}" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
 fi
 
@@ -122,11 +140,10 @@ if [ ! -w "${token_dir}" ]; then
   exit 1
 fi
 sa_json=$(podman compose "${compose_args[@]}" -f compose.yaml -f compose.loadtest.yaml exec -T server \
-  /app/zann-server tokens create \
-  --name "k6" \
-  --vault "${LOADTEST_VAULT_SLUG}" \
-  --prefix / \
-  --ops read \
+  /app/zann-server token create \
+  "k6" \
+  "${LOADTEST_VAULT_SLUG}:/" \
+  "read" \
   --ttl 30d \
   --issued-by-email "${ADMIN_EMAIL}")
 sa_token=$(printf "%s" "${sa_json}" | tr -d '\r' | rg -o "zann_sa_[A-Za-z0-9]+" | tail -n 1)
