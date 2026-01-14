@@ -22,9 +22,9 @@ pub(crate) mod prelude {
     pub(crate) use sqlx_core::row::Row;
     pub(crate) use uuid::Uuid;
     pub(crate) use zann_core::{
-        AppliedOp, Attachment, Change, Device, Group, GroupMember, Invite, Item, ItemConflict,
-        ItemHistory, ItemUsage, OidcGroupMapping, OidcIdentity, ServiceAccount,
-        ServiceAccountSession, Session, User, UserStatus, Vault, VaultMember,
+        Attachment, Change, Device, Group, GroupMember, Item, ItemHistory, ItemUsage,
+        OidcGroupMapping, OidcIdentity, ServiceAccount, ServiceAccountSession, Session, User,
+        UserStatus, Vault, VaultMember,
     };
 }
 
@@ -39,7 +39,7 @@ mod vaults;
 pub use changes::ChangeRepo;
 pub use devices::{DeviceRepo, ServiceAccountRepo, ServiceAccountSessionRepo};
 pub use groups::{GroupMemberRepo, GroupRepo, OidcGroupMappingRepo};
-pub use items::{AttachmentRepo, ItemConflictRepo, ItemHistoryRepo, ItemRepo, ItemUsageRepo};
-pub use sessions::{AppliedOpRepo, InviteRepo, SessionRepo};
+pub use items::{AttachmentRepo, ItemHistoryRepo, ItemRepo, ItemUsageRepo};
+pub use sessions::SessionRepo;
 pub use users::{OidcIdentityRepo, UserRepo};
 pub use vaults::{VaultMemberRepo, VaultRepo};
