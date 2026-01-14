@@ -2,6 +2,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::ge
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::env;
 
 use crate::app::AppState;
 
@@ -31,6 +32,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     let build_commit = option_env!("GIT_COMMIT");
 
     let mut components = HashMap::new();
+    let is_production = is_production_env();
 
     let db_ok = sqlx_core::query::query::<sqlx_postgres::Postgres>("SELECT 1")
         .execute(&state.db)
@@ -41,6 +43,8 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         HealthComponent {
             status: if db_ok { "ok" } else { "error" },
             details: if db_ok {
+                None
+            } else if is_production {
                 None
             } else {
                 Some("db_ping_failed".to_string())
@@ -54,7 +58,11 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "db_pool".to_string(),
         HealthComponent {
             status: if pool_idle > 0 { "ok" } else { "degraded" },
-            details: Some(format!("size={}, idle={}", pool_size, pool_idle)),
+            details: if is_production {
+                None
+            } else {
+                Some(format!("size={}, idle={}", pool_size, pool_idle))
+            },
         },
     );
 
@@ -63,7 +71,11 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "kdf".to_string(),
         HealthComponent {
             status: if kdf_permits > 0 { "ok" } else { "degraded" },
-            details: Some(format!("available={}", kdf_permits)),
+            details: if is_production {
+                None
+            } else {
+                Some(format!("available={}", kdf_permits))
+            },
         },
     );
 
@@ -79,7 +91,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
             },
             Err(err) => HealthComponent {
                 status: "degraded",
-                details: Some(err),
+                details: if is_production { None } else { Some(err) },
             },
         }
     } else {
@@ -116,4 +128,16 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
             components,
         }),
     )
+}
+
+fn is_production_env() -> bool {
+    env::var("ZANN_ENV")
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "prod" | "production"
+            )
+        })
+        .unwrap_or(false)
 }
