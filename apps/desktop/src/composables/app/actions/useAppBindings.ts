@@ -102,6 +102,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     showPersonalLockedBanner: statusBanners.showPersonalLockedBanner,
     showSyncErrorBanner: statusBanners.showSyncErrorBanner,
     syncErrorMessage: statusBanners.syncErrorMessage,
+    pendingChangesCount: statusBanners.pendingChangesCount,
     handleBannerSignIn: authFlow.handleBannerSignIn,
     openPersonalUnlock: personalUnlock.openPersonalUnlock,
     handleResetPersonal: personalUnlock.handleResetPersonal,

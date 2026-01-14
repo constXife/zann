@@ -464,6 +464,10 @@
     "vault_key_mismatch": "Server already has personal vaults encrypted with a different master password. Use your previous master password, or delete the vaults on the server to start fresh.",
     "history_unavailable_shared": "You do not have access to history details for this shared vault.",
     "server_unreachable": "Unable to reach the server. Check the URL and try again.",
+    "network_timeout": "Network timeout. Check your connection and try again.",
+    "rate_limited": "Too many requests. Please wait and retry.",
+    "temporary_unavailable": "Server temporarily unavailable. Try again soon.",
+    "pending_change_failed": "Unable to read pending changes.",
     "security_title": "Security alert",
     "time_sync_title": "Time sync required",
     "server_identity_invalid": "Critical security error. The server failed identity verification.",
@@ -515,6 +519,7 @@
   },
   "status": {
     "offline": "Offline mode. Changes will sync when connection is restored.",
+    "pendingChanges": "Queued changes: {count}",
     "syncing": "Syncing...",
     "sessionExpired": "Session expired. Sign in to sync.",
     "syncError": "Sync error",

@@ -6,6 +6,7 @@ use crate::state::{ensure_unlocked, AppState};
 use crate::types::{
     ApiResponse, ItemDeleteRequest, ItemDetail, ItemGetRequest, ItemPutRequest, ItemSummary,
     ItemUpdateRequest, ItemsEmptyTrashRequest, ItemsListRequest, ItemsTrashPurgeRequest,
+    PendingChangesCountRequest,
 };
 use zann_core::{ChangeType, EncryptedPayload, ItemListParams, ItemsService, SyncStatus};
 use zann_db::local::{LocalItemRepo, LocalPendingChange, LocalVaultRepo, PendingChangeRepo};
@@ -18,6 +19,28 @@ pub async fn items_list(
     Ok(match list_items(state, req.storage_id, req.vault_id, req.include_deleted).await {
         Ok(data) => ApiResponse::ok(data),
         Err(message) => ApiResponse::err("items_list_failed", &message),
+    })
+}
+
+pub async fn pending_changes_count(
+    state: State<'_, AppState>,
+    req: PendingChangesCountRequest,
+) -> Result<ApiResponse<usize>, String> {
+    ensure_unlocked(&state).await?;
+    let storage_id = Uuid::parse_str(&req.storage_id).map_err(|_| "invalid storage id")?;
+    let pending_repo = PendingChangeRepo::new(&state.pool);
+    let pending = match req.vault_id {
+        Some(vault_id) => {
+            let vault_id = Uuid::parse_str(&vault_id).map_err(|_| "invalid vault id")?;
+            pending_repo
+                .list_by_storage_vault(storage_id, vault_id)
+                .await
+        }
+        None => pending_repo.list_by_storage(storage_id).await,
+    };
+    Ok(match pending {
+        Ok(entries) => ApiResponse::ok(entries.len()),
+        Err(err) => ApiResponse::err("pending_change_failed", &err.to_string()),
     })
 }
 

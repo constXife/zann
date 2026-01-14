@@ -6,6 +6,7 @@ type AppStatusBannersOptions = {
   storageSyncErrors: Ref<Map<string, string>>;
   storagePersonalLocked: Ref<Map<string, boolean>>;
   isOffline: Ref<boolean>;
+  pendingChangesByStorage: Ref<Map<string, number>>;
   localStorageId: string;
 };
 
@@ -14,6 +15,7 @@ export function useAppStatusBanners({
   storageSyncErrors,
   storagePersonalLocked,
   isOffline,
+  pendingChangesByStorage,
   localStorageId,
 }: AppStatusBannersOptions) {
   const showOfflineBanner = computed(() => {
@@ -44,11 +46,17 @@ export function useAppStatusBanners({
 
   const showSyncErrorBanner = computed(() => !!syncErrorMessage.value);
 
+  const pendingChangesCount = computed(() => {
+    if (selectedStorageId.value === localStorageId) return 0;
+    return pendingChangesByStorage.value.get(selectedStorageId.value) ?? 0;
+  });
+
   return {
     showOfflineBanner,
     showSessionExpiredBanner,
     showPersonalLockedBanner,
     syncErrorMessage,
     showSyncErrorBanner,
+    pendingChangesCount,
   };
 }

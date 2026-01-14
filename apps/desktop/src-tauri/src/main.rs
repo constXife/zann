@@ -20,7 +20,7 @@ use commands::auth::{
 };
 use commands::items::{
     items_delete, items_empty_trash, items_get, items_list, items_purge, items_purge_trash,
-    items_put, items_resolve_conflict, items_restore, items_update,
+    items_put, items_resolve_conflict, items_restore, items_update, pending_changes_count,
 };
 use commands::items_history::{
     items_history_get, items_history_list, items_history_restore,
@@ -89,6 +89,7 @@ fn main() {
             open_logs,
             vault_list,
             items_list,
+            pending_changes_count,
             items_get,
             items_history_list,
             items_history_get,

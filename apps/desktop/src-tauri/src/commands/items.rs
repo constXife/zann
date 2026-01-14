@@ -5,6 +5,7 @@ use crate::state::AppState;
 use crate::types::{
     ApiResponse, ItemDeleteRequest, ItemDetail, ItemGetRequest, ItemPutRequest, ItemSummary,
     ItemUpdateRequest, ItemsEmptyTrashRequest, ItemsListRequest, ItemsTrashPurgeRequest,
+    PendingChangesCountRequest,
 };
 
 #[tauri::command]
@@ -13,6 +14,14 @@ pub async fn items_list(
     req: ItemsListRequest,
 ) -> Result<ApiResponse<Vec<ItemSummary>>, String> {
     items_service::items_list(state, req).await
+}
+
+#[tauri::command]
+pub async fn pending_changes_count(
+    state: State<'_, AppState>,
+    req: PendingChangesCountRequest,
+) -> Result<ApiResponse<usize>, String> {
+    items_service::pending_changes_count(state, req).await
 }
 
 #[tauri::command]

@@ -74,6 +74,7 @@ describe("useStorages", () => {
     });
 
     const api = createWrapper();
+    (invoke as unknown as ReturnType<typeof vi.fn>).mockClear();
     setOnline(false);
     window.dispatchEvent(new Event("offline"));
     await nextTick();
@@ -100,6 +101,7 @@ describe("useStorages", () => {
     );
 
     const api = createWrapper();
+    (invoke as unknown as ReturnType<typeof vi.fn>).mockClear();
     setOnline(true);
 
     const result = await api.runRemoteSync(null);
