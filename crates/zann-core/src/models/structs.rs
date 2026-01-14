@@ -213,18 +213,6 @@ pub struct Attachment {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ItemConflict {
-    pub id: Uuid,
-    pub item_id: Uuid,
-    pub vault_id: Uuid,
-    pub losing_version: i64,
-    pub losing_device_id: Uuid,
-    pub losing_payload_enc: Vec<u8>,
-    pub created_at: DateTime<Utc>,
-    pub resolved_at: Option<DateTime<Utc>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Change {
     pub seq: i64,
     pub vault_id: Uuid,
@@ -232,25 +220,5 @@ pub struct Change {
     pub op: ChangeOp,
     pub version: i64,
     pub device_id: Uuid,
-    pub created_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AppliedOp {
-    pub op_id: Uuid,
-    pub device_id: Uuid,
-    pub vault_id: Uuid,
-    pub item_id: Uuid,
-    pub applied_at: DateTime<Utc>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Invite {
-    pub id: Uuid,
-    pub vault_id: Uuid,
-    pub token_hash: String,
-    pub role: VaultMemberRole,
-    pub uses_left: i32,
-    pub expires_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }

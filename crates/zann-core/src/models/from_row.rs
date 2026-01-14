@@ -267,20 +267,6 @@ impl_from_row!(Attachment, row => {
     }
 );
 
-impl_from_row!(ItemConflict, row => {
-        Ok(Self {
-            id: row.try_get("id")?,
-            item_id: row.try_get("item_id")?,
-            vault_id: row.try_get("vault_id")?,
-            losing_version: row.try_get("losing_version")?,
-            losing_device_id: row.try_get("losing_device_id")?,
-            losing_payload_enc: row.try_get("losing_payload_enc")?,
-            created_at: row.try_get("created_at")?,
-            resolved_at: row.try_get("resolved_at")?,
-        })
-    }
-);
-
 impl_from_row!(Change, row => {
         let op: i16 = row.try_get("op")?;
         Ok(Self {
@@ -290,31 +276,6 @@ impl_from_row!(Change, row => {
             op: parse_enum(op)?,
             version: row.try_get("version")?,
             device_id: row.try_get("device_id")?,
-            created_at: row.try_get("created_at")?,
-        })
-    }
-);
-
-impl_from_row!(AppliedOp, row => {
-        Ok(Self {
-            op_id: row.try_get("op_id")?,
-            device_id: row.try_get("device_id")?,
-            vault_id: row.try_get("vault_id")?,
-            item_id: row.try_get("item_id")?,
-            applied_at: row.try_get("applied_at")?,
-        })
-    }
-);
-
-impl_from_row!(Invite, row => {
-        let role: i16 = row.try_get("role")?;
-        Ok(Self {
-            id: row.try_get("id")?,
-            vault_id: row.try_get("vault_id")?,
-            token_hash: row.try_get("token_hash")?,
-            role: parse_enum(role)?,
-            uses_left: row.try_get("uses_left")?,
-            expires_at: row.try_get("expires_at")?,
             created_at: row.try_get("created_at")?,
         })
     }
