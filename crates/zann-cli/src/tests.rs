@@ -1,7 +1,5 @@
 use crate::cli_args::*;
-use crate::modules::auth::{
-    clear_keyring_mock, load_access_token, lock_keyring_tests_sync,
-};
+use crate::modules::auth::{clear_keyring_mock, load_access_token, lock_keyring_tests_sync};
 use crate::modules::system::{handle_config_command, CliConfig};
 
 #[test]

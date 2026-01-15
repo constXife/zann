@@ -45,8 +45,7 @@ pub(crate) async fn send_request(
         &info.server_fingerprint,
     )?;
     let auth = exchange_service_account_token(ctx.client, ctx.addr, &service_account_token).await?;
-    let new_expires =
-        (Utc::now() + ChronoDuration::seconds(auth.expires_in as i64)).to_rfc3339();
+    let new_expires = (Utc::now() + ChronoDuration::seconds(auth.expires_in as i64)).to_rfc3339();
     store_access_token(&context_name, &token_name, &auth.access_token)?;
     if let Some(entry) = ctx
         .config

@@ -1,3 +1,7 @@
+use crate::modules::auth::{ServiceAccountAuthRequest, ServiceAccountAuthResponse};
+use crate::modules::system::http::{fetch_system_info, parse_rfc3339};
+use crate::modules::system::{load_known_hosts, normalize_server_key, save_known_hosts, CliConfig};
+use crate::{REFRESH_SKEW_SECONDS, SERVER_FINGERPRINT_ENV};
 use chrono::{Duration as ChronoDuration, Utc};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
 #[cfg(test)]
@@ -10,10 +14,6 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
 #[cfg(not(test))]
 use tracing::warn;
-use crate::modules::auth::{ServiceAccountAuthRequest, ServiceAccountAuthResponse};
-use crate::modules::system::{load_known_hosts, normalize_server_key, save_known_hosts, CliConfig};
-use crate::{REFRESH_SKEW_SECONDS, SERVER_FINGERPRINT_ENV};
-use crate::modules::system::http::{fetch_system_info, parse_rfc3339};
 
 pub(crate) fn auth_headers(token: &str) -> anyhow::Result<HeaderMap> {
     if token.trim().is_empty() {
