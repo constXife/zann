@@ -6,6 +6,7 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../../..");
 const readmePath = path.join(repoRoot, "README.md");
 const outputPath = path.join(repoRoot, "docs", "index.md");
+const docsBase = "/zann/";
 
 const raw = await fs.readFile(readmePath, "utf8");
 const lines = raw.split(/\r?\n/);
@@ -16,8 +17,8 @@ if (lines[0]?.startsWith("# ")) {
   body = rest.join("\n").replace(/^\s*\n/, "");
 }
 
-body = body.replaceAll("docs/screenshots/", "screenshots/");
-body = body.replaceAll("screenshots/", "/screenshots/");
+body = body.replaceAll("docs/screenshots/", `screenshots/`);
+body = body.replaceAll("screenshots/", `${docsBase}screenshots/`);
 body = body.replaceAll("docs/INSTALL.md", "/install/");
 
 const frontmatter = [

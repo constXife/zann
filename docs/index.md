@@ -25,9 +25,27 @@ Self-hosted password manager for individuals and small teams.
 - **Desktop app** - offline-first, works without a server (macOS, Windows)
 - **Hybrid auth** - OIDC + built-in authentication
 
+## Stability
+
+**Current status:** experimental. Until **v0.Y** (refactor milestone), the API,
+CLI, and config format may change without backward compatibility.
+
+### Policy starts at v0.Y
+
+After the refactor milestone, we will publish a stability policy and follow it
+for:
+- API compatibility
+- Config format migrations
+- Client/server version support windows
+
+### Breaking changes (pre-policy phase)
+
+- May happen without migration steps
+- Will still be noted in [CHANGELOG](CHANGELOG.md) when possible
+
 ## Screenshots
 
-![Desktop app](/screenshots/desktop-app.png)
+![Desktop app](/zann/screenshots/desktop-app.png)
 
 ## Quick start
 
@@ -91,6 +109,43 @@ Components:
 - `zann-core` - shared business logic and cryptography
 
 Server threat model: [crates/zann-server/SECURITY.md](crates/zann-server/SECURITY.md) (assumptions and trust boundaries).
+
+## Usage overview
+
+### General
+
+- Desktop is the primary client for people (personal vaults + shared vaults).
+- CLI is for automation and CI/CD; it is token-based and requires the server.
+- Server provides the API, shared vaults, and token issuance.
+
+### Desktop
+
+- Offline-first for personal vaults; optional server connection for shared vaults.
+- Recommended for interactive use and day-to-day management.
+
+### CLI (token-based)
+
+- Uses tokens issued by the server (service account tokens).
+- Provide tokens via `--token`, `--token-file`, or `zann config set-context`.
+- Print version info with `zann version`.
+
+Example token creation and CLI setup:
+
+```bash
+# Create a service account token on the server
+zann-server token create ci-prod infra:/
+
+# Configure the CLI in your CI job
+zann config set-context ci \
+  --addr https://zann.example.com \
+  --token "$ZANN_SERVICE_TOKEN" \
+  --vault infra
+```
+
+### Server
+
+- Runs as the shared backend (Docker Compose or prebuilt image).
+- Issues tokens and enforces access scope and IP restrictions.
 
 ## For DevOps and CI/CD
 

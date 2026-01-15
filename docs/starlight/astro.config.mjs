@@ -19,6 +19,20 @@ export default defineConfig({
           ],
         },
         {
+          label: "Clients",
+          items: [
+            { label: "Desktop Guide", link: "/desktop/" },
+            { label: "CLI Guide", link: "/cli/" },
+          ],
+        },
+        {
+          label: "Server",
+          items: [
+            { label: "Server Guide", link: "/server/" },
+            { label: "Threat Model", link: "/server-threat-model/" },
+          ],
+        },
+        {
           label: "Reference",
           items: [
             { label: "API Reference", link: "/api/" },
