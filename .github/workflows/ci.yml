@@ -164,7 +164,7 @@ jobs:
 
   coverage:
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    if: (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     env:
       ZANN_CONFIG_PATH: config/ci.yaml
@@ -190,6 +190,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          sudo apt-get clean
+          df -h
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
         with:
@@ -216,7 +221,7 @@ jobs:
 
   audit:
     needs: changes
-    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
+    if: (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
