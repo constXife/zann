@@ -111,6 +111,43 @@ Components:
 
 Server threat model: [crates/zann-server/SECURITY.md](crates/zann-server/SECURITY.md) (assumptions and trust boundaries).
 
+## Usage overview
+
+### General
+
+- Desktop is the primary client for people (personal vaults + shared vaults).
+- CLI is for automation and CI/CD; it is token-based and requires the server.
+- Server provides the API, shared vaults, and token issuance.
+
+### Desktop
+
+- Offline-first for personal vaults; optional server connection for shared vaults.
+- Recommended for interactive use and day-to-day management.
+
+### CLI (token-based)
+
+- Uses tokens issued by the server (service account tokens).
+- Provide tokens via `--token`, `--token-file`, or `zann config set-context`.
+- Print version info with `zann version`.
+
+Example token creation and CLI setup:
+
+```bash
+# Create a service account token on the server
+zann-server token create ci-prod infra:/
+
+# Configure the CLI in your CI job
+zann config set-context ci \
+  --addr https://zann.example.com \
+  --token "$ZANN_SERVICE_TOKEN" \
+  --vault infra
+```
+
+### Server
+
+- Runs as the shared backend (Docker Compose or prebuilt image).
+- Issues tokens and enforces access scope and IP restrictions.
+
 ## For DevOps and CI/CD
 
 Zann supports CI/CD integrations:

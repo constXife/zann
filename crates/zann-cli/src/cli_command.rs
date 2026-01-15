@@ -20,8 +20,8 @@ pub(crate) async fn handle_command(
             let response = send_request(ctx, Method::GET, url, None).await?;
             print_json_response(response).await?;
         }
-        Command::Server(_) | Command::Run(_) => {}
-        Command::Config(_) | Command::Login(_) | Command::Logout(_) => {
+        Command::Server(_) | Command::Run(_) | Command::Version => {}
+        Command::Config(_) => {
             unreachable!()
         }
     }

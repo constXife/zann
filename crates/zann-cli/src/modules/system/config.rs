@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use super::types::{CliConfig, CliContext, TokenEntry};
 use crate::cli_args::{ConfigArgs, ConfigCommand};
 use crate::modules::auth::{
-    delete_access_token, delete_refresh_token, delete_service_token, load_access_token,
-    load_service_token, store_access_token, store_service_token,
+    delete_access_token, delete_service_token, load_access_token, load_service_token,
+    store_access_token, store_service_token,
 };
 use crate::{DEFAULT_ADDR, SERVICE_ACCOUNT_PREFIX, TOKEN_MANUAL};
 
@@ -131,7 +131,6 @@ pub(crate) fn handle_config_command(
             if context.current_token.as_deref() == Some(&args.name) {
                 context.current_token = None;
             }
-            delete_refresh_token(&context_name, &args.name)?;
             delete_access_token(&context_name, &args.name)?;
             delete_service_token(&context_name, &args.name)?;
         }

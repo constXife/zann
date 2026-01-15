@@ -3,7 +3,7 @@ use predicates::prelude::*;
 
 #[test]
 fn cli_help_includes_usage() {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("zann-cli"));
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("zann"));
 
     cmd.arg("--help")
         .assert()
