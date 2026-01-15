@@ -1,10 +1,11 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use reqwest::Method;
 use serde::Deserialize;
 use tracing::{debug, info};
 
 use crate::modules::auth::{
-    auth_headers, load_refresh_token, refresh_token_for_context, refresh_token_missing_error,
+    auth_headers, exchange_service_account_token, load_service_token, store_access_token,
+    verify_server_fingerprint,
 };
 use crate::modules::system::CommandContext;
 
@@ -19,7 +20,11 @@ pub(crate) async fn send_request(
         return Ok(response);
     }
 
-    info!(method = %method, url = %url, "http request unauthorized; attempting refresh");
+    info!(
+        method = %method,
+        url = %url,
+        "http request unauthorized; attempting service token exchange"
+    );
 
     let Some(context_name) = ctx.context_name.clone() else {
         return Ok(response);
@@ -28,19 +33,30 @@ pub(crate) async fn send_request(
         return Ok(response);
     };
 
-    let refresh_token = load_refresh_token(&context_name, &token_name)?
-        .ok_or_else(|| refresh_token_missing_error(&context_name, &token_name))?;
+    let Some(service_account_token) = load_service_token(&context_name, &token_name)? else {
+        return Ok(response);
+    };
 
-    let new_token = refresh_token_for_context(
-        ctx.client,
-        ctx.addr,
-        &context_name,
-        &token_name,
-        &refresh_token,
+    let info = fetch_system_info(ctx.client, ctx.addr).await?;
+    verify_server_fingerprint(
         ctx.config,
-    )
-    .await?;
-    ctx.access_token = new_token;
+        Some(&context_name),
+        ctx.addr,
+        &info.server_fingerprint,
+    )?;
+    let auth = exchange_service_account_token(ctx.client, ctx.addr, &service_account_token).await?;
+    let new_expires =
+        (Utc::now() + ChronoDuration::seconds(auth.expires_in as i64)).to_rfc3339();
+    store_access_token(&context_name, &token_name, &auth.access_token)?;
+    if let Some(entry) = ctx
+        .config
+        .contexts
+        .get_mut(&context_name)
+        .and_then(|context| context.tokens.get_mut(&token_name))
+    {
+        entry.access_expires_at = Some(new_expires);
+    }
+    ctx.access_token = auth.access_token;
 
     response = send_request_once(ctx, method, &url, payload).await?;
     Ok(response)

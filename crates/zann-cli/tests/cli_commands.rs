@@ -7,7 +7,7 @@ use std::path::Path;
 use tempfile::tempdir;
 
 fn base_cmd(home: &Path) -> Command {
-    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("zann-cli"));
+    let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("zann"));
     cmd.env("HOME", home);
     cmd
 }

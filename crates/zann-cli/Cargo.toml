@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+[[bin]]
+name = "zann"
+path = "src/main.rs"
+
 [dependencies]
 anyhow = "1.0.86"
 base64 = "0.22.1"
@@ -18,7 +22,6 @@ zann-core = { path = "../zann-core", default-features = false }
 uuid = { version = "1.10.0", features = ["v7", "serde"] }
 blake3 = "1"
 urlencoding = "2.1.3"
-rpassword = "7.3.1"
 arboard = "3.4.0"
 keyring = "2.3.3"
 tracing = "0.1.40"

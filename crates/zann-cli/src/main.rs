@@ -1,5 +1,4 @@
 use clap::Parser;
-use std::io::{self, Write};
 use zann_core::{EncryptedPayload, FieldValue};
 
 mod cli_args;
@@ -11,7 +10,6 @@ use crate::cli_command::handle_command;
 use crate::modules::auth::{
     ensure_access_token, exchange_service_account_token, verify_server_fingerprint,
 };
-use crate::modules::auth::{handle_login_command, handle_logout};
 use crate::modules::system::http::fetch_system_info;
 use crate::modules::system::CommandContext;
 use crate::modules::system::{handle_config_command, load_config, save_config};
@@ -20,13 +18,12 @@ use tracing_subscriber::EnvFilter;
 
 pub(crate) const DEFAULT_ADDR: &str = "https://127.0.0.1:8080";
 pub(crate) const REFRESH_SKEW_SECONDS: i64 = 30;
-pub(crate) const TOKEN_SESSION: &str = "session";
-pub(crate) const TOKEN_OIDC: &str = "oidc";
 pub(crate) const TOKEN_MANUAL: &str = "manual";
 pub(crate) const SERVER_FINGERPRINT_ENV: &str = "ZANN_SERVER_FINGERPRINT";
 const SERVER_URL_ENV: &str = "ZANN_SERVER_URL";
 const SERVICE_TOKEN_ENV: &str = "ZANN_SERVICE_TOKEN";
 pub(crate) const SERVICE_ACCOUNT_PREFIX: &str = "zann_sa_";
+const REPO_URL: &str = "https://github.com/constXife/zann";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -61,29 +58,8 @@ async fn main() -> anyhow::Result<()> {
             handle_config_command(args, &mut config)?;
             save_config(&config)?;
         }
-        Command::Login(args) => {
-            handle_login_command(
-                args,
-                addr_arg,
-                context_arg,
-                cli.insecure,
-                &client,
-                &mut config,
-            )
-            .await?;
-            save_config(&config)?;
-        }
-        Command::Logout(args) => {
-            handle_logout(
-                args,
-                addr_arg,
-                context_arg,
-                cli.insecure,
-                &client,
-                &mut config,
-            )
-            .await?;
-            save_config(&config)?;
+        Command::Version => {
+            print_version();
         }
         Command::Server(args) => {
             handle_server_command(args, addr_arg, context_arg, cli.insecure, &client, &config)
@@ -158,6 +134,14 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn print_version() {
+    println!(
+        "zann {} (token-based; tokens are issued by the server)\nDocs: {}",
+        env!("CARGO_PKG_VERSION"),
+        REPO_URL
+    );
+}
+
 fn read_token_file(path: &str) -> anyhow::Result<String> {
     let contents = std::fs::read_to_string(path)?;
     let token = contents.trim();
@@ -178,43 +162,6 @@ fn init_logging(verbosity: u8) -> anyhow::Result<()> {
         .with_target(false)
         .init();
     Ok(())
-}
-
-fn prompt_login_command() -> anyhow::Result<LoginCommand> {
-    let method = prompt_line("Login method (internal/oidc-device): ")?;
-    match method.trim() {
-        "internal" => {
-            let email = prompt_line("Email: ")?;
-            let password = prompt_password("Password: ")?;
-            Ok(LoginCommand::Internal(LoginInternalArgs {
-                email,
-                password: Some(password),
-                device_name: None,
-                device_platform: None,
-                context: None,
-            }))
-        }
-        "oidc-device" | "oidc" => Ok(LoginCommand::OidcDevice(LoginOidcArgs { context: None })),
-        _ => anyhow::bail!("unknown login method"),
-    }
-}
-
-fn prompt_line(prompt: &str) -> anyhow::Result<String> {
-    let mut input = String::new();
-    print!("{prompt}");
-    io::stdout().flush()?;
-    io::stdin().read_line(&mut input)?;
-    Ok(input.trim().to_string())
-}
-
-pub(crate) fn prompt_password(prompt: &str) -> anyhow::Result<String> {
-    print!("{prompt}");
-    io::stdout().flush()?;
-    let password = rpassword::read_password()?;
-    if password.trim().is_empty() {
-        anyhow::bail!("password is required");
-    }
-    Ok(password)
 }
 
 pub(crate) fn find_field<'a>(payload: &'a EncryptedPayload, key: &str) -> Option<&'a FieldValue> {
