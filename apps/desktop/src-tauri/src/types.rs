@@ -146,6 +146,12 @@ pub struct OidcLoginStatusResponse {
     pub old_fingerprint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub new_fingerprint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal_vaults_present: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal_key_envelopes_present: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub personal_vault_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -165,7 +171,7 @@ pub struct VaultSummaryResponse {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[allow(dead_code)]
 pub struct VaultDetailResponse {
     pub id: String,
@@ -177,6 +183,14 @@ pub struct VaultDetailResponse {
     pub encryption_type: i32,
     pub tags: Option<Vec<String>>,
     pub created_at: String,
+}
+
+#[derive(Deserialize)]
+#[allow(dead_code)]
+pub struct PersonalVaultStatusResponse {
+    pub personal_vaults_present: bool,
+    pub personal_key_envelopes_present: bool,
+    pub personal_vault_id: Option<String>,
 }
 
 #[derive(Serialize)]

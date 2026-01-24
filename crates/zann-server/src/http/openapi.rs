@@ -14,7 +14,7 @@ use zann_core::api::auth::{
     LoginRequest, LoginResponse, LogoutRequest, OidcConfigResponse, OidcLoginRequest,
     PreloginResponse, RefreshRequest, RegisterRequest,
 };
-use zann_core::api::vaults::VaultListResponse;
+use zann_core::api::vaults::{PersonalVaultStatusResponse, VaultListResponse};
 use zann_core::{
     AuthSource, CachePolicy, ChangeType, Identity, UserStatus, VaultEncryptionType, VaultKind,
 };
@@ -102,6 +102,7 @@ fn doc_router() -> ApiRouter<AppState> {
             delete(groups_remove_member),
         )
         .api_route("/v1/vaults", get(vaults_list).post(vaults_create))
+        .api_route("/v1/vaults/personal/status", get(vaults_personal_status))
         .api_route(
             "/v1/vaults/:vault_id",
             get(vaults_get).delete(vaults_delete),
@@ -396,6 +397,14 @@ async fn vaults_list(
     Query(_query): Query<ListVaultsQuery>,
 ) -> (StatusCode, Json<VaultListResponse>) {
     not_implemented(VaultListResponse { vaults: Vec::new() })
+}
+
+async fn vaults_personal_status() -> (StatusCode, Json<PersonalVaultStatusResponse>) {
+    not_implemented(PersonalVaultStatusResponse {
+        personal_vaults_present: false,
+        personal_key_envelopes_present: false,
+        personal_vault_id: None,
+    })
 }
 
 async fn vaults_create(

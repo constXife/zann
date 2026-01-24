@@ -164,7 +164,7 @@ jobs:
 
   coverage:
     needs: changes
-    if: (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') && github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       ZANN_CONFIG_PATH: config/ci.yaml
@@ -223,6 +223,10 @@ jobs:
     needs: changes
     if: (needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true') && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4

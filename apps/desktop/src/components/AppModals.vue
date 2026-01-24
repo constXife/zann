@@ -30,6 +30,7 @@ type AppModalsProps = {
   setupFlow: unknown;
   setupPassword: unknown;
   setupConfirm: unknown;
+  setupPasswordMode: unknown;
   connectServerUrl: unknown;
   setupError: unknown;
   setupBusy: unknown;
@@ -206,6 +207,7 @@ const setupStep = modelRef<unknown>("setupStep");
 const setupFlow = modelRef<unknown>("setupFlow");
 const setupPassword = modelRef<unknown>("setupPassword");
 const setupConfirm = modelRef<unknown>("setupConfirm");
+const setupPasswordMode = modelRef<unknown>("setupPasswordMode");
 const connectServerUrl = modelRef<unknown>("connectServerUrl");
 const password = modelRef<unknown>("password");
 const personalUnlockPassword = modelRef<unknown>("personalUnlockPassword");
@@ -277,6 +279,7 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     v-model:setup-password="setupPassword"
     v-model:setup-confirm="setupConfirm"
     v-model:connect-server-url="connectServerUrl"
+    :password-mode="setupPasswordMode"
     :setup-error="setupError"
     :setup-busy="setupBusy"
     :connect-verification="connectVerification"

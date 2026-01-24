@@ -6,16 +6,22 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 
 use crate::constants::DWK_AAD;
+use crate::crypto::decrypt_vault_key_with_master;
+use crate::infra::auth::ensure_access_token_for_context;
 use crate::infra::config::{load_config, load_settings, save_config, save_settings};
+use crate::infra::http::{auth_headers, decode_json_response, ensure_success};
 use crate::state::AppState;
 use crate::types::{
     ApiResponse, AppStatusResponse, AutolockConfig, BootstrapResponse, DesktopSettings,
-    KeystoreStatusResponse, StatusResponse,
+    KeystoreStatusResponse, PersonalVaultStatusResponse, StatusResponse, VaultDetailResponse,
 };
 use zann_core::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
 use zann_core::{AppService, StorageKind, VaultKind};
-use zann_db::local::{LocalItemRepo, LocalStorageRepo, LocalVaultRepo, MetadataRepo};
+use zann_db::local::{KeyWrapType, LocalItemRepo, LocalStorageRepo, LocalVaultRepo, MetadataRepo};
 use zann_db::services::LocalServices;
+use zann_db::local::LocalVault;
+use zann_core::VaultEncryptionType;
+use uuid::Uuid;
 
 fn default_local_kdf_params() -> zann_core::api::auth::KdfParams {
     zann_core::api::auth::KdfParams {
@@ -30,6 +36,120 @@ fn generate_kdf_salt() -> String {
     let mut salt = [0u8; 32];
     OsRng.fill_bytes(&mut salt);
     base64::engine::general_purpose::STANDARD.encode(salt)
+}
+
+async fn fetch_personal_status(
+    client: &reqwest::Client,
+    headers: &reqwest::header::HeaderMap,
+    addr: &str,
+) -> Result<PersonalVaultStatusResponse, String> {
+    let url = format!("{}/v1/vaults/personal/status", addr.trim_end_matches('/'));
+    let response = client
+        .get(url)
+        .headers(headers.clone())
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    let response = match ensure_success(response).await {
+        Ok(response) => response,
+        Err(err) => return Err(format!("vault_preflight_failed: {err}")),
+    };
+    decode_json_response::<PersonalVaultStatusResponse>(response).await
+}
+
+async fn fetch_vault_detail(
+    client: &reqwest::Client,
+    headers: &reqwest::header::HeaderMap,
+    addr: &str,
+    vault_id: &str,
+) -> Result<VaultDetailResponse, String> {
+    let url = format!("{}/v1/vaults/{}", addr.trim_end_matches('/'), vault_id);
+    let response = client
+        .get(url)
+        .headers(headers.clone())
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    let response = match ensure_success(response).await {
+        Ok(response) => response,
+        Err(err) => return Err(format!("vault_get_failed: {err}")),
+    };
+    decode_json_response::<VaultDetailResponse>(response).await
+}
+
+async fn verify_remote_master_password(
+    state: &State<'_, AppState>,
+    master_key: &SecretKey,
+) -> Result<(), (String, String)> {
+    let mut config = load_config(&state.root).map_err(|err| ("config_error".to_string(), err.to_string()))?;
+    let context_name = match config.current_context.clone() {
+        Some(value) => value,
+        None => return Ok(()),
+    };
+    let Some(context) = config.contexts.get(&context_name).cloned() else {
+        return Ok(());
+    };
+    if context.current_token.is_none() {
+        return Ok(());
+    }
+    let addr = context.addr.clone();
+    if addr.trim().is_empty() {
+        return Ok(());
+    }
+
+    let client = reqwest::Client::new();
+    let access_token = ensure_access_token_for_context(
+        &client,
+        &addr,
+        &context_name,
+        &mut config,
+        None,
+    )
+    .await
+    .map_err(|err| ("vault_list_failed".to_string(), err))?;
+    let _ = save_config(&state.root, &config);
+
+    let headers = auth_headers(&access_token).map_err(|err| ("vault_list_failed".to_string(), err))?;
+    let status = fetch_personal_status(&client, &headers, &addr)
+        .await
+        .map_err(|err| ("vault_list_failed".to_string(), err))?;
+
+    if !status.personal_key_envelopes_present {
+        return Ok(());
+    }
+    let Some(vault_id) = status.personal_vault_id.as_deref() else {
+        return Err(("vault_get_failed".to_string(), "personal vault missing".to_string()));
+    };
+
+    let vault = fetch_vault_detail(&client, &headers, &addr, vault_id)
+        .await
+        .map_err(|err| ("vault_get_failed".to_string(), err))?;
+    let vault_id = Uuid::parse_str(&vault.id)
+        .map_err(|err| ("vault_get_failed".to_string(), err.to_string()))?;
+    let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
+        .map_err(|_| ("vault_get_failed".to_string(), "invalid vault encryption type".to_string()))?;
+    let kind = VaultKind::try_from(vault.kind)
+        .map_err(|_| ("vault_get_failed".to_string(), "invalid vault kind".to_string()))?;
+    if encryption_type == VaultEncryptionType::Client && kind == VaultKind::Personal {
+        let local_vault = LocalVault {
+            id: vault_id,
+            storage_id: Uuid::nil(),
+            name: vault.name.clone(),
+            kind,
+            is_default: false,
+            vault_key_enc: vault.vault_key_enc.clone(),
+            key_wrap_type: KeyWrapType::RemoteStrict,
+            last_synced_at: None,
+        };
+        if decrypt_vault_key_with_master(master_key, &local_vault).is_err() {
+            return Err((
+                "master_password_invalid".to_string(),
+                "invalid master password".to_string(),
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn initialize_local_identity(state: State<'_, AppState>) -> Result<ApiResponse<()>, String> {
@@ -125,6 +245,9 @@ pub async fn initialize_master_password(
         .ok_or_else(|| "identity not initialized".to_string())?;
     log_master_key_context("initialize", &password, &identity);
     let master_key = derive_master_key(&password, &identity).map_err(|err| err.to_string())?;
+    if let Err((kind, message)) = verify_remote_master_password(&state, &master_key).await {
+        return Ok(ApiResponse::err(&kind, &message));
+    }
     let services = LocalServices::new(&state.pool, &master_key);
     match services.initialize_master_password().await {
         Ok(()) => {

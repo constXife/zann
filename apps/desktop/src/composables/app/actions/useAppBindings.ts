@@ -206,6 +206,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     setupFlow: authFlow.setupFlow,
     setupPassword: authFlow.setupPassword,
     setupConfirm: authFlow.setupConfirm,
+    setupPasswordMode: authFlow.setupPasswordMode,
     connectServerUrl: authFlow.connectServerUrl,
     setupError: authFlow.setupError,
     setupBusy: authFlow.setupBusy,
