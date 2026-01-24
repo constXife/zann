@@ -16,12 +16,7 @@ async fn personal_status(app: &TestApp, token: &str) -> serde_json::Value {
             json!({}),
         )
         .await;
-    assert_eq!(
-        status,
-        StatusCode::OK,
-        "personal status failed: {:?}",
-        json
-    );
+    assert_eq!(status, StatusCode::OK, "personal status failed: {:?}", json);
     json
 }
 
@@ -29,7 +24,9 @@ async fn personal_status(app: &TestApp, token: &str) -> serde_json::Value {
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn personal_status_reports_missing_envelope() {
     let app = TestApp::new_with_smk().await;
-    let user = app.register("preflight-personal@example.com", "password").await;
+    let user = app
+        .register("preflight-personal@example.com", "password")
+        .await;
     let token = user["access_token"].as_str().expect("token");
 
     let status = personal_status(&app, token).await;
