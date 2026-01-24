@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod backup;
 pub mod items;
 pub mod items_history;
 pub mod session;

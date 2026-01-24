@@ -24,7 +24,8 @@
     "cancel": "Cancel",
     "continue": "Continue",
     "undo": "Undo",
-    "save": "Save"
+    "save": "Save",
+    "loading": "Loading..."
   },
   "sidebar": {
     "collapse": "Collapse sidebar",
@@ -334,10 +335,27 @@
       "alsoClearCache": "Also erase local cached data"
     },
     "backups": {
-      "localOnly": "Local-Only Feature",
-      "description": "Backups are only available for your local vault. Remote server data is managed by the server.",
-      "comingSoon": "Coming Soon",
-      "comingSoonDesc": "Backup and restore functionality will be available in a future update.",
+      "plainWarningTitle": "Plain JSON Export",
+      "plainWarningDesc": "Exports include decrypted secrets. Store the file securely and delete it when done.",
+      "exportTitle": "Export",
+      "exportDesc": "Create a plain JSON backup from all connected storages.",
+      "exportPathLabel": "Export path (optional)",
+      "exportPathPlaceholder": "Leave empty to use the default backups folder",
+      "exportAction": "Export JSON",
+      "exportSuccess": "Backup exported",
+      "exportFailed": "Export failed",
+      "exportedPath": "Saved to: {path}",
+      "exportedCounts": "{storages} storages, {vaults} vaults, {items} items",
+      "importTitle": "Import",
+      "importDesc": "Import a plain JSON backup. Existing secrets are skipped.",
+      "importPathLabel": "Import file path",
+      "importPathPlaceholder": "Paste a .json file path",
+      "importAction": "Import JSON",
+      "importSuccess": "Backup imported",
+      "importFailed": "Import failed",
+      "importPathRequired": "Path is required",
+      "importedCounts": "Imported {imported}, skipped existing {skipped}",
+      "importedSkippedMissing": "Skipped missing storages {missingStorages}, missing vaults {missingVaults}, deleted {deleted}",
       "singleWriterWarning": "Do not open the same vault file on multiple devices simultaneously. Use server sync instead."
     },
     "about": {

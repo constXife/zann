@@ -169,3 +169,18 @@ export type FolderNode = {
   itemCount: number;
   totalCount: number;
 };
+
+export type PlainBackupExportResponse = {
+  path: string;
+  storages_count: number;
+  vaults_count: number;
+  items_count: number;
+};
+
+export type PlainBackupImportResponse = {
+  imported_items: number;
+  skipped_existing: number;
+  skipped_missing_storage: number;
+  skipped_missing_vault: number;
+  skipped_deleted: number;
+};

@@ -24,7 +24,8 @@
     "cancel": "Отмена",
     "continue": "Продолжить",
     "undo": "Отменить",
-    "save": "Сохранить"
+    "save": "Сохранить",
+    "loading": "Загрузка..."
   },
   "sidebar": {
     "collapse": "Свернуть панель",
@@ -334,10 +335,27 @@
       "alsoClearCache": "Также очистить локальный кеш"
     },
     "backups": {
-      "localOnly": "Только для локального хранилища",
-      "description": "Резервные копии доступны только для локального хранилища. Данные на сервере управляются сервером.",
-      "comingSoon": "Скоро",
-      "comingSoonDesc": "Функция резервного копирования и восстановления появится в будущих обновлениях.",
+      "plainWarningTitle": "Plain JSON экспорт",
+      "plainWarningDesc": "Экспорт содержит расшифрованные секреты. Храните файл безопасно и удаляйте его после использования.",
+      "exportTitle": "Экспорт",
+      "exportDesc": "Создать plain JSON резервную копию для всех подключенных хранилищ.",
+      "exportPathLabel": "Путь для экспорта (необязательно)",
+      "exportPathPlaceholder": "Оставьте пустым, чтобы использовать папку backups по умолчанию",
+      "exportAction": "Экспорт JSON",
+      "exportSuccess": "Резервная копия экспортирована",
+      "exportFailed": "Ошибка экспорта",
+      "exportedPath": "Сохранено в: {path}",
+      "exportedCounts": "{storages} хранилищ, {vaults} сейфов, {items} секретов",
+      "importTitle": "Импорт",
+      "importDesc": "Импортировать plain JSON копию. Существующие секреты пропускаются.",
+      "importPathLabel": "Путь к файлу импорта",
+      "importPathPlaceholder": "Вставьте путь к файлу .json",
+      "importAction": "Импорт JSON",
+      "importSuccess": "Резервная копия импортирована",
+      "importFailed": "Ошибка импорта",
+      "importPathRequired": "Путь обязателен",
+      "importedCounts": "Импортировано {imported}, пропущено существующих {skipped}",
+      "importedSkippedMissing": "Пропущено: нет хранилищ {missingStorages}, нет сейфов {missingVaults}, удалено {deleted}",
       "singleWriterWarning": "Не открывайте один файл хранилища на нескольких устройствах одновременно. Используйте синхронизацию через сервер."
     },
     "about": {

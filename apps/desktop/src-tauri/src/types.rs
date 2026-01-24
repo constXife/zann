@@ -592,6 +592,68 @@ pub struct ItemUpdateRequest {
     pub payload: EncryptedPayload,
 }
 
+#[derive(Serialize, Deserialize)]
+pub struct PlainBackup {
+    pub version: u32,
+    pub exported_at: String,
+    pub storages: Vec<PlainBackupStorage>,
+    pub vaults: Vec<PlainBackupVault>,
+    pub items: Vec<PlainBackupItem>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PlainBackupStorage {
+    pub id: String,
+    pub kind: i32,
+    pub name: String,
+    pub server_url: Option<String>,
+    pub server_name: Option<String>,
+    pub server_fingerprint: Option<String>,
+    pub account_subject: Option<String>,
+    pub personal_vaults_enabled: bool,
+    pub auth_method: Option<i32>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PlainBackupVault {
+    pub id: String,
+    pub storage_id: String,
+    pub name: String,
+    pub kind: i32,
+    pub is_default: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PlainBackupItem {
+    pub id: Option<String>,
+    pub storage_id: String,
+    pub vault_id: String,
+    pub path: String,
+    pub name: String,
+    pub type_id: String,
+    pub payload: EncryptedPayload,
+    pub updated_at: String,
+    pub version: i64,
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct PlainBackupExportResponse {
+    pub path: String,
+    pub storages_count: usize,
+    pub vaults_count: usize,
+    pub items_count: usize,
+}
+
+#[derive(Serialize)]
+pub struct PlainBackupImportResponse {
+    pub imported_items: usize,
+    pub skipped_existing: usize,
+    pub skipped_missing_storage: usize,
+    pub skipped_missing_vault: usize,
+    pub skipped_deleted: usize,
+}
+
 #[derive(Deserialize, Serialize)]
 pub struct VaultCreatePayload {
     #[serde(default)]

@@ -90,6 +90,8 @@ type AppModalsProps = {
   openCreateLocalVault: unknown;
   handleSyncNow: unknown;
   handleResetSyncCursor: unknown;
+  exportPlainBackup: unknown;
+  importPlainBackup: unknown;
   toast: unknown;
   toastActionLabel: unknown;
   toastAction: unknown;
@@ -366,6 +368,8 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :on-create-local-vault="openCreateLocalVault"
     :on-sync-now="handleSyncNow"
     :on-reset-sync-cursor="handleResetSyncCursor"
+    :on-export-plain="exportPlainBackup"
+    :on-import-plain="importPlainBackup"
   />
 
   <ToastMessage

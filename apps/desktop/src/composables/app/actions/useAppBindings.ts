@@ -255,6 +255,8 @@ export function useAppBindings(options: AppBindingsOptions) {
     updateSettings: settingsActions.updateSettings,
     testBiometrics: settingsActions.testBiometrics,
     rebindBiometrics: settingsActions.rebindBiometrics,
+    exportPlainBackup: settingsActions.exportPlainBackup,
+    importPlainBackup: settingsActions.importPlainBackup,
     showLocalSection: storageState.showLocalSection,
     hasLocalVaults: storageState.hasLocalVaults,
     getStorageInfo: storageState.getStorageInfo,

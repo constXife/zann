@@ -617,7 +617,7 @@ const settingsActions = useAppSettingsActions({
     error.value = message;
   },
 });
-const { updateSettings, testBiometrics, rebindBiometrics } = settingsActions;
+const { updateSettings, testBiometrics, rebindBiometrics, exportPlainBackup, importPlainBackup } = settingsActions;
 
 const timeTravelMaxIndex = computed(() =>
   Math.max(0, itemDetailsState.historyEntries.value.length - 1),

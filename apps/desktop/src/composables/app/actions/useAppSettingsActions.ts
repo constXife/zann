@@ -1,6 +1,12 @@
 import type { Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { ApiResponse, KeystoreStatus, Settings } from "../../../types";
+import type {
+  ApiResponse,
+  KeystoreStatus,
+  PlainBackupExportResponse,
+  PlainBackupImportResponse,
+  Settings,
+} from "../../../types";
 import { createErrorWithCause } from "../../errors";
 
 type AppSettingsActionsOptions = {
@@ -94,9 +100,53 @@ export function useAppSettingsActions({
     }
   };
 
+  const exportPlainBackup = async (path?: string | null) => {
+    setError("");
+    try {
+      const result = await invoke<ApiResponse<PlainBackupExportResponse>>("backup_plain_export", {
+        path: path && path.trim().length > 0 ? path : null,
+      });
+      if (!result.ok || !result.data) {
+        const key = result.error?.kind ?? "generic";
+        const detail = result.error?.message
+          ? `${t(`errors.${key}`)}: ${result.error.message}`
+          : t(`errors.${key}`);
+        throw createErrorWithCause(detail, result.error);
+      }
+      showToast(t("settings.backups.exportSuccess"));
+      return result.data;
+    } catch (err) {
+      setError(String(err));
+      return null;
+    }
+  };
+
+  const importPlainBackup = async (path: string) => {
+    setError("");
+    try {
+      const result = await invoke<ApiResponse<PlainBackupImportResponse>>("backup_plain_import", {
+        path,
+      });
+      if (!result.ok || !result.data) {
+        const key = result.error?.kind ?? "generic";
+        const detail = result.error?.message
+          ? `${t(`errors.${key}`)}: ${result.error.message}`
+          : t(`errors.${key}`);
+        throw createErrorWithCause(detail, result.error);
+      }
+      showToast(t("settings.backups.importSuccess"));
+      return result.data;
+    } catch (err) {
+      setError(String(err));
+      return null;
+    }
+  };
+
   return {
     updateSettings,
     testBiometrics,
     rebindBiometrics,
+    exportPlainBackup,
+    importPlainBackup,
   };
 }
