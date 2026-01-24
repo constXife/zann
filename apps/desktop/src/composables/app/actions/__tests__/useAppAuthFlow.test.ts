@@ -115,6 +115,9 @@ describe("useAppAuthFlow", () => {
         login_id: null,
         old_fingerprint: null,
         new_fingerprint: null,
+        personal_vaults_present: true,
+        personal_key_envelopes_present: false,
+        personal_vault_id: "vault-1",
       },
     });
 
@@ -148,6 +151,9 @@ describe("useAppAuthFlow", () => {
       email: "user@example.com",
       old_fingerprint: null,
       new_fingerprint: null,
+      personal_vaults_present: true,
+      personal_key_envelopes_present: false,
+      personal_vault_id: "vault-1",
     });
 
     expect(runRemoteSync).toHaveBeenCalledWith("new-storage");

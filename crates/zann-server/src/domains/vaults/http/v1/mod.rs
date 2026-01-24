@@ -4,13 +4,15 @@ use axum::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use zann_core::api::vaults::VaultListResponse;
+use zann_core::api::vaults::{PersonalVaultStatusResponse, VaultListResponse};
 use zann_core::{CachePolicy, Identity, Vault, VaultEncryptionType, VaultKind};
+use zann_db::repo::VaultRepo;
 
 use crate::app::AppState;
 use crate::domains::vaults::service::{
     self, CreateVaultCommand, ListVaultsCommand, UpdateVaultKeyCommand, VaultServiceError,
 };
+use crate::infra::metrics;
 
 mod vaults_service_account;
 use vaults_service_account::list_service_account_vaults;
@@ -66,6 +68,7 @@ pub(crate) struct VaultResponse {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/v1/vaults", get(list_vaults).post(create_vault))
+        .route("/v1/vaults/personal/status", get(personal_status))
         .route("/v1/vaults/:vault_id", get(get_vault).delete(delete_vault))
         .route("/v1/vaults/:vault_id/key", put(update_vault_key))
         .merge(shared::router())
@@ -94,6 +97,65 @@ async fn list_vaults(
     tracing::info!(event = "vaults_listed", "Vault list returned");
     let body = VaultListResponse { vaults };
     (axum::http::StatusCode::OK, Json(body)).into_response()
+}
+
+#[tracing::instrument(skip(state, identity))]
+async fn personal_status(
+    State(state): State<AppState>,
+    Extension(identity): Extension<Identity>,
+) -> impl IntoResponse {
+    let resource = "vaults/*";
+    let policies = state.policy_store.get();
+    if !policies.is_allowed(&identity, "list", resource) {
+        metrics::forbidden_access(resource);
+        tracing::warn!(
+            event = "forbidden",
+            action = "list",
+            resource = resource,
+            "Access denied"
+        );
+        return StatusCode::FORBIDDEN.into_response();
+    }
+
+    if !state.config.server.personal_vaults_enabled {
+        let response = PersonalVaultStatusResponse {
+            personal_vaults_present: false,
+            personal_key_envelopes_present: false,
+            personal_vault_id: None,
+        };
+        return (StatusCode::OK, Json(response)).into_response();
+    }
+
+    let repo = VaultRepo::new(&state.db);
+    let vault = match repo.get_personal_by_user(identity.user_id).await {
+        Ok(vault) => vault,
+        Err(_) => {
+            tracing::error!(event = "personal_vault_status_failed", "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
+
+    let personal_vaults_present = vault.is_some();
+    let personal_vault_id = vault.as_ref().map(|vault| vault.id);
+    let personal_key_envelopes_present = vault
+        .as_ref()
+        .map(|vault| {
+            vault.kind == VaultKind::Personal
+                && vault.encryption_type == VaultEncryptionType::Client
+                && !vault.vault_key_enc.is_empty()
+        })
+        .unwrap_or(false);
+
+    let response = PersonalVaultStatusResponse {
+        personal_vaults_present,
+        personal_key_envelopes_present,
+        personal_vault_id,
+    };
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 #[tracing::instrument(skip(state, identity, payload))]

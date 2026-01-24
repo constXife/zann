@@ -14,7 +14,8 @@ use crate::infra::remote::fetch_system_info;
 use crate::state::{ensure_unlocked, AppState};
 use crate::types::{
     ApiResponse, SyncPullRequest, SyncPullResponse, SyncPushChange, SyncPushRequest,
-    SyncPushResponse, SyncSharedPullResponse, SyncSharedPushRequest, VaultListResponse,
+    SyncPushResponse, SyncSharedPullResponse, SyncSharedPushRequest, VaultDetailResponse,
+    VaultListResponse,
 };
 use zann_core::crypto::{encrypt_blob, SecretKey};
 use zann_core::{StorageKind, VaultEncryptionType, VaultKind};
@@ -24,6 +25,7 @@ use crate::services::sync_helpers::{
     build_shared_push_changes, ensure_local_vaults, fetch_vault_details, handle_sync_conflict,
     key_fingerprint,
 };
+// preflight is handled in auth/session flow; sync logic only.
 
 pub async fn remote_sync(
     storage_id: Option<String>,

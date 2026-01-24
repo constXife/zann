@@ -18,3 +18,10 @@ pub struct VaultSummary {
 pub struct VaultListResponse {
     pub vaults: Vec<VaultSummary>,
 }
+
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PersonalVaultStatusResponse {
+    pub personal_vaults_present: bool,
+    pub personal_key_envelopes_present: bool,
+    pub personal_vault_id: Option<Uuid>,
+}

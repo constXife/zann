@@ -47,6 +47,7 @@ const renderModal = (options?: {
         v-model:setup-password="setupPassword"
         v-model:setup-confirm="setupConfirm"
         v-model:connect-server-url="connectUrl"
+        password-mode="create"
         logo-url="/logo.png"
         setup-error=""
         :setup-busy="false"

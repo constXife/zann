@@ -6,7 +6,7 @@ use crate::constants::TOKEN_SESSION;
 use crate::infra::remote::{fetch_prelogin, fetch_system_info};
 use crate::services::auth::{
     apply_login_context, context_name_for_server_id, empty_oidc_config, empty_oidc_discovery,
-    fingerprint_change_for_context, insert_pending_login,
+    fetch_personal_status, fingerprint_change_for_context, insert_pending_login,
 };
 use crate::state::{AppState, PendingLogin, PendingLoginResult};
 use crate::types::ApiResponse;
@@ -25,9 +25,19 @@ pub struct PasswordAuthResponse {
     new_fingerprint: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     login_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    personal_vaults_present: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    personal_key_envelopes_present: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    personal_vault_id: Option<String>,
 }
 
-fn password_success(email: String, storage_id: Option<String>) -> PasswordAuthResponse {
+fn password_success(
+    email: String,
+    storage_id: Option<String>,
+    personal_status: Option<crate::types::PersonalVaultStatusResponse>,
+) -> PasswordAuthResponse {
     PasswordAuthResponse {
         status: "success".to_string(),
         storage_id,
@@ -35,6 +45,13 @@ fn password_success(email: String, storage_id: Option<String>) -> PasswordAuthRe
         old_fingerprint: None,
         new_fingerprint: None,
         login_id: None,
+        personal_vaults_present: personal_status
+            .as_ref()
+            .map(|status| status.personal_vaults_present),
+        personal_key_envelopes_present: personal_status
+            .as_ref()
+            .map(|status| status.personal_key_envelopes_present),
+        personal_vault_id: personal_status.and_then(|status| status.personal_vault_id),
     }
 }
 
@@ -51,6 +68,9 @@ fn password_fingerprint_changed(
         old_fingerprint: Some(old_fingerprint),
         new_fingerprint: Some(new_fingerprint),
         login_id: Some(login_id),
+        personal_vaults_present: None,
+        personal_key_envelopes_present: None,
+        personal_vault_id: None,
     }
 }
 
@@ -187,7 +207,13 @@ pub(crate) async fn password_login(
     }
 
     let storage_id = apply_login_context(state, &server_url, &result).await?;
-    Ok(ApiResponse::ok(password_success(email, storage_id)))
+    let personal_status =
+        fetch_personal_status(&server_url, &result.access_token).await.ok();
+    Ok(ApiResponse::ok(password_success(
+        email,
+        storage_id,
+        personal_status,
+    )))
 }
 
 pub(crate) async fn password_register(
@@ -284,5 +310,11 @@ pub(crate) async fn password_register(
     }
 
     let storage_id = apply_login_context(state, &server_url, &result).await?;
-    Ok(ApiResponse::ok(password_success(email, storage_id)))
+    let personal_status =
+        fetch_personal_status(&server_url, &result.access_token).await.ok();
+    Ok(ApiResponse::ok(password_success(
+        email,
+        storage_id,
+        personal_status,
+    )))
 }

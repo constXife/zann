@@ -21,6 +21,7 @@ const props = defineProps<{
   connectNewFp: string;
   connectBusy: boolean;
   connectLoginId: string;
+  passwordMode: "create" | "unlock";
   t: Translator;
   normalizeServerUrl: (value: string) => string;
   startLocalSetup: () => void;
@@ -105,6 +106,8 @@ const strengthBarWidth = computed(() => {
   if (passwordStrength.value === "medium") return "66%";
   return "100%";
 });
+
+const isUnlockExisting = computed(() => props.passwordMode === "unlock");
 </script>
 
 <template>
@@ -150,10 +153,12 @@ const strengthBarWidth = computed(() => {
       <div v-else-if="setupStep === 'password'" class="space-y-4">
         <div class="flex items-center justify-between" data-tauri-drag-region>
           <div>
-            <p class="text-xs text-[var(--text-tertiary)]">
-              {{ t("wizard.stepOf", { current: currentStep, total: totalSteps }) }} — {{ stepLabel }}
-            </p>
-            <h2 class="text-lg font-semibold">{{ t("wizard.passwordTitle") }}</h2>
+        <p class="text-xs text-[var(--text-tertiary)]">
+          {{ t("wizard.stepOf", { current: currentStep, total: totalSteps }) }} — {{ stepLabel }}
+        </p>
+            <h2 class="text-lg font-semibold">
+              {{ isUnlockExisting ? t("wizard.unlockTitle") : t("wizard.passwordTitle") }}
+            </h2>
           </div>
           <button
             type="button"
@@ -166,17 +171,17 @@ const strengthBarWidth = computed(() => {
           </button>
         </div>
         <p class="text-sm text-[var(--text-secondary)]">
-          {{ t("wizard.passwordSubtitle") }}
+          {{ isUnlockExisting ? t("wizard.unlockSubtitle") : t("wizard.passwordSubtitle") }}
         </p>
         <input
           v-model="setupPassword"
           class="w-full rounded-lg bg-[var(--bg-tertiary)] px-4 py-3 text-sm placeholder-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
           type="password"
-          :placeholder="t('wizard.passwordPlaceholder')"
-          autocomplete="new-password"
+          :placeholder="isUnlockExisting ? t('wizard.unlockPlaceholder') : t('wizard.passwordPlaceholder')"
+          :autocomplete="isUnlockExisting ? 'current-password' : 'new-password'"
           data-testid="wizard-master-password"
         />
-        <div v-if="setupPassword" class="flex items-center gap-2 -mt-2">
+        <div v-if="setupPassword && !isUnlockExisting" class="flex items-center gap-2 -mt-2">
           <div class="flex-1 h-1.5 bg-[var(--bg-hover)] rounded-full overflow-hidden">
             <div
               class="h-full rounded-full transition-all duration-300"
@@ -189,6 +194,7 @@ const strengthBarWidth = computed(() => {
           </span>
         </div>
         <input
+          v-if="!isUnlockExisting"
           v-model="setupConfirm"
           class="w-full rounded-lg bg-[var(--bg-tertiary)] px-4 py-3 text-sm placeholder-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
           type="password"
@@ -203,7 +209,7 @@ const strengthBarWidth = computed(() => {
           @click="createMasterPassword"
           data-testid="wizard-master-create"
         >
-          {{ t("wizard.create") }}
+          {{ isUnlockExisting ? t("wizard.unlockAction") : t("wizard.create") }}
         </button>
         <p v-if="setupError" class="text-xs text-category-security">
           {{ setupError }}

@@ -70,6 +70,8 @@ export function useAppAuthFlow({
   const setupOpen = ref(false);
   const setupPassword = ref("");
   const setupConfirm = ref("");
+  const setupPasswordMode = ref<"create" | "unlock">("create");
+  const setupStorageId = ref<string | null>(null);
   const setupError = ref("");
   const setupBusy = ref(false);
   const connectServerUrl = ref("");
@@ -101,6 +103,7 @@ export function useAppAuthFlow({
   const startLocalSetup = () => {
     setupError.value = "";
     setupFlow.value = "local";
+    setupPasswordMode.value = "create";
     setupStep.value = "password";
   };
 
@@ -112,6 +115,7 @@ export function useAppAuthFlow({
     connectBusy.value = false;
     connectLoginId.value = "";
     setupFlow.value = "remote";
+    setupPasswordMode.value = "create";
     connectVerification.value = "";
     connectOldFp.value = "";
     connectNewFp.value = "";
@@ -136,7 +140,7 @@ export function useAppAuthFlow({
       setupError.value = t("errors.password_required");
       return;
     }
-    if (setupPassword.value !== setupConfirm.value) {
+    if (setupPasswordMode.value === "create" && setupPassword.value !== setupConfirm.value) {
       setupError.value = t("wizard.passwordMismatch");
       return;
     }
@@ -169,7 +173,7 @@ export function useAppAuthFlow({
       }
       syncError.value = "";
       if (setupFlow.value === "remote") {
-        const syncOk = await runRemoteSync();
+        const syncOk = await runRemoteSync(setupStorageId.value ?? undefined);
         if (!syncOk && syncError.value) {
           setupError.value = syncError.value;
           return;
@@ -186,6 +190,7 @@ export function useAppAuthFlow({
       setupBusy.value = false;
     }
   };
+
 
   const beginOidcConnect = async () => {
     connectError.value = "";
@@ -322,6 +327,9 @@ export function useAppAuthFlow({
             old_fingerprint?: string | null;
             new_fingerprint?: string | null;
             login_id?: string | null;
+            personal_vaults_present?: boolean | null;
+            personal_key_envelopes_present?: boolean | null;
+            personal_vault_id?: string | null;
           }>
         >(command, {
           serverUrl: connectServerUrl.value,
@@ -347,10 +355,16 @@ export function useAppAuthFlow({
           passwordLoginOpen.value = false;
           connectLoginId.value = "";
           const syncStorageId = data.storage_id ?? selectedStorageId.value;
+          setupStorageId.value = syncStorageId ?? null;
           clearSyncErrors(syncStorageId);
           await refreshAppStatus();
           const needsSetup = !appStatus.value?.initialized;
           if (needsSetup) {
+            setupFlow.value = "remote";
+            setupPasswordMode.value = data.personal_key_envelopes_present
+              ? "unlock"
+              : "create";
+            setupConfirm.value = "";
             setupStep.value = "password";
           }
           if (unlocked.value) {
@@ -405,6 +419,9 @@ export function useAppAuthFlow({
     email?: string | null;
     old_fingerprint?: string | null;
     new_fingerprint?: string | null;
+    personal_vaults_present?: boolean | null;
+    personal_key_envelopes_present?: boolean | null;
+    personal_vault_id?: string | null;
   }) => {
     console.info("[oidc] status event", payload);
     console.info("[oidc] current login id", connectLoginId.value);
@@ -421,10 +438,16 @@ export function useAppAuthFlow({
     if (payload.status === "success") {
       connectStatus.value = "success";
       const syncStorageId = payload.storage_id ?? selectedStorageId.value;
+      setupStorageId.value = syncStorageId ?? null;
       clearSyncErrors(syncStorageId);
       await refreshAppStatus();
       const needsSetup = !appStatus.value?.initialized;
       if (needsSetup) {
+        setupFlow.value = "remote";
+        setupPasswordMode.value = payload.personal_key_envelopes_present
+          ? "unlock"
+          : "create";
+        setupConfirm.value = "";
         setupStep.value = "password";
       }
       if (unlocked.value) {
@@ -479,6 +502,9 @@ export function useAppAuthFlow({
         email?: string | null;
         old_fingerprint?: string | null;
         new_fingerprint?: string | null;
+        personal_vaults_present?: boolean | null;
+        personal_key_envelopes_present?: boolean | null;
+        personal_vault_id?: string | null;
       };
       void handleOidcStatus(payload);
     });
@@ -501,6 +527,7 @@ export function useAppAuthFlow({
     setupOpen,
     setupPassword,
     setupConfirm,
+    setupPasswordMode,
     setupError,
     setupBusy,
     connectServerUrl,

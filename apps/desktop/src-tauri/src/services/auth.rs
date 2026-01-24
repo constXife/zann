@@ -3,8 +3,12 @@ use tauri::{Emitter, State};
 use uuid::Uuid;
 
 use crate::infra::config::{ensure_context, load_config, save_config};
+use crate::infra::http::{auth_headers, decode_json_response, ensure_success};
 use crate::state::{AppState, PendingLogin, PendingLoginResult, TokenEntry};
-use crate::types::{ApiResponse, OidcConfigResponse, OidcDiscovery, OidcLoginStatusResponse};
+use crate::types::{
+    ApiResponse, OidcConfigResponse, OidcDiscovery, OidcLoginStatusResponse,
+    PersonalVaultStatusResponse,
+};
 use crate::util::{context_name_from_url, storage_name_from_url};
 use zann_core::StorageKind;
 use zann_db::local::{
@@ -38,6 +42,9 @@ pub(crate) fn oidc_status_error(login_id: &str, message: impl Into<String>) -> O
         email: None,
         old_fingerprint: None,
         new_fingerprint: None,
+        personal_vaults_present: None,
+        personal_key_envelopes_present: None,
+        personal_vault_id: None,
     }
 }
 
@@ -54,6 +61,9 @@ pub(crate) fn oidc_status_fingerprint_changed(
         email: None,
         old_fingerprint: Some(old_fingerprint.to_string()),
         new_fingerprint: Some(new_fingerprint.to_string()),
+        personal_vaults_present: None,
+        personal_key_envelopes_present: None,
+        personal_vault_id: None,
     }
 }
 
@@ -143,6 +153,8 @@ pub(crate) async fn finalize_login(
     result: PendingLoginResult,
 ) -> Result<ApiResponse<OidcLoginStatusResponse>, String> {
     let storage_id_string = apply_login_context(state, &pending.server_url, &result).await?;
+    let personal_status =
+        fetch_personal_status(&pending.server_url, &result.access_token).await.ok();
 
     let mut guard = state
         .pending_logins
@@ -158,7 +170,35 @@ pub(crate) async fn finalize_login(
         email: Some(result.email),
         old_fingerprint: None,
         new_fingerprint: None,
+        personal_vaults_present: personal_status.as_ref().map(|status| status.personal_vaults_present),
+        personal_key_envelopes_present: personal_status
+            .as_ref()
+            .map(|status| status.personal_key_envelopes_present),
+        personal_vault_id: personal_status.and_then(|status| status.personal_vault_id),
     }))
+}
+
+pub(crate) async fn fetch_personal_status(
+    server_url: &str,
+    access_token: &str,
+) -> Result<PersonalVaultStatusResponse, String> {
+    let client = reqwest::Client::new();
+    let headers = auth_headers(access_token)?;
+    let url = format!(
+        "{}/v1/vaults/personal/status",
+        server_url.trim_end_matches('/')
+    );
+    let response = client
+        .get(url)
+        .headers(headers)
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
+    let response = match ensure_success(response).await {
+        Ok(response) => response,
+        Err(err) => return Err(format!("vault_preflight_failed: {err}")),
+    };
+    decode_json_response::<PersonalVaultStatusResponse>(response).await
 }
 
 pub(crate) async fn apply_login_context(
