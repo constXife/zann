@@ -225,6 +225,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      checks: write
       issues: write
       pull-requests: write
       security-events: write
