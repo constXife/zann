@@ -5,8 +5,10 @@ use ed25519_dalek::Signer;
 use schemars::JsonSchema;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use sqlx_core::query::query;
+use sqlx_postgres::Postgres;
 use std::collections::HashMap;
-use zann_core::{AuthMethod, SecurityProfile};
+use zann_core::{AuthMethod, SecurityProfile, UserStatus};
 
 use crate::app::AppState;
 use crate::config::AuthMode;
@@ -22,6 +24,8 @@ pub(crate) struct SystemInfoResponse {
     pub(crate) server_fingerprint: String,
     pub(crate) auth_methods: Vec<AuthMethod>,
     pub(crate) personal_vaults_enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) internal_users_present: Option<bool>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -63,6 +67,29 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
         }
     }
 
+    let internal_users_present = if auth_methods.contains(&AuthMethod::Password) {
+        match query::<Postgres>(
+            r#"
+            SELECT 1
+            FROM users
+            WHERE status != $1 AND deleted_at IS NULL
+            LIMIT 1
+            "#,
+        )
+        .bind(UserStatus::System as i32)
+        .fetch_optional(&state.db)
+        .await
+        {
+            Ok(row) => Some(row.is_some()),
+            Err(err) => {
+                tracing::error!(event = "system_info_users_check_failed", error = %err);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     (
         StatusCode::OK,
         Json(SystemInfoResponse {
@@ -78,6 +105,7 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
             server_fingerprint: fingerprint,
             auth_methods,
             personal_vaults_enabled: state.config.server.personal_vaults_enabled,
+            internal_users_present,
         }),
     )
 }

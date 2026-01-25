@@ -300,6 +300,7 @@ async fn system_info() -> (StatusCode, Json<SystemInfoResponse>) {
         server_fingerprint: String::new(),
         auth_methods: Vec::new(),
         personal_vaults_enabled: false,
+        internal_users_present: None,
     })
 }
 
