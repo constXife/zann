@@ -520,7 +520,7 @@ const {
   setupStep, setupFlow, setupOpen, setupPassword, setupConfirm, setupError, setupBusy,
   connectServerUrl, connectLoginId, connectVerification, connectStatus, connectError,
   connectOldFp, connectNewFp, connectBusy, authMethodOpen, availableMethods,
-  passwordLoginOpen, passwordLoginBusy, passwordLoginError, normalizeServerUrl,
+  passwordLoginOpen, passwordLoginMode, passwordLoginBusy, passwordLoginError, normalizeServerUrl,
   startLocalSetup, startConnect, backToWelcome, createMasterPassword,
   showAuthMethodSelection, trustFingerprint, handleBannerSignIn,
   handleSelectOidc, handleSelectPassword, handlePasswordAuth,
@@ -613,11 +613,13 @@ const settingsActions = useAppSettingsActions({
   keystoreStatus,
   locale,
   showToast,
+  runRemoteSync,
+  syncError,
   setError: (message) => {
     error.value = message;
   },
 });
-const { updateSettings, testBiometrics, rebindBiometrics } = settingsActions;
+const { updateSettings, testBiometrics, rebindBiometrics, exportPlainBackup, importPlainBackup } = settingsActions;
 
 const timeTravelMaxIndex = computed(() =>
   Math.max(0, itemDetailsState.historyEntries.value.length - 1),

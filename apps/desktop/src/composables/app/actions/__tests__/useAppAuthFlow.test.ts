@@ -4,6 +4,7 @@ import { render, cleanup } from "@testing-library/vue";
 import type { Ref } from "vue";
 import type { AppStatus, StorageSummary } from "../../../../types";
 import { useAppAuthFlow } from "../useAppAuthFlow";
+import { AuthMethod } from "../../../../constants/enums";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -158,5 +159,25 @@ describe("useAppAuthFlow", () => {
 
     expect(runRemoteSync).toHaveBeenCalledWith("new-storage");
     expect(clearSyncErrors).toHaveBeenCalledWith("new-storage");
+  });
+
+  it("opens password registration when no internal users exist", async () => {
+    const { invoke } = await import("@tauri-apps/api/core");
+    (invoke as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      ok: true,
+      data: {
+        auth_methods: [AuthMethod.Password],
+        internal_users_present: false,
+      },
+    });
+
+    const { api } = createWrapper();
+    api.connectServerUrl.value = "https://example.com";
+
+    await api.showAuthMethodSelection();
+    await nextTick();
+
+    expect(api.passwordLoginOpen.value).toBe(true);
+    expect(api.passwordLoginMode.value).toBe("register");
   });
 });

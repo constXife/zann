@@ -85,6 +85,7 @@ export function useAppAuthFlow({
   const authMethodOpen = ref(false);
   const availableMethods = ref<AuthMethod[]>([]);
   const passwordLoginOpen = ref(false);
+  const passwordLoginMode = ref<"login" | "register">("login");
   const passwordLoginBusy = ref(false);
   const passwordLoginError = ref("");
   let oidcUnlisten: null | (() => void) = null;
@@ -224,7 +225,9 @@ export function useAppAuthFlow({
     connectBusy.value = true;
 
     try {
-      const response = await invoke<ApiResponse<{ auth_methods: AuthMethod[] }>>(
+      const response = await invoke<
+        ApiResponse<{ auth_methods: AuthMethod[]; internal_users_present?: boolean | null }>
+      >(
         "get_server_info",
         {
           serverUrl: normalized,
@@ -238,6 +241,9 @@ export function useAppAuthFlow({
       }
 
       const methods = response.data.auth_methods;
+      passwordLoginMode.value = response.data.internal_users_present === false
+        ? "register"
+        : "login";
       const interactiveMethods = methods.filter(
         (method) => method === AuthMethod.Password || method === AuthMethod.Oidc,
       );
@@ -541,6 +547,7 @@ export function useAppAuthFlow({
     authMethodOpen,
     availableMethods,
     passwordLoginOpen,
+    passwordLoginMode,
     passwordLoginBusy,
     passwordLoginError,
     normalizeServerUrl,

@@ -1,6 +1,12 @@
 import type { Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import type { ApiResponse, KeystoreStatus, Settings } from "../../../types";
+import type {
+  ApiResponse,
+  KeystoreStatus,
+  PlainBackupExportResponse,
+  PlainBackupImportResponse,
+  Settings,
+} from "../../../types";
 import { createErrorWithCause } from "../../errors";
 
 type AppSettingsActionsOptions = {
@@ -10,6 +16,8 @@ type AppSettingsActionsOptions = {
   locale: Ref<string>;
   showToast: (message: string, options?: { duration?: number }) => void;
   setError: (message: string) => void;
+  runRemoteSync: (storageId?: string | null) => Promise<boolean>;
+  syncError: Ref<string>;
 };
 
 export function useAppSettingsActions({
@@ -19,6 +27,8 @@ export function useAppSettingsActions({
   locale,
   showToast,
   setError,
+  runRemoteSync,
+  syncError,
 }: AppSettingsActionsOptions) {
   const updateSettings = async (patch: Partial<Settings>) => {
     if (!settings.value) {
@@ -94,9 +104,76 @@ export function useAppSettingsActions({
     }
   };
 
+  const exportPlainBackup = async (path?: string | null) => {
+    setError("");
+    try {
+      const result = await invoke<ApiResponse<PlainBackupExportResponse>>("backup_plain_export", {
+        path: path && path.trim().length > 0 ? path : null,
+      });
+      if (!result.ok || !result.data) {
+        if (result.error?.kind === "backup_cancelled") {
+          return undefined;
+        }
+        const key = result.error?.kind ?? "generic";
+        const detail = result.error?.message
+          ? `${t(`errors.${key}`)}: ${result.error.message}`
+          : t(`errors.${key}`);
+        throw createErrorWithCause(detail, result.error);
+      }
+      showToast(t("settings.backups.exportSuccess"));
+      return result.data;
+    } catch (err) {
+      setError(String(err));
+      return null;
+    }
+  };
+
+  const importPlainBackup = async (path?: string | null, targetStorageId?: string | null) => {
+    setError("");
+    try {
+      console.info("[backup] invoke import target", targetStorageId);
+      const result = await invoke<ApiResponse<PlainBackupImportResponse>>("backup_plain_import", {
+        payload: {
+          path: path && path.trim().length > 0 ? path : null,
+          target_storage_id: targetStorageId ?? null,
+        },
+      });
+      if (!result.ok || !result.data) {
+        if (result.error?.kind === "backup_cancelled") {
+          return undefined;
+        }
+        const key = result.error?.kind ?? "generic";
+        const detail = result.error?.message
+          ? `${t(`errors.${key}`)}: ${result.error.message}`
+          : t(`errors.${key}`);
+        throw createErrorWithCause(detail, result.error);
+      }
+      const shouldSyncRemote =
+        !!targetStorageId && targetStorageId !== "local";
+      if (shouldSyncRemote) {
+        showToast(t("settings.backups.importSyncStart"));
+        const syncOk = await runRemoteSync(targetStorageId);
+        if (syncOk) {
+          showToast(t("settings.backups.importSyncDone"));
+        } else {
+          const message = syncError.value || t("settings.backups.importSyncFailed");
+          showToast(message, { duration: 2000 });
+        }
+      } else {
+        showToast(t("settings.backups.importSuccess"));
+      }
+      return result.data;
+    } catch (err) {
+      setError(String(err));
+      return null;
+    }
+  };
+
   return {
     updateSettings,
     testBiometrics,
     rebindBiometrics,
+    exportPlainBackup,
+    importPlainBackup,
   };
 }

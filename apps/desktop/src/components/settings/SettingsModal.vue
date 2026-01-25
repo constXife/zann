@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
-import type { KeystoreStatus, Settings, StorageSummary, StorageInfo } from "../../types";
+import type {
+  KeystoreStatus,
+  Settings,
+  StorageSummary,
+  StorageInfo,
+  PlainBackupExportResponse,
+  PlainBackupImportResponse,
+} from "../../types";
 import { StorageKind } from "../../constants/enums";
 import SettingsTabGeneral from "./SettingsTabGeneral.vue";
 import SettingsTabSecurity from "./SettingsTabSecurity.vue";
@@ -38,6 +45,8 @@ const props = defineProps<{
   onCreateLocalVault: () => void;
   onSyncNow: (storageId: string) => Promise<void>;
   onResetSyncCursor: (storageId: string) => Promise<void>;
+  onExportPlain: (path?: string | null) => Promise<PlainBackupExportResponse | null | undefined>;
+  onImportPlain: (path?: string | null) => Promise<PlainBackupImportResponse | null | undefined>;
 }>();
 
 const emit = defineEmits<{
@@ -155,6 +164,9 @@ watch(() => props.open, (isOpen) => {
           <SettingsTabBackups
             v-else-if="activeTab === 'backups'"
             :t="t"
+            :storages="storages"
+            :on-export-plain="onExportPlain"
+            :on-import-plain="onImportPlain"
           />
           <SettingsTabAbout
             v-else-if="activeTab === 'about'"

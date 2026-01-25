@@ -149,6 +149,34 @@ async fn personal_status(
                 && !vault.vault_key_enc.is_empty()
         })
         .unwrap_or(false);
+    if let Some(vault) = vault.as_ref() {
+        if vault.kind != VaultKind::Personal
+            || vault.encryption_type != VaultEncryptionType::Client
+            || vault.vault_key_enc.is_empty()
+        {
+            tracing::warn!(
+                event = "personal_vault_status_mismatch",
+                user_id = %identity.user_id,
+                email = %identity.email,
+                source = ?identity.source,
+                vault_id = %vault.id,
+                kind = ?vault.kind,
+                encryption_type = ?vault.encryption_type,
+                vault_key_len = vault.vault_key_enc.len(),
+                "Personal vault status mismatch"
+            );
+        }
+    }
+    tracing::info!(
+        event = "personal_vault_status",
+        user_id = %identity.user_id,
+        email = %identity.email,
+        source = ?identity.source,
+        personal_vaults_present,
+        personal_key_envelopes_present,
+        personal_vault_id = ?personal_vault_id,
+        "Personal vault status resolved"
+    );
 
     let response = PersonalVaultStatusResponse {
         personal_vaults_present,

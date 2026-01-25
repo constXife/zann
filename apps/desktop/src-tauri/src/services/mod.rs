@@ -1,6 +1,7 @@
 pub(crate) mod auth;
 pub(crate) mod auth_oidc;
 pub(crate) mod auth_password;
+pub(crate) mod backup;
 pub(crate) mod items;
 pub(crate) mod items_history;
 pub(crate) mod vaults;
