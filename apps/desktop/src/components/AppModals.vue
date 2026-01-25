@@ -171,6 +171,7 @@ type AppModalsProps = {
   handleSelectPassword: unknown;
   handleSelectOidc: unknown;
   passwordLoginOpen: unknown;
+  passwordLoginMode: unknown;
   passwordLoginBusy: unknown;
   passwordLoginError: unknown;
   handlePasswordAuth: unknown;
@@ -253,6 +254,7 @@ const passwordLoginOpen = modelRef<unknown>("passwordLoginOpen");
 const availableMethods = valueRef<unknown>("availableMethods");
 const passwordLoginBusy = valueRef<unknown>("passwordLoginBusy");
 const passwordLoginError = valueRef<unknown>("passwordLoginError");
+const passwordLoginMode = valueRef<unknown>("passwordLoginMode");
 const confirmInputExpected = valueRef<unknown>("confirmInputExpected");
 const confirmInputLabel = valueRef<unknown>("confirmInputLabel");
 const confirmInputPlaceholder = valueRef<unknown>("confirmInputPlaceholder");
@@ -493,6 +495,7 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :server-url="connectServerUrl"
     :busy="passwordLoginBusy"
     :error="passwordLoginError"
+    :default-mode="passwordLoginMode"
     :t="t"
     @submit="onPasswordSubmit"
   />

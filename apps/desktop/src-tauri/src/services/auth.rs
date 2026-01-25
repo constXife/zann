@@ -1,4 +1,5 @@
 use chrono::{Duration as ChronoDuration, Utc};
+use std::io::Write;
 use tauri::{Emitter, State};
 use uuid::Uuid;
 
@@ -15,6 +16,23 @@ use zann_db::local::{
     LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVaultRepo, PendingChangeRepo,
     SyncCursorRepo,
 };
+
+fn append_auth_log(message: &str) {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let logs_dir = home.join(".zann").join("logs");
+    let _ = std::fs::create_dir_all(&logs_dir);
+    let log_path = logs_dir.join("auth.log");
+    let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+    else {
+        return;
+    };
+    let _ = writeln!(file, "{} {}", Utc::now().to_rfc3339(), message);
+}
 
 pub(crate) fn empty_oidc_config() -> OidcConfigResponse {
     OidcConfigResponse {
@@ -196,9 +214,27 @@ pub(crate) async fn fetch_personal_status(
         .map_err(|err| err.to_string())?;
     let response = match ensure_success(response).await {
         Ok(response) => response,
-        Err(err) => return Err(format!("vault_preflight_failed: {err}")),
+        Err(err) => {
+            append_auth_log(&format!(
+                "personal_status_error server={} error={}",
+                server_url,
+                err
+            ));
+            return Err(format!("vault_preflight_failed: {err}"));
+        }
     };
-    decode_json_response::<PersonalVaultStatusResponse>(response).await
+    let status = decode_json_response::<PersonalVaultStatusResponse>(response).await?;
+    append_auth_log(&format!(
+        "personal_status_ok server={} present={} key_envelopes_present={} vault_id={}",
+        server_url,
+        status.personal_vaults_present,
+        status.personal_key_envelopes_present,
+        status
+            .personal_vault_id
+            .as_deref()
+            .unwrap_or("none")
+    ));
+    Ok(status)
 }
 
 pub(crate) async fn apply_login_context(

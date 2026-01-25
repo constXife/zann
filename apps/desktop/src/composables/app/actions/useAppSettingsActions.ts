@@ -16,6 +16,8 @@ type AppSettingsActionsOptions = {
   locale: Ref<string>;
   showToast: (message: string, options?: { duration?: number }) => void;
   setError: (message: string) => void;
+  runRemoteSync: (storageId?: string | null) => Promise<boolean>;
+  syncError: Ref<string>;
 };
 
 export function useAppSettingsActions({
@@ -25,6 +27,8 @@ export function useAppSettingsActions({
   locale,
   showToast,
   setError,
+  runRemoteSync,
+  syncError,
 }: AppSettingsActionsOptions) {
   const updateSettings = async (patch: Partial<Settings>) => {
     if (!settings.value) {
@@ -107,6 +111,9 @@ export function useAppSettingsActions({
         path: path && path.trim().length > 0 ? path : null,
       });
       if (!result.ok || !result.data) {
+        if (result.error?.kind === "backup_cancelled") {
+          return undefined;
+        }
         const key = result.error?.kind ?? "generic";
         const detail = result.error?.message
           ? `${t(`errors.${key}`)}: ${result.error.message}`
@@ -121,20 +128,40 @@ export function useAppSettingsActions({
     }
   };
 
-  const importPlainBackup = async (path: string) => {
+  const importPlainBackup = async (path?: string | null, targetStorageId?: string | null) => {
     setError("");
     try {
+      console.info("[backup] invoke import target", targetStorageId);
       const result = await invoke<ApiResponse<PlainBackupImportResponse>>("backup_plain_import", {
-        path,
+        payload: {
+          path: path && path.trim().length > 0 ? path : null,
+          target_storage_id: targetStorageId ?? null,
+        },
       });
       if (!result.ok || !result.data) {
+        if (result.error?.kind === "backup_cancelled") {
+          return undefined;
+        }
         const key = result.error?.kind ?? "generic";
         const detail = result.error?.message
           ? `${t(`errors.${key}`)}: ${result.error.message}`
           : t(`errors.${key}`);
         throw createErrorWithCause(detail, result.error);
       }
-      showToast(t("settings.backups.importSuccess"));
+      const shouldSyncRemote =
+        !!targetStorageId && targetStorageId !== "local";
+      if (shouldSyncRemote) {
+        showToast(t("settings.backups.importSyncStart"));
+        const syncOk = await runRemoteSync(targetStorageId);
+        if (syncOk) {
+          showToast(t("settings.backups.importSyncDone"));
+        } else {
+          const message = syncError.value || t("settings.backups.importSyncFailed");
+          showToast(message, { duration: 2000 });
+        }
+      } else {
+        showToast(t("settings.backups.importSuccess"));
+      }
       return result.data;
     } catch (err) {
       setError(String(err));

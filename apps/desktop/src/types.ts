@@ -131,6 +131,7 @@ export type SystemInfoResponse = {
   identity?: SystemIdentity | null;
   server_name?: string | null;
   personal_vaults_enabled: boolean;
+  internal_users_present?: boolean | null;
   auth_methods?: AuthMethod[];
 };
 export type FieldRow = {

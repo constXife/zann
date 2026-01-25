@@ -1,17 +1,33 @@
 <script setup lang="ts">
-import { ref } from "vue";
-import type { PlainBackupExportResponse, PlainBackupImportResponse } from "../../types";
+import { computed, ref, watch } from "vue";
+import type { PlainBackupExportResponse, PlainBackupImportResponse, StorageSummary } from "../../types";
+import { StorageKind } from "../../constants/enums";
 
 type Translator = (key: string) => string;
 
 const props = defineProps<{
   t: Translator;
-  onExportPlain: (path?: string | null) => Promise<PlainBackupExportResponse | null>;
-  onImportPlain: (path: string) => Promise<PlainBackupImportResponse | null>;
+  storages: StorageSummary[];
+  onExportPlain: (path?: string | null) => Promise<PlainBackupExportResponse | null | undefined>;
+  onImportPlain: (
+    path?: string | null,
+    targetStorageId?: string | null,
+  ) => Promise<PlainBackupImportResponse | null | undefined>;
 }>();
 
-const exportPath = ref("");
-const importPath = ref("");
+const remoteStorages = computed(() =>
+  props.storages.filter((storage) => storage.kind === StorageKind.Remote),
+);
+const defaultTarget = computed(() =>
+  remoteStorages.value.length > 0 ? remoteStorages.value[0].id : "local",
+);
+const importTarget = ref<string>(defaultTarget.value);
+watch(defaultTarget, (value) => {
+  if (!importTarget.value || importTarget.value === "local") {
+    importTarget.value = value;
+  }
+});
+
 const exportBusy = ref(false);
 const importBusy = ref(false);
 const exportResult = ref<PlainBackupExportResponse | null>(null);
@@ -24,8 +40,11 @@ const runExport = async () => {
   exportBusy.value = true;
   exportError.value = "";
   exportResult.value = null;
-  const result = await props.onExportPlain(exportPath.value || null);
+  const result = await props.onExportPlain(null);
   exportBusy.value = false;
+  if (result === undefined) {
+    return;
+  }
   if (!result) {
     exportError.value = props.t("settings.backups.exportFailed");
     return;
@@ -37,13 +56,13 @@ const runImport = async () => {
   if (importBusy.value) return;
   importError.value = "";
   importResult.value = null;
-  if (!importPath.value.trim()) {
-    importError.value = props.t("settings.backups.importPathRequired");
+  importBusy.value = true;
+  console.info("[backup] import target", importTarget.value);
+  const result = await props.onImportPlain(null, importTarget.value);
+  importBusy.value = false;
+  if (result === undefined) {
     return;
   }
-  importBusy.value = true;
-  const result = await props.onImportPlain(importPath.value.trim());
-  importBusy.value = false;
   if (!result) {
     importError.value = props.t("settings.backups.importFailed");
     return;
@@ -73,15 +92,6 @@ const runImport = async () => {
         <h4 class="font-medium">{{ t("settings.backups.exportTitle") }}</h4>
         <p class="text-sm text-[var(--text-secondary)]">{{ t("settings.backups.exportDesc") }}</p>
       </div>
-      <div>
-        <label class="block text-sm font-medium mb-2">{{ t("settings.backups.exportPathLabel") }}</label>
-        <input
-          v-model="exportPath"
-          type="text"
-          :placeholder="t('settings.backups.exportPathPlaceholder')"
-          class="w-full rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
-        />
-      </div>
       <div class="flex items-center gap-3">
         <button
           type="button"
@@ -105,13 +115,20 @@ const runImport = async () => {
         <p class="text-sm text-[var(--text-secondary)]">{{ t("settings.backups.importDesc") }}</p>
       </div>
       <div>
-        <label class="block text-sm font-medium mb-2">{{ t("settings.backups.importPathLabel") }}</label>
-        <input
-          v-model="importPath"
-          type="text"
-          :placeholder="t('settings.backups.importPathPlaceholder')"
-          class="w-full rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-amber-500"
-        />
+        <label class="block text-sm font-medium mb-2">{{ t("settings.backups.importTargetLabel") }}</label>
+        <select
+          v-model="importTarget"
+          class="w-full rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
+        >
+          <option value="local">{{ t("settings.backups.importTargetLocal") }}</option>
+          <option
+            v-for="storage in remoteStorages"
+            :key="storage.id"
+            :value="storage.id"
+          >
+            {{ storage.name || storage.server_name || storage.server_url || storage.id }}
+          </option>
+        </select>
       </div>
       <div class="flex items-center gap-3">
         <button

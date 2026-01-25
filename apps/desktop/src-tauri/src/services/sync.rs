@@ -14,8 +14,7 @@ use crate::infra::remote::fetch_system_info;
 use crate::state::{ensure_unlocked, AppState};
 use crate::types::{
     ApiResponse, SyncPullRequest, SyncPullResponse, SyncPushChange, SyncPushRequest,
-    SyncPushResponse, SyncSharedPullResponse, SyncSharedPushRequest, VaultDetailResponse,
-    VaultListResponse,
+    SyncPushResponse, SyncSharedPullResponse, SyncSharedPushRequest, VaultListResponse,
 };
 use zann_core::crypto::{encrypt_blob, SecretKey};
 use zann_core::{StorageKind, VaultEncryptionType, VaultKind};

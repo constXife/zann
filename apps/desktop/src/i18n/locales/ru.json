@@ -348,6 +348,8 @@
       "exportedCounts": "{storages} хранилищ, {vaults} сейфов, {items} секретов",
       "importTitle": "Импорт",
       "importDesc": "Импортировать plain JSON копию. Существующие секреты пропускаются.",
+      "importTargetLabel": "Куда импортировать",
+      "importTargetLocal": "Локально (это устройство)",
       "importPathLabel": "Путь к файлу импорта",
       "importPathPlaceholder": "Вставьте путь к файлу .json",
       "importAction": "Импорт JSON",
@@ -356,6 +358,9 @@
       "importPathRequired": "Путь обязателен",
       "importedCounts": "Импортировано {imported}, пропущено существующих {skipped}",
       "importedSkippedMissing": "Пропущено: нет хранилищ {missingStorages}, нет сейфов {missingVaults}, удалено {deleted}",
+      "importSyncStart": "Импорт завершен. Синхронизация с сервером...",
+      "importSyncDone": "Синхронизация завершена",
+      "importSyncFailed": "Ошибка синхронизации",
       "singleWriterWarning": "Не открывайте один файл хранилища на нескольких устройствах одновременно. Используйте синхронизацию через сервер."
     },
     "about": {

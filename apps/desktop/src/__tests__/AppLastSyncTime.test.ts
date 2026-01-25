@@ -273,6 +273,8 @@ vi.mock("../composables/app/actions/useAppSettingsActions", () => ({
     updateSettings: vi.fn(),
     testBiometrics: vi.fn(),
     rebindBiometrics: vi.fn(),
+    exportPlainBackup: vi.fn(),
+    importPlainBackup: vi.fn(),
   }),
 }));
 

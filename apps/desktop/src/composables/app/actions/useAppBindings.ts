@@ -347,6 +347,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     handleSelectPassword: authFlow.handleSelectPassword,
     handleSelectOidc: authFlow.handleSelectOidc,
     passwordLoginOpen: authFlow.passwordLoginOpen,
+    passwordLoginMode: authFlow.passwordLoginMode,
     passwordLoginBusy: authFlow.passwordLoginBusy,
     passwordLoginError: authFlow.passwordLoginError,
     handlePasswordAuth: authFlow.handlePasswordAuth,

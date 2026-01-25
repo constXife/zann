@@ -45,8 +45,8 @@ const props = defineProps<{
   onCreateLocalVault: () => void;
   onSyncNow: (storageId: string) => Promise<void>;
   onResetSyncCursor: (storageId: string) => Promise<void>;
-  onExportPlain: (path?: string | null) => Promise<PlainBackupExportResponse | null>;
-  onImportPlain: (path: string) => Promise<PlainBackupImportResponse | null>;
+  onExportPlain: (path?: string | null) => Promise<PlainBackupExportResponse | null | undefined>;
+  onImportPlain: (path?: string | null) => Promise<PlainBackupImportResponse | null | undefined>;
 }>();
 
 const emit = defineEmits<{
@@ -164,6 +164,7 @@ watch(() => props.open, (isOpen) => {
           <SettingsTabBackups
             v-else-if="activeTab === 'backups'"
             :t="t"
+            :storages="storages"
             :on-export-plain="onExportPlain"
             :on-import-plain="onImportPlain"
           />

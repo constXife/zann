@@ -8,6 +8,7 @@ const props = defineProps<{
   serverUrl: string;
   busy: boolean;
   error: string;
+  defaultMode?: "login" | "register";
   t: Translator;
 }>();
 
@@ -34,7 +35,7 @@ watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
-      mode.value = "login";
+      mode.value = props.defaultMode ?? "login";
       email.value = "";
       password.value = "";
       confirm.value = "";

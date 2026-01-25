@@ -112,6 +112,8 @@ pub struct SystemInfoResponse {
     #[serde(default = "default_true")]
     pub personal_vaults_enabled: bool,
     #[serde(default)]
+    pub internal_users_present: Option<bool>,
+    #[serde(default)]
     pub auth_methods: Vec<i32>,
 }
 

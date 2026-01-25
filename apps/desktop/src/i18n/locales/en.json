@@ -348,6 +348,8 @@
       "exportedCounts": "{storages} storages, {vaults} vaults, {items} items",
       "importTitle": "Import",
       "importDesc": "Import a plain JSON backup. Existing secrets are skipped.",
+      "importTargetLabel": "Import target",
+      "importTargetLocal": "Local (this device)",
       "importPathLabel": "Import file path",
       "importPathPlaceholder": "Paste a .json file path",
       "importAction": "Import JSON",
@@ -356,6 +358,9 @@
       "importPathRequired": "Path is required",
       "importedCounts": "Imported {imported}, skipped existing {skipped}",
       "importedSkippedMissing": "Skipped missing storages {missingStorages}, missing vaults {missingVaults}, deleted {deleted}",
+      "importSyncStart": "Import completed. Syncing with server...",
+      "importSyncDone": "Sync completed",
+      "importSyncFailed": "Sync failed",
       "singleWriterWarning": "Do not open the same vault file on multiple devices simultaneously. Use server sync instead."
     },
     "about": {
