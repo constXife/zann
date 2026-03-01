@@ -789,6 +789,7 @@ pub(crate) async fn create_shared_item(
         .map(|tags| {
             tags.into_iter()
                 .filter(|t| !t.trim().is_empty())
+                .take(crate::domains::items::service::MAX_TAGS)
                 .collect::<Vec<_>>()
         })
         .filter(|tags| !tags.is_empty());
@@ -980,7 +981,11 @@ pub(crate) async fn update_shared_item(
 
     // Update tags
     if let Some(tags) = req.tags {
-        let tags: Vec<String> = tags.into_iter().filter(|t| !t.trim().is_empty()).collect();
+        let tags: Vec<String> = tags
+            .into_iter()
+            .filter(|t| !t.trim().is_empty())
+            .take(crate::domains::items::service::MAX_TAGS)
+            .collect();
         item.tags = if tags.is_empty() {
             None
         } else {
