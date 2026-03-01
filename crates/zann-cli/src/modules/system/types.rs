@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zann_core::api::auth::KdfParams;
+use zann_core::AuthMethod;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct CliConfig {
@@ -54,7 +55,7 @@ pub struct SystemInfoResponse {
     #[serde(default)]
     pub personal_vaults_enabled: Option<bool>,
     #[serde(default)]
-    pub auth_methods: Vec<String>,
+    pub auth_methods: Vec<AuthMethod>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

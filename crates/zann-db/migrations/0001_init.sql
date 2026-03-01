@@ -96,6 +96,8 @@ CREATE TABLE item_history (
     changed_by_name TEXT,
     changed_by_device_id BLOB,
     changed_by_device_name TEXT,
+    source INTEGER NOT NULL DEFAULT 1 CHECK (source IN (1, 2, 3)),
+    sync_status INTEGER NOT NULL DEFAULT 2 CHECK (sync_status IN (1, 2, 3)),
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
     FOREIGN KEY (vault_id) REFERENCES local_vaults(id) ON DELETE CASCADE,
     CHECK (length(id) = 16),
