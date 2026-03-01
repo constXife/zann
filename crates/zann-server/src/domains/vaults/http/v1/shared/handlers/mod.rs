@@ -4,8 +4,8 @@ mod rotation_start;
 mod rotation_status;
 
 pub(crate) use items::{
-    create_shared_item, delete_shared_item, get_shared_item, get_shared_version,
-    list_shared_items, list_shared_versions, update_shared_item,
+    create_shared_item, delete_shared_item, get_shared_item, get_shared_version, list_shared_items,
+    list_shared_versions, update_shared_item,
 };
 pub(crate) use rotation_commit::rotate_commit;
 pub(crate) use rotation_start::rotate_start;

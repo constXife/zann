@@ -7,9 +7,7 @@ use axum::{
 use chrono::Utc;
 use sqlx_core::types::Json as SqlxJson;
 use uuid::Uuid;
-use zann_core::{
-    Change, ChangeOp, ChangeType, Identity, Item, ItemHistory, SyncStatus,
-};
+use zann_core::{Change, ChangeOp, ChangeType, Identity, Item, ItemHistory, SyncStatus};
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{ChangeRepo, ItemHistoryRepo, ItemRepo, VaultRepo};
 
@@ -766,25 +764,33 @@ pub(crate) async fn create_shared_item(
                 .into_response();
         }
     };
-    let payload_enc =
-        match core_crypto::encrypt_payload_bytes(&vault_key, vault.id, item_id, &payload_bytes) {
-            Ok(enc) => enc,
-            Err(err) => {
-                tracing::error!(event = "shared_item_create_failed", error = %err, "Encryption failed");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: "encrypt_failed",
-                    }),
-                )
-                    .into_response();
-            }
-        };
+    let payload_enc = match core_crypto::encrypt_payload_bytes(
+        &vault_key,
+        vault.id,
+        item_id,
+        &payload_bytes,
+    ) {
+        Ok(enc) => enc,
+        Err(err) => {
+            tracing::error!(event = "shared_item_create_failed", error = %err, "Encryption failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "encrypt_failed",
+                }),
+            )
+                .into_response();
+        }
+    };
     let checksum = core_crypto::payload_checksum(&payload_enc);
 
     let tags = req
         .tags
-        .map(|tags| tags.into_iter().filter(|t| !t.trim().is_empty()).collect::<Vec<_>>())
+        .map(|tags| {
+            tags.into_iter()
+                .filter(|t| !t.trim().is_empty())
+                .collect::<Vec<_>>()
+        })
         .filter(|tags| !tags.is_empty());
 
     let device_id = identity.device_id.unwrap_or(Uuid::nil());
@@ -1026,20 +1032,24 @@ pub(crate) async fn update_shared_item(
                 .into_response();
         }
     };
-    let payload_enc =
-        match core_crypto::encrypt_payload_bytes(&vault_key, vault.id, item.id, &payload_bytes) {
-            Ok(enc) => enc,
-            Err(err) => {
-                tracing::error!(event = "shared_item_update_failed", error = %err, "Encryption failed");
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ErrorResponse {
-                        error: "encrypt_failed",
-                    }),
-                )
-                    .into_response();
-            }
-        };
+    let payload_enc = match core_crypto::encrypt_payload_bytes(
+        &vault_key,
+        vault.id,
+        item.id,
+        &payload_bytes,
+    ) {
+        Ok(enc) => enc,
+        Err(err) => {
+            tracing::error!(event = "shared_item_update_failed", error = %err, "Encryption failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse {
+                    error: "encrypt_failed",
+                }),
+            )
+                .into_response();
+        }
+    };
     item.payload_enc = payload_enc;
     item.checksum = core_crypto::payload_checksum(&item.payload_enc);
 
@@ -1067,7 +1077,10 @@ pub(crate) async fn update_shared_item(
         if let Err(err) = history_repo.create(&history).await {
             tracing::error!(event = "item_history_create_failed", error = %err, item_id = %item.id);
         }
-        if let Err(err) = history_repo.prune_by_item(item.id, ITEM_HISTORY_LIMIT).await {
+        if let Err(err) = history_repo
+            .prune_by_item(item.id, ITEM_HISTORY_LIMIT)
+            .await
+        {
             tracing::error!(event = "item_history_prune_failed", error = %err, item_id = %item.id);
         }
     }

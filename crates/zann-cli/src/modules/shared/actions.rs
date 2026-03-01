@@ -7,10 +7,9 @@ use zann_core::{EncryptedPayload, FieldKind, FieldValue};
 use crate::cli_args::*;
 use crate::find_field;
 use crate::modules::shared::{
-    create_shared_item, delete_shared_item, fetch_shared_item, fetch_shared_items,
-    flatten_payload, format_env_flat, format_kv_flat, payload_or_error, print_list_table,
-    resolve_path_arg, resolve_shared_item_id, resolve_vault_arg, secret_not_found_error,
-    update_shared_item,
+    create_shared_item, delete_shared_item, fetch_shared_item, fetch_shared_items, flatten_payload,
+    format_env_flat, format_kv_flat, payload_or_error, print_list_table, resolve_path_arg,
+    resolve_shared_item_id, resolve_vault_arg, secret_not_found_error, update_shared_item,
 };
 use crate::modules::shared::{
     materialize_shared, render_shared_template, SharedListJsonItem, SharedListJsonResponse,

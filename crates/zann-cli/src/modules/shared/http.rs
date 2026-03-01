@@ -54,11 +54,7 @@ pub(crate) async fn update_shared_item(
     item_id: &str,
     payload: JsonValue,
 ) -> anyhow::Result<SharedItemResponse> {
-    let url = format!(
-        "{}/v1/shared/items/{}",
-        addr.trim_end_matches('/'),
-        item_id
-    );
+    let url = format!("{}/v1/shared/items/{}", addr.trim_end_matches('/'), item_id);
     let body = serde_json::json!({
         "payload": payload,
     });
@@ -82,16 +78,8 @@ pub(crate) async fn delete_shared_item(
     access_token: &str,
     item_id: &str,
 ) -> anyhow::Result<()> {
-    let url = format!(
-        "{}/v1/shared/items/{}",
-        addr.trim_end_matches('/'),
-        item_id
-    );
-    let response = client
-        .delete(url)
-        .bearer_auth(access_token)
-        .send()
-        .await?;
+    let url = format!("{}/v1/shared/items/{}", addr.trim_end_matches('/'), item_id);
+    let response = client.delete(url).bearer_auth(access_token).send().await?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
