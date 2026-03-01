@@ -55,6 +55,12 @@ pub enum Command {
     Config(ConfigArgs),
     #[command(about = "Fetch a single secret item by path")]
     Get(GetArgs),
+    #[command(about = "Create a secret item in a shared vault")]
+    Create(CreateArgs),
+    #[command(about = "Update a secret item in a shared vault")]
+    Update(UpdateArgs),
+    #[command(about = "Delete a secret item from a shared vault")]
+    Delete(DeleteArgs),
     #[command(about = "Print version information")]
     Version,
 }

@@ -2,8 +2,9 @@ use chrono::Utc;
 use std::io::Write;
 use uuid::Uuid;
 use zann_db::local::{
-    KeyWrapType, LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo,
-    LocalPendingChange, LocalStorage, LocalVault, LocalVaultRepo,
+    HistorySource, HistorySyncStatus, KeyWrapType, LocalItem, LocalItemHistory,
+    LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange, LocalStorage, LocalVault,
+    LocalVaultRepo,
 };
 
 use crate::crypto::{decrypt_payload, payload_aad, payload_checksum};
@@ -15,6 +16,8 @@ use crate::types::{
 use crate::util::{parse_rfc3339, storage_name_from_url};
 use zann_core::crypto::{encrypt_blob, SecretKey};
 use zann_core::{ChangeType, StorageKind, SyncStatus, VaultEncryptionType, VaultKind};
+
+const HISTORY_LIMIT: i64 = 5;
 
 fn append_sync_log(message: &str) {
     let Some(home) = dirs::home_dir() else {
@@ -534,11 +537,13 @@ async fn apply_history_payloads(
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,
             changed_by_device_name: None,
+            source: HistorySource::Server,
+            sync_status: HistorySyncStatus::Confirmed,
             created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
         });
     }
     match history_repo
-        .replace_by_item(storage_id, item_id, &entries)
+        .merge_by_item(storage_id, item_id, &entries, HISTORY_LIMIT)
         .await
     {
         Ok(()) => {
@@ -609,11 +614,13 @@ async fn apply_shared_history_payloads(
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,
             changed_by_device_name: None,
+            source: HistorySource::Server,
+            sync_status: HistorySyncStatus::Confirmed,
             created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
         });
     }
     match history_repo
-        .replace_by_item(storage_id, item_id, &entries)
+        .merge_by_item(storage_id, item_id, &entries, HISTORY_LIMIT)
         .await
     {
         Ok(()) => {

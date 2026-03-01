@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type { ApiResponse, EncryptedPayload, FieldKind, FieldValue, ItemDetail, ItemSummary, VaultSummary } from "../types";
 import { getFieldSchema, getSchemaFieldDefs, resolveSchemaLabel, type FieldType } from "../data/secretSchemas";
+import { CATEGORY_TYPES, categoryTypes, type ItemCategoryId } from "../utils/itemCategories";
 import { CachePolicy, VaultKind } from "../constants/enums";
 import { createErrorWithCause } from "./errors";
 
@@ -31,7 +32,7 @@ type UseCreateModalOptions = {
   selectedItem: Ref<ItemDetail | null>;
   selectedCategory: Ref<string | null>;
   lastCreateItemType: Ref<string>;
-  loadItems: () => Promise<void>;
+  loadItems: (options?: { silent?: boolean }) => Promise<void>;
   loadVaults: () => Promise<void>;
   runRemoteSync: (storageId: string | null) => Promise<void>;
   localStorageId: string;
@@ -45,6 +46,8 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   const createMode = ref<"vault" | "item" | null>(null);
   const createItemType = ref("login");
   const createItemFields = ref<FieldInput[]>([]);
+  const openTypeMenuOnOpen = ref(false);
+  const showAllTypes = ref(false);
   const createItemTitle = ref("");
   const createItemFolder = ref("");
   const createItemVaultId = ref<string | null>(null);
@@ -74,6 +77,10 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     "file_secret",
     "server_credentials",
   ];
+  const mappedTypeIds = new Set(Object.values(CATEGORY_TYPES).flat());
+
+  const getOrderedTypes = () =>
+    typeOptions.value.length ? typeOptions.value : defaultTypeOrder;
 
   const currentSchema = computed(() => getFieldSchema(createItemType.value));
 
@@ -168,25 +175,69 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   };
 
   const typeGroups = computed(() => {
-    const available = new Set(typeOptions.value.length ? typeOptions.value : defaultTypeOrder);
+    const orderedTypes = getOrderedTypes();
+    const categoryId = options.selectedCategory.value as ItemCategoryId | null;
+    const categoryTypeIds =
+      categoryId && categoryId !== "all" && categoryId !== "trash"
+        ? new Set(categoryTypes(categoryId))
+        : null;
+    const shouldFilterTypes = Boolean(categoryTypeIds && !showAllTypes.value);
+    const available = shouldFilterTypes
+      ? new Set(orderedTypes.filter((typeId) => categoryTypeIds?.has(typeId)))
+      : new Set(orderedTypes);
+    const resolveTypes = (categoryId: ItemCategoryId) =>
+      orderedTypes.filter((typeId) => available.has(typeId) && categoryTypes(categoryId).includes(typeId));
+    const otherTypes = orderedTypes.filter(
+      (typeId) => available.has(typeId) && !mappedTypeIds.has(typeId),
+    );
     const groups = [
+      {
+        id: "login",
+        label: options.t("create.typeGroupLogins"),
+        types: resolveTypes("login"),
+      },
+      {
+        id: "card",
+        label: options.t("create.typeGroupCards"),
+        types: resolveTypes("card"),
+      },
+      {
+        id: "note",
+        label: options.t("create.typeGroupNotes"),
+        types: resolveTypes("note"),
+      },
+      {
+        id: "kv",
+        label: options.t("create.typeGroupVariables"),
+        types: resolveTypes("kv"),
+      },
       {
         id: "infra",
         label: options.t("create.typeGroupInfra"),
-        types: ["ssh_key", "database", "cloud_iam", "file_secret", "server_credentials"].filter(
-          (typeId) => available.has(typeId),
-        ),
-      },
-      {
-        id: "core",
-        label: options.t("create.typeGroupGeneral"),
-        types: ["login", "card", "note", "identity", "api", "kv"].filter((typeId) =>
-          available.has(typeId),
-        ),
+        types: resolveTypes("infra"),
       },
     ];
+    if (otherTypes.length) {
+      groups.push({
+        id: "other",
+        label: options.t("create.typeGroupOther"),
+        types: otherTypes,
+      });
+    }
     return groups.filter((group) => group.types.length > 0);
   });
+
+  const showAllTypesOption = computed(() => {
+    const categoryId = options.selectedCategory.value as ItemCategoryId | null;
+    if (!categoryId || categoryId === "all" || categoryId === "trash") {
+      return false;
+    }
+    return !showAllTypes.value && categoryTypes(categoryId).length > 0;
+  });
+
+  const enableAllTypes = () => {
+    showAllTypes.value = true;
+  };
 
   const addCustomField = (isSecret: boolean) => {
     createItemFields.value = [
@@ -218,6 +269,18 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     } catch {
       // noop
     }
+  };
+
+  const resolveCategoryType = (categoryId: string | null) => {
+    if (!categoryId || categoryId === "all" || categoryId === "trash") {
+      return null;
+    }
+    const orderedTypes = getOrderedTypes();
+    return (
+      orderedTypes.find((typeId) =>
+        categoryTypes(categoryId as ItemCategoryId).includes(typeId),
+      ) ?? null
+    );
   };
 
   const resetFieldsForType = async (typeId: string, prevFields?: FieldInput[]) => {
@@ -335,12 +398,17 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createVaultBusy.value = false;
   };
 
-  const openCreateModal = async (mode: "vault" | "item") => {
+  const openCreateModal = async (
+    mode: "vault" | "item",
+    menuOptions?: { openTypeMenu?: boolean; typeId?: string },
+  ) => {
     createMode.value = mode;
     createItemError.value = "";
     createItemErrorKey.value = "";
     createVaultError.value = "";
     createEditingItemId.value = null;
+    openTypeMenuOnOpen.value = menuOptions?.openTypeMenu ?? false;
+    showAllTypes.value = false;
     if (mode === "vault") {
       createVaultName.value = "";
       createVaultKind.value =
@@ -349,15 +417,20 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
       createVaultDefault.value = options.vaults.value.length === 0;
     } else {
       await loadTypeOptions();
-      const categoryType = options.selectedCategory.value;
+      const categoryType = resolveCategoryType(options.selectedCategory.value);
       const preferredType =
+        menuOptions?.typeId ??
         options.selectedItem.value?.type_id ??
         (typeOptions.value.includes(categoryType ?? "") ? categoryType : null) ??
         options.lastCreateItemType.value ??
         "login";
-      createItemType.value = typeOptions.value.includes(preferredType)
-        ? preferredType
-        : typeOptions.value[0] ?? "login";
+      if (menuOptions?.typeId) {
+        createItemType.value = preferredType;
+      } else {
+        createItemType.value = typeOptions.value.includes(preferredType)
+          ? preferredType
+          : typeOptions.value[0] ?? "login";
+      }
       createItemTitle.value = "";
       createItemFolder.value = "";
       createItemVaultId.value = options.selectedVaultId.value ?? options.vaults.value[0]?.id ?? null;
@@ -373,6 +446,8 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
       return;
     }
     createMode.value = "item";
+    openTypeMenuOnOpen.value = false;
+    showAllTypes.value = false;
     createItemErrorKey.value = "";
     createEditingItemId.value = options.selectedItem.value.id;
     createItemType.value = options.selectedItem.value.type_id;
@@ -546,6 +621,14 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   };
 
   const validateFieldKeys = () => {
+    if (createItemType.value === "kv") {
+      const hasRow = createItemFields.value.some(
+        (field) => field.key.trim() && field.value.trim(),
+      );
+      if (!hasRow) {
+        return { ok: false, key: "fields_required" };
+      }
+    }
     const keys = createItemFields.value
       .map((field) => field.key.trim())
       .filter(Boolean);
@@ -617,6 +700,7 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     "path_too_long",
   ]);
   const fieldKeyErrorKeys = new Set([
+    "fields_required",
     "field_key_invalid",
     "field_key_duplicate",
   ]);
@@ -695,6 +779,11 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     }
     const keyValidation = validateFieldKeys();
     if (!keyValidation.ok) {
+      if (keyValidation.key === "fields_required" && createItemType.value === "kv") {
+        if (createItemFields.value.length === 0) {
+          addCustomField(false);
+        }
+      }
       createItemError.value = options.t(`errors.${keyValidation.key}`);
       createItemErrorKey.value = keyValidation.key;
       return;
@@ -709,7 +798,7 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
       options.selectedItem.value?.payload &&
       hasPasswordChange(options.selectedItem.value.payload, payload)
     ) {
-      optimisticVersion = options.onOptimisticHistory?.(options.selectedItem.value.payload) ?? null;
+      optimisticVersion = options.onOptimisticHistory?.(payload) ?? null;
     }
     try {
       const response = createEditingItemId.value
@@ -803,6 +892,16 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     },
   );
 
+  watch(
+    () => options.selectedCategory.value,
+    () => {
+      if (!createModalOpen.value || createMode.value !== "item") {
+        return;
+      }
+      showAllTypes.value = false;
+    },
+  );
+
   return {
     createModalOpen,
     createMode,
@@ -827,6 +926,12 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createVaultValid,
     typeOptions,
     typeGroups,
+    showAllTypesOption,
+    enableAllTypes,
+    openTypeMenuOnOpen,
+    consumeOpenTypeMenu: () => {
+      openTypeMenuOnOpen.value = false;
+    },
     currentSchema,
     mainFields,
     advancedFields,

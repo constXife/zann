@@ -60,6 +60,7 @@ const selectedVaultId = ref<string | null>(
 const selectedItemId = ref<string | null>(null);
 const itemDetailError = ref("");
 const listLoading = ref(false);
+const listError = ref("");
 const fatalError = ref("");
 const settingsOpen = ref(false);
 const settingsInitialTab = ref<"general" | "accounts">("general");
@@ -91,14 +92,7 @@ const initialized = computed(() => appStatus.value?.initialized ?? false);
 const showMain = computed(() => appStatus.value && initialized.value && unlocked.value);
 
 const toastState = useAppToast();
-const {
-  toast,
-  toastActionLabel,
-  toastAction,
-  clearToast,
-  showToast,
-  clearToastTimer,
-} = toastState;
+const { toasts, clearToast, showToast, clearToastTimer } = toastState;
 
 const confirmState = useAppConfirm();
 const {
@@ -149,9 +143,7 @@ const itemsState = useItems({
   initialized,
   unlocked,
   listLoading,
-  onFatalError: (message) => {
-    fatalError.value = message;
-  },
+  listError,
   t,
   onAfterLoad: () => {
     void pendingChangesState.refreshPendingChanges();
@@ -327,6 +319,8 @@ const {
   categoryCounts,
   categories,
   selectCategory,
+  selectedSubtype,
+  selectSubtype,
   filteredItems,
   isDeletedItem,
 } = useAppItemFilters({
@@ -336,6 +330,7 @@ const {
   selectedFolder,
   selectedCategory,
 });
+
 const statusBanners = useAppStatusBanners({
   selectedStorageId,
   storageSyncErrors,
@@ -435,6 +430,9 @@ const paletteState = usePalette({
   },
 });
 const { paletteOpen, paletteQuery, paletteIndex, paletteItems } = paletteState;
+const openPalette = () => {
+  paletteOpen.value = true;
+};
 
 const formatError = (err: unknown) => {
   const message = err instanceof Error ? err.message : String(err);
@@ -625,6 +623,7 @@ const timeTravelMaxIndex = computed(() =>
   Math.max(0, itemDetailsState.historyEntries.value.length - 1),
 );
 
+
 const { lastActivityAt, altRevealAll } = useAppEventHandlers({
   t,
   settings,
@@ -733,6 +732,7 @@ const { shellBindings, modalBindings } = useAppBindings({
     settingsInitialTab,
     openSettings,
     listLoading,
+    listError,
     itemDetailError,
     settings,
     keystoreStatus,
@@ -762,6 +762,8 @@ const { shellBindings, modalBindings } = useAppBindings({
   misc: {
     resolveConflict,
     altRevealAll,
+    openPalette,
+    loadItems,
   },
 });
 
@@ -784,10 +786,12 @@ onBeforeUnmount(() => {
     >
       Alt reveal
     </div>
-    <AppShell
-      v-if="showMain"
-      v-bind="shellBindings"
-    />
+    <KeepAlive>
+      <AppShell
+        v-if="showMain"
+        v-bind="shellBindings"
+      />
+    </KeepAlive>
     <AppModals v-bind="modalBindings" />
   </main>
 </template>

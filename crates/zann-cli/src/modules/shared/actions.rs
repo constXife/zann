@@ -1,11 +1,15 @@
-use std::io::{self, Write};
+use std::collections::HashMap;
+use std::io::{self, Read, Write};
+
+use serde_json::Value as JsonValue;
+use zann_core::{EncryptedPayload, FieldKind, FieldValue};
 
 use crate::cli_args::*;
 use crate::find_field;
 use crate::modules::shared::{
-    fetch_shared_item, fetch_shared_items, flatten_payload, format_env_flat, format_kv_flat,
-    payload_or_error, print_list_table, resolve_path_arg, resolve_shared_item_id,
-    resolve_vault_arg, secret_not_found_error,
+    create_shared_item, delete_shared_item, fetch_shared_item, fetch_shared_items, flatten_payload,
+    format_env_flat, format_kv_flat, payload_or_error, print_list_table, resolve_path_arg,
+    resolve_shared_item_id, resolve_vault_arg, secret_not_found_error, update_shared_item,
 };
 use crate::modules::shared::{
     materialize_shared, render_shared_template, SharedListJsonItem, SharedListJsonResponse,
@@ -94,6 +98,132 @@ pub(crate) async fn handle_get(args: GetArgs, ctx: &mut CommandContext<'_>) -> a
         }
     }
     Ok(())
+}
+
+pub(crate) async fn handle_create(
+    args: CreateArgs,
+    ctx: &mut CommandContext<'_>,
+) -> anyhow::Result<()> {
+    let vault_id = resolve_vault_arg(args.vault, ctx).await?;
+    let payload = build_payload_from_args(&args.field, args.stdin, &args.type_id)?;
+
+    let item = create_shared_item(
+        ctx.client,
+        ctx.addr,
+        &ctx.access_token,
+        &vault_id,
+        &args.path,
+        &args.type_id,
+        payload,
+    )
+    .await?;
+
+    println!("Created: {} (id: {})", item.path, item.id);
+    Ok(())
+}
+
+pub(crate) async fn handle_update(
+    args: UpdateArgs,
+    ctx: &mut CommandContext<'_>,
+) -> anyhow::Result<()> {
+    let (vault_id, path) = resolve_path_arg(&args.path, args.vault, ctx).await?;
+    let item_id = resolve_shared_item_id(
+        ctx.client,
+        ctx.addr,
+        &ctx.access_token,
+        &vault_id,
+        None,
+        Some(&path),
+    )
+    .await
+    .map_err(|_| secret_not_found_error(&path))?;
+
+    let type_id = args.type_id.as_deref().unwrap_or("secret");
+    let payload = build_payload_from_args(&args.field, args.stdin, type_id)?;
+
+    let item = update_shared_item(
+        ctx.client,
+        ctx.addr,
+        &ctx.access_token,
+        &item_id.to_string(),
+        payload,
+    )
+    .await?;
+
+    println!("Updated: {} (version: {})", item.path, item.id);
+    Ok(())
+}
+
+pub(crate) async fn handle_delete(
+    args: DeleteArgs,
+    ctx: &mut CommandContext<'_>,
+) -> anyhow::Result<()> {
+    let (vault_id, path) = resolve_path_arg(&args.path, args.vault, ctx).await?;
+    let item_id = resolve_shared_item_id(
+        ctx.client,
+        ctx.addr,
+        &ctx.access_token,
+        &vault_id,
+        None,
+        Some(&path),
+    )
+    .await
+    .map_err(|_| secret_not_found_error(&path))?;
+
+    delete_shared_item(
+        ctx.client,
+        ctx.addr,
+        &ctx.access_token,
+        &item_id.to_string(),
+    )
+    .await?;
+
+    println!("Deleted: {}", path);
+    Ok(())
+}
+
+fn build_payload_from_args(
+    fields: &[String],
+    stdin: bool,
+    type_id: &str,
+) -> anyhow::Result<JsonValue> {
+    if stdin && !fields.is_empty() {
+        anyhow::bail!("Cannot use both --field and --stdin");
+    }
+
+    if stdin {
+        let mut input = String::new();
+        io::stdin().read_to_string(&mut input)?;
+        let value: JsonValue = serde_json::from_str(&input)?;
+        return Ok(value);
+    }
+
+    if fields.is_empty() {
+        anyhow::bail!("Provide at least one --field KEY VALUE or use --stdin");
+    }
+
+    let mut map = HashMap::new();
+    for chunk in fields.chunks(2) {
+        let key = &chunk[0];
+        let value = &chunk[1];
+        map.insert(
+            key.clone(),
+            FieldValue {
+                kind: FieldKind::Text,
+                value: value.clone(),
+                meta: None,
+            },
+        );
+    }
+
+    let payload = EncryptedPayload {
+        v: 1,
+        type_id: type_id.to_string(),
+        fields: map,
+        extra: None,
+    };
+
+    Ok(serde_json::to_value(payload)?)
 }
 
 pub(crate) async fn handle_materialize(

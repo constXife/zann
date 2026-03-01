@@ -8,8 +8,8 @@ use zann_core::{
 };
 
 use crate::local::{
-    LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange,
-    LocalStorageRepo, PendingChangeRepo,
+    HistorySource, HistorySyncStatus, LocalItem, LocalItemHistory, LocalItemHistoryRepo,
+    LocalItemRepo, LocalPendingChange, LocalStorageRepo, PendingChangeRepo,
 };
 
 use super::LocalServices;
@@ -167,25 +167,33 @@ impl<'a> ItemsService for LocalServices<'a> {
             Ok(Some(storage)) => storage.kind == StorageKind::LocalOnly,
             _ => false,
         };
-        if is_local_only {
-            let history_repo = LocalItemHistoryRepo::new(self.pool);
-            let history = LocalItemHistory {
-                id: Uuid::now_v7(),
-                storage_id,
-                vault_id,
-                item_id,
-                payload_enc: item.payload_enc.clone(),
-                checksum: item.checksum.clone(),
-                version: item.version,
-                change_type: ChangeType::Create,
-                changed_by_email: "local".to_string(),
-                changed_by_name: None,
-                changed_by_device_id: None,
-                changed_by_device_name: None,
-                created_at: now,
-            };
-            let _ = history_repo.create(&history).await;
-        }
+        let (source, sync_status) = if is_local_only {
+            (HistorySource::Local, HistorySyncStatus::Confirmed)
+        } else {
+            (HistorySource::Local, HistorySyncStatus::Pending)
+        };
+        let history_repo = LocalItemHistoryRepo::new(self.pool);
+        let history = LocalItemHistory {
+            id: Uuid::now_v7(),
+            storage_id,
+            vault_id,
+            item_id,
+            payload_enc: item.payload_enc.clone(),
+            checksum: item.checksum.clone(),
+            version: item.version,
+            change_type: ChangeType::Create,
+            changed_by_email: "local".to_string(),
+            changed_by_name: None,
+            changed_by_device_id: None,
+            changed_by_device_name: None,
+            source,
+            sync_status,
+            created_at: now,
+        };
+        history_repo
+            .create(&history)
+            .await
+            .map_err(|err| ServiceError::new("history_create_failed", err.to_string()))?;
         self.track_pending(
             storage_id,
             LocalPendingChange {

@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { Ref } from "vue";
 import type {
@@ -16,6 +16,8 @@ import { getSchemaFieldDefs, getSchemaKeys, resolveSchemaLabel } from "../data/s
 import { createErrorWithCause } from "./errors";
 
 type Translator = (key: string) => string;
+
+let optimisticCounter = 0;
 
 type UseItemDetailsOptions = {
   selectedStorageId: Ref<string>;
@@ -76,10 +78,12 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
     };
   };
 
-  const loadItemDetail = async (itemId: string) => {
+  const loadItemDetail = async (itemId: string, loadOptions?: { silent?: boolean }) => {
+    const shouldToggleLoading = !loadOptions?.silent;
     if (!options.initialized.value || !options.unlocked.value) {
       return;
     }
+    const isSameItem = selectedItem.value?.id === itemId;
     const preserveTimeTravel =
       timeTravelActive.value && selectedItem.value?.id === itemId;
     const preservedIndex = timeTravelIndex.value;
@@ -97,8 +101,9 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       timeTravelError.value = "";
       timeTravelLoading.value = false;
     }
-    console.info("[details] load_item_start", { itemId });
-    detailLoading.value = true;
+    if (shouldToggleLoading) {
+      detailLoading.value = true;
+    }
     try {
       const response = await invoke<ApiResponse<ItemDetail>>("items_get", {
         req: { storage_id: options.selectedStorageId.value, item_id: itemId },
@@ -109,25 +114,23 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
         throw createErrorWithCause(message ?? options.t(`errors.${key}`), response.error);
       }
       selectedItem.value = response.data;
-      historyEntries.value = [];
-      historyPayloads.value = new Map();
-      pendingHistoryEntries.value = [];
+      if (!isSameItem) {
+        historyEntries.value = [];
+        historyPayloads.value = new Map();
+        pendingHistoryEntries.value = [];
+      }
       historyError.value = "";
       await loadItemHistory(response.data);
       if (preserveTimeTravel) {
         timeTravelActive.value = true;
         await setTimeTravelIndex(preservedIndex);
       }
-      console.info("[details] load_item_ok", {
-        itemId,
-        name: response.data.name,
-        vaultId: response.data.vault_id,
-      });
     } catch (err) {
       options.onError?.(String(err));
-      console.warn("[details] load_item_err", { itemId, error: String(err) });
     } finally {
-      detailLoading.value = false;
+      if (shouldToggleLoading) {
+        detailLoading.value = false;
+      }
     }
   };
 
@@ -143,7 +146,7 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
             storage_id: options.selectedStorageId.value,
             vault_id: item.vault_id,
             item_id: item.id,
-            limit: 5,
+            limit: 20,
           },
         },
       );
@@ -405,8 +408,10 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       return;
     }
     timeTravelActive.value = true;
-    timeTravelIndex.value = 0;
-    await loadTimeTravelPayloads(0);
+    const firstCommitted = historyEntries.value.findIndex((entry) => !entry.pending);
+    const nextIndex = firstCommitted === -1 ? 0 : firstCommitted;
+    timeTravelIndex.value = nextIndex;
+    await loadTimeTravelPayloads(nextIndex);
   };
 
   const closeTimeTravel = () => {
@@ -422,6 +427,9 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
   const setTimeTravelIndex = async (index: number) => {
     const maxIndex = Math.max(0, historyEntries.value.length - 1);
     const nextIndex = Math.min(Math.max(index, 0), maxIndex);
+    if (nextIndex !== timeTravelIndex.value) {
+      timeTravelOverrides.value = {};
+    }
     timeTravelIndex.value = nextIndex;
     if (timeTravelActive.value) {
       await loadTimeTravelPayloads(nextIndex);
@@ -445,8 +453,23 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
 
   onBeforeUnmount(clearRevealTimer);
 
+  watch(historyEntries, async () => {
+    if (!timeTravelActive.value) {
+      return;
+    }
+    const current = historyEntries.value[timeTravelIndex.value];
+    if (current && !current.pending) {
+      return;
+    }
+    const firstCommitted = historyEntries.value.findIndex((entry) => !entry.pending);
+    if (firstCommitted !== -1 && firstCommitted !== timeTravelIndex.value) {
+      await setTimeTravelIndex(firstCommitted);
+    }
+  });
+
   const addOptimisticHistory = (payload: EncryptedPayload) => {
-    const version = -Date.now();
+    optimisticCounter += 1;
+    const version = -(Date.now() * 1000 + optimisticCounter);
     const entry: ItemHistorySummary = {
       version,
       checksum: "local",

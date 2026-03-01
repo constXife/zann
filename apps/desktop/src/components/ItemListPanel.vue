@@ -3,6 +3,9 @@ import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import type { ItemSummary } from "../types";
 import { SyncStatus } from "../constants/enums";
+import Button from "./ui/Button.vue";
+import TypePickerMenu from "./TypePickerMenu.vue";
+import { typeMeta } from "../data/secretSchemas";
 
 type Category = { id: string; icon: string; label: string };
 
@@ -12,19 +15,9 @@ const props = defineProps<{
   sidebarCollapsed: boolean;
   categories: Category[];
   selectedCategory: string | null;
-  showOfflineBanner: boolean;
-  showSessionExpiredBanner: boolean;
-  showPersonalLockedBanner: boolean;
-  showSyncErrorBanner: boolean;
-  syncErrorMessage: string;
-  pendingChangesCount: number;
-  onSignIn: () => void;
-  onUnlockPersonal: () => void;
-  onResetPersonal: () => void;
-  lastSyncTime: string | null;
-  retrySync: () => void;
   filteredItems: ItemSummary[];
   listLoading: boolean;
+  listError: string;
   totalListHeight: number;
   listOffset: number;
   visibleItems: ItemSummary[];
@@ -32,16 +25,24 @@ const props = defineProps<{
   vaultContextLabel: string;
   isSharedVault: boolean;
   isLocalStorage: boolean;
+  syncBusy: boolean;
   onListScroll: () => void;
   selectItem: (itemId: string) => void;
-  openCreateItem: () => void;
+  openCreateItem: (typeId?: string) => void;
+  createTypeOptions: string[];
+  createTypeGroups: { id: string; label: string; types: string[] }[];
+  prepareCreateTypes?: () => Promise<void>;
   onEmptyTrash: () => void;
+  retryLoadItems: () => void;
+  listBlocked: boolean;
+  listBlockedMessage: string;
 }>();
 
 const emit = defineEmits<{ (e: "expandSidebar"): void }>();
 
 const listContainer = ref<HTMLDivElement | null>(null);
 const isMac = ref(false);
+const createMenuOpen = ref(false);
 
 defineExpose({ listContainer });
 
@@ -61,21 +62,29 @@ const collapsedPaddingClass = computed(() => {
 });
 const collapsedToggleOffsetClass = computed(() => (isMac.value ? "left-[84px]" : "left-[12px]"));
 
-const formattedLastSync = computed(() => {
-  if (!props.lastSyncTime) return null;
-  const date = new Date(props.lastSyncTime);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  if (diffMins < 1) return t("time.justNow");
-  if (diffMins < 60) return `${diffMins} ${t("time.minutesAgo")}`;
-  if (diffMins < 1440) return `${Math.floor(diffMins / 60)} ${t("time.hoursAgo")}`;
-  return date.toLocaleDateString();
-});
-
 const showEmptyTrash = computed(
   () => props.selectedCategory === "trash" && props.filteredItems.length > 0,
 );
+
+const getTypeLabel = (typeId: string) => {
+  const key = `types.${typeId}`;
+  const label = t(key);
+  return label !== key ? label : typeId;
+};
+
+const createMenuTypes = computed(() => {
+  if (props.createTypeGroups?.length) {
+    return props.createTypeGroups.flatMap((group) => group.types);
+  }
+  return props.createTypeOptions ?? [];
+});
+
+const shouldOpenCreateMenu = computed(() => {
+  if (!props.selectedCategory || props.selectedCategory === "all" || props.selectedCategory === "trash") {
+    return true;
+  }
+  return createMenuTypes.value.length > 1;
+});
 
 const formatDeletedAt = (value?: string | null) => {
   if (!value) {
@@ -88,153 +97,79 @@ const formatDeletedAt = (value?: string | null) => {
   return date.toLocaleString();
 };
 
+const formatUpdatedAt = (value?: string | null) => {
+  if (!value) {
+    return "";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString();
+};
+
+const getFolderPath = (path: string) =>
+  path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
+
 const handleSelectItem = (itemId: string) => {
   console.info("[item_list] select_item", { itemId });
+  if (props.listBlocked) {
+    return;
+  }
   props.selectItem(itemId);
+};
+
+const actionDisabledClass = computed(() =>
+  props.listBlocked ? "opacity-50 cursor-not-allowed" : "",
+);
+
+const closeCreateMenu = () => {
+  createMenuOpen.value = false;
+};
+
+const handleCreateClick = async () => {
+  if (props.listBlocked) {
+    return;
+  }
+  if (!shouldOpenCreateMenu.value) {
+    props.openCreateItem(createMenuTypes.value[0]);
+    return;
+  }
+  if (!createMenuTypes.value.length && props.prepareCreateTypes) {
+    await props.prepareCreateTypes();
+  }
+  if (!createMenuTypes.value.length) {
+    props.openCreateItem();
+    return;
+  }
+  createMenuOpen.value = true;
+};
+
+const handleSelectCreateType = (typeId: string) => {
+  createMenuOpen.value = false;
+  props.openCreateItem(typeId);
 };
 </script>
 
 <template>
-  <section class="relative flex flex-col bg-[var(--bg-secondary)]">
-    <button
+  <section
+    class="relative flex flex-col bg-[var(--bg-secondary)]"
+    :title="listBlocked ? listBlockedMessage : ''"
+  >
+    <Button
       v-if="sidebarCollapsed"
-      type="button"
-      class="absolute top-[8px] rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors z-[60]"
+      variant="ghost"
+      size="icon-sm"
+      class="absolute top-[8px] z-[60]"
       :class="collapsedToggleOffsetClass"
+      :title="t('sidebar.expand')"
       data-tauri-drag-region="false"
       @click="emit('expandSidebar')"
-      :title="t('sidebar.expand')"
     >
       <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 4H5a1 1 0 00-1 1v14a1 1 0 001 1h4m0-16v16m0-16h10a1 1 0 011 1v14a1 1 0 01-1 1H9" />
       </svg>
-    </button>
-
-    <div
-      v-if="showOfflineBanner"
-      class="flex items-center gap-3 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5"
-      :class="collapsedPaddingClass"
-      data-testid="offline-banner"
-    >
-      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/20">
-        <svg class="h-4 w-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636a9 9 0 010 12.728M5.636 5.636a9 9 0 000 12.728M12 12v.01M8.464 15.536a5 5 0 010-7.072m7.072 0a5 5 0 010 7.072" />
-          <line x1="4" y1="4" x2="20" y2="20" stroke-width="2" />
-        </svg>
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium text-amber-700 dark:text-amber-300">
-          {{ t("status.offline") }}
-        </div>
-        <div v-if="formattedLastSync" class="text-xs text-amber-600/80 dark:text-amber-400/80">
-          {{ t("storage.lastSynced") }}: {{ formattedLastSync }}
-        </div>
-        <div
-          v-if="pendingChangesCount > 0"
-          class="text-xs text-amber-600/80 dark:text-amber-400/80"
-        >
-          {{ t("status.pendingChanges", { count: pendingChangesCount }) }}
-        </div>
-      </div>
-      <button
-        type="button"
-        class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 transition-colors"
-        @click="retrySync"
-      >
-        {{ t("common.retry") }}
-      </button>
-    </div>
-
-    <div
-      v-else-if="showSessionExpiredBanner"
-      class="flex items-center gap-3 bg-red-500/10 border-b border-red-500/20 px-4 py-2.5"
-      :class="collapsedPaddingClass"
-    >
-      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/20">
-        <svg class="h-4 w-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-        </svg>
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium text-red-700 dark:text-red-300">
-          {{ t("status.sessionExpired") }}
-        </div>
-      </div>
-      <button
-        type="button"
-        class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 bg-red-500/20 hover:bg-red-500/30 transition-colors"
-        @click="onSignIn"
-      >
-        {{ t("auth.signIn") }}
-      </button>
-    </div>
-
-    <div
-      v-else-if="showPersonalLockedBanner"
-      class="flex items-center gap-3 bg-amber-500/10 border-b border-amber-500/20 px-4 py-2.5"
-      :class="collapsedPaddingClass"
-    >
-      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/20">
-        <svg class="h-4 w-4 text-amber-600 dark:text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-        </svg>
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium text-amber-700 dark:text-amber-300">
-          {{ t("status.personalLocked") }}
-        </div>
-        <div class="text-xs text-amber-600/80 dark:text-amber-400/80">
-          {{ t("status.personalLockedDesc") }}
-        </div>
-        <div class="text-xs text-amber-600/80 dark:text-amber-400/80">
-          {{ t("errors.vault_key_mismatch") }}
-        </div>
-      </div>
-      <div class="flex shrink-0 items-center gap-2">
-        <button
-          type="button"
-          class="rounded-lg px-3 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 transition-colors"
-          @click="onUnlockPersonal"
-        >
-          {{ t("status.personalLockedAction") }}
-        </button>
-        <button
-          type="button"
-          class="rounded-lg px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 bg-red-500/20 hover:bg-red-500/30 transition-colors"
-          @click="onResetPersonal"
-        >
-          {{ t("status.personalLockedReset") }}
-        </button>
-      </div>
-    </div>
-
-    <div
-      v-else-if="showSyncErrorBanner"
-      class="flex items-center gap-3 bg-red-500/10 border-b border-red-500/20 px-4 py-2.5"
-      :class="collapsedPaddingClass"
-      data-testid="sync-error-banner"
-    >
-      <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-red-500/20">
-        <svg class="h-4 w-4 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-      </div>
-      <div class="flex-1 min-w-0">
-        <div class="text-sm font-medium text-red-700 dark:text-red-300">
-          {{ t("status.syncError") }}
-        </div>
-        <div class="text-xs text-red-600/80 dark:text-red-400/80 break-words">
-          {{ syncErrorMessage }}
-        </div>
-      </div>
-      <button
-        type="button"
-        class="shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-300 bg-red-500/20 hover:bg-red-500/30 transition-colors"
-        @click="retrySync"
-      >
-        {{ t("common.retry") }}
-      </button>
-    </div>
+    </Button>
 
     <div
       class="flex items-center justify-between px-4 pt-3 pb-2"
@@ -256,41 +191,101 @@ const handleSelectItem = (itemId: string) => {
         </div>
       </div>
       <div class="flex items-center gap-2">
-        <button
+        <div
+          v-if="syncBusy"
+          class="hidden items-center gap-2 text-[11px] text-[var(--text-tertiary)] sm:flex"
+        >
+          <span class="h-2.5 w-2.5 animate-spin rounded-full border border-[var(--border-color)] border-t-[var(--text-secondary)]"></span>
+          <span>{{ t("status.syncing") }}</span>
+        </div>
+        <Button
           v-if="showEmptyTrash"
-          type="button"
-          class="rounded-lg border border-[var(--border-color)] px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
+          variant="outline"
+          size="xs"
+          :class="actionDisabledClass"
+          :disabled="listBlocked"
           data-tauri-drag-region="false"
           @click="onEmptyTrash"
         >
           {{ t("items.emptyTrash") }}
-        </button>
-        <button
-          type="button"
-          class="rounded-lg p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          :class="actionDisabledClass"
+          :disabled="listBlocked"
           data-tauri-drag-region="false"
         >
           <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4h13M3 8h9m-9 4h6m4 0l4-4m0 0l4 4m-4-4v12" />
           </svg>
-        </button>
+        </Button>
+        <div class="relative">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            :class="[
+              actionDisabledClass,
+              createMenuOpen ? 'bg-[var(--bg-hover)] text-[var(--text-primary)]' : '',
+            ]"
+            :disabled="listBlocked"
+            data-tauri-drag-region="false"
+            data-testid="item-create"
+            :aria-expanded="createMenuOpen"
+            @click="handleCreateClick"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" />
+            </svg>
+          </Button>
+          <TypePickerMenu
+            :open="createMenuOpen"
+            align="right"
+            menu-width-class="w-48"
+            :show-group-labels="false"
+            :type-options="createTypeOptions"
+            :type-groups="createTypeGroups"
+            :type-meta="typeMeta"
+            :get-type-label="getTypeLabel"
+            :on-select-type="handleSelectCreateType"
+            :on-close="closeCreateMenu"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div
+      v-if="!listLoading && listError"
+      class="mx-4 mt-2 rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs text-red-700 dark:text-red-300"
+    >
+      <div class="flex items-start justify-between gap-2">
+        <div class="min-w-0">
+          <div class="font-semibold">{{ t("items.listLoadFailed") }}</div>
+          <div class="mt-1 text-[11px] text-red-600/80 dark:text-red-300/80 break-words">
+            {{ listError }}
+          </div>
+        </div>
         <button
           type="button"
-          class="rounded-lg p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
-          data-tauri-drag-region="false"
-          @click="openCreateItem"
-          data-testid="item-create"
+          class="shrink-0 rounded-md bg-red-500/20 px-2 py-1 text-[11px] font-semibold text-red-700 dark:text-red-300 hover:bg-red-500/30 transition-colors"
+          @click="retryLoadItems"
         >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 4v16m8-8H4" />
-          </svg>
+          {{ t("common.retry") }}
         </button>
       </div>
     </div>
 
     <div
+      v-if="listBlocked"
+      class="mx-4 mt-2 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300"
+    >
+      {{ listBlockedMessage }}
+    </div>
+
+    <div
       ref="listContainer"
       class="flex-1 overflow-auto"
+      :class="listBlocked ? 'pointer-events-none opacity-60' : ''"
       @scroll="onListScroll"
     >
       <div v-if="listLoading" class="space-y-1 p-2">
@@ -344,9 +339,19 @@ const handleSelectItem = (itemId: string) => {
                     </svg>
                   </span>
                 </div>
-                <div class="text-xs text-[var(--text-secondary)] truncate">
+                <div class="text-xs text-[var(--text-secondary)] flex items-center min-w-0">
                   <template v-if="selectedCategory !== 'trash'">
-                    {{ item.path.includes('/') ? item.path.split('/').slice(0, -1).join('/') : '' }}
+                    <span class="shrink-0 text-[var(--text-tertiary)]">
+                      {{ getTypeLabel(item.type_id) }}
+                    </span>
+                    <span v-if="getFolderPath(item.path)" class="shrink min-w-0 truncate">
+                      <span class="mx-1 text-[var(--text-tertiary)]">·</span>
+                      <span>{{ getFolderPath(item.path) }}</span>
+                    </span>
+                    <span class="shrink-0">
+                      <span class="mx-1 text-[var(--text-tertiary)]">·</span>
+                      <span>{{ t("items.updatedAtLabel", { value: formatUpdatedAt(item.updated_at) }) }}</span>
+                    </span>
                   </template>
                   <template v-else>
                     {{ t("items.deletedAt") }}: {{ formatDeletedAt(item.deleted_at) }}
@@ -362,22 +367,9 @@ const handleSelectItem = (itemId: string) => {
         </div>
       </div>
       <div
-        v-if="!listLoading && !filteredItems.length"
-        class="mx-6 my-8 flex flex-col items-center justify-center rounded-xl border border-dashed border-[var(--border-color)] px-6 py-12 text-[var(--text-secondary)]"
-      >
-        <svg class="h-12 w-12 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
-        </svg>
-        <div class="mt-3 text-sm text-center">{{ t('items.noItems') }}</div>
-        <button
-          type="button"
-          class="mt-3 rounded-lg bg-gray-800 dark:bg-gray-600 hover:bg-gray-700 dark:hover:bg-gray-500 px-3 py-1.5 text-xs text-white transition-colors"
-          @click="openCreateItem"
-          data-testid="item-create-empty"
-        >
-          {{ t('onboarding.createItem') }}
-        </button>
-      </div>
+        v-if="!listLoading && !listError && !filteredItems.length"
+        class="mx-4 my-3 text-xs text-[var(--text-tertiary)]"
+      ></div>
     </div>
   </section>
 </template>

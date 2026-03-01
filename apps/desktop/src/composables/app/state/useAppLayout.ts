@@ -36,72 +36,62 @@ export function useAppLayout({
   const overscan = 6;
 
   const isResizingDetails = ref(false);
-  const SIDEBAR_FIXED = 280;
-  const LIST_MIN = 220;
-  const LIST_BASE = SIDEBAR_FIXED;
-  const LIST_MAX = 420;
-  const DETAILS_MIN_PX = 420;
-  const DETAILS_MIN_RATIO = 0.5;
-  const DETAILS_MAX_RATIO = 0.75;
-  const DETAILS_MAX_PX = 880;
+  const SIDEBAR_FIXED = 240;
+  const LIST_MIN = 320;
+  const LIST_MAX = 560;
+  const LIST_DEFAULT = 400;
+  const DETAILS_MIN_PX = 560;
+  const RESIZE_HANDLE_WIDTH = 5;
   const detailsRatio = ref(0);
   const listWidth = ref(320);
 
   const currentSidebarWidth = () =>
     uiSettings.value.sidebarCollapsed ? 0 : SIDEBAR_FIXED;
 
+  const availableWidth = () =>
+    Math.max(0, window.innerWidth - currentSidebarWidth() - RESIZE_HANDLE_WIDTH);
+
   const minDetailsWidth = () => {
-    const desired = Math.max(
-      DETAILS_MIN_PX,
-      Math.floor(window.innerWidth * DETAILS_MIN_RATIO),
-    );
-    const maxAllowed = Math.max(
-      0,
-      window.innerWidth - currentSidebarWidth() - LIST_MIN,
-    );
-    return Math.min(desired, maxAllowed);
+    const available = availableWidth();
+    return Math.max(DETAILS_MIN_PX, available - LIST_MAX);
   };
 
   const maxDetailsWidth = () => {
-    const maxAllowed = Math.max(
-      0,
-      window.innerWidth - currentSidebarWidth() - LIST_MIN,
-    );
-    return Math.min(
-      Math.floor(window.innerWidth * DETAILS_MAX_RATIO),
-      DETAILS_MAX_PX,
-      maxAllowed,
-    );
+    const available = availableWidth();
+    return Math.max(0, available - LIST_MIN);
+  };
+
+  const clampDetailsWidth = (value: number) => {
+    const min = minDetailsWidth();
+    const max = maxDetailsWidth();
+    if (max <= 0) return 0;
+    if (max < min) return Math.max(0, Math.min(value, max));
+    return Math.min(max, Math.max(min, value));
   };
 
   const updateListWidth = () => {
     const sidebarWidth = currentSidebarWidth();
     const availableForList = Math.max(
       0,
-      window.innerWidth - sidebarWidth - minDetailsWidth(),
+      window.innerWidth - sidebarWidth - uiSettings.value.detailsWidth - RESIZE_HANDLE_WIDTH,
     );
-    const baseWidth = Math.min(LIST_BASE, availableForList);
-    const extraSpace = Math.max(0, availableForList - baseWidth);
-    const extra = Math.min(160, Math.floor(extraSpace * 0.35));
-    const nextWidth = Math.min(LIST_MAX, baseWidth + extra, availableForList);
-    listWidth.value = Math.max(0, nextWidth);
+    listWidth.value = Math.max(LIST_MIN, availableForList);
   };
 
   const updatePanelRatios = () => {
-    if (window.innerWidth <= 0) return;
-    detailsRatio.value = uiSettings.value.detailsWidth / window.innerWidth;
+    const available = availableWidth();
+    if (available <= 0) return;
+    detailsRatio.value = uiSettings.value.detailsWidth / available;
   };
 
   const applyPanelWidthsFromRatio = () => {
     if (window.innerWidth <= 0) return;
-    const minDetails = minDetailsWidth();
-    const maxDetails = maxDetailsWidth();
-    const nextDetails = Math.min(
-      maxDetails,
-      Math.max(minDetails, Math.round(window.innerWidth * detailsRatio.value)),
-    );
+    const desired =
+      detailsRatio.value > 0
+        ? Math.round(availableWidth() * detailsRatio.value)
+        : Math.max(DETAILS_MIN_PX, availableWidth() - LIST_DEFAULT);
     uiSettings.value.sidebarWidth = SIDEBAR_FIXED;
-    uiSettings.value.detailsWidth = nextDetails;
+    uiSettings.value.detailsWidth = clampDetailsWidth(desired);
     updatePanelRatios();
     updateListWidth();
   };
@@ -115,13 +105,8 @@ export function useAppLayout({
 
   const onResizeDetails = (e: MouseEvent) => {
     if (!isResizingDetails.value) return;
-    const minDetails = minDetailsWidth();
-    const maxDetails = maxDetailsWidth();
-    const newWidth = Math.min(
-      maxDetails,
-      Math.max(minDetails, window.innerWidth - e.clientX),
-    );
-    uiSettings.value.detailsWidth = newWidth;
+    const desired = window.innerWidth - e.clientX;
+    uiSettings.value.detailsWidth = clampDetailsWidth(desired);
     updatePanelRatios();
     updateListWidth();
   };
@@ -218,7 +203,7 @@ export function useAppLayout({
   watch(
     () => uiSettings.value.sidebarCollapsed,
     () => {
-      updateListWidth();
+      applyPanelWidthsFromRatio();
     },
   );
 

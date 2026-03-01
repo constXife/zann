@@ -2,7 +2,10 @@ use crate::cli_args::*;
 use crate::modules::system::CommandContext;
 use reqwest::Method;
 
-use crate::modules::shared::{handle_get, handle_list, handle_materialize, handle_render};
+use crate::modules::shared::{
+    handle_create, handle_delete, handle_get, handle_list, handle_materialize, handle_render,
+    handle_update,
+};
 use crate::modules::system::http::print_json_response;
 use crate::modules::system::http::send_request;
 
@@ -15,6 +18,9 @@ pub(crate) async fn handle_command(
         Command::Get(args) => handle_get(args, ctx).await?,
         Command::Materialize(args) => handle_materialize(args, ctx).await?,
         Command::Render(args) => handle_render(args, ctx).await?,
+        Command::Create(args) => handle_create(args, ctx).await?,
+        Command::Update(args) => handle_update(args, ctx).await?,
+        Command::Delete(args) => handle_delete(args, ctx).await?,
         Command::Whoami => {
             let url = format!("{}/v1/users/me", ctx.addr.trim_end_matches('/'));
             let response = send_request(ctx, Method::GET, url, None).await?;

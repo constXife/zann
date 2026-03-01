@@ -483,6 +483,7 @@ pub struct ItemHistorySummary {
     pub changed_by_name: Option<String>,
     pub changed_by_email: String,
     pub created_at: String,
+    pub pending: bool,
 }
 
 #[derive(Serialize)]

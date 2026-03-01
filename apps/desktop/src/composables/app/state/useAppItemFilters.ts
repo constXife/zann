@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 import type { ComputedRef, Ref } from "vue";
 import type { ItemSummary } from "../../../types";
+import { categoryForType, categoryTypes, type ItemCategoryId } from "../../../utils/itemCategories";
 
 type AppItemFiltersOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
@@ -18,40 +19,33 @@ export function useAppItemFilters({
   selectedCategory: selectedCategoryRef,
 }: AppItemFiltersOptions) {
   const selectedCategory = selectedCategoryRef ?? ref<string | null>(null);
+  const selectedSubtype = ref<string | null>(null);
   const query = ref("");
-  const infraTypes = new Set([
-    "ssh_key",
-    "database",
-    "cloud_iam",
-    "file_secret",
-    "server_credentials",
-  ]);
+  const categoryIds: ItemCategoryId[] = [
+    "all",
+    "login",
+    "card",
+    "note",
+    "infra",
+    "trash",
+  ];
 
   const isDeletedItem = (item: ItemSummary) => !!item.deleted_at;
 
   const categoryCounts = computed(() => {
-    const counts: Record<string, number> = {
-      all: 0,
-      login: 0,
-      note: 0,
-      card: 0,
-      identity: 0,
-      api: 0,
-      kv: 0,
-      infra: 0,
-      trash: 0,
-    };
+    const counts = categoryIds.reduce<Record<ItemCategoryId, number>>((acc, id) => {
+      acc[id] = 0;
+      return acc;
+    }, {} as Record<ItemCategoryId, number>);
     items.value.forEach((item) => {
       if (isDeletedItem(item)) {
         counts.trash++;
         return;
       }
       counts.all++;
-      if (counts[item.type_id] !== undefined) {
-        counts[item.type_id]++;
-      }
-      if (infraTypes.has(item.type_id)) {
-        counts.infra++;
+      const category = categoryForType(item.type_id);
+      if (category) {
+        counts[category]++;
       }
     });
     return counts;
@@ -60,11 +54,8 @@ export function useAppItemFilters({
   const categories = computed(() => [
     { id: "all", icon: "grid", label: t("nav.allItems") },
     { id: "login", icon: "key", label: t("nav.logins") },
-    { id: "note", icon: "doc", label: t("nav.notes") },
     { id: "card", icon: "card", label: t("nav.cards") },
-    { id: "identity", icon: "person", label: t("nav.identity") },
-    { id: "api", icon: "network", label: t("nav.api") },
-    { id: "kv", icon: "list", label: t("nav.kv") },
+    { id: "note", icon: "doc", label: t("nav.notes") },
     { id: "infra", icon: "network", label: t("nav.infrastructure") },
     {
       id: "trash",
@@ -74,8 +65,9 @@ export function useAppItemFilters({
   ]);
 
   const selectCategory = (categoryId: string) => {
-    selectedCategory.value = categoryId;
+    selectedCategory.value = categoryId === "kv" ? "infra" : categoryId;
   };
+
 
   const filteredItems = computed(() => {
     let result = items.value;
@@ -90,10 +82,9 @@ export function useAppItemFilters({
       selectedCategory.value !== "all" &&
       selectedCategory.value !== "trash"
     ) {
-      if (selectedCategory.value === "infra") {
-        result = result.filter((item) => infraTypes.has(item.type_id));
-      } else {
-        result = result.filter((item) => item.type_id === selectedCategory.value);
+      const matchTypes = new Set(categoryTypes(selectedCategory.value as ItemCategoryId));
+      if (matchTypes.size) {
+        result = result.filter((item) => matchTypes.has(item.type_id));
       }
     }
 

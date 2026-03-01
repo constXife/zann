@@ -10,7 +10,7 @@ type AppWatchersOptions = {
   stopAutoSync: () => void;
   loadStorages: () => Promise<void>;
   loadVaults: () => Promise<void>;
-  loadItems: () => Promise<void>;
+  loadItems: (options?: { silent?: boolean }) => Promise<void>;
   vaults: Ref<VaultSummary[]>;
   items: Ref<ItemSummary[]>;
   filteredItems: ComputedRef<ItemSummary[]>;
@@ -19,7 +19,7 @@ type AppWatchersOptions = {
   selectedStorageId: Ref<string>;
   selectedItemId: Ref<string | null>;
   uiSettings: Ref<UiSettings>;
-  loadItemDetail: (itemId: string) => Promise<void>;
+  loadItemDetail: (itemId: string, options?: { silent?: boolean }) => Promise<void>;
   revealedFields: Ref<Set<string>>;
   itemDetailError: Ref<string>;
   error: Ref<string>;
@@ -112,7 +112,6 @@ export function useAppWatchers({
   });
 
   watch(selectedItemId, async (value) => {
-    console.info("[details] selected_item_id", { itemId: value });
     revealedFields.value = new Set();
     itemDetailError.value = "";
     if (!value) {
@@ -121,10 +120,6 @@ export function useAppWatchers({
     }
     try {
       await loadItemDetail(value);
-      console.info("[details] sidebar_ready", {
-        itemId: selectedItem.value?.id ?? null,
-        name: selectedItem.value?.name ?? null,
-      });
     } catch (err) {
       selectedItem.value = null;
       error.value = String(err);
@@ -139,7 +134,7 @@ export function useAppWatchers({
     if (!selectedItemId.value || selectedItem.value?.id !== selectedItemId.value) {
       return;
     }
-    await loadItemDetail(selectedItemId.value);
+    await loadItemDetail(selectedItemId.value, { silent: true });
   });
 
   watch(filteredItems, (value) => {

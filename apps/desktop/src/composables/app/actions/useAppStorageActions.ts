@@ -16,7 +16,7 @@ type AppStorageActionsOptions = {
   localStorageId: string;
   loadStorages: () => Promise<void>;
   loadVaults: () => Promise<void>;
-  loadItems: () => Promise<void>;
+  loadItems: (options?: { silent?: boolean }) => Promise<void>;
   runRemoteSync: (storageId?: string | null) => Promise<boolean>;
   refreshStatus: () => Promise<void>;
   refreshAppStatus: () => Promise<void>;
