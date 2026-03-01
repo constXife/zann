@@ -40,8 +40,7 @@ vi.mock("../composables/useUiSettings", () => ({
 vi.mock("../composables/app/state/useAppToast", () => ({
   useAppToast: () => ({
     toast: ref(""),
-    toastActionLabel: ref(""),
-    toastAction: ref(null),
+    toasts: ref([]),
     clearToast: vi.fn(),
     showToast: vi.fn(),
     clearToastTimer: vi.fn(),

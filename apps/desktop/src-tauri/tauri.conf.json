@@ -26,6 +26,8 @@
         "title": "Zann Desktop",
         "width": 1000,
         "height": 700,
+        "minWidth": 1125,
+        "minHeight": 650,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true,
         "devtools": true,

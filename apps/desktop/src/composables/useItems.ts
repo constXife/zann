@@ -12,7 +12,7 @@ type UseItemsOptions = {
   initialized: Ref<boolean>;
   unlocked: Ref<boolean>;
   listLoading: Ref<boolean>;
-  onFatalError: (message: string) => void;
+  listError: Ref<string>;
   t: Translator;
   onAfterLoad?: () => void;
 };
@@ -20,12 +20,19 @@ type UseItemsOptions = {
 export const useItems = (options: UseItemsOptions) => {
   const items = ref<ItemSummary[]>([]);
 
-  const loadItems = async () => {
+  const loadItems = async (loadOptions?: { silent?: boolean }) => {
+    const shouldToggleLoading = !loadOptions?.silent;
     if (!options.selectedVaultId.value || !options.initialized.value || !options.unlocked.value) {
       items.value = [];
+      options.listError.value = "";
+      if (shouldToggleLoading) {
+        options.listLoading.value = false;
+      }
       return;
     }
-    options.listLoading.value = true;
+    if (shouldToggleLoading) {
+      options.listLoading.value = true;
+    }
     try {
       const response = await invoke<ApiResponse<ItemSummary[]>>("items_list", {
         req: {
@@ -39,11 +46,14 @@ export const useItems = (options: UseItemsOptions) => {
         throw createErrorWithCause(options.t(`errors.${key}`), response.error);
       }
       items.value = response.data;
+      options.listError.value = "";
       options.onAfterLoad?.();
     } catch (err) {
-      options.onFatalError(String(err));
+      options.listError.value = String(err);
     } finally {
-      options.listLoading.value = false;
+      if (shouldToggleLoading) {
+        options.listLoading.value = false;
+      }
     }
   };
 

@@ -9,7 +9,7 @@ type UseFoldersOptions = {
   items: Ref<ItemSummary[]>;
   selectedStorageId: Ref<string>;
   createItemFolder: Ref<string>;
-  onReloadItems: () => Promise<void>;
+  onReloadItems: (options?: { silent?: boolean }) => Promise<void>;
   t: Translator;
 };
 

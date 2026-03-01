@@ -8,7 +8,7 @@ type AppTrashPurgeOptions = {
   unlocked: ComputedRef<boolean>;
   initialized: ComputedRef<boolean>;
   storages: Ref<{ id: string }[]>;
-  loadItems: () => Promise<void>;
+  loadItems: (options?: { silent?: boolean }) => Promise<void>;
 };
 
 export function useAppTrashPurge({

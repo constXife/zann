@@ -32,8 +32,8 @@ type AppItemActionsOptions = {
   items: Ref<ItemSummary[]>;
   detailSections: Ref<{ fields: FieldRow[] }[]>;
   fetchHistoryPayload: (version: number) => Promise<EncryptedPayload | null>;
-  loadItemDetail: (itemId: string) => Promise<void>;
-  loadItems: () => Promise<void>;
+  loadItemDetail: (itemId: string, options?: { silent?: boolean }) => Promise<void>;
+  loadItems: (options?: { silent?: boolean }) => Promise<void>;
   runRemoteSync: (storageId?: string | null) => Promise<boolean>;
   scheduleRemoteSync: (storageId: string | null) => void;
   copyToClipboard: (value: string) => Promise<void>;
@@ -70,35 +70,54 @@ export function useAppItemActions({
 }: AppItemActionsOptions) {
   const copyField = async (field: FieldRow) => {
     await copyToClipboard(field.value);
+    if (field.masked) {
+      showToast(t("items.copiedProtectedValue"));
+    }
   };
 
-  const buildFieldsRecord = () => {
+  const buildFieldsRecord = (options?: { includeProtected?: boolean }) => {
     const record: Record<string, string> = {};
+    let excludedCount = 0;
     detailSections.value
       .flatMap((section) => section.fields)
       .forEach((field) => {
-        record[field.path] = field.value;
+        if (field.masked && !options?.includeProtected) {
+          record[field.path] = "<protected>";
+          excludedCount += 1;
+        } else {
+          record[field.path] = field.value;
+        }
       });
-    return record;
+    return { record, excludedCount };
   };
 
-  const copyEnv = async () => {
+  const copyEnv = async (options?: { includeProtected?: boolean }) => {
     if (!selectedItem.value) {
       return;
     }
-    const lines = detailSections.value
-      .flatMap((section) => section.fields)
-      .map((field) => `${field.path}=${field.value}`);
+    const { record, excludedCount } = buildFieldsRecord(options);
+    const lines = Object.entries(record).map(([key, value]) => `${key}=${value}`);
     const payload = lines.length ? `${lines.join("\n")}\n` : "";
     await copyToClipboard(payload);
+    if (options?.includeProtected) {
+      showToast(t("items.copyEnvIncluded"));
+    } else if (excludedCount > 0) {
+      showToast(t("items.copyEnvExcluded", { count: excludedCount }));
+    }
   };
 
-  const copyJson = async () => {
+  const copyJson = async (options?: { includeProtected?: boolean }) => {
     if (!selectedItem.value) {
       return;
     }
-    const payload = JSON.stringify(buildFieldsRecord(), null, 2);
+    const { record, excludedCount } = buildFieldsRecord(options);
+    const payload = JSON.stringify(record, null, 2);
     await copyToClipboard(payload);
+    if (options?.includeProtected) {
+      showToast(t("items.copyJsonIncluded"));
+    } else if (excludedCount > 0) {
+      showToast(t("items.copyJsonExcluded", { count: excludedCount }));
+    }
   };
 
   const copyRaw = async () => {
