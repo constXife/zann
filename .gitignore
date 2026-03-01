@@ -26,3 +26,4 @@ loadtest/.env.k6
 loadtest/loadtest_sa_token
 loadtest/data/loadtest_sa_token
 compose.loadtest.yaml
+.serena
