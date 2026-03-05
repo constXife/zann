@@ -94,6 +94,18 @@ pub struct UpdateArgs {
 }
 
 #[derive(Args)]
+pub struct SetArgs {
+    /// Item path (e.g. "rlyeh/grafana")
+    pub path: String,
+    /// Field key
+    pub key: String,
+    /// Field value
+    pub value: String,
+    #[arg(long, help = "Vault name or ID")]
+    pub vault: Option<String>,
+}
+
+#[derive(Args)]
 pub struct DeleteArgs {
     /// Item path (e.g. "db/production")
     pub path: String,

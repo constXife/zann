@@ -59,6 +59,8 @@ pub enum Command {
     Create(CreateArgs),
     #[command(about = "Update a secret item in a shared vault")]
     Update(UpdateArgs),
+    #[command(about = "Set a field value (create or update)")]
+    Set(SetArgs),
     #[command(about = "Delete a secret item from a shared vault")]
     Delete(DeleteArgs),
     #[command(about = "Print version information")]
