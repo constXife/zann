@@ -154,6 +154,88 @@ pub(crate) async fn handle_update(
     Ok(())
 }
 
+pub(crate) async fn handle_set(
+    args: SetArgs,
+    ctx: &mut CommandContext<'_>,
+) -> anyhow::Result<()> {
+    let (vault_id, path) = resolve_path_arg(&args.path, args.vault, ctx).await?;
+
+    let existing = resolve_shared_item_id(
+        ctx.client,
+        ctx.addr,
+        &ctx.access_token,
+        &vault_id,
+        None,
+        Some(&path),
+    )
+    .await;
+
+    let mut fields = HashMap::new();
+    fields.insert(
+        args.key.clone(),
+        FieldValue {
+            kind: FieldKind::Text,
+            value: args.value,
+            meta: None,
+        },
+    );
+
+    match existing {
+        Ok(item_id) => {
+            let item = fetch_shared_item(
+                ctx.client,
+                ctx.addr,
+                &ctx.access_token,
+                &vault_id,
+                item_id,
+            )
+            .await?;
+            let existing_payload = payload_or_error(&item)?;
+
+            let mut merged_fields = existing_payload.fields.clone();
+            merged_fields.extend(fields);
+
+            let payload = EncryptedPayload {
+                v: existing_payload.v,
+                type_id: existing_payload.type_id.clone(),
+                fields: merged_fields,
+                extra: existing_payload.extra.clone(),
+            };
+
+            let updated = update_shared_item(
+                ctx.client,
+                ctx.addr,
+                &ctx.access_token,
+                &item_id.to_string(),
+                serde_json::to_value(payload)?,
+            )
+            .await?;
+            println!("Updated: {} field '{}' (version: {})", updated.path, args.key, updated.id);
+        }
+        Err(_) => {
+            let payload = EncryptedPayload {
+                v: 1,
+                type_id: "secret".to_string(),
+                fields,
+                extra: None,
+            };
+
+            let created = create_shared_item(
+                ctx.client,
+                ctx.addr,
+                &ctx.access_token,
+                &vault_id,
+                &path,
+                "secret",
+                serde_json::to_value(payload)?,
+            )
+            .await?;
+            println!("Created: {} with field '{}' (id: {})", created.path, args.key, created.id);
+        }
+    }
+    Ok(())
+}
+
 pub(crate) async fn handle_delete(
     args: DeleteArgs,
     ctx: &mut CommandContext<'_>,

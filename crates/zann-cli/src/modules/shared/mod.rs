@@ -12,7 +12,7 @@ mod utils;
 
 pub(crate) use actions::{
     handle_create, handle_delete, handle_get, handle_list, handle_materialize, handle_render,
-    handle_update,
+    handle_set, handle_update,
 };
 pub(crate) use fetch::{fetch_shared_item, fetch_shared_items};
 pub(crate) use format::{flatten_payload, format_env_flat, format_kv_flat, is_valid_env_key};

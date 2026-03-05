@@ -4,7 +4,7 @@ use reqwest::Method;
 
 use crate::modules::shared::{
     handle_create, handle_delete, handle_get, handle_list, handle_materialize, handle_render,
-    handle_update,
+    handle_set, handle_update,
 };
 use crate::modules::system::http::print_json_response;
 use crate::modules::system::http::send_request;
@@ -20,6 +20,7 @@ pub(crate) async fn handle_command(
         Command::Render(args) => handle_render(args, ctx).await?,
         Command::Create(args) => handle_create(args, ctx).await?,
         Command::Update(args) => handle_update(args, ctx).await?,
+        Command::Set(args) => handle_set(args, ctx).await?,
         Command::Delete(args) => handle_delete(args, ctx).await?,
         Command::Whoami => {
             let url = format!("{}/v1/users/me", ctx.addr.trim_end_matches('/'));
