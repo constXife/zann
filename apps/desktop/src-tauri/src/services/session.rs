@@ -368,8 +368,10 @@ pub async fn session_unlock_with_biometrics(
         Err(_) => return Ok(ApiResponse::err("keystore_unavailable", "invalid master key length")),
     };
     let master_key = SecretKey::from_bytes(master_arr);
+    let master_key = std::sync::Arc::new(master_key);
 
-    *state.master_key.write().await = Some(std::sync::Arc::new(master_key));
+    *state.master_key.write().await = Some(std::sync::Arc::clone(&master_key));
+    handle_master_key_change(&app, &state, master_key.as_ref()).await?;
     Ok(ApiResponse::ok(()))
 }
 
