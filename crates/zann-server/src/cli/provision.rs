@@ -294,8 +294,8 @@ async fn set_field_command(
                 changed_by_user_id: owner.id,
                 changed_by_email: owner.email.clone(),
                 changed_by_name: owner.full_name.clone(),
-                changed_by_device_id: None,
-                changed_by_device_name: None,
+                changed_by_device_id: Some(provision_device.id),
+                changed_by_device_name: Some(provision_device.name.clone()),
                 created_at: Utc::now(),
             };
             if let Err(err) = history_repo.create(&history).await {
@@ -383,8 +383,8 @@ async fn set_field_command(
             changed_by_user_id: owner.id,
             changed_by_email: owner.email.clone(),
             changed_by_name: owner.full_name.clone(),
-            changed_by_device_id: None,
-            changed_by_device_name: None,
+            changed_by_device_id: Some(provision_device.id),
+            changed_by_device_name: Some(provision_device.name.clone()),
             created_at: now,
         };
         if let Err(err) = history_repo.create(&history).await {
@@ -1064,10 +1064,15 @@ impl From<ProvisionFieldKind> for FieldKind {
 
 impl StagedSecretFile {
     fn finalize(self) -> Result<(), String> {
-        fs::rename(&self.tmp_path, &self.final_path)
-            .map_err(|err| format!("token_file_rename_failed: {err}"))?;
+        let tmp_path = self.tmp_path.display().to_string();
+        let final_path = self.final_path.display().to_string();
+        fs::rename(&self.tmp_path, &self.final_path).map_err(|err| {
+            format!(
+                "token_file_rename_failed: {err}; staged_path={tmp_path}; final_path={final_path}"
+            )
+        })?;
         fs::set_permissions(&self.final_path, fs::Permissions::from_mode(0o600))
-            .map_err(|err| format!("token_file_chmod_failed: {err}"))?;
+            .map_err(|err| format!("token_file_chmod_failed: {err}; final_path={final_path}"))?;
         Ok(())
     }
 
@@ -1083,7 +1088,8 @@ impl StagedSecretFile {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_shared_server_vault, normalize_prefix, parse_ops, parse_ttl, write_secret_file,
+        ensure_shared_server_vault, normalize_prefix, parse_ops, parse_ttl, stage_secret_file,
+        write_secret_file,
     };
     use chrono::Utc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1126,6 +1132,25 @@ mod tests {
         let content = std::fs::read_to_string(&path).expect("read secret file");
         assert_eq!(content, "zann_sa_example\n");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn finalize_error_reports_staged_secret_path() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("zann-provision-finalize-{unique}"));
+        std::fs::create_dir_all(&base).expect("create base dir");
+        let final_path = base.join("token");
+        std::fs::create_dir_all(&final_path).expect("create conflicting final dir");
+
+        let staged = stage_secret_file(&final_path, "zann_sa_example").expect("stage secret");
+        let err = staged.finalize().expect_err("finalize should fail");
+        assert!(err.contains("staged_path="));
+        assert!(err.contains(&final_path.display().to_string()));
+
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]
