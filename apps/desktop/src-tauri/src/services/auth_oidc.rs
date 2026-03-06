@@ -11,7 +11,6 @@ use uuid::Uuid;
 
 use crate::constants::TOKEN_OIDC;
 use crate::infra::config::{ensure_context, load_config, save_config};
-use crate::util::context_name_from_url;
 use crate::infra::http::fetch_json;
 use crate::infra::remote::{
     exchange_authorization_code, exchange_oidc_for_session, fetch_me_email, fetch_prelogin,
@@ -22,9 +21,8 @@ use crate::services::auth::{
     update_pending_login_for_fingerprint,
 };
 use crate::state::{AppState, PendingLogin, PendingLoginResult};
-use crate::types::{
-    ApiResponse, OidcConfigResponse, OidcDiscovery, OidcLoginStartResponse,
-};
+use crate::types::{ApiResponse, OidcConfigResponse, OidcDiscovery, OidcLoginStartResponse};
+use crate::util::context_name_from_url;
 
 fn random_url_safe(size: usize) -> String {
     let mut bytes = vec![0u8; size];
@@ -63,16 +61,34 @@ fn log_jwt_summary(label: &str, token: &str) {
     };
     let header_json: serde_json::Value = serde_json::from_slice(&header).unwrap_or_default();
     let payload_json: serde_json::Value = serde_json::from_slice(&payload).unwrap_or_default();
-    let alg = header_json.get("alg").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let kid = header_json.get("kid").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let iss = payload_json.get("iss").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let alg = header_json
+        .get("alg")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let kid = header_json
+        .get("kid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let iss = payload_json
+        .get("iss")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     let aud = payload_json
         .get("aud")
         .map(|v| v.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let azp = payload_json.get("azp").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let typ = header_json.get("typ").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let exp = payload_json.get("exp").and_then(|v| v.as_i64()).unwrap_or(0);
+    let azp = payload_json
+        .get("azp")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let typ = header_json
+        .get("typ")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let exp = payload_json
+        .get("exp")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     println!(
         "[oidc] {label} summary alg={alg} kid={kid} typ={typ} iss={iss} aud={aud} azp={azp} exp={exp}"
     );
@@ -84,18 +100,24 @@ pub(crate) async fn begin_login(
     app: &AppHandle,
 ) -> Result<ApiResponse<OidcLoginStartResponse>, String> {
     if server_url.trim().is_empty() {
-        return Ok(ApiResponse::err("invalid_server_url", "server_url is required"));
+        return Ok(ApiResponse::err(
+            "invalid_server_url",
+            "server_url is required",
+        ));
     }
     let client = reqwest::Client::new();
     let oidc_config_url = format!("{}/v1/auth/oidc/config", server_url.trim_end_matches('/'));
-    let oidc_config =
-        fetch_json::<OidcConfigResponse>(&client, &oidc_config_url).await.map_err(|e| e)?;
+    let oidc_config = fetch_json::<OidcConfigResponse>(&client, &oidc_config_url)
+        .await
+        .map_err(|e| e)?;
     let discovery_url = format!("{}/.well-known/openid-configuration", oidc_config.issuer);
-    let discovery = fetch_json::<OidcDiscovery>(&client, &discovery_url).await.map_err(|e| e)?;
+    let discovery = fetch_json::<OidcDiscovery>(&client, &discovery_url)
+        .await
+        .map_err(|e| e)?;
 
     let redirect_port = 8765;
-    let listener = TcpListener::bind(format!("127.0.0.1:{redirect_port}"))
-        .map_err(|err| err.to_string())?;
+    let listener =
+        TcpListener::bind(format!("127.0.0.1:{redirect_port}")).map_err(|err| err.to_string())?;
     let redirect_uri = format!("http://127.0.0.1:{}/oidc/callback", redirect_port);
 
     let oauth_state = random_url_safe(16);
@@ -120,11 +142,19 @@ pub(crate) async fn begin_login(
     }
 
     let login_id = Uuid::now_v7().to_string();
+    println!(
+        "[oidc] starting login login_id={} issuer={} auth_endpoint={} token_endpoint={} client_id={} redirect_uri={} scopes={} audience={}",
+        login_id,
+        oidc_config.issuer,
+        discovery.authorization_endpoint,
+        discovery.token_endpoint,
+        oidc_config.client_id,
+        redirect_uri,
+        scope,
+        oidc_config.audience.as_deref().unwrap_or("<none>")
+    );
     let login_id_for_thread = login_id.clone();
-    let mut guard = state
-        .pending_logins
-        .lock()
-        .map_err(|err| err.to_string())?;
+    let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
     guard.insert(
         login_id.clone(),
         PendingLogin {
@@ -151,8 +181,7 @@ pub(crate) async fn begin_login(
             if let Ok(mut guard) = app_handle.state::<AppState>().pending_logins.lock() {
                 guard.remove(&login_id_for_thread);
             }
-            let _ =
-                emit_oidc_status(&app_handle, oidc_status_error(&login_id_for_thread, err));
+            let _ = emit_oidc_status(&app_handle, oidc_status_error(&login_id_for_thread, err));
         }
     });
 
@@ -168,17 +197,20 @@ pub(crate) async fn trust_fingerprint(
     app: &AppHandle,
 ) -> Result<ApiResponse<()>, String> {
     let pending = {
-        let mut guard = state
-            .pending_logins
-            .lock()
-            .map_err(|err| err.to_string())?;
+        let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
         guard.get_mut(&login_id).cloned()
     };
     let Some(pending) = pending else {
-        return Ok(ApiResponse::err("login_not_found", "login session not found"));
+        return Ok(ApiResponse::err(
+            "login_not_found",
+            "login session not found",
+        ));
     };
     let Some(new_fp) = pending.fingerprint_new.clone() else {
-        return Ok(ApiResponse::err("fingerprint_missing", "no new fingerprint to trust"));
+        return Ok(ApiResponse::err(
+            "fingerprint_missing",
+            "no new fingerprint to trust",
+        ));
     };
 
     let mut config = load_config(&state.root).unwrap_or_else(|_| Default::default());
@@ -189,10 +221,7 @@ pub(crate) async fn trust_fingerprint(
         context.server_id = result.info.server_id.clone();
     }
     save_config(&state.root, &config).map_err(|err| err.to_string())?;
-    let mut guard = state
-        .pending_logins
-        .lock()
-        .map_err(|err| err.to_string())?;
+    let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
     if let Some(entry) = guard.get_mut(&login_id) {
         entry.fingerprint_trusted = true;
         if let Some(result) = entry.pending_result.clone() {
@@ -246,7 +275,8 @@ fn listen_for_oidc_callback(
                 let app_handle = app.clone();
                 tauri::async_runtime::spawn(async move {
                     let login_id_for_error = login_id.clone();
-                    if let Err(err) = complete_oidc_login(&app_handle, login_id, code, oauth_state).await
+                    if let Err(err) =
+                        complete_oidc_login(&app_handle, login_id, code, oauth_state).await
                     {
                         let _ = emit_oidc_status(
                             &app_handle,
@@ -322,7 +352,11 @@ fn parse_oidc_request(
     Ok((code, state))
 }
 
-fn respond_html(stream: &mut std::net::TcpStream, title: &str, message: &str) -> Result<(), String> {
+fn respond_html(
+    stream: &mut std::net::TcpStream,
+    title: &str,
+    message: &str,
+) -> Result<(), String> {
     let body = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>{}</title></head>\
         <body style=\"font-family: sans-serif; padding: 24px;\"><h2>{}</h2><p>{}</p></body></html>",
@@ -333,7 +367,9 @@ fn respond_html(stream: &mut std::net::TcpStream, title: &str, message: &str) ->
         body.len(),
         body
     );
-    stream.write_all(response.as_bytes()).map_err(|err| err.to_string())
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|err| err.to_string())
 }
 
 async fn complete_oidc_login(
@@ -344,10 +380,7 @@ async fn complete_oidc_login(
 ) -> Result<(), String> {
     let state = app.state::<AppState>();
     let pending = {
-        let guard = state
-            .pending_logins
-            .lock()
-            .map_err(|err| err.to_string())?;
+        let guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
         guard.get(&login_id).cloned()
     };
     let Some(pending) = pending else {
@@ -358,6 +391,13 @@ async fn complete_oidc_login(
     }
 
     let client = reqwest::Client::new();
+    println!(
+        "[oidc] exchanging authorization code login_id={} token_endpoint={} client_id={} redirect_uri={}",
+        login_id,
+        pending.discovery.token_endpoint,
+        pending.oidc_config.client_id,
+        pending.redirect_uri
+    );
     let idp_token = exchange_authorization_code(
         &client,
         &pending.discovery,

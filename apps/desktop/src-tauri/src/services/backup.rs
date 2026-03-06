@@ -17,8 +17,8 @@ use crate::infra::config::{load_config, save_config};
 use crate::infra::http::{auth_headers, decode_json_response, ensure_success};
 use crate::state::{ensure_unlocked, AppState};
 use crate::types::{
-    ApiResponse, PlainBackup, PlainBackupExportResponse, PlainBackupImportResponse,
-    PlainBackupItem, PlainBackupStorage, PlainBackupVault, PersonalVaultStatusResponse,
+    ApiResponse, PersonalVaultStatusResponse, PlainBackup, PlainBackupExportResponse,
+    PlainBackupImportResponse, PlainBackupItem, PlainBackupStorage, PlainBackupVault,
     VaultDetailResponse, VaultListResponse,
 };
 use crate::util::context_name_from_url;
@@ -105,10 +105,7 @@ pub async fn plain_export(
     let vault_repo = LocalVaultRepo::new(&state.pool);
     let item_repo = LocalItemRepo::new(&state.pool);
 
-    let storages = storage_repo
-        .list()
-        .await
-        .map_err(|err| err.to_string())?;
+    let storages = storage_repo.list().await.map_err(|err| err.to_string())?;
 
     let mut backup_storages = Vec::with_capacity(storages.len());
     let mut backup_vaults = Vec::new();
@@ -147,12 +144,7 @@ pub async fn plain_export(
                 .map_err(|err| err.to_string())?;
             for item in items {
                 let payload = services
-                    .decrypt_payload_for_item(
-                        storage_id,
-                        item.vault_id,
-                        item.id,
-                        &item.payload_enc,
-                    )
+                    .decrypt_payload_for_item(storage_id, item.vault_id, item.id, &item.payload_enc)
                     .await
                     .map_err(|err| err.message)?;
                 backup_items.push(PlainBackupItem {
@@ -188,7 +180,7 @@ pub async fn plain_export(
                 return Ok(ApiResponse::err(
                     "backup_cancelled",
                     "backup export cancelled",
-                ))
+                ));
             }
         },
     };
@@ -255,10 +247,7 @@ pub async fn plain_import(
                 .collect::<Vec<_>>();
             if remote.len() == 1 {
                 target_storage_id = Some(remote[0].id.to_string());
-                append_backup_log(&format!(
-                    "import_mode_fallback storage_id={}",
-                    remote[0].id
-                ));
+                append_backup_log(&format!("import_mode_fallback storage_id={}", remote[0].id));
             }
         }
     }
@@ -274,10 +263,7 @@ pub async fn plain_import(
                     storage.kind.as_i32()
                 ));
                 if storage.kind == StorageKind::Remote {
-                    append_backup_log(&format!(
-                        "import_mode_remote storage_id={}",
-                        storage.id
-                    ));
+                    append_backup_log(&format!("import_mode_remote storage_id={}", storage.id));
                     return plain_import_remote(state, path, storage).await;
                 }
                 append_backup_log("import_mode_fallback reason=storage_not_remote");
@@ -303,15 +289,12 @@ pub async fn plain_import(
                 return Ok(ApiResponse::err(
                     "backup_cancelled",
                     "backup import cancelled",
-                ))
+                ));
             }
         },
     };
     append_backup_log(&format!("import_start path={}", input_path.display()));
-    append_backup_log(&format!(
-        "import_read_start path={}",
-        input_path.display()
-    ));
+    append_backup_log(&format!("import_read_start path={}", input_path.display()));
     let backup = match read_backup_file(&input_path) {
         Ok(backup) => backup,
         Err(err) => {
@@ -357,8 +340,8 @@ pub async fn plain_import(
     for storage in backup.storages {
         let storage_id =
             Uuid::parse_str(&storage.id).map_err(|_| log_error("invalid storage id"))?;
-        let kind = StorageKind::try_from(storage.kind)
-            .map_err(|_| log_error("invalid storage kind"))?;
+        let kind =
+            StorageKind::try_from(storage.kind).map_err(|_| log_error("invalid storage kind"))?;
         let existing = storage_repo
             .get(storage_id)
             .await
@@ -516,7 +499,9 @@ pub async fn plain_import(
                 }
                 Err(err) => {
                     let message = err.to_string();
-                    if message.contains("UNIQUE constraint failed: local_vaults.storage_id, local_vaults.name") {
+                    if message.contains(
+                        "UNIQUE constraint failed: local_vaults.storage_id, local_vaults.name",
+                    ) {
                         continue;
                     }
                     return Err(log_error(&message));
@@ -655,7 +640,10 @@ pub async fn plain_import(
 }
 
 fn default_backup_path(root: &Path) -> PathBuf {
-    let filename = format!("zann-plain-backup-{}.json", Utc::now().format("%Y%m%d-%H%M%S"));
+    let filename = format!(
+        "zann-plain-backup-{}.json",
+        Utc::now().format("%Y%m%d-%H%M%S")
+    );
     root.join("backups").join(filename)
 }
 
@@ -779,10 +767,7 @@ async fn plain_import_remote(
         }
     }
 
-    let personal_status_url = format!(
-        "{}/v1/vaults/personal/status",
-        addr.trim_end_matches('/')
-    );
+    let personal_status_url = format!("{}/v1/vaults/personal/status", addr.trim_end_matches('/'));
     let personal_resp = client
         .get(personal_status_url)
         .headers(headers.clone())
@@ -792,10 +777,9 @@ async fn plain_import_remote(
     let personal_resp = ensure_success(personal_resp)
         .await
         .map_err(|err| log_remote_error(&format!("personal_status_failed: {err}")))?;
-    let personal_status =
-        decode_json_response::<PersonalVaultStatusResponse>(personal_resp)
-            .await
-            .map_err(|err| log_remote_error(&format!("personal_status_decode_failed: {err}")))?;
+    let personal_status = decode_json_response::<PersonalVaultStatusResponse>(personal_resp)
+        .await
+        .map_err(|err| log_remote_error(&format!("personal_status_decode_failed: {err}")))?;
     let personal_vault_id = personal_status
         .personal_vault_id
         .clone()
@@ -807,8 +791,8 @@ async fn plain_import_remote(
     let mut mapped_personal = 0usize;
 
     for vault in &backup.vaults {
-        let backup_storage_id =
-            Uuid::parse_str(&vault.storage_id).map_err(|_| log_remote_error("invalid storage id"))?;
+        let backup_storage_id = Uuid::parse_str(&vault.storage_id)
+            .map_err(|_| log_remote_error("invalid storage id"))?;
         let backup_vault_id =
             Uuid::parse_str(&vault.id).map_err(|_| log_remote_error("invalid vault id"))?;
         let kind =
@@ -855,7 +839,9 @@ async fn plain_import_remote(
             if resp.status().is_success() {
                 let created = decode_json_response::<VaultDetailResponse>(resp)
                     .await
-                    .map_err(|err| log_remote_error(&format!("vault_create_decode_failed: {err}")))?;
+                    .map_err(|err| {
+                        log_remote_error(&format!("vault_create_decode_failed: {err}"))
+                    })?;
                 created_id = Some(created.id.clone());
                 existing_by_name.insert(name.clone(), created.id.clone());
                 if attempt > 0 {
@@ -971,8 +957,8 @@ async fn plain_import_remote(
             skipped_deleted += 1;
             continue;
         }
-        let backup_storage_id =
-            Uuid::parse_str(&item.storage_id).map_err(|_| log_remote_error("invalid storage id"))?;
+        let backup_storage_id = Uuid::parse_str(&item.storage_id)
+            .map_err(|_| log_remote_error("invalid storage id"))?;
         let backup_vault_id =
             Uuid::parse_str(&item.vault_id).map_err(|_| log_remote_error("invalid vault id"))?;
         let Some(target_vault_id) = vault_map
