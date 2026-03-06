@@ -253,7 +253,10 @@ impl<'a> ServiceAccountRepo<'a> {
                 created_at as "created_at",
                 revoked_at as "revoked_at"
             FROM service_accounts
-            WHERE owner_user_id = $1 AND name = $2 AND revoked_at IS NULL
+            WHERE owner_user_id = $1
+              AND name = $2
+              AND revoked_at IS NULL
+              AND (expires_at IS NULL OR expires_at > NOW())
             ORDER BY created_at DESC
             LIMIT 1
             "#,
