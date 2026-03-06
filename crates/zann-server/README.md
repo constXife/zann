@@ -59,6 +59,15 @@ zann-server token list
 zann-server token revoke <token_id>
 ```
 
+For server-side bootstrap flows, use the privileged provisioning helpers:
+
+```bash
+zann-server provision ensure-system-user
+zann-server provision ensure-vault --name Infrastructure --slug infra
+zann-server provision set-field --vault infra --path rlyeh/yogg/grafana --key client_id --value grafana-rlyeh
+zann-server provision ensure-token yogg-grafana infra:rlyeh/yogg/grafana read
+```
+
 ## Health endpoint
 
 The server exposes a health check at:

@@ -159,6 +159,29 @@ mod tests {
     }
 
     #[test]
+    fn parse_provision_ensure_token_command() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "provision",
+            "ensure-token",
+            "yogg-grafana",
+            "infra:rlyeh/yogg/grafana",
+            "read",
+            "--rotate",
+        ]);
+        let Some(Command::Provision(args)) = cli.command else {
+            panic!("expected provision command");
+        };
+        let provision::ProvisionCommand::EnsureToken(command) = args.command else {
+            panic!("expected ensure-token command");
+        };
+        assert_eq!(command.name, "yogg-grafana");
+        assert_eq!(command.target, "infra:rlyeh/yogg/grafana");
+        assert_eq!(command.ops, "read");
+        assert!(command.rotate);
+    }
+
+    #[test]
     fn parse_token_create_requires_target() {
         let result = Cli::try_parse_from(["zann-server", "token", "create", "ci-prod"]);
         assert!(result.is_err());

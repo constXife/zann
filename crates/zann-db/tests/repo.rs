@@ -298,6 +298,13 @@ async fn service_account_repo_crud() {
         .expect("list_by_prefix");
     assert_eq!(by_prefix.len(), 1);
 
+    let active = sa_repo
+        .get_active_by_owner_and_name(user.id, "ci")
+        .await
+        .expect("get_active_by_owner_and_name")
+        .expect("active service account");
+    assert_eq!(active.id, account.id);
+
     let list = sa_repo
         .list_by_owner(user.id, 10, 0, "asc")
         .await
@@ -346,6 +353,12 @@ async fn service_account_repo_crud() {
         .await
         .expect("revoke");
     assert_eq!(revoked, 1);
+
+    let active = sa_repo
+        .get_active_by_owner_and_name(user.id, "ci")
+        .await
+        .expect("get_active_by_owner_and_name after revoke");
+    assert!(active.is_none());
 }
 
 #[tokio::test]

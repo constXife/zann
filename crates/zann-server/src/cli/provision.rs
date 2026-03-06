@@ -1,19 +1,24 @@
 use chrono::Utc;
 use clap::{Args, Subcommand, ValueEnum};
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
 use serde::Serialize;
 use sqlx_core::types::Json as SqlxJson;
 use uuid::Uuid;
 use zann_core::{
-    CachePolicy, Change, ChangeOp, ChangeType, Item, ItemHistory, SyncStatus, User, UserStatus,
-    Vault, VaultEncryptionType, VaultKind, VaultMember, VaultMemberRole,
+    CachePolicy, Change, ChangeOp, ChangeType, Item, ItemHistory, ServiceAccount, SyncStatus, User,
+    UserStatus, Vault, VaultEncryptionType, VaultKind, VaultMember, VaultMemberRole,
 };
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::secrets::{EncryptedPayload, FieldKind, FieldValue};
 use zann_crypto::vault_crypto as core_crypto;
-use zann_db::repo::{ChangeRepo, ItemHistoryRepo, ItemRepo, UserRepo, VaultMemberRepo, VaultRepo};
+use zann_db::repo::{
+    ChangeRepo, ItemHistoryRepo, ItemRepo, ServiceAccountRepo, UserRepo, VaultMemberRepo, VaultRepo,
+};
 use zann_db::PgPool;
 
-use crate::cli::tokens::SYSTEM_OWNER_EMAIL;
+use crate::cli::tokens::{SERVICE_ACCOUNT_PREFIX, SERVICE_ACCOUNT_PREFIX_LEN, SYSTEM_OWNER_EMAIL};
+use crate::domains::auth::core::passwords;
 use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
 use crate::settings;
 
@@ -31,6 +36,8 @@ pub enum ProvisionCommand {
     EnsureVault(EnsureVaultArgs),
     #[command(about = "Create or update a field in a shared item")]
     SetField(SetFieldArgs),
+    #[command(about = "Ensure a service account token exists for a scoped shared vault target")]
+    EnsureToken(EnsureTokenArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -59,6 +66,36 @@ pub struct SetFieldArgs {
         help = "Item type for newly created items"
     )]
     pub type_id: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct EnsureTokenArgs {
+    #[arg(value_name = "name")]
+    pub name: String,
+    #[arg(
+        value_name = "vault:prefixes",
+        help = "Vault selector and prefixes, e.g. infra:/ or infra:rlyeh/yogg/grafana"
+    )]
+    pub target: String,
+    #[arg(
+        value_name = "ops",
+        default_value = "read",
+        help = "Comma-separated ops (read, read_history, read_previous)"
+    )]
+    pub ops: String,
+    #[arg(long)]
+    pub ttl: Option<String>,
+    #[arg(long)]
+    pub owner_email: Option<String>,
+    #[arg(long)]
+    pub owner_id: Option<String>,
+    #[arg(long)]
+    pub issued_by_email: Option<String>,
+    #[arg(
+        long,
+        help = "Rotate the token plaintext and update the stored token hash"
+    )]
+    pub rotate: bool,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -94,6 +131,43 @@ struct SetFieldOutput {
     key: String,
 }
 
+#[derive(Debug, Serialize)]
+struct EnsureTokenOutput {
+    status: &'static str,
+    token: Option<String>,
+    service_account: ProvisionedServiceAccountOutput,
+}
+
+#[derive(Debug, Serialize)]
+struct ProvisionedServiceAccountOutput {
+    id: String,
+    owner_user_id: String,
+    name: String,
+    token_prefix: String,
+    scopes: Vec<String>,
+    issued_by: String,
+    vault_id: String,
+    vault_slug: String,
+    prefix: Option<String>,
+    prefixes: Option<Vec<String>>,
+    ops: Vec<String>,
+    expires_at: Option<String>,
+    created_at: String,
+    revoked_at: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ProvisionTokenSpec {
+    owner_id: Uuid,
+    issued_by: String,
+    vault: Vault,
+    scopes: Vec<String>,
+    description: String,
+    expires_at: Option<chrono::DateTime<Utc>>,
+    prefixes_display: Vec<String>,
+    ops_display: Vec<String>,
+}
+
 pub(crate) async fn run(
     settings: &settings::Settings,
     db: &PgPool,
@@ -103,6 +177,7 @@ pub(crate) async fn run(
         ProvisionCommand::EnsureSystemUser => ensure_system_user_command(settings, db).await,
         ProvisionCommand::EnsureVault(command) => ensure_vault_command(settings, db, command).await,
         ProvisionCommand::SetField(command) => set_field_command(settings, db, command).await,
+        ProvisionCommand::EnsureToken(command) => ensure_token_command(settings, db, command).await,
     }
 }
 
@@ -326,6 +401,106 @@ async fn set_field_command(
     print_json(&output)
 }
 
+async fn ensure_token_command(
+    settings: &settings::Settings,
+    db: &PgPool,
+    args: &EnsureTokenArgs,
+) -> Result<(), String> {
+    let name = args.name.trim();
+    if name.is_empty() {
+        return Err("invalid_name".to_string());
+    }
+
+    let spec = build_token_spec(settings, db, args).await?;
+    let repo = ServiceAccountRepo::new(db);
+
+    let (account, status, plaintext_token) = if let Some(mut account) = repo
+        .get_active_by_owner_and_name(spec.owner_id, name)
+        .await
+        .map_err(db_error("service_account_lookup_failed"))?
+    {
+        let mut status = "existing";
+        let mut plaintext_token = None;
+        let description = Some(spec.description.clone());
+        let metadata_changed = account.description != description
+            || account.scopes.0 != spec.scopes
+            || account.expires_at != spec.expires_at;
+
+        if metadata_changed {
+            account.description = description;
+            account.scopes = sqlx_core::types::Json(spec.scopes.clone());
+            account.expires_at = spec.expires_at;
+            repo.update(&account)
+                .await
+                .map_err(db_error("service_account_update_failed"))?;
+            status = "updated";
+        }
+
+        if args.rotate {
+            let provisioned = generate_service_account_token(settings)?;
+            account.token_hash = provisioned.token_hash;
+            account.token_prefix = provisioned.token_prefix;
+            account.description = Some(spec.description.clone());
+            account.scopes = sqlx_core::types::Json(spec.scopes.clone());
+            account.expires_at = spec.expires_at;
+            account.revoked_at = None;
+            repo.update(&account)
+                .await
+                .map_err(db_error("service_account_rotate_failed"))?;
+            plaintext_token = Some(provisioned.token);
+            status = "rotated";
+        }
+
+        (account, status, plaintext_token)
+    } else {
+        let provisioned = generate_service_account_token(settings)?;
+        let now = Utc::now();
+        let account = ServiceAccount {
+            id: Uuid::now_v7(),
+            owner_user_id: spec.owner_id,
+            name: name.to_string(),
+            description: Some(spec.description.clone()),
+            token_hash: provisioned.token_hash,
+            token_prefix: provisioned.token_prefix,
+            scopes: sqlx_core::types::Json(spec.scopes.clone()),
+            allowed_ips: None,
+            expires_at: spec.expires_at,
+            last_used_at: None,
+            last_used_ip: None,
+            last_used_user_agent: None,
+            use_count: 0,
+            created_at: now,
+            revoked_at: None,
+        };
+        repo.create(&account)
+            .await
+            .map_err(db_error("service_account_create_failed"))?;
+        (account, "created", Some(provisioned.token))
+    };
+
+    let output = EnsureTokenOutput {
+        status,
+        token: plaintext_token,
+        service_account: ProvisionedServiceAccountOutput {
+            id: account.id.to_string(),
+            owner_user_id: account.owner_user_id.to_string(),
+            name: account.name,
+            token_prefix: account.token_prefix,
+            scopes: account.scopes.0,
+            issued_by: spec.issued_by,
+            vault_id: spec.vault.id.to_string(),
+            vault_slug: spec.vault.slug,
+            prefix: spec.prefixes_display.first().cloned(),
+            prefixes: Some(spec.prefixes_display),
+            ops: spec.ops_display,
+            expires_at: account.expires_at.map(|dt| dt.to_rfc3339()),
+            created_at: account.created_at.to_rfc3339(),
+            revoked_at: account.revoked_at.map(|dt| dt.to_rfc3339()),
+        },
+    };
+    print_json(&output)
+}
+
 async fn ensure_system_user(
     settings: &settings::Settings,
     db: &PgPool,
@@ -441,6 +616,125 @@ async fn ensure_vault_member(db: &PgPool, vault_id: Uuid, user_id: Uuid) -> Resu
         .map_err(db_error("vault_member_create_failed"))
 }
 
+async fn build_token_spec(
+    settings: &settings::Settings,
+    db: &PgPool,
+    args: &EnsureTokenArgs,
+) -> Result<ProvisionTokenSpec, String> {
+    let target = args.target.trim();
+    if target.is_empty() {
+        return Err("invalid_target".to_string());
+    }
+    let (vault_selector, prefixes_raw) = target
+        .split_once(':')
+        .ok_or_else(|| "invalid_target".to_string())?;
+    let vault_selector = vault_selector.trim();
+    let prefixes_raw = prefixes_raw.trim();
+    if vault_selector.is_empty() || prefixes_raw.is_empty() {
+        return Err("invalid_target".to_string());
+    }
+
+    let (system_user, _) = ensure_system_user(settings, db).await?;
+    let owner_id = resolve_owner_id(
+        db,
+        &system_user,
+        args.owner_email.as_deref(),
+        args.owner_id.as_deref(),
+    )
+    .await?;
+    let issued_by = args
+        .issued_by_email
+        .as_deref()
+        .unwrap_or(SYSTEM_OWNER_EMAIL)
+        .trim()
+        .to_string();
+    if issued_by.is_empty() {
+        return Err("invalid_issued_by_email".to_string());
+    }
+
+    let ops = parse_ops(&args.ops)?;
+    let expires_at = args
+        .ttl
+        .as_deref()
+        .map(parse_ttl)
+        .transpose()?
+        .map(|ttl| Utc::now() + ttl);
+    let vault = resolve_vault(db, vault_selector).await?;
+
+    let mut full_vault = false;
+    let mut normalized_prefixes = Vec::new();
+    for prefix in prefixes_raw.split(',') {
+        let prefix = prefix.trim();
+        if prefix.is_empty() {
+            return Err("invalid_prefix".to_string());
+        }
+        if prefix == "/" {
+            full_vault = true;
+            continue;
+        }
+        normalized_prefixes.push(normalize_prefix(prefix)?);
+    }
+    if full_vault && !normalized_prefixes.is_empty() {
+        return Err("prefix_root_conflict".to_string());
+    }
+    if !full_vault && normalized_prefixes.is_empty() {
+        return Err("missing_prefix".to_string());
+    }
+
+    let scopes = if full_vault {
+        ops.iter()
+            .map(|op| format!("{}:{op}", vault.id))
+            .collect::<Vec<_>>()
+    } else {
+        normalized_prefixes
+            .iter()
+            .flat_map(|prefix| {
+                ops.iter()
+                    .map(move |op| format!("{}/prefix:{}:{op}", vault.id, prefix.scope))
+            })
+            .collect::<Vec<_>>()
+    };
+    let prefixes_display = if full_vault {
+        vec!["/".to_string()]
+    } else {
+        normalized_prefixes
+            .iter()
+            .map(|prefix| prefix.canonical.clone())
+            .collect::<Vec<_>>()
+    };
+    let ops_display = ops
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect::<Vec<_>>();
+    let description = serde_json::to_string(&serde_json::json!({
+        "issued_by": issued_by,
+        "vault_id": vault.id.to_string(),
+        "vault_slug": vault.slug.clone(),
+        "prefix": prefixes_display.first().cloned(),
+        "prefixes": prefixes_display.clone(),
+        "ops": ops_display.clone(),
+    }))
+    .map_err(|err| format!("description_encode_failed: {err}"))?;
+
+    Ok(ProvisionTokenSpec {
+        owner_id,
+        issued_by,
+        vault,
+        scopes,
+        description,
+        expires_at,
+        prefixes_display: if full_vault {
+            vec!["/".to_string()]
+        } else {
+            normalized_prefixes
+                .iter()
+                .map(|prefix| prefix.canonical.clone())
+                .collect::<Vec<_>>()
+        },
+        ops_display: ops.iter().map(|value| (*value).to_string()).collect(),
+    })
+}
+
 async fn resolve_vault(db: &PgPool, selector: &str) -> Result<Vault, String> {
     let repo = VaultRepo::new(db);
     if let Ok(vault_id) = selector.parse::<Uuid>() {
@@ -456,8 +750,121 @@ async fn resolve_vault(db: &PgPool, selector: &str) -> Result<Vault, String> {
         .ok_or_else(|| "vault_not_found".to_string())
 }
 
+async fn resolve_owner_id(
+    db: &PgPool,
+    system_user: &User,
+    owner_email: Option<&str>,
+    owner_id: Option<&str>,
+) -> Result<Uuid, String> {
+    if let Some(owner_id) = owner_id {
+        return owner_id
+            .parse::<Uuid>()
+            .map_err(|_| "invalid_owner_id".to_string());
+    }
+    let owner_email = owner_email.unwrap_or(SYSTEM_OWNER_EMAIL).trim();
+    if owner_email.is_empty() {
+        return Err("invalid_owner_email".to_string());
+    }
+    if owner_email.eq_ignore_ascii_case(SYSTEM_OWNER_EMAIL) {
+        return Ok(system_user.id);
+    }
+    let repo = UserRepo::new(db);
+    let owner = repo
+        .get_by_email(owner_email)
+        .await
+        .map_err(db_error("owner_lookup_failed"))?;
+    owner
+        .map(|user| user.id)
+        .ok_or_else(|| "owner_not_found".to_string())
+}
+
 fn normalize_path(value: &str) -> String {
     value.trim().trim_matches('/').to_string()
+}
+
+fn normalize_prefix(prefix: &str) -> Result<NormalizedPrefix, String> {
+    let trimmed = prefix.trim();
+    if trimmed.is_empty() {
+        return Err("invalid_prefix".to_string());
+    }
+    let canonical = trimmed.trim_matches('/').to_string();
+    if canonical.is_empty() {
+        return Err("invalid_prefix".to_string());
+    }
+    Ok(NormalizedPrefix {
+        canonical: format!("/{canonical}"),
+        scope: canonical.replace('/', "::"),
+    })
+}
+
+fn parse_ops(value: &str) -> Result<Vec<&'static str>, String> {
+    let mut ops = Vec::new();
+    for token in value.split(',') {
+        let normalized = token.trim().to_ascii_lowercase();
+        if normalized.is_empty() {
+            continue;
+        }
+        let op = match normalized.as_str() {
+            "read" => "read",
+            "read_history" => "read_history",
+            "read_previous" => "read_previous",
+            "history_read" => "read_history",
+            _ => return Err(format!("invalid_ops:{token}")),
+        };
+        if !ops.contains(&op) {
+            ops.push(op);
+        }
+    }
+    if ops.is_empty() {
+        return Err("invalid_ops".to_string());
+    }
+    Ok(ops)
+}
+
+fn parse_ttl(value: &str) -> Result<chrono::Duration, String> {
+    let trimmed = value.trim().to_ascii_lowercase();
+    if trimmed.is_empty() {
+        return Err("invalid_ttl".to_string());
+    }
+    let (amount, unit) = trimmed.split_at(trimmed.len().saturating_sub(1));
+    let amount = amount
+        .parse::<i64>()
+        .map_err(|_| "invalid_ttl".to_string())?;
+    match unit {
+        "s" => Ok(chrono::Duration::seconds(amount)),
+        "m" => Ok(chrono::Duration::minutes(amount)),
+        "h" => Ok(chrono::Duration::hours(amount)),
+        "d" => Ok(chrono::Duration::days(amount)),
+        _ => Err("invalid_ttl".to_string()),
+    }
+}
+
+fn generate_service_account_token(
+    settings: &settings::Settings,
+) -> Result<ProvisionedToken, String> {
+    let token_suffix: String = thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
+    let token = format!("{SERVICE_ACCOUNT_PREFIX}{token_suffix}");
+    let token_prefix = token
+        .chars()
+        .take(SERVICE_ACCOUNT_PREFIX_LEN)
+        .collect::<String>();
+    let params = passwords::KdfParams {
+        algorithm: settings.config.auth.kdf.algorithm.clone(),
+        iterations: settings.config.auth.kdf.iterations,
+        memory_kb: settings.config.auth.kdf.memory_kb,
+        parallelism: settings.config.auth.kdf.parallelism,
+    };
+    let token_hash = passwords::hash_service_token(&token, &settings.token_pepper, &params)
+        .map_err(|err| format!("token_hash_failed: {err}"))?;
+    Ok(ProvisionedToken {
+        token,
+        token_hash,
+        token_prefix,
+    })
 }
 
 fn decrypt_payload(
@@ -511,6 +918,19 @@ fn db_error(label: &'static str) -> impl Fn(sqlx_core::Error) -> String {
     }
 }
 
+#[derive(Debug, Clone)]
+struct NormalizedPrefix {
+    canonical: String,
+    scope: String,
+}
+
+#[derive(Debug, Clone)]
+struct ProvisionedToken {
+    token: String,
+    token_hash: String,
+    token_prefix: String,
+}
+
 impl From<ProvisionFieldKind> for FieldKind {
     fn from(value: ProvisionFieldKind) -> Self {
         match value {
@@ -520,5 +940,35 @@ impl From<ProvisionFieldKind> for FieldKind {
             ProvisionFieldKind::Otp => Self::Otp,
             ProvisionFieldKind::Note => Self::Note,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_prefix, parse_ops, parse_ttl};
+
+    #[test]
+    fn parse_ops_deduplicates_aliases() {
+        let ops = parse_ops("read, history_read, read_history, read_previous").expect("ops");
+        assert_eq!(ops, vec!["read", "read_history", "read_previous"]);
+    }
+
+    #[test]
+    fn parse_ops_rejects_unknown_values() {
+        let err = parse_ops("read,write").expect_err("invalid ops");
+        assert_eq!(err, "invalid_ops:write");
+    }
+
+    #[test]
+    fn parse_ttl_supports_days() {
+        let ttl = parse_ttl("30d").expect("ttl");
+        assert_eq!(ttl, chrono::Duration::days(30));
+    }
+
+    #[test]
+    fn normalize_prefix_canonicalizes_slashes() {
+        let prefix = normalize_prefix("/rlyeh/yogg/grafana/").expect("prefix");
+        assert_eq!(prefix.canonical, "/rlyeh/yogg/grafana");
+        assert_eq!(prefix.scope, "rlyeh::yogg::grafana");
     }
 }
