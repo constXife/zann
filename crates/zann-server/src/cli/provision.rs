@@ -288,7 +288,7 @@ async fn set_field_command(
                 item_id: item.id,
                 payload_enc: item.payload_enc.clone(),
                 checksum: item.checksum.clone(),
-                version: item.version,
+                version: update_history_version(item.version),
                 change_type: ChangeType::Update,
                 fields_changed: None,
                 changed_by_user_id: owner.id,
@@ -991,6 +991,10 @@ fn db_error(label: &'static str) -> impl Fn(sqlx_core::Error) -> String {
     }
 }
 
+fn update_history_version(current_version: i64) -> i64 {
+    current_version
+}
+
 fn ensure_shared_server_vault(vault: &Vault) -> Result<(), String> {
     if vault.kind != VaultKind::Shared || vault.encryption_type != VaultEncryptionType::Server {
         return Err("vault_not_shared_server_encrypted".to_string());
@@ -1089,7 +1093,7 @@ impl StagedSecretFile {
 mod tests {
     use super::{
         ensure_shared_server_vault, normalize_prefix, parse_ops, parse_ttl, stage_secret_file,
-        write_secret_file,
+        update_history_version, write_secret_file,
     };
     use chrono::Utc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1173,5 +1177,11 @@ mod tests {
 
         let err = ensure_shared_server_vault(&vault).expect_err("non-shared vault should fail");
         assert_eq!(err, "vault_not_shared_server_encrypted");
+    }
+
+    #[test]
+    fn update_history_uses_previous_version() {
+        assert_eq!(update_history_version(1), 1);
+        assert_eq!(update_history_version(7), 7);
     }
 }
