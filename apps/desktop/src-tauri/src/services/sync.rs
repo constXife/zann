@@ -157,8 +157,7 @@ pub async fn remote_sync(
     for vault in &vault_details {
         let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
             .map_err(|_| "invalid vault encryption type".to_string())?;
-        let kind = VaultKind::try_from(vault.kind)
-            .map_err(|_| "invalid vault kind".to_string())?;
+        let kind = VaultKind::try_from(vault.kind).map_err(|_| "invalid vault kind".to_string())?;
         if encryption_type != VaultEncryptionType::Client || kind != VaultKind::Personal {
             continue;
         }
@@ -200,7 +199,12 @@ pub async fn remote_sync(
             }
         }
         let _ = vault_repo
-            .update_key(storage_uuid, vault_id, &blob.to_bytes(), KeyWrapType::RemoteStrict)
+            .update_key(
+                storage_uuid,
+                vault_id,
+                &blob.to_bytes(),
+                KeyWrapType::RemoteStrict,
+            )
             .await;
     }
 
@@ -216,8 +220,7 @@ pub async fn remote_sync(
         };
         let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
             .map_err(|_| "invalid vault encryption type".to_string())?;
-        let kind = VaultKind::try_from(vault.kind)
-            .map_err(|_| "invalid vault kind".to_string())?;
+        let kind = VaultKind::try_from(vault.kind).map_err(|_| "invalid vault kind".to_string())?;
         let should_be_shared =
             encryption_type == VaultEncryptionType::Server && kind == VaultKind::Shared;
         let desired_wrap = if should_be_shared {
@@ -440,7 +443,10 @@ pub async fn remote_sync(
                         return Ok(ApiResponse::err("sync_pull_failed", &err));
                     }
                 };
-                let pull = resp.json::<SyncPullResponse>().await.map_err(|err| err.to_string())?;
+                let pull = resp
+                    .json::<SyncPullResponse>()
+                    .await
+                    .map_err(|err| err.to_string())?;
 
                 let Some(vault_key) = vault_key.as_ref() else {
                     break;
@@ -454,8 +460,8 @@ pub async fn remote_sync(
                         vault_id,
                         change,
                     )
-                        .await
-                        .unwrap_or(false)
+                    .await
+                    .unwrap_or(false)
                     {
                         applied_total += 1;
                     }
@@ -564,7 +570,9 @@ pub async fn sync_reset_cursor(
     }
 
     let cursor_repo = SyncCursorRepo::new(&state.pool);
-    cursor_repo.delete_by_storage(storage_uuid).await
+    cursor_repo
+        .delete_by_storage(storage_uuid)
+        .await
         .map_err(|err| err.to_string())?;
 
     Ok(ApiResponse::ok(()))

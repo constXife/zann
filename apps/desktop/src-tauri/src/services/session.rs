@@ -1,9 +1,9 @@
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
-use tauri::{Emitter, State};
-use tauri_plugin_biometry::{AuthOptions, BiometryExt};
 use rand::rngs::OsRng;
 use rand::RngCore;
+use tauri::{Emitter, State};
+use tauri_plugin_biometry::{AuthOptions, BiometryExt};
 
 use crate::constants::DWK_AAD;
 use crate::crypto::decrypt_vault_key_with_master;
@@ -15,13 +15,13 @@ use crate::types::{
     ApiResponse, AppStatusResponse, AutolockConfig, BootstrapResponse, DesktopSettings,
     KeystoreStatusResponse, PersonalVaultStatusResponse, StatusResponse, VaultDetailResponse,
 };
+use uuid::Uuid;
 use zann_core::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
+use zann_core::VaultEncryptionType;
 use zann_core::{AppService, StorageKind, VaultKind};
+use zann_db::local::LocalVault;
 use zann_db::local::{KeyWrapType, LocalItemRepo, LocalStorageRepo, LocalVaultRepo, MetadataRepo};
 use zann_db::services::LocalServices;
-use zann_db::local::LocalVault;
-use zann_core::VaultEncryptionType;
-use uuid::Uuid;
 
 fn default_local_kdf_params() -> zann_core::api::auth::KdfParams {
     zann_core::api::auth::KdfParams {
@@ -81,7 +81,8 @@ async fn verify_remote_master_password(
     state: &State<'_, AppState>,
     master_key: &SecretKey,
 ) -> Result<(), (String, String)> {
-    let mut config = load_config(&state.root).map_err(|err| ("config_error".to_string(), err.to_string()))?;
+    let mut config =
+        load_config(&state.root).map_err(|err| ("config_error".to_string(), err.to_string()))?;
     let context_name = match config.current_context.clone() {
         Some(value) => value,
         None => return Ok(()),
@@ -98,18 +99,14 @@ async fn verify_remote_master_password(
     }
 
     let client = reqwest::Client::new();
-    let access_token = ensure_access_token_for_context(
-        &client,
-        &addr,
-        &context_name,
-        &mut config,
-        None,
-    )
-    .await
-    .map_err(|err| ("vault_list_failed".to_string(), err))?;
+    let access_token =
+        ensure_access_token_for_context(&client, &addr, &context_name, &mut config, None)
+            .await
+            .map_err(|err| ("vault_list_failed".to_string(), err))?;
     let _ = save_config(&state.root, &config);
 
-    let headers = auth_headers(&access_token).map_err(|err| ("vault_list_failed".to_string(), err))?;
+    let headers =
+        auth_headers(&access_token).map_err(|err| ("vault_list_failed".to_string(), err))?;
     let status = fetch_personal_status(&client, &headers, &addr)
         .await
         .map_err(|err| ("vault_list_failed".to_string(), err))?;
@@ -118,7 +115,10 @@ async fn verify_remote_master_password(
         return Ok(());
     }
     let Some(vault_id) = status.personal_vault_id.as_deref() else {
-        return Err(("vault_get_failed".to_string(), "personal vault missing".to_string()));
+        return Err((
+            "vault_get_failed".to_string(),
+            "personal vault missing".to_string(),
+        ));
     };
 
     let vault = fetch_vault_detail(&client, &headers, &addr, vault_id)
@@ -126,10 +126,18 @@ async fn verify_remote_master_password(
         .map_err(|err| ("vault_get_failed".to_string(), err))?;
     let vault_id = Uuid::parse_str(&vault.id)
         .map_err(|err| ("vault_get_failed".to_string(), err.to_string()))?;
-    let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
-        .map_err(|_| ("vault_get_failed".to_string(), "invalid vault encryption type".to_string()))?;
-    let kind = VaultKind::try_from(vault.kind)
-        .map_err(|_| ("vault_get_failed".to_string(), "invalid vault kind".to_string()))?;
+    let encryption_type = VaultEncryptionType::try_from(vault.encryption_type).map_err(|_| {
+        (
+            "vault_get_failed".to_string(),
+            "invalid vault encryption type".to_string(),
+        )
+    })?;
+    let kind = VaultKind::try_from(vault.kind).map_err(|_| {
+        (
+            "vault_get_failed".to_string(),
+            "invalid vault kind".to_string(),
+        )
+    })?;
     if encryption_type == VaultEncryptionType::Client && kind == VaultKind::Personal {
         let local_vault = LocalVault {
             id: vault_id,
@@ -152,7 +160,9 @@ async fn verify_remote_master_password(
     Ok(())
 }
 
-pub async fn initialize_local_identity(state: State<'_, AppState>) -> Result<ApiResponse<()>, String> {
+pub async fn initialize_local_identity(
+    state: State<'_, AppState>,
+) -> Result<ApiResponse<()>, String> {
     let mut config = load_config(&state.root).map_err(|err| err.to_string())?;
     if config.identity.is_some() {
         return Ok(ApiResponse::ok(()));
@@ -178,7 +188,9 @@ pub async fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapResponse, 
     Ok(BootstrapResponse {
         status: StatusResponse {
             unlocked: state.master_key.read().await.is_some(),
-            db_path: crate::state::local_db_path(&state.root).display().to_string(),
+            db_path: crate::state::local_db_path(&state.root)
+                .display()
+                .to_string(),
         },
         settings,
         auto_unlock_error,
@@ -188,18 +200,19 @@ pub async fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapResponse, 
 pub async fn status(state: State<'_, AppState>) -> Result<StatusResponse, String> {
     Ok(StatusResponse {
         unlocked: state.master_key.read().await.is_some(),
-        db_path: crate::state::local_db_path(&state.root).display().to_string(),
+        db_path: crate::state::local_db_path(&state.root)
+            .display()
+            .to_string(),
     })
 }
 
-pub async fn app_status(state: State<'_, AppState>) -> Result<ApiResponse<AppStatusResponse>, String> {
+pub async fn app_status(
+    state: State<'_, AppState>,
+) -> Result<ApiResponse<AppStatusResponse>, String> {
     let locked = state.master_key.read().await.is_none();
     let dummy_key = SecretKey::from_bytes([0u8; 32]);
     let services = LocalServices::new(&state.pool, &dummy_key);
-    let status = services
-        .status(locked)
-        .await
-        .map_err(|err| err.message)?;
+    let status = services.status(locked).await.map_err(|err| err.message)?;
     Ok(ApiResponse::ok(AppStatusResponse {
         initialized: status.initialized,
         locked: status.locked,
@@ -272,7 +285,11 @@ pub async fn keystore_status(
         Ok(status) => Ok(ApiResponse::ok(KeystoreStatusResponse {
             supported: true,
             biometrics_available: status.is_available,
-            reason: if status.is_available { None } else { status.error_code },
+            reason: if status.is_available {
+                None
+            } else {
+                status.error_code
+            },
         })),
         Err(err) => {
             let message = err.to_string();
@@ -338,7 +355,12 @@ pub async fn session_unlock_with_biometrics(
 
     let dwk_arr: [u8; 32] = match dwk_bytes.as_slice().try_into() {
         Ok(arr) => arr,
-        Err(_) => return Ok(ApiResponse::err("keystore_unavailable", "invalid dwk length")),
+        Err(_) => {
+            return Ok(ApiResponse::err(
+                "keystore_unavailable",
+                "invalid dwk length",
+            ))
+        }
     };
     let dwk = SecretKey::from_bytes(dwk_arr);
 
@@ -365,7 +387,12 @@ pub async fn session_unlock_with_biometrics(
 
     let master_arr: [u8; 32] = match master_bytes.as_slice().try_into() {
         Ok(arr) => arr,
-        Err(_) => return Ok(ApiResponse::err("keystore_unavailable", "invalid master key length")),
+        Err(_) => {
+            return Ok(ApiResponse::err(
+                "keystore_unavailable",
+                "invalid master key length",
+            ))
+        }
     };
     let master_key = SecretKey::from_bytes(master_arr);
     let master_key = std::sync::Arc::new(master_key);
@@ -455,8 +482,7 @@ fn wrap_master_key_with_biometry(
         .map_err(|err| err.to_string())?;
     let dwk_backup = Some(encoded_dwk);
 
-    let blob = encrypt_blob(&dwk, master_key.as_bytes(), DWK_AAD)
-        .map_err(|err| err.to_string())?;
+    let blob = encrypt_blob(&dwk, master_key.as_bytes(), DWK_AAD).map_err(|err| err.to_string())?;
 
     Ok((
         base64::engine::general_purpose::STANDARD.encode(blob.to_bytes()),
@@ -523,7 +549,9 @@ pub async fn unlock(
     }
 
     let config = load_config(&state.root).map_err(|err| err.to_string())?;
-    let identity = config.identity.ok_or_else(|| "identity not initialized".to_string())?;
+    let identity = config
+        .identity
+        .ok_or_else(|| "identity not initialized".to_string())?;
     log_master_key_context("unlock", &password, &identity);
     let master_key = derive_master_key(&password, &identity).map_err(|err| err.to_string())?;
     let master_key = std::sync::Arc::new(master_key);
@@ -573,7 +601,10 @@ async fn handle_master_key_change(
                     .list_by_storage(storage.id)
                     .await
                     .map_err(|err| err.to_string())?;
-                for vault in vaults.iter().filter(|vault| vault.kind == VaultKind::Shared) {
+                for vault in vaults
+                    .iter()
+                    .filter(|vault| vault.kind == VaultKind::Shared)
+                {
                     let _ = item_repo
                         .delete_by_storage_vault(storage.id, vault.id)
                         .await;
@@ -594,4 +625,5 @@ fn key_fingerprint(key: &SecretKey) -> String {
     hex.get(0..12).unwrap_or(&hex).to_string()
 }
 
-fn log_master_key_context(_label: &str, _password: &str, _identity: &crate::state::IdentityConfig) {}
+fn log_master_key_context(_label: &str, _password: &str, _identity: &crate::state::IdentityConfig) {
+}

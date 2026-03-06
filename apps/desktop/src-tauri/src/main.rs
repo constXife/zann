@@ -9,23 +9,22 @@ mod state;
 mod types;
 mod util;
 
-use tauri::Emitter;
-use tauri::Manager;
 use tauri::menu::{Menu, MenuBuilder, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::Emitter;
+use tauri::Manager;
 
 use crate::infra::config::save_settings;
 use commands::auth::{
-    get_server_info, password_login, password_register, remote_begin_login, remote_trust_fingerprint,
+    get_server_info, password_login, password_register, remote_begin_login,
+    remote_trust_fingerprint,
 };
 use commands::backup::{backup_plain_export, backup_plain_import};
 use commands::items::{
     items_delete, items_empty_trash, items_get, items_list, items_purge, items_purge_trash,
     items_put, items_resolve_conflict, items_restore, items_update, pending_changes_count,
 };
-use commands::items_history::{
-    items_history_get, items_history_list, items_history_restore,
-};
+use commands::items_history::{items_history_get, items_history_list, items_history_restore};
 use commands::session::{
     app_status, bootstrap, get_settings, initialize_local_identity, initialize_master_password,
     keystore_disable, keystore_enable, keystore_status, session_autolock_config, session_lock,
@@ -33,13 +32,14 @@ use commands::session::{
     session_unlock_with_password, status, system_locale, unlock, update_settings,
 };
 use commands::storage::{
-    app_version, local_clear_data, local_factory_reset, open_data_folder, open_logs, storage_delete,
-    storage_disconnect, storage_info, storage_reveal, storage_sign_out, storages_list,
+    app_version, local_clear_data, local_factory_reset, open_data_folder, open_logs,
+    storage_delete, storage_disconnect, storage_info, storage_reveal, storage_sign_out,
+    storages_list,
 };
 use commands::sync::{remote_reset, remote_sync, sync_reset_cursor};
 use commands::types::{publish_list, publish_trigger, types_list, types_show};
 use commands::vaults::{vault_create, vault_list, vault_reset_personal};
-use state::{AppState, build_state};
+use state::{build_state, AppState};
 
 fn main() {
     std::panic::set_hook(Box::new(|info| {
@@ -173,14 +173,13 @@ fn main() {
 
             app_handle.emit("zann:ready", ())?;
             Ok(())
-    })
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let app_handle = window.app_handle();
                 let state = app_handle.state::<AppState>();
-                let settings = tauri::async_runtime::block_on(async {
-                    state.settings.read().await.clone()
-                });
+                let settings =
+                    tauri::async_runtime::block_on(async { state.settings.read().await.clone() });
 
                 if !settings.close_to_tray {
                     return;
