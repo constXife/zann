@@ -4,6 +4,10 @@ use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use serde::Serialize;
 use sqlx_core::types::Json as SqlxJson;
+use std::fs::OpenOptions;
+use std::io::Write;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use zann_core::{
     CachePolicy, Change, ChangeOp, ChangeType, Item, ItemHistory, ServiceAccount, SyncStatus, User,
@@ -96,6 +100,12 @@ pub struct EnsureTokenArgs {
         help = "Rotate the token plaintext and update the stored token hash"
     )]
     pub rotate: bool,
+    #[arg(
+        long,
+        value_name = "path",
+        help = "Write newly created or rotated plaintext token to a file instead of stdout"
+    )]
+    pub write_token_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -134,7 +144,8 @@ struct SetFieldOutput {
 #[derive(Debug, Serialize)]
 struct EnsureTokenOutput {
     status: &'static str,
-    token: Option<String>,
+    token_written: bool,
+    token_file: Option<String>,
     service_account: ProvisionedServiceAccountOutput,
 }
 
@@ -413,6 +424,7 @@ async fn ensure_token_command(
 
     let spec = build_token_spec(settings, db, args).await?;
     let repo = ServiceAccountRepo::new(db);
+    let token_file = args.write_token_file.as_deref();
 
     let (account, status, plaintext_token) = if let Some(mut account) = repo
         .get_active_by_owner_and_name(spec.owner_id, name)
@@ -437,6 +449,9 @@ async fn ensure_token_command(
         }
 
         if args.rotate {
+            if token_file.is_none() {
+                return Err("token_sink_required".to_string());
+            }
             let provisioned = generate_service_account_token(settings)?;
             account.token_hash = provisioned.token_hash;
             account.token_prefix = provisioned.token_prefix;
@@ -453,6 +468,9 @@ async fn ensure_token_command(
 
         (account, status, plaintext_token)
     } else {
+        if token_file.is_none() {
+            return Err("token_sink_required".to_string());
+        }
         let provisioned = generate_service_account_token(settings)?;
         let now = Utc::now();
         let account = ServiceAccount {
@@ -478,9 +496,19 @@ async fn ensure_token_command(
         (account, "created", Some(provisioned.token))
     };
 
+    let token_written = if let (Some(token), Some(path)) = (plaintext_token.as_deref(), token_file)
+    {
+        write_secret_file(path, token)?;
+        true
+    } else {
+        false
+    };
+
     let output = EnsureTokenOutput {
         status,
-        token: plaintext_token,
+        token_written,
+        token_file: token_written
+            .then(|| token_file.expect("token file path").display().to_string()),
         service_account: ProvisionedServiceAccountOutput {
             id: account.id.to_string(),
             owner_user_id: account.owner_user_id.to_string(),
@@ -867,6 +895,27 @@ fn generate_service_account_token(
     })
 }
 
+fn write_secret_file(path: &Path, value: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "invalid_token_file_path".to_string())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|err| format!("token_file_create_dir_failed: {err}"))?;
+    let mut file = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)
+        .map_err(|err| format!("token_file_open_failed: {err}"))?;
+    file.write_all(value.as_bytes())
+        .map_err(|err| format!("token_file_write_failed: {err}"))?;
+    file.write_all(b"\n")
+        .map_err(|err| format!("token_file_write_failed: {err}"))?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .map_err(|err| format!("token_file_chmod_failed: {err}"))?;
+    Ok(())
+}
+
 fn decrypt_payload(
     settings: &settings::Settings,
     vault: &Vault,
@@ -945,7 +994,8 @@ impl From<ProvisionFieldKind> for FieldKind {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_prefix, parse_ops, parse_ttl};
+    use super::{normalize_prefix, parse_ops, parse_ttl, write_secret_file};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn parse_ops_deduplicates_aliases() {
@@ -970,5 +1020,18 @@ mod tests {
         let prefix = normalize_prefix("/rlyeh/yogg/grafana/").expect("prefix");
         assert_eq!(prefix.canonical, "/rlyeh/yogg/grafana");
         assert_eq!(prefix.scope, "rlyeh::yogg::grafana");
+    }
+
+    #[test]
+    fn write_secret_file_persists_token_with_newline() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("zann-provision-token-{unique}.txt"));
+        write_secret_file(&path, "zann_sa_example").expect("write secret file");
+        let content = std::fs::read_to_string(&path).expect("read secret file");
+        assert_eq!(content, "zann_sa_example\n");
+        let _ = std::fs::remove_file(path);
     }
 }

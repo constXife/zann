@@ -65,7 +65,7 @@ For server-side bootstrap flows, use the privileged provisioning helpers:
 zann-server provision ensure-system-user
 zann-server provision ensure-vault --name Infrastructure --slug infra
 zann-server provision set-field --vault infra --path rlyeh/yogg/grafana --key client_id --value grafana-rlyeh
-zann-server provision ensure-token yogg-grafana infra:rlyeh/yogg/grafana read
+zann-server provision ensure-token yogg-grafana infra:rlyeh/yogg/grafana read --write-token-file /run/secrets/yogg-zann-token
 ```
 
 ## Health endpoint

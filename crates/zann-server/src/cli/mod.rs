@@ -168,6 +168,8 @@ mod tests {
             "infra:rlyeh/yogg/grafana",
             "read",
             "--rotate",
+            "--write-token-file",
+            "/run/secrets/yogg-zann-token",
         ]);
         let Some(Command::Provision(args)) = cli.command else {
             panic!("expected provision command");
@@ -179,6 +181,10 @@ mod tests {
         assert_eq!(command.target, "infra:rlyeh/yogg/grafana");
         assert_eq!(command.ops, "read");
         assert!(command.rotate);
+        assert_eq!(
+            command.write_token_file.as_deref(),
+            Some(std::path::Path::new("/run/secrets/yogg-zann-token"))
+        );
     }
 
     #[test]
