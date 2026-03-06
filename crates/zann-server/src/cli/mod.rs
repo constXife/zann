@@ -2,6 +2,7 @@ use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 pub mod init;
+pub mod provision;
 pub mod tokens;
 
 #[derive(Parser)]
@@ -20,6 +21,8 @@ enum Command {
     Openapi(OpenApiArgs),
     /// Initial setup (first user + vault)
     Init(init::InitArgs),
+    /// Privileged provisioning helpers for server-side bootstrap
+    Provision(provision::ProvisionArgs),
     /// Manage service account tokens
     Token(tokens::TokenArgs),
 }
@@ -36,6 +39,7 @@ pub enum RunMode {
     Migrate,
     OpenApi { out: Option<PathBuf> },
     Init(init::InitArgs),
+    Provision(provision::ProvisionArgs),
     Token(tokens::TokenArgs),
 }
 
@@ -46,6 +50,7 @@ pub fn parse_args() -> RunMode {
         Some(Command::Migrate) => RunMode::Migrate,
         Some(Command::Openapi(args)) => RunMode::OpenApi { out: args.out },
         Some(Command::Init(args)) => RunMode::Init(args),
+        Some(Command::Provision(args)) => RunMode::Provision(args),
         Some(Command::Token(args)) => RunMode::Token(args),
     }
 }
@@ -130,6 +135,27 @@ mod tests {
         };
         assert_eq!(args.email, "admin@example.com");
         assert_eq!(args.vault_slug, "prod");
+    }
+
+    #[test]
+    fn parse_provision_ensure_vault_command() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "provision",
+            "ensure-vault",
+            "--name",
+            "Infrastructure",
+            "--slug",
+            "infra",
+        ]);
+        let Some(Command::Provision(args)) = cli.command else {
+            panic!("expected provision command");
+        };
+        let provision::ProvisionCommand::EnsureVault(command) = args.command else {
+            panic!("expected ensure-vault command");
+        };
+        assert_eq!(command.name, "Infrastructure");
+        assert_eq!(command.slug, "infra");
     }
 
     #[test]

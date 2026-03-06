@@ -72,7 +72,10 @@ async fn main() {
     let metrics_config = settings.config.metrics.clone();
     if matches!(
         run_mode,
-        cli::RunMode::Server | cli::RunMode::Init(_) | cli::RunMode::Token(_)
+        cli::RunMode::Server
+            | cli::RunMode::Init(_)
+            | cli::RunMode::Provision(_)
+            | cli::RunMode::Token(_)
     ) {
         if let Err(missing) = settings::preflight(&settings) {
             tracing::error!(
@@ -106,6 +109,13 @@ async fn main() {
     }
     if let cli::RunMode::Token(token_args) = run_mode {
         if let Err(err) = cli::tokens::run(&settings, &db, &token_args).await {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let cli::RunMode::Provision(provision_args) = run_mode {
+        if let Err(err) = cli::provision::run(&settings, &db, &provision_args).await {
             eprintln!("{err}");
             std::process::exit(1);
         }
