@@ -4,27 +4,33 @@ use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use serde::Serialize;
 use sqlx_core::types::Json as SqlxJson;
-use std::fs::OpenOptions;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use zann_core::{
-    CachePolicy, Change, ChangeOp, ChangeType, Item, ItemHistory, ServiceAccount, SyncStatus, User,
-    UserStatus, Vault, VaultEncryptionType, VaultKind, VaultMember, VaultMemberRole,
+    CachePolicy, Change, ChangeOp, ChangeType, Device, Item, ItemHistory, ServiceAccount,
+    SyncStatus, User, UserStatus, Vault, VaultEncryptionType, VaultKind, VaultMember,
+    VaultMemberRole,
 };
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::secrets::{EncryptedPayload, FieldKind, FieldValue};
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{
-    ChangeRepo, ItemHistoryRepo, ItemRepo, ServiceAccountRepo, UserRepo, VaultMemberRepo, VaultRepo,
+    ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, ServiceAccountRepo, UserRepo,
+    VaultMemberRepo, VaultRepo,
 };
 use zann_db::PgPool;
 
 use crate::cli::tokens::{SERVICE_ACCOUNT_PREFIX, SERVICE_ACCOUNT_PREFIX_LEN, SYSTEM_OWNER_EMAIL};
 use crate::domains::auth::core::passwords;
+use crate::domains::auth::helpers::build_device;
 use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
 use crate::settings;
+
+const PROVISION_DEVICE_NAME: &str = "provision";
+const PROVISION_DEVICE_FINGERPRINT: &str = "zann:provision:system";
 
 #[derive(Debug, Clone, Args)]
 pub struct ProvisionArgs {
@@ -228,9 +234,8 @@ async fn set_field_command(
 ) -> Result<(), String> {
     let owner = ensure_system_user(settings, db).await?.0;
     let vault = resolve_vault(db, args.vault.trim()).await?;
-    if vault.kind != VaultKind::Shared || vault.encryption_type != VaultEncryptionType::Server {
-        return Err("vault_not_shared_server_encrypted".to_string());
-    }
+    ensure_shared_server_vault(&vault)?;
+    let provision_device = ensure_provision_device(db, &owner).await?;
 
     let path = normalize_path(&args.path);
     if path.is_empty() {
@@ -301,7 +306,7 @@ async fn set_field_command(
             item.payload_enc = payload_enc;
             item.checksum = core_crypto::payload_checksum(&item.payload_enc);
             item.version += 1;
-            item.device_id = Uuid::nil();
+            item.device_id = provision_device.id;
             item.updated_at = Utc::now();
             let affected = item_repo
                 .update(&item)
@@ -324,7 +329,7 @@ async fn set_field_command(
                 item_id: item.id,
                 op: ChangeOp::Update,
                 version: item.version,
-                device_id: Uuid::nil(),
+                device_id: provision_device.id,
                 created_at: item.updated_at,
             };
             if let Err(err) = change_repo.create(&change).await {
@@ -352,7 +357,7 @@ async fn set_field_command(
             checksum: String::new(),
             version: 1,
             row_version: 1,
-            device_id: Uuid::nil(),
+            device_id: provision_device.id,
             sync_status: SyncStatus::Active,
             deleted_at: None,
             deleted_by_user_id: None,
@@ -392,7 +397,7 @@ async fn set_field_command(
             item_id,
             op: ChangeOp::Create,
             version: item.version,
-            device_id: Uuid::nil(),
+            device_id: provision_device.id,
             created_at: now,
         };
         if let Err(err) = change_repo.create(&change).await {
@@ -426,13 +431,13 @@ async fn ensure_token_command(
     let repo = ServiceAccountRepo::new(db);
     let token_file = args.write_token_file.as_deref();
 
-    let (account, status, plaintext_token) = if let Some(mut account) = repo
+    let (account, status, staged_secret) = if let Some(mut account) = repo
         .get_active_by_owner_and_name(spec.owner_id, name)
         .await
         .map_err(db_error("service_account_lookup_failed"))?
     {
         let mut status = "existing";
-        let mut plaintext_token = None;
+        let mut staged_secret = None;
         let description = Some(spec.description.clone());
         let metadata_changed = account.description != description
             || account.scopes.0 != spec.scopes
@@ -453,25 +458,33 @@ async fn ensure_token_command(
                 return Err("token_sink_required".to_string());
             }
             let provisioned = generate_service_account_token(settings)?;
+            staged_secret = Some(stage_secret_file(
+                token_file.expect("token file path"),
+                &provisioned.token,
+            )?);
             account.token_hash = provisioned.token_hash;
             account.token_prefix = provisioned.token_prefix;
             account.description = Some(spec.description.clone());
             account.scopes = sqlx_core::types::Json(spec.scopes.clone());
             account.expires_at = spec.expires_at;
             account.revoked_at = None;
-            repo.update(&account)
-                .await
-                .map_err(db_error("service_account_rotate_failed"))?;
-            plaintext_token = Some(provisioned.token);
+            if let Err(err) = repo.update(&account).await {
+                if let Some(staged_secret) = staged_secret.take() {
+                    let _ = staged_secret.discard();
+                }
+                return Err(db_error("service_account_rotate_failed")(err));
+            }
             status = "rotated";
         }
 
-        (account, status, plaintext_token)
+        (account, status, staged_secret)
     } else {
         if token_file.is_none() {
             return Err("token_sink_required".to_string());
         }
         let provisioned = generate_service_account_token(settings)?;
+        let staged_secret =
+            stage_secret_file(token_file.expect("token file path"), &provisioned.token)?;
         let now = Utc::now();
         let account = ServiceAccount {
             id: Uuid::now_v7(),
@@ -490,15 +503,15 @@ async fn ensure_token_command(
             created_at: now,
             revoked_at: None,
         };
-        repo.create(&account)
-            .await
-            .map_err(db_error("service_account_create_failed"))?;
-        (account, "created", Some(provisioned.token))
+        if let Err(err) = repo.create(&account).await {
+            let _ = staged_secret.discard();
+            return Err(db_error("service_account_create_failed")(err));
+        }
+        (account, "created", Some(staged_secret))
     };
 
-    let token_written = if let (Some(token), Some(path)) = (plaintext_token.as_deref(), token_file)
-    {
-        write_secret_file(path, token)?;
+    let token_written = if let Some(staged_secret) = staged_secret {
+        staged_secret.finalize()?;
         true
     } else {
         false
@@ -589,6 +602,7 @@ async fn ensure_shared_vault(
         .await
         .map_err(db_error("vault_lookup_failed"))?
     {
+        ensure_shared_server_vault(&vault)?;
         ensure_vault_member(db, vault.id, owner.id).await?;
         return Ok((vault, false));
     }
@@ -688,6 +702,7 @@ async fn build_token_spec(
         .transpose()?
         .map(|ttl| Utc::now() + ttl);
     let vault = resolve_vault(db, vault_selector).await?;
+    ensure_shared_server_vault(&vault)?;
 
     let mut full_vault = false;
     let mut normalized_prefixes = Vec::new();
@@ -895,25 +910,34 @@ fn generate_service_account_token(
     })
 }
 
+#[cfg(test)]
 fn write_secret_file(path: &Path, value: &str) -> Result<(), String> {
+    stage_secret_file(path, value)?.finalize()
+}
+
+fn stage_secret_file(path: &Path, value: &str) -> Result<StagedSecretFile, String> {
     let parent = path
         .parent()
         .ok_or_else(|| "invalid_token_file_path".to_string())?;
-    std::fs::create_dir_all(parent)
-        .map_err(|err| format!("token_file_create_dir_failed: {err}"))?;
+    fs::create_dir_all(parent).map_err(|err| format!("token_file_create_dir_failed: {err}"))?;
+    let tmp_path = parent.join(format!(".{}.tmp", Uuid::now_v7()));
     let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .write(true)
-        .open(path)
+        .open(&tmp_path)
         .map_err(|err| format!("token_file_open_failed: {err}"))?;
     file.write_all(value.as_bytes())
         .map_err(|err| format!("token_file_write_failed: {err}"))?;
     file.write_all(b"\n")
         .map_err(|err| format!("token_file_write_failed: {err}"))?;
-    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+    file.sync_all()
+        .map_err(|err| format!("token_file_sync_failed: {err}"))?;
+    file.set_permissions(fs::Permissions::from_mode(0o600))
         .map_err(|err| format!("token_file_chmod_failed: {err}"))?;
-    Ok(())
+    Ok(StagedSecretFile {
+        final_path: path.to_path_buf(),
+        tmp_path,
+    })
 }
 
 fn decrypt_payload(
@@ -967,6 +991,46 @@ fn db_error(label: &'static str) -> impl Fn(sqlx_core::Error) -> String {
     }
 }
 
+fn ensure_shared_server_vault(vault: &Vault) -> Result<(), String> {
+    if vault.kind != VaultKind::Shared || vault.encryption_type != VaultEncryptionType::Server {
+        return Err("vault_not_shared_server_encrypted".to_string());
+    }
+    Ok(())
+}
+
+async fn ensure_provision_device(db: &PgPool, user: &User) -> Result<Device, String> {
+    let repo = DeviceRepo::new(db);
+    let existing = repo
+        .list_by_user(user.id, 1024, 0, "desc")
+        .await
+        .map_err(db_error("provision_device_lookup_failed"))?
+        .into_iter()
+        .find(|device| {
+            device.revoked_at.is_none() && device.fingerprint == PROVISION_DEVICE_FINGERPRINT
+        });
+    if let Some(device) = existing {
+        return Ok(device);
+    }
+
+    let now = Utc::now();
+    let device = build_device(
+        user.id,
+        Some(PROVISION_DEVICE_NAME.to_string()),
+        Some("server".to_string()),
+        Some(PROVISION_DEVICE_FINGERPRINT.to_string()),
+        Some("server".to_string()),
+        None,
+        None,
+        PROVISION_DEVICE_NAME,
+        "server",
+        now,
+    );
+    repo.create(&device)
+        .await
+        .map_err(db_error("provision_device_create_failed"))?;
+    Ok(device)
+}
+
 #[derive(Debug, Clone)]
 struct NormalizedPrefix {
     canonical: String,
@@ -978,6 +1042,12 @@ struct ProvisionedToken {
     token: String,
     token_hash: String,
     token_prefix: String,
+}
+
+#[derive(Debug)]
+struct StagedSecretFile {
+    final_path: PathBuf,
+    tmp_path: PathBuf,
 }
 
 impl From<ProvisionFieldKind> for FieldKind {
@@ -992,10 +1062,33 @@ impl From<ProvisionFieldKind> for FieldKind {
     }
 }
 
+impl StagedSecretFile {
+    fn finalize(self) -> Result<(), String> {
+        fs::rename(&self.tmp_path, &self.final_path)
+            .map_err(|err| format!("token_file_rename_failed: {err}"))?;
+        fs::set_permissions(&self.final_path, fs::Permissions::from_mode(0o600))
+            .map_err(|err| format!("token_file_chmod_failed: {err}"))?;
+        Ok(())
+    }
+
+    fn discard(self) -> Result<(), String> {
+        match fs::remove_file(&self.tmp_path) {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(format!("token_file_cleanup_failed: {err}")),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{normalize_prefix, parse_ops, parse_ttl, write_secret_file};
+    use super::{
+        ensure_shared_server_vault, normalize_prefix, parse_ops, parse_ttl, write_secret_file,
+    };
+    use chrono::Utc;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use uuid::Uuid;
+    use zann_core::{CachePolicy, Vault, VaultEncryptionType, VaultKind};
 
     #[test]
     fn parse_ops_deduplicates_aliases() {
@@ -1033,5 +1126,27 @@ mod tests {
         let content = std::fs::read_to_string(&path).expect("read secret file");
         assert_eq!(content, "zann_sa_example\n");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn ensure_shared_server_vault_rejects_non_shared_vaults() {
+        let vault = Vault {
+            id: Uuid::now_v7(),
+            slug: "personal".to_string(),
+            name: "Personal".to_string(),
+            kind: VaultKind::Personal,
+            encryption_type: VaultEncryptionType::Client,
+            vault_key_enc: Vec::new(),
+            cache_policy: CachePolicy::Full,
+            tags: None,
+            deleted_at: None,
+            deleted_by_user_id: None,
+            deleted_by_device_id: None,
+            row_version: 1,
+            created_at: Utc::now(),
+        };
+
+        let err = ensure_shared_server_vault(&vault).expect_err("non-shared vault should fail");
+        assert_eq!(err, "vault_not_shared_server_encrypted");
     }
 }
