@@ -639,6 +639,57 @@ async fn service_account_login_allows_shared_access_in_oidc_mode() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn service_account_access_token_can_set_secret_without_device_id() {
+    let app = TestApp::new_with_smk().await;
+    let email = "shared-secrets-sa@example.com";
+    let user = app.register(email, "password").await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app.create_shared_vault(token, "shared-secrets-sa").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    let slug = vault["slug"].as_str().expect("vault slug");
+    let scopes = vec![
+        format!("{slug}/prefix:allowed:write"),
+        format!("{slug}/prefix:allowed:read"),
+    ];
+    let service_account = app.create_service_account(email, scopes).await;
+    let sa_token = service_account["token"].as_str().expect("sa token");
+
+    let (status, login) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/service-account",
+            None,
+            json!({ "token": sa_token }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "sa login failed: {:?}", login);
+    let access_token = login["access_token"].as_str().expect("access token");
+
+    let (status, created) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{}/secrets/allowed/one", vault_id),
+            Some(access_token),
+            json!({ "value": "pw-1" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret set failed: {:?}", created);
+    assert_eq!(created["created"], true);
+    assert_eq!(created["value"], "pw-1");
+
+    let (status, fetched) = app
+        .get_json(
+            &format!("/v1/vaults/{}/secrets/allowed/one", vault_id),
+            Some(access_token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret get failed: {:?}", fetched);
+    assert_eq!(fetched["value"], "pw-1");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn service_account_token_allows_shared_access_for_system_owner() {
     let app = TestApp::new_with_smk().await;
     let email = "shared-system@example.com";
