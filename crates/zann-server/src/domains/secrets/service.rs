@@ -104,9 +104,9 @@ pub async fn ensure_secret(
     policy_name: Option<&str>,
     meta: Option<HashMap<String, String>>,
 ) -> Result<(SecretRecord, bool), SecretError> {
-    let device_id = identity
-        .device_id
-        .ok_or(SecretError::Forbidden("device_required"))?;
+    // Service-account identities do not carry a device id. Use the nil UUID for
+    // item/change records to match the existing shared-items write path.
+    let device_id = identity.device_id.unwrap_or(Uuid::nil());
     let normalized_path = normalize_secret_path(path)?;
     let resource = format!("vaults/{vault_id}/secrets/{normalized_path}");
     let vault = authorize_vault_access(
@@ -217,7 +217,7 @@ pub async fn ensure_secret(
     };
 
     let history_repo = ItemHistoryRepo::new(&state.db);
-    let actor = actor_snapshot(state, identity, Some(device_id)).await;
+    let actor = actor_snapshot(state, identity, identity.device_id).await;
     let history = ItemHistory {
         id: Uuid::now_v7(),
         item_id: item.id,
@@ -229,7 +229,7 @@ pub async fn ensure_secret(
         changed_by_user_id: identity.user_id,
         changed_by_email: actor.email,
         changed_by_name: actor.name,
-        changed_by_device_id: Some(device_id),
+        changed_by_device_id: identity.device_id,
         changed_by_device_name: actor.device_name,
         created_at: now,
     };
@@ -271,9 +271,9 @@ pub async fn set_secret(
     policy_name: Option<&str>,
     meta: Option<HashMap<String, String>>,
 ) -> Result<(SecretRecord, bool), SecretError> {
-    let device_id = identity
-        .device_id
-        .ok_or(SecretError::Forbidden("device_required"))?;
+    // Service-account identities do not carry a device id. Use the nil UUID for
+    // item/change records to match the existing shared-items write path.
+    let device_id = identity.device_id.unwrap_or(Uuid::nil());
     let normalized_path = normalize_secret_path(path)?;
     let resource = format!("vaults/{vault_id}/secrets/{normalized_path}");
     let vault = authorize_vault_access(
@@ -330,7 +330,7 @@ pub async fn set_secret(
         }
 
         let history_repo = ItemHistoryRepo::new(&state.db);
-        let actor = actor_snapshot(state, identity, Some(device_id)).await;
+        let actor = actor_snapshot(state, identity, identity.device_id).await;
         let history = ItemHistory {
             id: Uuid::now_v7(),
             item_id: item.id,
@@ -342,7 +342,7 @@ pub async fn set_secret(
             changed_by_user_id: identity.user_id,
             changed_by_email: actor.email,
             changed_by_name: actor.name,
-            changed_by_device_id: Some(device_id),
+            changed_by_device_id: identity.device_id,
             changed_by_device_name: actor.device_name,
             created_at: Utc::now(),
         };
@@ -451,7 +451,7 @@ pub async fn set_secret(
     }
 
     let history_repo = ItemHistoryRepo::new(&state.db);
-    let actor = actor_snapshot(state, identity, Some(device_id)).await;
+    let actor = actor_snapshot(state, identity, identity.device_id).await;
     let history = ItemHistory {
         id: Uuid::now_v7(),
         item_id: item.id,
@@ -463,7 +463,7 @@ pub async fn set_secret(
         changed_by_user_id: identity.user_id,
         changed_by_email: actor.email,
         changed_by_name: actor.name,
-        changed_by_device_id: Some(device_id),
+        changed_by_device_id: identity.device_id,
         changed_by_device_name: actor.device_name,
         created_at: now,
     };
@@ -504,9 +504,9 @@ pub async fn rotate_secret(
     policy_name: Option<&str>,
     meta: Option<HashMap<String, String>>,
 ) -> Result<(SecretRecord, i64), SecretError> {
-    let device_id = identity
-        .device_id
-        .ok_or(SecretError::Forbidden("device_required"))?;
+    // Service-account identities do not carry a device id. Use the nil UUID for
+    // item/change records to match the existing shared-items write path.
+    let device_id = identity.device_id.unwrap_or(Uuid::nil());
     let normalized_path = normalize_secret_path(path)?;
     let resource = format!("vaults/{vault_id}/secrets/{normalized_path}");
     let vault = authorize_vault_access(
@@ -551,7 +551,7 @@ pub async fn rotate_secret(
     let previous_version = item.version;
 
     let history_repo = ItemHistoryRepo::new(&state.db);
-    let actor = actor_snapshot(state, identity, Some(device_id)).await;
+    let actor = actor_snapshot(state, identity, identity.device_id).await;
     let history = ItemHistory {
         id: Uuid::now_v7(),
         item_id: item.id,
@@ -563,7 +563,7 @@ pub async fn rotate_secret(
         changed_by_user_id: identity.user_id,
         changed_by_email: actor.email,
         changed_by_name: actor.name,
-        changed_by_device_id: Some(device_id),
+        changed_by_device_id: identity.device_id,
         changed_by_device_name: actor.device_name,
         created_at: Utc::now(),
     };
