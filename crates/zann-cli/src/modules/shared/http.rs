@@ -1,6 +1,6 @@
 use serde_json::Value as JsonValue;
 
-use crate::modules::shared::{SharedItemResponse, VaultListResponse};
+use crate::modules::shared::{SecretResponse, SharedItemResponse, VaultListResponse};
 
 pub(crate) async fn fetch_vaults(
     client: &reqwest::Client,
@@ -70,6 +70,37 @@ pub(crate) async fn update_shared_item(
         anyhow::bail!("Update failed: {status} {body}");
     }
     Ok(response.json::<SharedItemResponse>().await?)
+}
+
+pub(crate) async fn set_secret_value(
+    client: &reqwest::Client,
+    addr: &str,
+    access_token: &str,
+    vault_id: &str,
+    path: &str,
+    value: &str,
+) -> anyhow::Result<SecretResponse> {
+    let url = format!(
+        "{}/v1/vaults/{}/secrets/{}",
+        addr.trim_end_matches('/'),
+        vault_id,
+        path.trim_matches('/')
+    );
+    let body = serde_json::json!({
+        "value": value,
+    });
+    let response = client
+        .put(url)
+        .bearer_auth(access_token)
+        .json(&body)
+        .send()
+        .await?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Secret set failed: {status} {body}");
+    }
+    Ok(response.json::<SecretResponse>().await?)
 }
 
 pub(crate) async fn delete_shared_item(

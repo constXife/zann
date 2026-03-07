@@ -18,6 +18,16 @@ pub struct SharedItemsResponse {
     pub next_cursor: Option<String>,
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct SecretResponse {
+    pub path: String,
+    pub vault_id: String,
+    pub value: String,
+    pub policy: String,
+    pub version: i64,
+    pub created: Option<bool>,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 pub struct SharedItemResponse {
     pub id: String,

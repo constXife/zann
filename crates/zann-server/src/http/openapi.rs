@@ -36,6 +36,7 @@ use crate::domains::items::http::v1::items_models::{
 use crate::domains::members::http::v1::MembersResponse;
 use crate::domains::secrets::http::v1::{
     BatchEnsureRequest, BatchGetRequest, BatchResult, SecretRequest, SecretResponse,
+    SecretSetRequest,
 };
 use crate::domains::sync::http::v1::types::{
     SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncPushResponse, SyncSharedPullRequest,
@@ -167,7 +168,10 @@ fn doc_router() -> ApiRouter<AppState> {
             post(items_history_restore),
         )
         .api_route("/v1/vaults/:vault_id/members", get(members_list))
-        .api_route("/v1/vaults/:vault_id/secrets/*path", get(secrets_get))
+        .api_route(
+            "/v1/vaults/:vault_id/secrets/*path",
+            get(secrets_get).put(secrets_set),
+        )
         .api_route("/v1/vaults/:vault_id/secrets/ensure", post(secrets_ensure))
         .api_route("/v1/vaults/:vault_id/secrets/rotate", post(secrets_rotate))
         .api_route(
@@ -732,6 +736,22 @@ async fn members_list(Path(_vault_id): Path<String>) -> (StatusCode, Json<Member
 
 async fn secrets_get(
     Path((_vault_id, _path)): Path<(String, String)>,
+) -> (StatusCode, Json<SecretResponse>) {
+    not_implemented(SecretResponse {
+        path: String::new(),
+        vault_id: String::new(),
+        value: String::new(),
+        policy: String::new(),
+        meta: None,
+        version: 0,
+        previous_version: None,
+        created: None,
+    })
+}
+
+async fn secrets_set(
+    Path((_vault_id, _path)): Path<(String, String)>,
+    Json(_payload): Json<SecretSetRequest>,
 ) -> (StatusCode, Json<SecretResponse>) {
     not_implemented(SecretResponse {
         path: String::new(),

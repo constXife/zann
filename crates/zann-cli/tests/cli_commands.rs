@@ -185,6 +185,112 @@ fn get_command_returns_payload() {
 }
 
 #[test]
+fn set_password_command_uses_secret_endpoint() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+
+    server
+        .mock("PUT", "/v1/vaults/vault-1/secrets/alpha/one")
+        .match_header("authorization", "Bearer token")
+        .match_body(Matcher::Json(json!({ "value": "secret-value" })))
+        .with_status(200)
+        .with_body(
+            json!({
+                "path": "/alpha/one",
+                "vault_id": "vault-1",
+                "value": "secret-value",
+                "policy": "default",
+                "version": 1,
+                "created": true
+            })
+            .to_string(),
+        )
+        .create();
+
+    base_cmd(home_dir.path())
+        .args([
+            "--addr",
+            &server.url(),
+            "--token",
+            "token",
+            "--insecure",
+            "set",
+            "alpha/one",
+            "password",
+            "secret-value",
+            "--vault",
+            "vault-1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created: /alpha/one field 'password'",
+        ));
+}
+
+#[test]
+fn set_non_password_command_uses_shared_item_flow() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+
+    server
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .match_query(Matcher::UrlEncoded("prefix".into(), "alpha/one".into()))
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(json!({ "items": [] }).to_string())
+        .create();
+
+    server
+        .mock("POST", "/v1/shared/items")
+        .match_header("authorization", "Bearer token")
+        .match_body(Matcher::Json(json!({
+            "vault_id": "vault-1",
+            "path": "alpha/one",
+            "type_id": "secret",
+            "payload": {
+                "v": 1,
+                "typeId": "secret",
+                "fields": {
+                    "username": {
+                        "kind": "text",
+                        "value": "alice"
+                    }
+                }
+            }
+        })))
+        .with_status(200)
+        .with_body(
+            json!({
+                "id": "00000000-0000-0000-0000-000000000010",
+                "path": "alpha/one"
+            })
+            .to_string(),
+        )
+        .create();
+
+    base_cmd(home_dir.path())
+        .args([
+            "--addr",
+            &server.url(),
+            "--token",
+            "token",
+            "--insecure",
+            "set",
+            "alpha/one",
+            "username",
+            "alice",
+            "--vault",
+            "vault-1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "Created: alpha/one with field 'username'",
+        ));
+}
+
+#[test]
 fn materialize_command_writes_files() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
