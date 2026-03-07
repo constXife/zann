@@ -9,7 +9,8 @@ use crate::find_field;
 use crate::modules::shared::{
     create_shared_item, delete_shared_item, fetch_shared_item, fetch_shared_items, flatten_payload,
     format_env_flat, format_kv_flat, payload_or_error, print_list_table, resolve_path_arg,
-    resolve_shared_item_id, resolve_vault_arg, secret_not_found_error, update_shared_item,
+    resolve_shared_item_id, resolve_vault_arg, secret_not_found_error, set_secret_value,
+    update_shared_item,
 };
 use crate::modules::shared::{
     materialize_shared, render_shared_template, SharedListJsonItem, SharedListJsonResponse,
@@ -154,11 +155,30 @@ pub(crate) async fn handle_update(
     Ok(())
 }
 
-pub(crate) async fn handle_set(
-    args: SetArgs,
-    ctx: &mut CommandContext<'_>,
-) -> anyhow::Result<()> {
+pub(crate) async fn handle_set(args: SetArgs, ctx: &mut CommandContext<'_>) -> anyhow::Result<()> {
     let (vault_id, path) = resolve_path_arg(&args.path, args.vault, ctx).await?;
+
+    if args.key == "password" {
+        let secret = set_secret_value(
+            ctx.client,
+            ctx.addr,
+            &ctx.access_token,
+            &vault_id,
+            &path,
+            &args.value,
+        )
+        .await?;
+        let status = if secret.created.unwrap_or(false) {
+            "Created"
+        } else {
+            "Updated"
+        };
+        println!(
+            "{status}: {} field '{}' (version: {})",
+            secret.path, args.key, secret.version
+        );
+        return Ok(());
+    }
 
     let existing = resolve_shared_item_id(
         ctx.client,
@@ -182,14 +202,9 @@ pub(crate) async fn handle_set(
 
     match existing {
         Ok(item_id) => {
-            let item = fetch_shared_item(
-                ctx.client,
-                ctx.addr,
-                &ctx.access_token,
-                &vault_id,
-                item_id,
-            )
-            .await?;
+            let item =
+                fetch_shared_item(ctx.client, ctx.addr, &ctx.access_token, &vault_id, item_id)
+                    .await?;
             let existing_payload = payload_or_error(&item)?;
 
             let mut merged_fields = existing_payload.fields.clone();
@@ -210,7 +225,10 @@ pub(crate) async fn handle_set(
                 serde_json::to_value(payload)?,
             )
             .await?;
-            println!("Updated: {} field '{}' (version: {})", updated.path, args.key, updated.id);
+            println!(
+                "Updated: {} field '{}' (version: {})",
+                updated.path, args.key, updated.id
+            );
         }
         Err(_) => {
             let payload = EncryptedPayload {
@@ -230,7 +248,10 @@ pub(crate) async fn handle_set(
                 serde_json::to_value(payload)?,
             )
             .await?;
-            println!("Created: {} with field '{}' (id: {})", created.path, args.key, created.id);
+            println!(
+                "Created: {} with field '{}' (id: {})",
+                created.path, args.key, created.id
+            );
         }
     }
     Ok(())
