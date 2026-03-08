@@ -75,6 +75,7 @@ pub(super) fn parse_ops(value: &str) -> Result<Vec<&'static str>, String> {
         let normalized = token.to_ascii_lowercase();
         let op = match normalized.as_str() {
             "read" => "read",
+            "write" => "write",
             "read_history" => "read_history",
             "read_previous" => "read_previous",
             "history_read" => "read_history",
@@ -88,6 +89,23 @@ pub(super) fn parse_ops(value: &str) -> Result<Vec<&'static str>, String> {
         return Err("invalid ops".to_string());
     }
     Ok(ops)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_ops;
+
+    #[test]
+    fn parse_ops_accepts_write() {
+        let ops = parse_ops("read,write").expect("ops");
+        assert_eq!(ops, vec!["read", "write"]);
+    }
+
+    #[test]
+    fn parse_ops_rejects_unknown_values() {
+        let err = parse_ops("read,rotate").expect_err("invalid ops");
+        assert_eq!(err, "invalid ops: rotate");
+    }
 }
 
 pub(super) fn parse_ttl(value: &str) -> Result<ChronoDuration, String> {

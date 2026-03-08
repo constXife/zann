@@ -90,7 +90,7 @@ pub struct EnsureTokenArgs {
     #[arg(
         value_name = "ops",
         default_value = "read",
-        help = "Comma-separated ops (read, read_history, read_previous)"
+        help = "Comma-separated ops (read, write, read_history, read_previous)"
     )]
     pub ops: String,
     #[arg(long)]
@@ -849,6 +849,7 @@ fn parse_ops(value: &str) -> Result<Vec<&'static str>, String> {
         }
         let op = match normalized.as_str() {
             "read" => "read",
+            "write" => "write",
             "read_history" => "read_history",
             "read_previous" => "read_previous",
             "history_read" => "read_history",
@@ -1107,9 +1108,15 @@ mod tests {
     }
 
     #[test]
+    fn parse_ops_accepts_write() {
+        let ops = parse_ops("read,write").expect("ops");
+        assert_eq!(ops, vec!["read", "write"]);
+    }
+
+    #[test]
     fn parse_ops_rejects_unknown_values() {
-        let err = parse_ops("read,write").expect_err("invalid ops");
-        assert_eq!(err, "invalid_ops:write");
+        let err = parse_ops("read,rotate").expect_err("invalid ops");
+        assert_eq!(err, "invalid_ops:rotate");
     }
 
     #[test]

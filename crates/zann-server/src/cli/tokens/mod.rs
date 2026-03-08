@@ -36,7 +36,7 @@ pub struct TokenCreateArgs {
     #[arg(
         value_name = "ops",
         default_value = "read",
-        help = "Comma-separated ops (read, read_history, read_previous)"
+        help = "Comma-separated ops (read, write, read_history, read_previous)"
     )]
     pub ops: String,
     #[arg(long)]
