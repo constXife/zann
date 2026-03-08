@@ -38,12 +38,12 @@ pub(crate) async fn materialize_shared(
                 fs::create_dir_all(parent)?;
             }
             let contents = if let Some(field) = field {
-                let value = crate::find_field(payload, field).ok_or_else(|| {
+                let value = crate::find_field(&payload, field).ok_or_else(|| {
                     anyhow::anyhow!("Field '{}' not found in {}", field, item.path)
                 })?;
                 value.value.clone()
             } else {
-                serde_json::to_string_pretty(payload)?
+                serde_json::to_string_pretty(&payload)?
             };
             if skip_unchanged && is_same_contents(&target, &contents)? {
                 continue;
@@ -122,9 +122,6 @@ fn write_atomic(path: &Path, contents: String) -> anyhow::Result<()> {
 
 pub(crate) fn normalize_output_path(path: &str) -> anyhow::Result<PathBuf> {
     let trimmed = path.trim();
-    if trimmed.starts_with('/') {
-        return Err(anyhow::anyhow!("invalid path component: {}", path));
-    }
     let trimmed = trimmed.trim_matches('/');
     let rel = Path::new(trimmed);
     for component in rel.components() {
@@ -156,7 +153,8 @@ mod tests {
     fn normalize_output_path_rejects_traversal() {
         assert!(normalize_output_path("../etc").is_err());
         assert!(normalize_output_path("foo/../bar").is_err());
-        assert!(normalize_output_path("/etc").is_err());
+        let path = normalize_output_path("/etc").expect("leading slash normalized");
+        assert_eq!(path, PathBuf::from("etc"));
     }
 
     #[tokio::test]

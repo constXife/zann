@@ -732,6 +732,53 @@ async fn service_account_access_token_can_set_secret_without_device_id() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn secret_created_via_secrets_endpoint_is_visible_via_shared_items_api() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("shared-secrets-contract@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app
+        .create_shared_vault(token, "shared-secrets-contract")
+        .await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+
+    let (status, created) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{}/secrets/alpha/one", vault_id),
+            Some(token),
+            json!({ "value": "pw-1" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret set failed: {:?}", created);
+    assert_eq!(created["path"], "/alpha/one");
+
+    let (status, list) = app
+        .get_json(
+            &format!("/v1/shared/items?vault_id={}&prefix=alpha", vault_id),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "shared list failed: {:?}", list);
+    let items = list["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1, "expected exactly one shared item");
+    assert_eq!(items[0]["path"], "/alpha/one");
+    assert_eq!(items[0]["payload"]["value"], "pw-1");
+    assert_eq!(items[0]["payload"]["policy"], "default");
+
+    let item_id = items[0]["id"].as_str().expect("item id");
+    let (status, detail) = app
+        .get_json(&format!("/v1/shared/items/{}", item_id), Some(token))
+        .await;
+    assert_eq!(status, StatusCode::OK, "shared detail failed: {:?}", detail);
+    assert_eq!(detail["path"], "/alpha/one");
+    assert_eq!(detail["payload"]["value"], "pw-1");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn service_account_token_allows_shared_access_for_system_owner() {
     let app = TestApp::new_with_smk().await;
     let email = "shared-system@example.com";

@@ -38,9 +38,10 @@ pub(crate) async fn handle_list(
                 .items
                 .iter()
                 .map(|item| {
+                    let payload = payload_or_error(item)?;
                     Ok(SharedListJsonItem {
                         path: item.path.clone(),
-                        fields: flatten_payload(payload_or_error(item)?),
+                        fields: flatten_payload(&payload),
                     })
                 })
                 .collect::<anyhow::Result<Vec<_>>>()?;
@@ -74,7 +75,7 @@ pub(crate) async fn handle_get(args: GetArgs, ctx: &mut CommandContext<'_>) -> a
     let payload = payload_or_error(&item)?;
 
     if let Some(key) = args.key.as_deref() {
-        let value = find_field(payload, key)
+        let value = find_field(&payload, key)
             .map(|item| item.value.clone())
             .ok_or_else(|| anyhow::anyhow!("field '{}' not found", key))?;
         print!("{value}");
@@ -84,16 +85,16 @@ pub(crate) async fn handle_get(args: GetArgs, ctx: &mut CommandContext<'_>) -> a
 
     match args.format {
         GetFormat::Json => {
-            let output = flatten_payload(payload);
+            let output = flatten_payload(&payload);
             println!("{}", serde_json::to_string_pretty(&output)?);
         }
         GetFormat::Kv => {
-            let output = format_kv_flat(payload);
+            let output = format_kv_flat(&payload);
             print!("{output}");
             io::stdout().flush()?;
         }
         GetFormat::Env => {
-            let output = format_env_flat(payload);
+            let output = format_env_flat(&payload);
             print!("{output}");
             io::stdout().flush()?;
         }

@@ -114,7 +114,11 @@ async fn resolve_shared_item_id_by_path(
     let item = response
         .items
         .iter()
-        .find(|item| item.path == path)
+        .find(|item| normalize_item_path(&item.path) == normalize_item_path(path))
         .ok_or_else(|| anyhow::anyhow!("shared item not found: {}", path))?;
     Ok(Uuid::parse_str(&item.id)?)
+}
+
+fn normalize_item_path(path: &str) -> String {
+    format!("/{}", path.trim().trim_matches('/'))
 }
