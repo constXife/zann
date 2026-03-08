@@ -159,7 +159,7 @@ pub(crate) async fn handle_set(args: SetArgs, ctx: &mut CommandContext<'_>) -> a
     let (vault_id, path) = resolve_path_arg(&args.path, args.vault, ctx).await?;
 
     if args.key == "password" {
-        let secret = set_secret_value(
+        set_secret_value(
             ctx.client,
             ctx.addr,
             &ctx.access_token,
@@ -168,15 +168,7 @@ pub(crate) async fn handle_set(args: SetArgs, ctx: &mut CommandContext<'_>) -> a
             &args.value,
         )
         .await?;
-        let status = if secret.created.unwrap_or(false) {
-            "Created"
-        } else {
-            "Updated"
-        };
-        println!(
-            "{status}: {} field '{}' (version: {})",
-            secret.path, args.key, secret.version
-        );
+        println!("Updated: {} field '{}'", path, args.key);
         return Ok(());
     }
 
