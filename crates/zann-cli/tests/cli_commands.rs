@@ -25,6 +25,13 @@ fn shared_payload(value: &str) -> serde_json::Value {
     })
 }
 
+fn legacy_secret_payload(value: &str) -> serde_json::Value {
+    json!({
+        "value": value,
+        "policy": "default"
+    })
+}
+
 #[test]
 fn server_info_command_fetches_info() {
     let home_dir = tempdir().expect("tempdir");
@@ -185,6 +192,58 @@ fn get_command_returns_payload() {
 }
 
 #[test]
+fn get_command_supports_legacy_secret_payload_shape() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+    let item_id = "00000000-0000-0000-0000-000000000001";
+
+    let list_body = json!({
+        "items": [{
+            "id": item_id,
+            "path": "/alpha/one",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
+    });
+    server
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .match_query(Matcher::UrlEncoded("prefix".into(), "alpha/one".into()))
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(list_body.to_string())
+        .create();
+
+    let item_body = json!({
+        "id": item_id,
+        "path": "/alpha/one",
+        "payload": legacy_secret_payload("secret")
+    });
+    let item_path = format!("/v1/vaults/vault-1/items/{item_id}");
+    server
+        .mock("GET", item_path.as_str())
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(item_body.to_string())
+        .create();
+
+    base_cmd(home_dir.path())
+        .args([
+            "--addr",
+            &server.url(),
+            "--token",
+            "token",
+            "--insecure",
+            "get",
+            "alpha/one",
+            "password",
+            "--vault",
+            "vault-1",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("secret"));
+}
+
+#[test]
 fn set_password_command_uses_secret_endpoint() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
@@ -226,6 +285,60 @@ fn set_password_command_uses_secret_endpoint() {
         .stdout(predicate::str::contains(
             "Updated: alpha/one field 'password'",
         ));
+}
+
+#[test]
+fn list_command_supports_legacy_secret_payload_shape() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+
+    let list_body = json!({
+        "items": [{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "path": "/alpha/one",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
+    });
+    server
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(list_body.to_string())
+        .create();
+
+    let item_body = json!({
+        "id": "00000000-0000-0000-0000-000000000001",
+        "path": "/alpha/one",
+        "payload": legacy_secret_payload("secret")
+    });
+    server
+        .mock(
+            "GET",
+            "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001",
+        )
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(item_body.to_string())
+        .create();
+
+    base_cmd(home_dir.path())
+        .args([
+            "--addr",
+            &server.url(),
+            "--token",
+            "token",
+            "--insecure",
+            "list",
+            "--vault",
+            "vault-1",
+            "--format",
+            "json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("/alpha/one"))
+        .stdout(predicate::str::contains("\"password\""))
+        .stdout(predicate::str::contains("secret"));
 }
 
 #[test]
@@ -350,6 +463,65 @@ fn materialize_command_writes_files() {
 }
 
 #[test]
+fn materialize_command_supports_legacy_secret_payload_shape() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+
+    let list_body = json!({
+        "items": [{
+            "id": "00000000-0000-0000-0000-000000000001",
+            "path": "/alpha/one",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
+    });
+    server
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(list_body.to_string())
+        .create();
+
+    let item_body = json!({
+        "id": "00000000-0000-0000-0000-000000000001",
+        "path": "/alpha/one",
+        "payload": legacy_secret_payload("secret")
+    });
+    server
+        .mock(
+            "GET",
+            "/v1/vaults/vault-1/items/00000000-0000-0000-0000-000000000001",
+        )
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(item_body.to_string())
+        .create();
+
+    let out_dir = tempdir().expect("tempdir");
+
+    base_cmd(home_dir.path())
+        .args([
+            "--addr",
+            &server.url(),
+            "--token",
+            "token",
+            "--insecure",
+            "materialize",
+            "--vault",
+            "vault-1",
+            "--out",
+            out_dir.path().to_str().expect("path"),
+            "--field",
+            "password",
+        ])
+        .assert()
+        .success();
+
+    let target = out_dir.path().join("alpha/one");
+    let contents = fs::read_to_string(target).expect("secret");
+    assert_eq!(contents, "secret");
+}
+
+#[test]
 fn render_command_renders_template() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
@@ -374,6 +546,68 @@ fn render_command_renders_template() {
         "id": item_id,
         "path": "alpha/one",
         "payload": shared_payload("secret")
+    });
+    let item_path = format!("/v1/vaults/vault-1/items/{item_id}");
+    server
+        .mock("GET", item_path.as_str())
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(item_body.to_string())
+        .create();
+
+    let template_dir = tempdir().expect("tempdir");
+    let template_path = template_dir.path().join("template.txt");
+    fs::write(&template_path, "db={{ alpha/one#password }}").expect("template");
+
+    let out_path = template_dir.path().join("out.txt");
+
+    base_cmd(home_dir.path())
+        .args([
+            "--addr",
+            &server.url(),
+            "--token",
+            "token",
+            "--insecure",
+            "render",
+            "--vault",
+            "vault-1",
+            "--template",
+            template_path.to_str().expect("template"),
+            "--out",
+            out_path.to_str().expect("out"),
+        ])
+        .assert()
+        .success();
+
+    let contents = fs::read_to_string(out_path).expect("output");
+    assert_eq!(contents, "db=secret");
+}
+
+#[test]
+fn render_command_supports_legacy_secret_payload_shape() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+    let item_id = "00000000-0000-0000-0000-000000000001";
+
+    let list_body = json!({
+        "items": [{
+            "id": item_id,
+            "path": "/alpha/one",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }]
+    });
+    server
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .match_query(Matcher::UrlEncoded("prefix".into(), "alpha/one".into()))
+        .match_header("authorization", "Bearer token")
+        .with_status(200)
+        .with_body(list_body.to_string())
+        .create();
+
+    let item_body = json!({
+        "id": item_id,
+        "path": "/alpha/one",
+        "payload": legacy_secret_payload("secret")
     });
     let item_path = format!("/v1/vaults/vault-1/items/{item_id}");
     server

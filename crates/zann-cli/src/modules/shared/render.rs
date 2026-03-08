@@ -88,7 +88,7 @@ async fn resolve_template_placeholder(
         .map_err(|_| secret_not_found_error(&path))?;
         let item =
             fetch_shared_item(ctx.client, ctx.addr, &ctx.access_token, &vault_id, item_id).await?;
-        let payload = payload_or_error(&item)?.clone();
+        let payload = payload_or_error(&item)?;
         cache.insert((vault_id.clone(), path.clone()), payload);
         cache
             .get(&(vault_id.clone(), path.clone()))
