@@ -224,7 +224,7 @@ fn set_password_command_uses_secret_endpoint() {
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "Created: /alpha/one field 'password'",
+            "Updated: alpha/one field 'password'",
         ));
 }
 

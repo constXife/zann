@@ -4,17 +4,25 @@ use std::collections::HashMap;
 use uuid::Uuid;
 use zann_core::{Change, ChangeOp, ChangeType, Identity, Item, ItemHistory, SyncStatus, Vault};
 use zann_crypto::vault_crypto as core_crypto;
-use zann_db::repo::{ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, UserRepo, VaultRepo};
+use zann_db::repo::{
+    ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, ServiceAccountRepo, UserRepo, VaultRepo,
+};
 
 use crate::app::AppState;
-use crate::domains::access_control::http::{find_vault, vault_role_allows, VaultScope};
+use crate::domains::access_control::http::{
+    find_vault, parse_scope, vault_role_allows, ScopeRule, ScopeTarget, VaultScope,
+};
 use crate::domains::access_control::policies::PolicyDecision;
+use crate::domains::auth::helpers::build_device;
 use crate::domains::errors::ServiceError;
 use crate::domains::items::service::basename_from_path;
 use crate::domains::secrets::policies::{generate_secret, PasswordPolicy};
 use crate::infra::metrics;
 
 pub type SecretError = ServiceError;
+
+const SERVICE_ACCOUNT_DEVICE_NAME: &str = "Service Account";
+const SERVICE_ACCOUNT_DEVICE_FINGERPRINT: &str = "service-account";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretPayload {
@@ -54,6 +62,7 @@ pub async fn get_secret(
         vault_id,
         "read",
         &resource,
+        &normalized_path,
         VaultScope::Items,
     )
     .await?;
@@ -104,9 +113,7 @@ pub async fn ensure_secret(
     policy_name: Option<&str>,
     meta: Option<HashMap<String, String>>,
 ) -> Result<(SecretRecord, bool), SecretError> {
-    // Service-account identities do not carry a device id. Use the nil UUID for
-    // item/change records to match the existing shared-items write path.
-    let device_id = identity.device_id.unwrap_or(Uuid::nil());
+    let device_id = effective_device_id(state, identity).await?;
     let normalized_path = normalize_secret_path(path)?;
     let resource = format!("vaults/{vault_id}/secrets/{normalized_path}");
     let vault = authorize_vault_access(
@@ -115,6 +122,7 @@ pub async fn ensure_secret(
         vault_id,
         "write",
         &resource,
+        &normalized_path,
         VaultScope::Items,
     )
     .await?;
@@ -271,9 +279,7 @@ pub async fn set_secret(
     policy_name: Option<&str>,
     meta: Option<HashMap<String, String>>,
 ) -> Result<(SecretRecord, bool), SecretError> {
-    // Service-account identities do not carry a device id. Use the nil UUID for
-    // item/change records to match the existing shared-items write path.
-    let device_id = identity.device_id.unwrap_or(Uuid::nil());
+    let device_id = effective_device_id(state, identity).await?;
     let normalized_path = normalize_secret_path(path)?;
     let resource = format!("vaults/{vault_id}/secrets/{normalized_path}");
     let vault = authorize_vault_access(
@@ -282,6 +288,7 @@ pub async fn set_secret(
         vault_id,
         "write",
         &resource,
+        &normalized_path,
         VaultScope::Items,
     )
     .await?;
@@ -504,9 +511,7 @@ pub async fn rotate_secret(
     policy_name: Option<&str>,
     meta: Option<HashMap<String, String>>,
 ) -> Result<(SecretRecord, i64), SecretError> {
-    // Service-account identities do not carry a device id. Use the nil UUID for
-    // item/change records to match the existing shared-items write path.
-    let device_id = identity.device_id.unwrap_or(Uuid::nil());
+    let device_id = effective_device_id(state, identity).await?;
     let normalized_path = normalize_secret_path(path)?;
     let resource = format!("vaults/{vault_id}/secrets/{normalized_path}");
     let vault = authorize_vault_access(
@@ -515,6 +520,7 @@ pub async fn rotate_secret(
         vault_id,
         "write",
         &resource,
+        &normalized_path,
         VaultScope::Items,
     )
     .await?;
@@ -665,6 +671,55 @@ async fn actor_snapshot(
     }
 }
 
+async fn effective_device_id(state: &AppState, identity: &Identity) -> Result<Uuid, SecretError> {
+    if let Some(device_id) = identity.device_id {
+        return Ok(device_id);
+    }
+
+    if identity.service_account_id.is_none() {
+        return Err(SecretError::DeviceRequired);
+    }
+
+    ensure_service_account_device(state, identity.user_id).await
+}
+
+async fn ensure_service_account_device(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<Uuid, SecretError> {
+    let repo = DeviceRepo::new(&state.db);
+    let existing = repo
+        .list_by_user(user_id, 1024, 0, "desc")
+        .await
+        .map_err(|_| SecretError::DbError)?
+        .into_iter()
+        .find(|device| {
+            device.revoked_at.is_none() && device.fingerprint == SERVICE_ACCOUNT_DEVICE_FINGERPRINT
+        });
+    if let Some(device) = existing {
+        return Ok(device.id);
+    }
+
+    let now = Utc::now();
+    let device = build_device(
+        user_id,
+        Some(SERVICE_ACCOUNT_DEVICE_NAME.to_string()),
+        Some("server".to_string()),
+        Some(SERVICE_ACCOUNT_DEVICE_FINGERPRINT.to_string()),
+        Some("server".to_string()),
+        None,
+        None,
+        SERVICE_ACCOUNT_DEVICE_NAME,
+        "server",
+        now,
+    );
+    repo.create(&device).await.map_err(|err| {
+        tracing::error!(event = "service_account_device_create_failed", error = %err);
+        SecretError::DbError
+    })?;
+    Ok(device.id)
+}
+
 fn resolve_policy_name(state: &AppState, policy_name: Option<&str>) -> String {
     policy_name
         .map(str::to_string)
@@ -760,6 +815,7 @@ async fn authorize_vault_access(
     vault_id: &str,
     action: &str,
     resource: &str,
+    path: &str,
     scope: VaultScope,
 ) -> Result<Vault, SecretError> {
     let policies = state.policy_store.get();
@@ -787,6 +843,21 @@ async fn authorize_vault_access(
             return Err(SecretError::ForbiddenNoBody);
         }
         PolicyDecision::NoMatch => {
+            if let Some(service_account_id) = identity.service_account_id {
+                if service_account_allows_path(state, service_account_id, &vault, action, path)
+                    .await
+                {
+                    return Ok(vault);
+                }
+                metrics::forbidden_access(resource);
+                tracing::warn!(
+                    event = "forbidden",
+                    action = action,
+                    resource = %resource,
+                    "Access denied"
+                );
+                return Err(SecretError::ForbiddenNoBody);
+            }
             match vault_role_allows(state, identity, vault.id, action, scope).await {
                 Ok(true) => {}
                 Ok(false) => {
@@ -808,4 +879,99 @@ async fn authorize_vault_access(
     }
 
     Ok(vault)
+}
+
+async fn service_account_scopes(state: &AppState, service_account_id: Uuid) -> Option<Vec<String>> {
+    let repo = ServiceAccountRepo::new(&state.db);
+    repo.get_by_id(service_account_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|account| account.scopes.0)
+}
+
+async fn service_account_allows_path(
+    state: &AppState,
+    service_account_id: Uuid,
+    vault: &Vault,
+    action: &str,
+    path: &str,
+) -> bool {
+    let Some(scopes) = service_account_scopes(state, service_account_id).await else {
+        return false;
+    };
+    scopes.iter().any(|scope| {
+        let Some(rule) = parse_scope(scope) else {
+            return false;
+        };
+        scope_allows_action(&rule.permission, action) && scope_matches_path(&rule, vault, path)
+    })
+}
+
+fn scope_allows_action(permission: &str, action: &str) -> bool {
+    match action {
+        "read" | "list" => permission == "read",
+        _ => permission == action,
+    }
+}
+
+fn scope_matches_path(rule: &ScopeRule, vault: &Vault, path: &str) -> bool {
+    if !vault_matches_scope(vault, &rule.target) {
+        return false;
+    }
+    if let Some(prefix) = rule.prefix.as_deref() {
+        return prefix_matches_path(prefix, path);
+    }
+    true
+}
+
+fn vault_matches_scope(vault: &Vault, target: &ScopeTarget) -> bool {
+    match target {
+        ScopeTarget::Vault(scope) => vault.slug == *scope || vault.id.to_string() == *scope,
+        ScopeTarget::Tag(tag) => vault
+            .tags
+            .as_ref()
+            .is_some_and(|tags| tags.0.iter().any(|value| value == tag)),
+        ScopeTarget::Pattern(pattern) => matches_pattern(pattern, &vault.slug),
+    }
+}
+
+fn prefix_matches_path(prefix: &str, path: &str) -> bool {
+    let prefix = prefix.trim_matches('/');
+    let path = path.trim_matches('/');
+    path == prefix || path.starts_with(&format!("{prefix}/"))
+}
+
+fn matches_pattern(pattern: &str, value: &str) -> bool {
+    if pattern == "*" || pattern == "**" {
+        return true;
+    }
+
+    let starts_with_wildcard = pattern.starts_with('*');
+    let ends_with_wildcard = pattern.ends_with('*');
+    let parts: Vec<&str> = pattern.split('*').filter(|part| !part.is_empty()).collect();
+
+    if parts.is_empty() {
+        return true;
+    }
+
+    let mut index = 0;
+    for (i, part) in parts.iter().enumerate() {
+        if let Some(pos) = value[index..].find(part) {
+            if i == 0 && !starts_with_wildcard && pos != 0 {
+                return false;
+            }
+            index += pos + part.len();
+        } else {
+            return false;
+        }
+    }
+
+    if !ends_with_wildcard {
+        if let Some(last) = parts.last() {
+            return value.ends_with(last);
+        }
+    }
+
+    true
 }
