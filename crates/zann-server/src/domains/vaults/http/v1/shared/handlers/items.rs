@@ -17,9 +17,9 @@ use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
 use crate::infra::metrics;
 
 use super::super::helpers::{
-    actor_snapshot, cursor_allows, encode_cursor, evaluate_history_policy, is_shared_server_vault,
-    normalize_path, parse_cursor, prefix_match, service_account_allows_path,
-    service_account_allows_prefix,
+    actor_snapshot, cursor_allows, effective_device_id, encode_cursor, evaluate_history_policy,
+    is_shared_server_vault, normalize_path, parse_cursor, prefix_match,
+    service_account_allows_path, service_account_allows_prefix,
 };
 use super::super::types::{
     CreateSharedItemRequest, ErrorResponse, HistoryListQuery, ItemHistoryDetailResponse,
@@ -676,32 +676,6 @@ pub(crate) async fn create_shared_item(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    // Authorization
-    match policies.evaluate(&identity, "write", resource) {
-        crate::domains::access_control::policies::PolicyDecision::Allow => {}
-        crate::domains::access_control::policies::PolicyDecision::Deny => {
-            metrics::forbidden_access(resource);
-            return StatusCode::FORBIDDEN.into_response();
-        }
-        crate::domains::access_control::policies::PolicyDecision::NoMatch => {
-            match vault_role_allows(&state, &identity, vault.id, "write", VaultScope::Items).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    metrics::forbidden_access(resource);
-                    return StatusCode::FORBIDDEN.into_response();
-                }
-                Err(_) => {
-                    tracing::error!(event = "shared_item_create_failed", "DB error");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse { error: "db_error" }),
-                    )
-                        .into_response();
-                }
-            }
-        }
-    }
-
     let path = normalize_path(&req.path);
     if path.is_empty() {
         return (
@@ -711,6 +685,41 @@ pub(crate) async fn create_shared_item(
             }),
         )
             .into_response();
+    }
+
+    // Authorization
+    if let Some(service_account_id) = identity.service_account_id {
+        if !service_account_allows_path(&state, service_account_id, &vault, "write", &path).await {
+            metrics::forbidden_access(resource);
+            return StatusCode::FORBIDDEN.into_response();
+        }
+    } else {
+        match policies.evaluate(&identity, "write", resource) {
+            crate::domains::access_control::policies::PolicyDecision::Allow => {}
+            crate::domains::access_control::policies::PolicyDecision::Deny => {
+                metrics::forbidden_access(resource);
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            crate::domains::access_control::policies::PolicyDecision::NoMatch => {
+                match vault_role_allows(&state, &identity, vault.id, "write", VaultScope::Items)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        metrics::forbidden_access(resource);
+                        return StatusCode::FORBIDDEN.into_response();
+                    }
+                    Err(_) => {
+                        tracing::error!(event = "shared_item_create_failed", "DB error");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ErrorResponse { error: "db_error" }),
+                        )
+                            .into_response();
+                    }
+                }
+            }
+        }
     }
     let type_id = req.type_id.trim();
     if type_id.is_empty() {
@@ -794,7 +803,26 @@ pub(crate) async fn create_shared_item(
         })
         .filter(|tags| !tags.is_empty());
 
-    let device_id = identity.device_id.unwrap_or(Uuid::nil());
+    let device_id = match effective_device_id(&state, &identity).await {
+        Ok(device_id) => device_id,
+        Err("device_required") => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "device_required",
+                }),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            tracing::error!(event = "shared_item_create_failed", "Device lookup failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
     let now = Utc::now();
     let name = basename_from_path(&path);
 
@@ -919,26 +947,55 @@ pub(crate) async fn update_shared_item(
     }
 
     // Authorization
-    match policies.evaluate(&identity, "write", resource) {
-        crate::domains::access_control::policies::PolicyDecision::Allow => {}
-        crate::domains::access_control::policies::PolicyDecision::Deny => {
+    if let Some(service_account_id) = identity.service_account_id {
+        let next_path = match req.path.as_deref() {
+            Some(path) => {
+                let normalized = normalize_path(path);
+                if normalized.is_empty() {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: "invalid_path",
+                        }),
+                    )
+                        .into_response();
+                }
+                normalized
+            }
+            None => item.path.clone(),
+        };
+        if !service_account_allows_path(&state, service_account_id, &vault, "write", &item.path)
+            .await
+            || !service_account_allows_path(&state, service_account_id, &vault, "write", &next_path)
+                .await
+        {
             metrics::forbidden_access(resource);
             return StatusCode::FORBIDDEN.into_response();
         }
-        crate::domains::access_control::policies::PolicyDecision::NoMatch => {
-            match vault_role_allows(&state, &identity, vault.id, "write", VaultScope::Items).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    metrics::forbidden_access(resource);
-                    return StatusCode::FORBIDDEN.into_response();
-                }
-                Err(_) => {
-                    tracing::error!(event = "shared_item_update_failed", "DB error");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse { error: "db_error" }),
-                    )
-                        .into_response();
+    } else {
+        match policies.evaluate(&identity, "write", resource) {
+            crate::domains::access_control::policies::PolicyDecision::Allow => {}
+            crate::domains::access_control::policies::PolicyDecision::Deny => {
+                metrics::forbidden_access(resource);
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            crate::domains::access_control::policies::PolicyDecision::NoMatch => {
+                match vault_role_allows(&state, &identity, vault.id, "write", VaultScope::Items)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        metrics::forbidden_access(resource);
+                        return StatusCode::FORBIDDEN.into_response();
+                    }
+                    Err(_) => {
+                        tracing::error!(event = "shared_item_update_failed", "DB error");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ErrorResponse { error: "db_error" }),
+                        )
+                            .into_response();
+                    }
                 }
             }
         }
@@ -1090,7 +1147,26 @@ pub(crate) async fn update_shared_item(
         }
     }
 
-    let device_id = identity.device_id.unwrap_or(Uuid::nil());
+    let device_id = match effective_device_id(&state, &identity).await {
+        Ok(device_id) => device_id,
+        Err("device_required") => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "device_required",
+                }),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            tracing::error!(event = "shared_item_update_failed", "Device lookup failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
     item.version += 1;
     item.device_id = device_id;
     item.updated_at = Utc::now();
@@ -1212,32 +1288,62 @@ pub(crate) async fn delete_shared_item(
     }
 
     // Authorization
-    match policies.evaluate(&identity, "write", resource) {
-        crate::domains::access_control::policies::PolicyDecision::Allow => {}
-        crate::domains::access_control::policies::PolicyDecision::Deny => {
+    if let Some(service_account_id) = identity.service_account_id {
+        if !service_account_allows_path(&state, service_account_id, &vault, "write", &item.path)
+            .await
+        {
             metrics::forbidden_access(resource);
             return StatusCode::FORBIDDEN.into_response();
         }
-        crate::domains::access_control::policies::PolicyDecision::NoMatch => {
-            match vault_role_allows(&state, &identity, vault.id, "write", VaultScope::Items).await {
-                Ok(true) => {}
-                Ok(false) => {
-                    metrics::forbidden_access(resource);
-                    return StatusCode::FORBIDDEN.into_response();
-                }
-                Err(_) => {
-                    tracing::error!(event = "shared_item_delete_failed", "DB error");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse { error: "db_error" }),
-                    )
-                        .into_response();
+    } else {
+        match policies.evaluate(&identity, "write", resource) {
+            crate::domains::access_control::policies::PolicyDecision::Allow => {}
+            crate::domains::access_control::policies::PolicyDecision::Deny => {
+                metrics::forbidden_access(resource);
+                return StatusCode::FORBIDDEN.into_response();
+            }
+            crate::domains::access_control::policies::PolicyDecision::NoMatch => {
+                match vault_role_allows(&state, &identity, vault.id, "write", VaultScope::Items)
+                    .await
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        metrics::forbidden_access(resource);
+                        return StatusCode::FORBIDDEN.into_response();
+                    }
+                    Err(_) => {
+                        tracing::error!(event = "shared_item_delete_failed", "DB error");
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ErrorResponse { error: "db_error" }),
+                        )
+                            .into_response();
+                    }
                 }
             }
         }
     }
 
-    let device_id = identity.device_id.unwrap_or(Uuid::nil());
+    let device_id = match effective_device_id(&state, &identity).await {
+        Ok(device_id) => device_id,
+        Err("device_required") => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: "device_required",
+                }),
+            )
+                .into_response();
+        }
+        Err(_) => {
+            tracing::error!(event = "shared_item_delete_failed", "Device lookup failed");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
     let now = Utc::now();
 
     // History entry

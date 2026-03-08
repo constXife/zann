@@ -10,6 +10,10 @@ use zann_db::repo::{DeviceRepo, ServiceAccountRepo, UserRepo};
 use super::{ROTATION_STATE_ROTATING, ROTATION_STATE_STALE};
 use crate::app::AppState;
 use crate::domains::access_control::http::{parse_scope, ScopeRule, ScopeTarget};
+use crate::domains::auth::helpers::build_device;
+
+const SERVICE_ACCOUNT_DEVICE_NAME: &str = "Service Account";
+const SERVICE_ACCOUNT_DEVICE_FINGERPRINT: &str = "service-account";
 
 pub(super) struct RotationRow {
     pub(super) state: Option<String>,
@@ -240,8 +244,58 @@ pub(super) async fn service_account_scopes(
         .map(|account| account.scopes.0)
 }
 
+pub(super) async fn effective_device_id(
+    state: &AppState,
+    identity: &Identity,
+) -> Result<Uuid, &'static str> {
+    if let Some(device_id) = identity.device_id {
+        return Ok(device_id);
+    }
+
+    if identity.service_account_id.is_none() {
+        return Err("device_required");
+    }
+
+    ensure_service_account_device(state, identity.user_id).await
+}
+
+async fn ensure_service_account_device(
+    state: &AppState,
+    user_id: Uuid,
+) -> Result<Uuid, &'static str> {
+    let repo = DeviceRepo::new(&state.db);
+    let existing = repo
+        .list_by_user(user_id, 1024, 0, "desc")
+        .await
+        .map_err(|_| "db_error")?
+        .into_iter()
+        .find(|device| {
+            device.revoked_at.is_none() && device.fingerprint == SERVICE_ACCOUNT_DEVICE_FINGERPRINT
+        });
+    if let Some(device) = existing {
+        return Ok(device.id);
+    }
+
+    let now = Utc::now();
+    let device = build_device(
+        user_id,
+        Some(SERVICE_ACCOUNT_DEVICE_NAME.to_string()),
+        Some("server".to_string()),
+        Some(SERVICE_ACCOUNT_DEVICE_FINGERPRINT.to_string()),
+        Some("server".to_string()),
+        None,
+        None,
+        SERVICE_ACCOUNT_DEVICE_NAME,
+        "server",
+        now,
+    );
+    repo.create(&device).await.map_err(|_| "db_error")?;
+    Ok(device.id)
+}
+
 pub(super) fn scope_allows_action(permission: &str, action: &str) -> bool {
     match action {
+        "read" | "list" => permission == "read",
         "read_history" => {
             matches!(
                 permission,
@@ -249,7 +303,7 @@ pub(super) fn scope_allows_action(permission: &str, action: &str) -> bool {
             )
         }
         "read_previous" => permission == "read_previous",
-        _ => permission == "read",
+        _ => permission == action,
     }
 }
 
