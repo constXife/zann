@@ -103,3 +103,59 @@ async fn oidc_rejects_disabled_user() {
         .expect_err("oidc should reject disabled users");
     assert_eq!(error, "user_disabled");
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn oidc_links_existing_user_by_email() {
+    let _guard = support::test_guard().await;
+    let pool = support::setup_shared_db().await;
+    support::reset_db(&pool).await;
+    let mut config = ServerConfig::default();
+    support::tune_test_kdf(&mut config);
+    let state = build_state(pool.clone(), config).await;
+
+    let now = Utc::now();
+    let user = User {
+        id: uuid::Uuid::now_v7(),
+        email: "oidc-existing@example.com".to_string(),
+        full_name: None,
+        password_hash: Some("password-hash".to_string()),
+        kdf_salt: random_kdf_salt(),
+        kdf_algorithm: state.config.auth.kdf.algorithm.clone(),
+        kdf_iterations: i64::from(state.config.auth.kdf.iterations),
+        kdf_memory_kb: i64::from(state.config.auth.kdf.memory_kb),
+        kdf_parallelism: i64::from(state.config.auth.kdf.parallelism),
+        recovery_key_hash: None,
+        status: UserStatus::Active,
+        deleted_at: None,
+        deleted_by_user_id: None,
+        deleted_by_device_id: None,
+        row_version: 1,
+        created_at: now,
+        updated_at: now,
+        last_login_at: None,
+    };
+    UserRepo::new(&state.db)
+        .create(&user)
+        .await
+        .expect("create existing user");
+
+    let token = OidcToken {
+        issuer: "https://issuer.example.com".to_string(),
+        subject: "subject-existing-user".to_string(),
+        email: Some(user.email.clone()),
+        claims: Map::new(),
+    };
+
+    let identity = identity_from_oidc(&state, token)
+        .await
+        .expect("oidc should link existing user");
+    assert_eq!(identity.user_id, user.id);
+
+    let oidc_identity = OidcIdentityRepo::new(&state.db)
+        .get_by_issuer_subject("https://issuer.example.com", "subject-existing-user")
+        .await
+        .expect("load oidc identity")
+        .expect("oidc identity created");
+    assert_eq!(oidc_identity.user_id, user.id);
+}
