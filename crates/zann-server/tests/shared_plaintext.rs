@@ -823,11 +823,11 @@ async fn service_account_access_token_can_manage_shared_items_without_device_id(
         .await;
     assert_eq!(
         status,
-        StatusCode::OK,
+        StatusCode::NO_CONTENT,
         "shared delete failed: {:?}",
         deleted
     );
-    assert!(deleted["deleted_at"].is_string());
+    assert!(deleted.is_null());
 }
 
 #[tokio::test]
