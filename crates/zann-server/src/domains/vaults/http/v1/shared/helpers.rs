@@ -242,6 +242,7 @@ pub(super) async fn service_account_scopes(
 
 pub(super) fn scope_allows_action(permission: &str, action: &str) -> bool {
     match action {
+        "read" | "list" => permission == "read",
         "read_history" => {
             matches!(
                 permission,
@@ -249,7 +250,7 @@ pub(super) fn scope_allows_action(permission: &str, action: &str) -> bool {
             )
         }
         "read_previous" => permission == "read_previous",
-        _ => permission == "read",
+        _ => permission == action,
     }
 }
 
