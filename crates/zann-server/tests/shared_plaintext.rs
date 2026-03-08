@@ -827,7 +827,7 @@ async fn service_account_access_token_can_manage_shared_items_without_device_id(
         "shared delete failed: {:?}",
         deleted
     );
-    assert_eq!(deleted["deleted_at"].is_string(), true);
+    assert!(deleted["deleted_at"].is_string());
 }
 
 #[tokio::test]
