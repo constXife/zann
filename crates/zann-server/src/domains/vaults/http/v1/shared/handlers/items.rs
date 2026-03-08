@@ -929,14 +929,24 @@ pub(crate) async fn update_shared_item(
 
     // Authorization
     if let Some(service_account_id) = identity.service_account_id {
-        let next_path = req
-            .path
-            .as_deref()
-            .map(normalize_path)
-            .unwrap_or_else(|| item.path.clone());
-        if next_path.is_empty()
-            || !service_account_allows_path(&state, service_account_id, &vault, "write", &item.path)
-                .await
+        let next_path = match req.path.as_deref() {
+            Some(path) => {
+                let normalized = normalize_path(path);
+                if normalized.is_empty() {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        Json(ErrorResponse {
+                            error: "invalid_path",
+                        }),
+                    )
+                        .into_response();
+                }
+                normalized
+            }
+            None => item.path.clone(),
+        };
+        if !service_account_allows_path(&state, service_account_id, &vault, "write", &item.path)
+            .await
             || !service_account_allows_path(&state, service_account_id, &vault, "write", &next_path)
                 .await
         {
