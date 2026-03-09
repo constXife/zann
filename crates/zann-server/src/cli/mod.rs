@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+pub mod export;
 pub mod init;
 pub mod provision;
 pub mod tokens;
@@ -17,6 +18,8 @@ pub struct Cli {
 enum Command {
     /// Run database migrations
     Migrate,
+    /// Export shared server-encrypted vaults in plaintext for local recovery
+    Export(export::ExportArgs),
     /// Print OpenAPI spec (optionally to a file)
     Openapi(OpenApiArgs),
     /// Initial setup (first user + vault)
@@ -37,6 +40,7 @@ struct OpenApiArgs {
 pub enum RunMode {
     Server,
     Migrate,
+    Export(export::ExportArgs),
     OpenApi { out: Option<PathBuf> },
     Init(init::InitArgs),
     Provision(provision::ProvisionArgs),
@@ -48,6 +52,7 @@ pub fn parse_args() -> RunMode {
     match cli.command {
         None => RunMode::Server,
         Some(Command::Migrate) => RunMode::Migrate,
+        Some(Command::Export(args)) => RunMode::Export(args),
         Some(Command::Openapi(args)) => RunMode::OpenApi { out: args.out },
         Some(Command::Init(args)) => RunMode::Init(args),
         Some(Command::Provision(args)) => RunMode::Provision(args),
@@ -74,6 +79,54 @@ mod tests {
             panic!("expected openapi command");
         };
         assert_eq!(args.out, Some(PathBuf::from("spec.json")));
+    }
+
+    #[test]
+    fn parse_export_single_vault_command() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "export",
+            "--vault",
+            "infra",
+            "--i-understand-plaintext",
+        ]);
+        let Some(Command::Export(args)) = cli.command else {
+            panic!("expected export command");
+        };
+        assert_eq!(args.vault, vec!["infra".to_string()]);
+        assert!(!args.all_shared);
+        assert!(args.i_understand_plaintext);
+    }
+
+    #[test]
+    fn parse_export_all_shared_to_file_command() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "export",
+            "--all-shared",
+            "--out",
+            "shared-export.json",
+            "--i-understand-plaintext",
+        ]);
+        let Some(Command::Export(args)) = cli.command else {
+            panic!("expected export command");
+        };
+        assert!(args.all_shared);
+        assert_eq!(args.out, Some(PathBuf::from("shared-export.json")));
+        assert!(args.i_understand_plaintext);
+    }
+
+    #[test]
+    fn parse_export_rejects_mixed_scope_flags() {
+        let result = Cli::try_parse_from([
+            "zann-server",
+            "export",
+            "--vault",
+            "infra",
+            "--all-shared",
+            "--i-understand-plaintext",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]

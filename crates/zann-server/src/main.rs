@@ -73,6 +73,7 @@ async fn main() {
     if matches!(
         run_mode,
         cli::RunMode::Server
+            | cli::RunMode::Export(_)
             | cli::RunMode::Init(_)
             | cli::RunMode::Provision(_)
             | cli::RunMode::Token(_)
@@ -109,6 +110,13 @@ async fn main() {
     }
     if let cli::RunMode::Token(token_args) = run_mode {
         if let Err(err) = cli::tokens::run(&settings, &db, &token_args).await {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let cli::RunMode::Export(export_args) = run_mode {
+        if let Err(err) = cli::export::run(&settings, &db, &export_args).await {
             eprintln!("{err}");
             std::process::exit(1);
         }
