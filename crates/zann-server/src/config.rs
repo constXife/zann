@@ -155,7 +155,7 @@ impl Default for InternalAuthConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            registration: InternalRegistration::Open,
+            registration: InternalRegistration::default(),
         }
     }
 }

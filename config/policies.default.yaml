@@ -40,32 +40,37 @@
   resource: "vaults/*"
 
 - name: vaults-create
-  subject_type: any
+  subject_type: group
+  subject_id: admins
   effect: allow
   actions: [write]
   resource: "vaults"
 
 - name: vault-items-list
-  subject_type: any
+  subject_type: group
+  subject_id: admins
   effect: allow
   actions: [list]
   resource: "vaults/*/items"
 
 - name: vault-members-list
-  subject_type: any
+  subject_type: group
+  subject_id: admins
   effect: allow
   actions: [list]
   resource: "vaults/*/members"
 
 # Service accounts for CI/CD
 - name: service-accounts-list
-  subject_type: any
+  subject_type: group
+  subject_id: admins
   effect: allow
   actions: [list, write]
   resource: "service-accounts"
 
 - name: service-accounts-manage
-  subject_type: any
+  subject_type: group
+  subject_id: admins
   effect: allow
   actions: [read, write]
   resource: "service-accounts/*"

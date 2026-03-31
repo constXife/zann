@@ -9,7 +9,7 @@ auth:
 
   internal:
     enabled: true
-    registration: invite_only # invite_only | open | disabled
+    registration: disabled # disabled | open
 
   oidc:
     enabled: true
