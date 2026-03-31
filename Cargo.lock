@@ -5477,6 +5477,7 @@ dependencies = [
  "sqlx-sqlite",
  "tokio",
  "tracing",
+ "url",
  "uuid",
  "zann-core",
  "zann-crypto",

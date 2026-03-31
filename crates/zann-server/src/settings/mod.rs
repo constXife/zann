@@ -101,7 +101,7 @@ impl Settings {
             .unwrap_or(6 * 60 * 60);
         let config_path =
             env::var("ZANN_CONFIG_PATH").unwrap_or_else(|_| "config.yaml".to_string());
-        let mut config = env_config::load_config(&config_path);
+        let mut config = env_config::load_config(&config_path)?;
         env_config::apply_auth_env_overrides(&mut config);
         env_config::apply_tracing_env_overrides(&mut config);
         env_config::apply_metrics_env_overrides(&mut config);
