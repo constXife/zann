@@ -15,7 +15,7 @@ fn master_password_persists_across_reopen() {
     let root = temp_root();
     let db_path = root.join("local.sqlite");
     let db_url = format!("sqlite://{}", db_path.display());
-    let password = "12312345".to_string();
+    let password = format!("test-master-password-{}", Uuid::now_v7());
 
     let core = create_core(db_url.clone()).expect("create core");
     let status = core
