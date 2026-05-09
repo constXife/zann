@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { constants as fsConstants, promises as fs } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -109,7 +110,7 @@ const main = async () => {
       mockCmd = mockBin;
     } else {
       try {
-        await runCommand("sh", ["-c", `test -x ${mockBin}`], { stdio: "ignore" });
+        await fs.access(mockBin, fsConstants.X_OK);
         mockCmd = mockBin;
       } catch {
         const manifestPath = path.join(mockRoot, "Cargo.toml");
