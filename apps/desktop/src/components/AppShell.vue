@@ -492,6 +492,7 @@ const formattedLastSync = computed(() => {
           :categories="categories"
           :selected-category="selectedCategory"
           :filtered-items="filteredItems"
+          :total-items-count="totalItemsCount"
           :list-loading="listLoading"
           :list-error="listError"
           :total-list-height="totalListHeight"

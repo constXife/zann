@@ -49,6 +49,18 @@ export type ItemSummary = {
   deleted_at?: string | null;
   deleted_by?: string | null;
 };
+
+export type ItemsListResponse = {
+  items: ItemSummary[];
+  next_cursor?: string | null;
+  total_count: number;
+  counts: ItemCounts;
+};
+export type ItemCounts = {
+  all: number;
+  trash: number;
+  by_type: Record<string, number>;
+};
 export type FieldKind = "text" | "password" | "url" | "otp" | "note";
 
 export type FieldMeta = {
@@ -142,6 +154,7 @@ export type FieldRow = {
   masked: boolean;
   copyable: boolean;
   revealable: boolean;
+  totp?: TotpFieldData | null;
 };
 export type DetailSection = {
   title: string;
@@ -171,6 +184,19 @@ export type FolderNode = {
   totalCount: number;
 };
 
+export type TotpCodeResponse = {
+  code: string;
+  remaining_seconds: number;
+  period: number;
+};
+
+export type TotpFieldData = {
+  secret: string;
+  algorithm: string;
+  digits: number;
+  period: number;
+};
+
 export type PlainBackupExportResponse = {
   path: string;
   storages_count: number;
@@ -184,4 +210,10 @@ export type PlainBackupImportResponse = {
   skipped_missing_storage: number;
   skipped_missing_vault: number;
   skipped_deleted: number;
+};
+
+export type ApplePasswordsImportResponse = {
+  imported_items: number;
+  skipped_existing: number;
+  skipped_invalid: number;
 };

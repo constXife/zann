@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ApiResponse,
   KeystoreStatus,
+  ApplePasswordsImportResponse,
   PlainBackupExportResponse,
   PlainBackupImportResponse,
   Settings,
@@ -169,11 +170,52 @@ export function useAppSettingsActions({
     }
   };
 
+  const importApplePasswords = async (path?: string | null, targetStorageId?: string | null) => {
+    setError("");
+    try {
+      const result = await invoke<ApiResponse<ApplePasswordsImportResponse>>("backup_apple_import", {
+        payload: {
+          path: path && path.trim().length > 0 ? path : null,
+          target_storage_id: targetStorageId ?? null,
+        },
+      });
+      if (!result.ok || !result.data) {
+        if (result.error?.kind === "backup_cancelled") {
+          return undefined;
+        }
+        const key = result.error?.kind ?? "generic";
+        const detail = result.error?.message
+          ? `${t(`errors.${key}`)}: ${result.error.message}`
+          : t(`errors.${key}`);
+        throw createErrorWithCause(detail, result.error);
+      }
+      const shouldSyncRemote =
+        !!targetStorageId && targetStorageId !== "local";
+      if (shouldSyncRemote) {
+        showToast(t("settings.backups.importSyncStart"));
+        const syncOk = await runRemoteSync(targetStorageId);
+        if (syncOk) {
+          showToast(t("settings.backups.importSyncDone"));
+        } else {
+          const message = syncError.value || t("settings.backups.importSyncFailed");
+          showToast(message, { duration: 2000 });
+        }
+      } else {
+        showToast(t("settings.backups.importAppleSuccess"));
+      }
+      return result.data;
+    } catch (err) {
+      setError(String(err));
+      return null;
+    }
+  };
+
   return {
     updateSettings,
     testBiometrics,
     rebindBiometrics,
     exportPlainBackup,
     importPlainBackup,
+    importApplePasswords,
   };
 }

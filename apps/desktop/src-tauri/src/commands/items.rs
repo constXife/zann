@@ -3,8 +3,8 @@ use tauri::State;
 use crate::services::items as items_service;
 use crate::state::AppState;
 use crate::types::{
-    ApiResponse, ItemDeleteRequest, ItemDetail, ItemGetRequest, ItemPutRequest, ItemSummary,
-    ItemUpdateRequest, ItemsEmptyTrashRequest, ItemsListRequest, ItemsTrashPurgeRequest,
+    ApiResponse, ItemDeleteRequest, ItemDetail, ItemGetRequest, ItemPutRequest, ItemUpdateRequest,
+    ItemsEmptyTrashRequest, ItemsListRequest, ItemsListResponse, ItemsTrashPurgeRequest,
     PendingChangesCountRequest,
 };
 
@@ -12,7 +12,7 @@ use crate::types::{
 pub async fn items_list(
     state: State<'_, AppState>,
     req: ItemsListRequest,
-) -> Result<ApiResponse<Vec<ItemSummary>>, String> {
+) -> Result<ApiResponse<ItemsListResponse>, String> {
     items_service::items_list(state, req).await
 }
 

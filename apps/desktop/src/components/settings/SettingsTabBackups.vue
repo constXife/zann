@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
-import type { PlainBackupExportResponse, PlainBackupImportResponse, StorageSummary } from "../../types";
+import type {
+  ApplePasswordsImportResponse,
+  PlainBackupExportResponse,
+  PlainBackupImportResponse,
+  StorageSummary,
+} from "../../types";
 import { StorageKind } from "../../constants/enums";
 
 type Translator = (key: string) => string;
@@ -13,6 +18,10 @@ const props = defineProps<{
     path?: string | null,
     targetStorageId?: string | null,
   ) => Promise<PlainBackupImportResponse | null | undefined>;
+  onImportApple: (
+    path?: string | null,
+    targetStorageId?: string | null,
+  ) => Promise<ApplePasswordsImportResponse | null | undefined>;
 }>();
 
 const remoteStorages = computed(() =>
@@ -30,10 +39,13 @@ watch(defaultTarget, (value) => {
 
 const exportBusy = ref(false);
 const importBusy = ref(false);
+const importAppleBusy = ref(false);
 const exportResult = ref<PlainBackupExportResponse | null>(null);
 const importResult = ref<PlainBackupImportResponse | null>(null);
+const importAppleResult = ref<ApplePasswordsImportResponse | null>(null);
 const exportError = ref("");
 const importError = ref("");
+const importAppleError = ref("");
 
 const runExport = async () => {
   if (exportBusy.value) return;
@@ -68,6 +80,23 @@ const runImport = async () => {
     return;
   }
   importResult.value = result;
+};
+
+const runAppleImport = async () => {
+  if (importAppleBusy.value) return;
+  importAppleError.value = "";
+  importAppleResult.value = null;
+  importAppleBusy.value = true;
+  const result = await props.onImportApple(null, importTarget.value);
+  importAppleBusy.value = false;
+  if (result === undefined) {
+    return;
+  }
+  if (!result) {
+    importAppleError.value = props.t("settings.backups.importAppleFailed");
+    return;
+  }
+  importAppleResult.value = result;
 };
 </script>
 
@@ -139,11 +168,24 @@ const runImport = async () => {
         >
           {{ importBusy ? t("common.loading") : t("settings.backups.importAction") }}
         </button>
+        <button
+          type="button"
+          class="rounded-lg border border-[var(--border-color)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="importAppleBusy"
+          @click="runAppleImport"
+        >
+          {{ importAppleBusy ? t("common.loading") : t("settings.backups.importAppleAction") }}
+        </button>
         <p v-if="importError" class="text-xs text-category-security">{{ importError }}</p>
+        <p v-if="importAppleError" class="text-xs text-category-security">{{ importAppleError }}</p>
       </div>
       <div v-if="importResult" class="rounded-lg bg-[var(--bg-tertiary)] p-3 text-xs text-[var(--text-secondary)] space-y-1">
         <div>{{ t("settings.backups.importedCounts", { imported: importResult.imported_items, skipped: importResult.skipped_existing }) }}</div>
         <div>{{ t("settings.backups.importedSkippedMissing", { missingStorages: importResult.skipped_missing_storage, missingVaults: importResult.skipped_missing_vault, deleted: importResult.skipped_deleted }) }}</div>
+      </div>
+      <div v-if="importAppleResult" class="rounded-lg bg-[var(--bg-tertiary)] p-3 text-xs text-[var(--text-secondary)] space-y-1">
+        <div>{{ t("settings.backups.importAppleCounts", { imported: importAppleResult.imported_items, skipped: importAppleResult.skipped_existing }) }}</div>
+        <div>{{ t("settings.backups.importAppleInvalid", { skipped: importAppleResult.skipped_invalid }) }}</div>
       </div>
     </div>
 

@@ -143,10 +143,19 @@ pub struct ItemPreview {
     pub deleted_at: Option<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ItemCounts {
+    pub all: usize,
+    pub trash: usize,
+    pub by_type: std::collections::HashMap<String, usize>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ItemPreviewPage {
     pub items: Vec<ItemPreview>,
     pub next_cursor: Option<String>,
+    pub total_count: usize,
+    pub counts: ItemCounts,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -112,7 +112,6 @@ const getFolderPath = (path: string) =>
   path.includes("/") ? path.split("/").slice(0, -1).join("/") : "";
 
 const handleSelectItem = (itemId: string) => {
-  console.info("[item_list] select_item", { itemId });
   if (props.listBlocked) {
     return;
   }

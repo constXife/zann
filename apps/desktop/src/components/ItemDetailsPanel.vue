@@ -558,6 +558,7 @@ onBeforeUnmount(() => {
             :show-masked-value="showMaskedValue"
             :apply-time-travel-field="applyTimeTravelField"
             :format-field-label="formatFieldLabel"
+            :copy-to-clipboard="copyToClipboard"
           />
         </div>
 

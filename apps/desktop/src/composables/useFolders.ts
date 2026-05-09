@@ -17,17 +17,20 @@ export const useFolders = (options: UseFoldersOptions) => {
   const selectedFolder = ref<string | null>(null);
   const expandedFolders = ref<Set<string>>(new Set());
 
-  const activeItems = computed(() =>
-    options.items.value.filter((item) => !item.deleted_at),
-  );
-
-  const folderTree = computed(() => {
+  const folderTreeData = computed(() => {
     const root: FolderNode[] = [];
     const pathMap = new Map<string, FolderNode>();
+    let itemsWithoutFolder = 0;
 
-    activeItems.value.forEach((item) => {
+    options.items.value.forEach((item) => {
+      if (item.deleted_at) {
+        return;
+      }
       const parts = item.path.split("/");
-      if (parts.length <= 1) return;
+      if (parts.length <= 1) {
+        itemsWithoutFolder++;
+        return;
+      }
 
       parts.pop();
       let currentPath = "";
@@ -45,13 +48,18 @@ export const useFolders = (options: UseFoldersOptions) => {
       });
     });
 
-    activeItems.value.forEach((item) => {
+    options.items.value.forEach((item) => {
+      if (item.deleted_at) {
+        return;
+      }
       const parts = item.path.split("/");
       if (parts.length <= 1) return;
       parts.pop();
       const folderPath = parts.join("/");
       const node = pathMap.get(folderPath);
-      if (node) node.itemCount++;
+      if (node) {
+        node.itemCount++;
+      }
     });
 
     const countTotal = (node: FolderNode): number => {
@@ -60,23 +68,27 @@ export const useFolders = (options: UseFoldersOptions) => {
     };
     root.forEach(countTotal);
 
-    return root;
-  });
-
-  const itemsWithoutFolder = computed(
-    () => activeItems.value.filter((item) => !item.path.includes("/")).length,
-  );
-
-  const flatFolderPaths = computed(() => {
-    const paths: string[] = [];
+    const flatPaths: string[] = [];
     const collectPaths = (nodes: FolderNode[]) => {
       for (const node of nodes) {
-        paths.push(node.path);
+        flatPaths.push(node.path);
         collectPaths(node.children);
       }
     };
-    collectPaths(folderTree.value);
-    return paths.sort();
+    collectPaths(root);
+
+    return {
+      tree: root,
+      itemsWithoutFolder,
+      flatPaths: flatPaths.sort(),
+    };
+  });
+
+  const folderTree = computed(() => folderTreeData.value.tree);
+  const itemsWithoutFolder = computed(() => folderTreeData.value.itemsWithoutFolder);
+
+  const flatFolderPaths = computed(() => {
+    return folderTreeData.value.flatPaths;
   });
 
   const showFolderSuggestions = ref(false);
@@ -124,9 +136,10 @@ export const useFolders = (options: UseFoldersOptions) => {
 
   const affectedItemsCount = computed(() => {
     if (!renameFolderOldPath.value) return 0;
-    return activeItems.value.filter(item =>
-      item.path === renameFolderOldPath.value ||
-      item.path.startsWith(renameFolderOldPath.value + "/")
+    return options.items.value.filter(item =>
+      !item.deleted_at &&
+      (item.path === renameFolderOldPath.value ||
+        item.path.startsWith(renameFolderOldPath.value + "/"))
     ).length;
   });
 

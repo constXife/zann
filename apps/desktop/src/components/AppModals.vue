@@ -92,6 +92,7 @@ type AppModalsProps = {
   handleResetSyncCursor: unknown;
   exportPlainBackup: unknown;
   importPlainBackup: unknown;
+  importApplePasswords: unknown;
   toasts: unknown;
   createMode: unknown;
   createModalOpen: unknown;
@@ -371,6 +372,7 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :on-reset-sync-cursor="handleResetSyncCursor"
     :on-export-plain="exportPlainBackup"
     :on-import-plain="importPlainBackup"
+    :on-import-apple="importApplePasswords"
   />
 
   <ToastMessage :toasts="toasts" />

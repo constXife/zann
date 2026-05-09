@@ -18,6 +18,10 @@
           openssl
           jemalloc
           llvm
+          qt6.qtbase
+          qt6.qtdeclarative
+          qt6.qtsvg
+          kdePackages.kirigami
           libxkbcommon
           wayland
           wayland-protocols
@@ -34,6 +38,10 @@
         ];
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
           pkgs.openssl
+          pkgs.qt6.qtbase
+          pkgs.qt6.qtdeclarative
+          pkgs.qt6.qtsvg
+          pkgs.kdePackages.kirigami
           pkgs.libxkbcommon
           pkgs.wayland
           pkgs.glib

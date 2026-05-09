@@ -65,6 +65,69 @@
     --accent-active: #0071e3;
   }
 
+  /* KDE Breeze theme */
+  .theme-breeze {
+    --background: 210 4% 94%;
+    --foreground: 210 11% 15%;
+    --primary: 203 82% 58%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 210 4% 88%;
+    --muted-foreground: 210 4% 50%;
+    --accent: 203 82% 58%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 4% 74%;
+    --input: 210 4% 74%;
+    --ring: 203 82% 58%;
+    --popover: 0 0% 99%;
+    --popover-foreground: 210 11% 15%;
+    --radius: 3px;
+    --bg-primary: #eff0f1;
+    --bg-secondary: #fcfcfc;
+    --bg-tertiary: #e3e5e7;
+    --bg-hover: rgba(0, 120, 215, 0.08);
+    --bg-active: rgba(0, 120, 215, 0.16);
+    --text-primary: #232629;
+    --text-secondary: #7f8c8d;
+    --text-tertiary: #95a5a6;
+    --border-color: #bdc3c7;
+    --accent: #3daee9;
+    --accent-hover: #2196f3;
+    --accent-active: #1976d2;
+  }
+
+  .theme-breeze.dark {
+    --background: 210 11% 23%;
+    --foreground: 210 4% 94%;
+    --primary: 203 82% 58%;
+    --primary-foreground: 0 0% 100%;
+    --muted: 210 11% 27%;
+    --muted-foreground: 210 4% 74%;
+    --accent: 203 82% 58%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 210 4% 30%;
+    --input: 210 4% 30%;
+    --ring: 203 82% 58%;
+    --popover: 210 11% 18%;
+    --popover-foreground: 210 4% 94%;
+    --radius: 3px;
+    --bg-primary: #31363b;
+    --bg-secondary: #232629;
+    --bg-tertiary: #3b4045;
+    --bg-hover: rgba(61, 174, 233, 0.12);
+    --bg-active: rgba(61, 174, 233, 0.24);
+    --text-primary: #eff0f1;
+    --text-secondary: #bdc3c7;
+    --text-tertiary: #7f8c8d;
+    --border-color: #4d4d4d;
+    --accent: #3daee9;
+    --accent-hover: #2196f3;
+    --accent-active: #1976d2;
+  }
+
   html,
   body,
   #app {
@@ -73,8 +136,8 @@
 
   body {
     margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
-      sans-serif;
+    font-family: "Noto Sans", "Cantarell", -apple-system, BlinkMacSystemFont,
+      "SF Pro Text", "Segoe UI", sans-serif;
     background: var(--bg-primary);
     color: var(--text-primary);
     -webkit-font-smoothing: antialiased;

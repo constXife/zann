@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openShell } from "@tauri-apps/plugin-shell";
@@ -60,10 +60,14 @@ const selectedVaultId = ref<string | null>(
 const selectedItemId = ref<string | null>(null);
 const itemDetailError = ref("");
 const listLoading = ref(false);
+const listLoadingMore = ref(false);
 const listError = ref("");
 const fatalError = ref("");
-const settingsOpen = ref(false);
-const settingsInitialTab = ref<"general" | "accounts">("general");
+const settingsOpen = ref(uiSettings.value.lastSettingsOpen ?? false);
+const settingsInitialTab = ref<"general" | "security" | "accounts" | "backups" | "about">(
+  (uiSettings.value.lastSettingsTab as "general" | "security" | "accounts" | "backups" | "about")
+    ?? "general",
+);
 const openSettings = (tab: "general" | "accounts" = "general") => {
   settingsInitialTab.value = tab;
   settingsOpen.value = true;
@@ -143,13 +147,15 @@ const itemsState = useItems({
   initialized,
   unlocked,
   listLoading,
+  listLoadingMore,
   listError,
   t,
   onAfterLoad: () => {
     void pendingChangesState.refreshPendingChanges();
   },
 });
-const { items, loadItems } = itemsState;
+const { items, loadItems, loadMoreItems, hasMore, totalCount, itemCounts } = itemsState;
+const totalItemsCount = computed(() => itemCounts.value?.all ?? totalCount.value);
 
 const storageState = useStorages({
   selectedStorageId,
@@ -286,7 +292,7 @@ const refreshKeystoreStatus = async () => {
 const scheduleRemoteSyncAsync = async (storageId: string | null) => {
   scheduleRemoteSync(storageId);
 };
-const selectedCategory = ref<string | null>(null);
+const selectedCategory = ref<string | null>(uiSettings.value.lastSelectedSection ?? "all");
 const createState = useCreateModal({
   selectedStorageId,
   selectedVaultId,
@@ -326,11 +332,14 @@ const {
 } = useAppItemFilters({
   t,
   items,
+  itemCounts,
   isSharedVault,
   selectedFolder,
   selectedCategory,
 });
-
+if (!query.value) {
+  query.value = uiSettings.value.lastSearchQuery ?? "";
+}
 const statusBanners = useAppStatusBanners({
   selectedStorageId,
   storageSyncErrors,
@@ -352,6 +361,71 @@ watch(
   { immediate: true },
 );
 
+watch(settingsOpen, (value) => {
+  uiSettings.value.lastSettingsOpen = value;
+});
+
+watch(settingsInitialTab, (value) => {
+  uiSettings.value.lastSettingsTab = value;
+});
+
+watch(selectedCategory, (value) => {
+  uiSettings.value.lastSelectedSection = value ?? "all";
+});
+
+watch(query, (value) => {
+  uiSettings.value.lastSearchQuery = value ?? "";
+});
+
+watch(selectedFolder, (value) => {
+  const vaultId = selectedVaultId.value;
+  if (!vaultId) {
+    return;
+  }
+  if (!value) {
+    delete uiSettings.value.lastSelectedFolderByVault[vaultId];
+  } else {
+    uiSettings.value.lastSelectedFolderByVault[vaultId] = value;
+  }
+});
+
+watch(selectedItemId, (value) => {
+  const vaultId = selectedVaultId.value;
+  if (!vaultId) {
+    return;
+  }
+  if (!value) {
+    delete uiSettings.value.lastSelectedItemByVault[vaultId];
+  } else {
+    uiSettings.value.lastSelectedItemByVault[vaultId] = value;
+  }
+});
+
+watch(selectedVaultId, (vaultId) => {
+  if (!vaultId) {
+    selectedFolder.value = null;
+    return;
+  }
+  const savedFolder = uiSettings.value.lastSelectedFolderByVault[vaultId] ?? null;
+  selectedFolder.value = savedFolder;
+});
+
+watch(items, () => {
+  const vaultId = selectedVaultId.value;
+  if (!vaultId || items.value.length === 0) {
+    return;
+  }
+  const savedItem = uiSettings.value.lastSelectedItemByVault[vaultId];
+  if (!savedItem) {
+    return;
+  }
+  if (items.value.some((item) => item.id === savedItem)) {
+    selectedItemId.value = savedItem;
+  } else if (selectedItemId.value && !items.value.some((item) => item.id === selectedItemId.value)) {
+    selectedItemId.value = null;
+  }
+});
+
 
 const layoutState = useAppLayout({
   uiSettings,
@@ -362,6 +436,7 @@ const layoutState = useAppLayout({
 const {
   listPanel,
   detailsPanel,
+  listContainerEl,
   listWidth,
   isResizingDetails,
   startResizeDetails,
@@ -371,6 +446,32 @@ const {
   listOffset,
   moveSelection,
 } = layoutState;
+
+const LOAD_MORE_THRESHOLD_PX = 240;
+const maybeLoadMore = () => {
+  const container = listContainerEl.value;
+  if (!container || listLoading.value || listLoadingMore.value || !hasMore.value) {
+    return;
+  }
+  const remaining =
+    container.scrollHeight - (container.scrollTop + container.clientHeight);
+  if (remaining <= LOAD_MORE_THRESHOLD_PX) {
+    void loadMoreItems();
+  }
+};
+const maybeFillList = () => {
+  const container = listContainerEl.value;
+  if (!container || listLoading.value || listLoadingMore.value || !hasMore.value) {
+    return;
+  }
+  if (container.scrollHeight <= container.clientHeight + LOAD_MORE_THRESHOLD_PX) {
+    void loadMoreItems();
+  }
+};
+const handleListScroll = () => {
+  onListScroll();
+  maybeLoadMore();
+};
 
 const hasSelectedItem = computed(() => !!selectedItem.value);
 
@@ -384,6 +485,11 @@ const openExternal = async (url: string) => {
     globalThis.open?.(url, "_blank");
   }
 };
+
+watch([items, hasMore, listContainerEl], async () => {
+  await nextTick();
+  maybeFillList();
+});
 
 const itemActions = useAppItemActions({
   t,
@@ -712,6 +818,11 @@ const selectionState = {
   vaultContextLabel,
 };
 
+const layoutBindings = {
+  ...layoutState,
+  onListScroll: handleListScroll,
+};
+
 const { shellBindings, modalBindings } = useAppBindings({
   core: {
     t,
@@ -740,6 +851,7 @@ const { shellBindings, modalBindings } = useAppBindings({
     locale,
     fatalError,
     doUnlock,
+    totalItemsCount,
   },
   computedState,
   statusBanners,
@@ -749,7 +861,7 @@ const { shellBindings, modalBindings } = useAppBindings({
   foldersState,
   createState,
   detailState: itemDetailsState,
-  layoutState,
+  layoutState: layoutBindings,
   itemActions,
   storageActions,
   settingsActions,

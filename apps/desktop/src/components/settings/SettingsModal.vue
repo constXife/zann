@@ -5,6 +5,7 @@ import type {
   Settings,
   StorageSummary,
   StorageInfo,
+  ApplePasswordsImportResponse,
   PlainBackupExportResponse,
   PlainBackupImportResponse,
 } from "../../types";
@@ -46,7 +47,14 @@ const props = defineProps<{
   onSyncNow: (storageId: string) => Promise<void>;
   onResetSyncCursor: (storageId: string) => Promise<void>;
   onExportPlain: (path?: string | null) => Promise<PlainBackupExportResponse | null | undefined>;
-  onImportPlain: (path?: string | null) => Promise<PlainBackupImportResponse | null | undefined>;
+  onImportPlain: (
+    path?: string | null,
+    targetStorageId?: string | null,
+  ) => Promise<PlainBackupImportResponse | null | undefined>;
+  onImportApple: (
+    path?: string | null,
+    targetStorageId?: string | null,
+  ) => Promise<ApplePasswordsImportResponse | null | undefined>;
 }>();
 
 const emit = defineEmits<{
@@ -167,6 +175,7 @@ watch(() => props.open, (isOpen) => {
             :storages="storages"
             :on-export-plain="onExportPlain"
             :on-import-plain="onImportPlain"
+            :on-import-apple="onImportApple"
           />
           <SettingsTabAbout
             v-else-if="activeTab === 'about'"

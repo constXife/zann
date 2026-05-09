@@ -1,14 +1,28 @@
-use std::collections::HashMap;
-use std::io::Write;
+use std::collections::{HashMap, VecDeque};
+use std::fs::File;
+use std::future::Future;
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
+use csv::ReaderBuilder;
+use percent_encoding::percent_decode_str;
+use serde::de::{self, DeserializeSeed, Deserializer as _, IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::Deserialize;
+use tokio::sync::mpsc;
+use url::Url;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
 use zann_core::vault_crypto as core_crypto;
-use zann_core::{AuthMethod, CachePolicy, ItemsService, StorageKind, VaultKind};
+use zann_core::{
+    AuthMethod, CachePolicy, EncryptedPayload, FieldKind, FieldValue, ItemsService, StorageKind,
+    VaultKind, VaultsService,
+};
 use zann_db::local::{
-    KeyWrapType, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVault, LocalVaultRepo,
+    KeyWrapType, LocalItem, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVault,
+    LocalVaultRepo,
 };
 use zann_db::services::LocalServices;
 
@@ -17,13 +31,14 @@ use crate::infra::config::{load_config, save_config};
 use crate::infra::http::{auth_headers, decode_json_response, ensure_success};
 use crate::state::{ensure_unlocked, AppState};
 use crate::types::{
-    ApiResponse, PersonalVaultStatusResponse, PlainBackup, PlainBackupExportResponse,
+    ApiResponse, ApplePasswordsImportResponse, PlainBackupExportResponse,
     PlainBackupImportResponse, PlainBackupItem, PlainBackupStorage, PlainBackupVault,
-    VaultDetailResponse, VaultListResponse,
+    PersonalVaultStatusResponse, VaultDetailResponse, VaultListResponse,
 };
 use crate::util::context_name_from_url;
 
 const BACKUP_VERSION: u32 = 1;
+const EXPORT_PAGE_LIMIT: i64 = 200;
 
 fn append_backup_log(message: &str) {
     let Some(home) = dirs::home_dir() else {
@@ -59,6 +74,113 @@ fn prompt_import_path() -> Option<PathBuf> {
     rfd::FileDialog::new()
         .add_filter("Zann backup", &["json"])
         .pick_file()
+}
+
+fn prompt_apple_import_path() -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter("Apple Passwords", &["csv"])
+        .pick_file()
+}
+
+struct TotpMeta {
+    secret: String,
+    otp_type: Option<String>,
+    issuer: Option<String>,
+    label: Option<String>,
+    algorithm: Option<String>,
+    digits: Option<String>,
+    period: Option<String>,
+}
+
+fn extract_totp_meta(value: &str) -> Option<TotpMeta> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let url = Url::parse(trimmed).ok()?;
+    if url.scheme() != "otpauth" {
+        return None;
+    }
+    let otp_type = url.host_str().map(|value| value.to_string());
+    let mut secret = None;
+    let mut issuer = None;
+    let mut label = None;
+    let mut algorithm = None;
+    let mut digits = None;
+    let mut period = None;
+    let raw_path = url.path().trim_matches('/');
+    if !raw_path.is_empty() {
+        let decoded = percent_decode_str(raw_path).decode_utf8_lossy();
+        if let Some((path_issuer, path_label)) = decoded.split_once(':') {
+            let path_issuer = path_issuer.trim();
+            let path_label = path_label.trim();
+            if !path_issuer.is_empty() && issuer.is_none() {
+                issuer = Some(path_issuer.to_string());
+            }
+            if !path_label.is_empty() {
+                label = Some(path_label.to_string());
+            }
+        } else {
+            let path_label = decoded.trim();
+            if !path_label.is_empty() {
+                label = Some(path_label.to_string());
+            }
+        }
+    }
+    for (key, val) in url.query_pairs() {
+        if key.eq_ignore_ascii_case("secret") {
+            let value = val.trim();
+            if !value.is_empty() {
+                secret = Some(value.to_string());
+            }
+        } else if key.eq_ignore_ascii_case("issuer") {
+            let value = val.trim();
+            if !value.is_empty() {
+                issuer = Some(value.to_string());
+            }
+        } else if key.eq_ignore_ascii_case("algorithm") {
+            let value = val.trim();
+            if !value.is_empty() {
+                algorithm = Some(value.to_string());
+            }
+        } else if key.eq_ignore_ascii_case("digits") {
+            let value = val.trim();
+            if !value.is_empty() {
+                digits = Some(value.to_string());
+            }
+        } else if key.eq_ignore_ascii_case("period") {
+            let value = val.trim();
+            if !value.is_empty() {
+                period = Some(value.to_string());
+            }
+        }
+    }
+    let secret = secret?;
+    Some(TotpMeta {
+        secret,
+        otp_type,
+        issuer,
+        label,
+        algorithm,
+        digits,
+        period,
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct ApplePasswordsRow {
+    #[serde(rename = "Title")]
+    title: String,
+    #[serde(rename = "URL")]
+    url: Option<String>,
+    #[serde(rename = "Username")]
+    username: Option<String>,
+    #[serde(rename = "Password")]
+    password: Option<String>,
+    #[serde(rename = "Notes")]
+    notes: Option<String>,
+    #[serde(rename = "OTPAuth")]
+    otp_auth: Option<String>,
 }
 
 fn slugify(value: &str) -> String {
@@ -105,11 +227,14 @@ pub async fn plain_export(
     let vault_repo = LocalVaultRepo::new(&state.pool);
     let item_repo = LocalItemRepo::new(&state.pool);
 
-    let storages = storage_repo.list().await.map_err(|err| err.to_string())?;
+    let storages = storage_repo
+        .list()
+        .await
+        .map_err(|err| err.to_string())?;
 
     let mut backup_storages = Vec::with_capacity(storages.len());
     let mut backup_vaults = Vec::new();
-    let mut backup_items = Vec::new();
+    let mut vault_queue = VecDeque::new();
 
     for storage in storages {
         let storage_id = storage.id;
@@ -137,39 +262,9 @@ pub async fn plain_export(
                 kind: vault.kind.as_i32(),
                 is_default: vault.is_default,
             });
-
-            let items = item_repo
-                .list_by_vault(storage_id, vault.id, true)
-                .await
-                .map_err(|err| err.to_string())?;
-            for item in items {
-                let payload = services
-                    .decrypt_payload_for_item(storage_id, item.vault_id, item.id, &item.payload_enc)
-                    .await
-                    .map_err(|err| err.message)?;
-                backup_items.push(PlainBackupItem {
-                    id: Some(item.id.to_string()),
-                    storage_id: storage_id.to_string(),
-                    vault_id: item.vault_id.to_string(),
-                    path: item.path.clone(),
-                    name: item.name.clone(),
-                    type_id: item.type_id.clone(),
-                    payload,
-                    updated_at: item.updated_at.to_rfc3339(),
-                    version: item.version,
-                    deleted_at: item.deleted_at.map(|dt| dt.to_rfc3339()),
-                });
-            }
+            vault_queue.push_back((storage_id, vault.id));
         }
     }
-
-    let backup = PlainBackup {
-        version: BACKUP_VERSION,
-        exported_at: Utc::now().to_rfc3339(),
-        storages: backup_storages,
-        vaults: backup_vaults,
-        items: backup_items,
-    };
 
     let output_path = match path {
         Some(path) if !path.trim().is_empty() => PathBuf::from(path),
@@ -180,12 +275,39 @@ pub async fn plain_export(
                 return Ok(ApiResponse::err(
                     "backup_cancelled",
                     "backup export cancelled",
-                ));
+                ))
             }
         },
     };
     append_backup_log(&format!("export_start path={}", output_path.display()));
-    if let Err(err) = write_backup_file(&output_path, &backup) {
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    let file = File::create(&output_path).map_err(|err| err.to_string())?;
+    let mut writer = BufWriter::new(file);
+    let exported_at = Utc::now().to_rfc3339();
+    let mut streamer = ExportItemStreamer::new(services, item_repo, vault_queue);
+    let items_count = match write_backup_streaming(
+        &mut writer,
+        BACKUP_VERSION,
+        &exported_at,
+        &backup_storages,
+        &backup_vaults,
+        &mut streamer,
+    )
+    .await
+    {
+        Ok(count) => count,
+        Err(err) => {
+            append_backup_log(&format!(
+                "export_failed path={} error={}",
+                output_path.display(),
+                err
+            ));
+            return Err(err.to_string());
+        }
+    };
+    if let Err(err) = writer.flush() {
         append_backup_log(&format!(
             "export_failed path={} error={}",
             output_path.display(),
@@ -196,16 +318,16 @@ pub async fn plain_export(
     append_backup_log(&format!(
         "export_ok path={} storages={} vaults={} items={}",
         output_path.display(),
-        backup.storages.len(),
-        backup.vaults.len(),
-        backup.items.len()
+        backup_storages.len(),
+        backup_vaults.len(),
+        items_count
     ));
 
     Ok(ApiResponse::ok(PlainBackupExportResponse {
         path: output_path.display().to_string(),
-        storages_count: backup.storages.len(),
-        vaults_count: backup.vaults.len(),
-        items_count: backup.items.len(),
+        storages_count: backup_storages.len(),
+        vaults_count: backup_vaults.len(),
+        items_count,
     }))
 }
 
@@ -247,7 +369,10 @@ pub async fn plain_import(
                 .collect::<Vec<_>>();
             if remote.len() == 1 {
                 target_storage_id = Some(remote[0].id.to_string());
-                append_backup_log(&format!("import_mode_fallback storage_id={}", remote[0].id));
+                append_backup_log(&format!(
+                    "import_mode_fallback storage_id={}",
+                    remote[0].id
+                ));
             }
         }
     }
@@ -263,7 +388,10 @@ pub async fn plain_import(
                     storage.kind.as_i32()
                 ));
                 if storage.kind == StorageKind::Remote {
-                    append_backup_log(&format!("import_mode_remote storage_id={}", storage.id));
+                    append_backup_log(&format!(
+                        "import_mode_remote storage_id={}",
+                        storage.id
+                    ));
                     return plain_import_remote(state, path, storage).await;
                 }
                 append_backup_log("import_mode_fallback reason=storage_not_remote");
@@ -289,14 +417,17 @@ pub async fn plain_import(
                 return Ok(ApiResponse::err(
                     "backup_cancelled",
                     "backup import cancelled",
-                ));
+                ))
             }
         },
     };
     append_backup_log(&format!("import_start path={}", input_path.display()));
-    append_backup_log(&format!("import_read_start path={}", input_path.display()));
-    let backup = match read_backup_file(&input_path) {
-        Ok(backup) => backup,
+    append_backup_log(&format!(
+        "import_read_start path={}",
+        input_path.display()
+    ));
+    let backup_meta = match read_backup_metadata(&input_path) {
+        Ok(meta) => meta,
         Err(err) => {
             append_backup_log(&format!(
                 "import_failed path={} error={}",
@@ -307,17 +438,16 @@ pub async fn plain_import(
         }
     };
     append_backup_log(&format!(
-        "import_read_ok path={} storages={} vaults={} items={}",
+        "import_read_ok path={} storages={} vaults={} items=streaming",
         input_path.display(),
-        backup.storages.len(),
-        backup.vaults.len(),
-        backup.items.len()
+        backup_meta.storages.len(),
+        backup_meta.vaults.len()
     ));
-    if backup.version != BACKUP_VERSION {
+    if backup_meta.version != BACKUP_VERSION {
         append_backup_log(&format!(
             "import_failed path={} error=unsupported_version version={}",
             input_path.display(),
-            backup.version
+            backup_meta.version
         ));
         return Ok(ApiResponse::err(
             "backup_version_unsupported",
@@ -337,11 +467,11 @@ pub async fn plain_import(
     };
     let mut created_storages = 0usize;
     let mut mapped_to_local = 0usize;
-    for storage in backup.storages {
+    for storage in backup_meta.storages {
         let storage_id =
             Uuid::parse_str(&storage.id).map_err(|_| log_error("invalid storage id"))?;
-        let kind =
-            StorageKind::try_from(storage.kind).map_err(|_| log_error("invalid storage kind"))?;
+        let kind = StorageKind::try_from(storage.kind)
+            .map_err(|_| log_error("invalid storage kind"))?;
         let existing = storage_repo
             .get(storage_id)
             .await
@@ -394,7 +524,7 @@ pub async fn plain_import(
     let mut vault_map: HashMap<(Uuid, Uuid), (Uuid, Uuid)> = HashMap::new();
     let mut created_vaults = 0usize;
     let mut reused_vaults = 0usize;
-    for vault in &backup.vaults {
+    for vault in &backup_meta.vaults {
         let backup_storage_id =
             Uuid::parse_str(&vault.storage_id).map_err(|_| log_error("invalid storage id"))?;
         let backup_vault_id =
@@ -499,9 +629,7 @@ pub async fn plain_import(
                 }
                 Err(err) => {
                     let message = err.to_string();
-                    if message.contains(
-                        "UNIQUE constraint failed: local_vaults.storage_id, local_vaults.name",
-                    ) {
+                    if message.contains("UNIQUE constraint failed: local_vaults.storage_id, local_vaults.name") {
                         continue;
                     }
                     return Err(log_error(&message));
@@ -520,106 +648,154 @@ pub async fn plain_import(
         reused_vaults
     ));
 
-    let mut imported_items = 0usize;
-    let mut skipped_existing = 0usize;
-    let mut skipped_missing_storage = 0usize;
-    let mut skipped_missing_vault = 0usize;
-    let mut skipped_deleted = 0usize;
-
     append_backup_log(&format!(
-        "import_items_start path={} total={}",
-        input_path.display(),
-        backup.items.len()
+        "import_items_start path={} total=streaming",
+        input_path.display()
     ));
-    for (index, item) in backup.items.into_iter().enumerate() {
-        append_backup_log(&format!(
-            "import_item_start path={} index={} item_id={}",
-            input_path.display(),
-            index,
-            item.id.as_deref().unwrap_or("new")
-        ));
-        if item.deleted_at.is_some() {
-            skipped_deleted += 1;
+    #[derive(Default)]
+    struct ImportCounters {
+        imported_items: usize,
+        skipped_existing: usize,
+        skipped_missing_storage: usize,
+        skipped_missing_vault: usize,
+        skipped_deleted: usize,
+    }
+
+    let counters = Arc::new(Mutex::new(ImportCounters::default()));
+    let api_error = Arc::new(Mutex::new(None));
+    let path_display = input_path.display().to_string();
+    let storage_map_ref = &storage_map;
+    let vault_map_ref = &vault_map;
+    let services_ref = &services;
+    let item_repo_ref = &item_repo;
+
+    let stream_result = stream_backup_items_async(&input_path, |item, index| {
+        let counters = Arc::clone(&counters);
+        let api_error = Arc::clone(&api_error);
+        let path_display = path_display.clone();
+        async move {
             append_backup_log(&format!(
-                "import_item_skip path={} index={} reason=deleted",
-                input_path.display(),
-                index
+                "import_item_start path={} index={} item_id={}",
+                path_display,
+                index,
+                item.id.as_deref().unwrap_or("new")
             ));
-            continue;
-        }
-        let backup_storage_id =
-            Uuid::parse_str(&item.storage_id).map_err(|_| log_error("invalid storage id"))?;
-        let backup_vault_id =
-            Uuid::parse_str(&item.vault_id).map_err(|_| log_error("invalid vault id"))?;
-        if !storage_map.contains_key(&backup_storage_id) {
-            skipped_missing_storage += 1;
-            append_backup_log(&format!(
-                "import_item_skip path={} index={} reason=missing_storage",
-                input_path.display(),
-                index
-            ));
-            continue;
-        }
-        let Some(&(target_storage_id, target_vault_id)) =
-            vault_map.get(&(backup_storage_id, backup_vault_id))
-        else {
-            skipped_missing_vault += 1;
-            append_backup_log(&format!(
-                "import_item_skip path={} index={} reason=missing_vault",
-                input_path.display(),
-                index
-            ));
-            continue;
-        };
-        let existing = item_repo
-            .get_active_by_vault_path(target_storage_id, target_vault_id, &item.path)
-            .await
-            .map_err(|err| log_error(&err.to_string()))?;
-        if existing.is_some() {
-            skipped_existing += 1;
-            append_backup_log(&format!(
-                "import_item_skip path={} index={} reason=existing_path",
-                input_path.display(),
-                index
-            ));
-            continue;
-        }
-        match services
-            .put_item(
-                target_storage_id,
-                target_vault_id,
-                item.path.clone(),
-                item.type_id.clone(),
-                item.payload.clone(),
-            )
-            .await
-        {
-            Ok(_) => {
-                imported_items += 1;
+            if item.deleted_at.is_some() {
+                let mut guard = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                guard.skipped_deleted += 1;
                 append_backup_log(&format!(
-                    "import_item_ok path={} index={}",
-                    input_path.display(),
+                    "import_item_skip path={} index={} reason=deleted",
+                    path_display,
                     index
                 ));
+                return Ok(());
             }
-            Err(err) if err.kind == "item_exists" => {
-                skipped_existing += 1;
+            let backup_storage_id = Uuid::parse_str(&item.storage_id)
+                .map_err(|_| "invalid storage id".to_string())?;
+            let backup_vault_id =
+                Uuid::parse_str(&item.vault_id).map_err(|_| "invalid vault id".to_string())?;
+            if !storage_map_ref.contains_key(&backup_storage_id) {
+                let mut guard = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                guard.skipped_missing_storage += 1;
                 append_backup_log(&format!(
-                    "import_item_skip path={} index={} reason=item_exists",
-                    input_path.display(),
+                    "import_item_skip path={} index={} reason=missing_storage",
+                    path_display,
                     index
                 ));
+                return Ok(());
             }
-            Err(err) => {
+            let Some(&(target_storage_id, target_vault_id)) =
+                vault_map_ref.get(&(backup_storage_id, backup_vault_id))
+            else {
+                let mut guard = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                guard.skipped_missing_vault += 1;
                 append_backup_log(&format!(
-                    "import_failed path={} error={}",
-                    input_path.display(),
-                    err.message
+                    "import_item_skip path={} index={} reason=missing_vault",
+                    path_display,
+                    index
                 ));
-                return Ok(ApiResponse::err(&err.kind, &err.message));
+                return Ok(());
+            };
+            let existing = item_repo_ref
+                .get_active_by_vault_path(target_storage_id, target_vault_id, &item.path)
+                .await
+                .map_err(|err| err.to_string())?;
+            if existing.is_some() {
+                let mut guard = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                guard.skipped_existing += 1;
+                append_backup_log(&format!(
+                    "import_item_skip path={} index={} reason=existing_path",
+                    path_display,
+                    index
+                ));
+                return Ok(());
             }
+            match services_ref
+                .put_item(
+                    target_storage_id,
+                    target_vault_id,
+                    item.path.clone(),
+                    item.type_id.clone(),
+                    item.payload.clone(),
+                )
+                .await
+            {
+                Ok(_) => {
+                    let mut guard =
+                        counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                    guard.imported_items += 1;
+                    append_backup_log(&format!(
+                        "import_item_ok path={} index={}",
+                        path_display,
+                        index
+                    ));
+                }
+                Err(err) if err.kind == "item_exists" => {
+                    let mut guard =
+                        counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                    guard.skipped_existing += 1;
+                    append_backup_log(&format!(
+                        "import_item_skip path={} index={} reason=item_exists",
+                        path_display,
+                        index
+                    ));
+                }
+                Err(err) => {
+                    append_backup_log(&format!(
+                        "import_failed path={} error={}",
+                        path_display,
+                        err.message
+                    ));
+                    if let Ok(mut guard) = api_error.lock() {
+                        *guard = Some((err.kind, err.message));
+                    }
+                    return Err("import_failed".to_string());
+                }
+            }
+            Ok(())
+        }
+    })
+    .await;
+    if let Ok(guard) = api_error.lock() {
+        if let Some((kind, message)) = guard.as_ref() {
+            return Ok(ApiResponse::err(kind, message));
         }
     }
+    if let Err(err) = stream_result {
+        append_backup_log(&format!(
+            "import_failed path={} error={}",
+            input_path.display(),
+            err
+        ));
+        return Err(err);
+    }
+
+    let counters = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+    let imported_items = counters.imported_items;
+    let skipped_existing = counters.skipped_existing;
+    let skipped_missing_storage = counters.skipped_missing_storage;
+    let skipped_missing_vault = counters.skipped_missing_vault;
+    let skipped_deleted = counters.skipped_deleted;
 
     append_backup_log(&format!(
         "import_ok path={} imported={} skipped_existing={} skipped_missing_storage={} skipped_missing_vault={} skipped_deleted={}",
@@ -639,26 +815,996 @@ pub async fn plain_import(
     }))
 }
 
-fn default_backup_path(root: &Path) -> PathBuf {
-    let filename = format!(
-        "zann-plain-backup-{}.json",
-        Utc::now().format("%Y%m%d-%H%M%S")
+fn insert_payload_field(
+    payload: &mut EncryptedPayload,
+    key: &str,
+    kind: FieldKind,
+    value: Option<&str>,
+) {
+    let Some(value) = value else {
+        return;
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    payload.fields.insert(
+        key.to_string(),
+        FieldValue {
+            kind,
+            value: trimmed.to_string(),
+            meta: None,
+        },
     );
+}
+
+pub async fn apple_import(
+    state: tauri::State<'_, AppState>,
+    path: Option<String>,
+    target_storage_id: Option<String>,
+) -> Result<ApiResponse<ApplePasswordsImportResponse>, String> {
+    ensure_unlocked(&state).await?;
+    append_backup_log(&format!(
+        "apple_import_mode_raw target_storage_id={}",
+        target_storage_id.as_deref().unwrap_or("<none>")
+    ));
+    let target_storage_id = match target_storage_id.as_deref() {
+        Some("local") | Some("") => None,
+        other => other.map(str::to_string),
+    };
+    append_backup_log(&format!(
+        "apple_import_mode_select target_storage_id={}",
+        target_storage_id.as_deref().unwrap_or("<none>")
+    ));
+
+    let master_key = state
+        .master_key
+        .read()
+        .await
+        .clone()
+        .ok_or_else(|| "vault is locked".to_string())?;
+    let services = LocalServices::new(&state.pool, master_key.as_ref());
+    let storage_repo = LocalStorageRepo::new(&state.pool);
+    let vault_repo = LocalVaultRepo::new(&state.pool);
+    let item_repo = LocalItemRepo::new(&state.pool);
+
+    let mut target_storage_id = target_storage_id;
+    if target_storage_id.is_none() {
+        if let Ok(storages) = storage_repo.list().await {
+            let remote = storages
+                .into_iter()
+                .filter(|storage| storage.kind == StorageKind::Remote)
+                .collect::<Vec<_>>();
+            if remote.len() == 1 {
+                target_storage_id = Some(remote[0].id.to_string());
+                append_backup_log(&format!(
+                    "apple_import_mode_fallback storage_id={}",
+                    remote[0].id
+                ));
+            }
+        }
+    }
+
+    let (storage_id, personal_vault_id) = if let Some(target_storage_id) =
+        target_storage_id.as_deref()
+    {
+        let target_id =
+            Uuid::parse_str(target_storage_id).map_err(|_| "invalid storage id".to_string())?;
+        let storage = storage_repo
+            .get(target_id)
+            .await
+            .map_err(|err| err.to_string())?
+            .ok_or_else(|| "storage not found".to_string())?;
+        if storage.kind != StorageKind::Remote {
+            let local_personal = services
+                .ensure_default_local_personal()
+                .await
+                .map_err(|err| err.message)?;
+            (Uuid::nil(), local_personal.id)
+        } else {
+            if !storage.personal_vaults_enabled {
+                return Ok(ApiResponse::err(
+                    "personal_vaults_disabled",
+                    "personal vaults disabled for server",
+                ));
+            }
+            let existing_personal = vault_repo
+                .list_by_storage(storage.id)
+                .await
+                .map_err(|err| err.to_string())?
+                .into_iter()
+                .find(|vault| vault.kind == VaultKind::Personal);
+            let personal_id = if let Some(existing) = existing_personal {
+                existing.id
+            } else {
+                let addr = storage
+                    .server_url
+                    .clone()
+                    .ok_or_else(|| "server url missing".to_string())?;
+                let mut config = load_config(&state.root).map_err(|err| err.to_string())?;
+                let context_name = context_name_from_url(&addr);
+                let client = reqwest::Client::new();
+                let access_token = ensure_access_token_for_context(
+                    &client,
+                    &addr,
+                    &context_name,
+                    &mut config,
+                    Some(storage.id),
+                )
+                .await
+                .map_err(|err| format!("auth_failed: {err}"))?;
+                let _ = save_config(&state.root, &config);
+                let headers = auth_headers(&access_token)
+                    .map_err(|err| format!("auth_header_failed: {err}"))?;
+
+                let personal_status_url = format!(
+                    "{}/v1/vaults/personal/status",
+                    addr.trim_end_matches('/')
+                );
+                let personal_resp = client
+                    .get(personal_status_url)
+                    .headers(headers.clone())
+                    .send()
+                    .await
+                    .map_err(|err| format!("personal_status_request_failed: {err}"))?;
+                let personal_resp = ensure_success(personal_resp)
+                    .await
+                    .map_err(|err| format!("personal_status_failed: {err}"))?;
+                let personal_status =
+                    decode_json_response::<PersonalVaultStatusResponse>(personal_resp)
+                        .await
+                        .map_err(|err| format!("personal_status_decode_failed: {err}"))?;
+                let personal_vault_id = personal_status
+                    .personal_vault_id
+                    .clone()
+                    .ok_or_else(|| "personal vault missing".to_string())?;
+
+                let detail_url =
+                    format!("{}/v1/vaults/{}", addr.trim_end_matches('/'), personal_vault_id);
+                let detail_resp = client
+                    .get(detail_url)
+                    .headers(headers.clone())
+                    .send()
+                    .await
+                    .map_err(|err| format!("vault_detail_request_failed: {err}"))?;
+                let detail_resp = ensure_success(detail_resp)
+                    .await
+                    .map_err(|err| format!("vault_detail_failed: {err}"))?;
+                let detail = decode_json_response::<VaultDetailResponse>(detail_resp)
+                    .await
+                    .map_err(|err| format!("vault_detail_decode_failed: {err}"))?;
+
+                let vault_id =
+                    Uuid::parse_str(&detail.id).map_err(|_| "invalid vault id".to_string())?;
+                if vault_repo
+                    .get_by_id(storage.id, vault_id)
+                    .await
+                    .map_err(|err| err.to_string())?
+                    .is_none()
+                {
+                    let kind = VaultKind::try_from(detail.kind)
+                        .map_err(|_| "invalid vault kind".to_string())?;
+                    let encryption_type = detail.encryption_type;
+                    let key_wrap_type =
+                        if encryption_type == zann_core::VaultEncryptionType::Server.as_i32() {
+                            KeyWrapType::RemoteServer
+                        } else {
+                            KeyWrapType::RemoteStrict
+                        };
+                    let local_vault = LocalVault {
+                        id: vault_id,
+                        storage_id: storage.id,
+                        name: detail.name.clone(),
+                        kind,
+                        is_default: false,
+                        vault_key_enc: detail.vault_key_enc.clone(),
+                        key_wrap_type,
+                        last_synced_at: None,
+                    };
+                    vault_repo
+                        .create(&local_vault)
+                        .await
+                        .map_err(|err| err.to_string())?;
+                }
+                vault_id
+            };
+            (storage.id, personal_id)
+        }
+    } else {
+        let local_personal = services
+            .ensure_default_local_personal()
+            .await
+            .map_err(|err| err.message)?;
+        (Uuid::nil(), local_personal.id)
+    };
+
+    let input_path = match path {
+        Some(path) if !path.trim().is_empty() => PathBuf::from(path),
+        _ => match prompt_apple_import_path() {
+            Some(path) => path,
+            None => {
+                append_backup_log("apple_import_cancelled");
+                return Ok(ApiResponse::err(
+                    "backup_cancelled",
+                    "backup import cancelled",
+                ));
+            }
+        },
+    };
+    append_backup_log(&format!(
+        "apple_import_start path={}",
+        input_path.display()
+    ));
+
+    let mut reader = ReaderBuilder::new()
+        .trim(csv::Trim::All)
+        .from_path(&input_path)
+        .map_err(|err| err.to_string())?;
+
+    let mut imported_items = 0usize;
+    let mut skipped_existing = 0usize;
+    let mut skipped_invalid = 0usize;
+
+    for (index, result) in reader.deserialize::<ApplePasswordsRow>().enumerate() {
+        let row = match result {
+            Ok(row) => row,
+            Err(err) => {
+                append_backup_log(&format!(
+                    "apple_import_failed path={} error={}",
+                    input_path.display(),
+                    err
+                ));
+                return Err(err.to_string());
+            }
+        };
+        let row_number = index + 2;
+        let title = row.title.trim();
+        if title.is_empty() {
+            skipped_invalid += 1;
+            append_backup_log(&format!(
+                "apple_import_skip path={} row={} reason=missing_title",
+                input_path.display(),
+                row_number
+            ));
+            continue;
+        }
+
+        let existing = item_repo
+            .get_active_by_vault_path(storage_id, personal_vault_id, title)
+            .await
+            .map_err(|err| err.to_string())?;
+        if existing.is_some() {
+            skipped_existing += 1;
+            append_backup_log(&format!(
+                "apple_import_skip path={} row={} title={} reason=existing_path",
+                input_path.display(),
+                row_number,
+                title
+            ));
+            continue;
+        }
+
+        let mut payload = EncryptedPayload::new("login");
+        insert_payload_field(
+            &mut payload,
+            "username",
+            FieldKind::Text,
+            row.username.as_deref(),
+        );
+        insert_payload_field(
+            &mut payload,
+            "password",
+            FieldKind::Password,
+            row.password.as_deref(),
+        );
+        insert_payload_field(&mut payload, "url", FieldKind::Url, row.url.as_deref());
+        insert_payload_field(&mut payload, "notes", FieldKind::Note, row.notes.as_deref());
+        if let Some(otp_auth) = row.otp_auth.as_deref() {
+            if let Some(meta) = extract_totp_meta(otp_auth) {
+                insert_payload_field(
+                    &mut payload,
+                    "totp_secret",
+                    FieldKind::Otp,
+                    Some(meta.secret.as_str()),
+                );
+                let mut extra = payload.extra.take().unwrap_or_default();
+                if let Some(value) = meta.otp_type {
+                    extra.insert("otp_type".to_string(), value);
+                }
+                if let Some(value) = meta.issuer {
+                    extra.insert("otp_issuer".to_string(), value);
+                }
+                if let Some(value) = meta.algorithm {
+                    extra.insert("otp_algorithm".to_string(), value);
+                }
+                if let Some(value) = meta.label {
+                    extra.insert("otp_label".to_string(), value);
+                }
+                if let Some(value) = meta.digits {
+                    extra.insert("otp_digits".to_string(), value);
+                }
+                if let Some(value) = meta.period {
+                    extra.insert("otp_period".to_string(), value);
+                }
+                if !extra.is_empty() {
+                    payload.extra = Some(extra);
+                }
+            }
+        }
+
+        match services
+            .put_item(
+                storage_id,
+                personal_vault_id,
+                title.to_string(),
+                "login".to_string(),
+                payload,
+            )
+            .await
+        {
+            Ok(_) => imported_items += 1,
+            Err(err) if err.kind == "item_exists" => skipped_existing += 1,
+            Err(err)
+                if matches!(
+                    err.kind.as_str(),
+                    "path_required"
+                        | "path_invalid"
+                        | "path_segment_invalid"
+                        | "name_too_long"
+                        | "path_segments_limit"
+                        | "payload_too_large"
+                ) =>
+            {
+                skipped_invalid += 1;
+                append_backup_log(&format!(
+                    "apple_import_skip path={} row={} title={} reason={}",
+                    input_path.display(),
+                    row_number,
+                    title,
+                    err.kind
+                ));
+            }
+            Err(err) => return Err(err.message),
+        }
+    }
+
+    append_backup_log(&format!(
+        "apple_import_ok path={} imported={} skipped_existing={} skipped_invalid={}",
+        input_path.display(),
+        imported_items,
+        skipped_existing,
+        skipped_invalid
+    ));
+
+    Ok(ApiResponse::ok(ApplePasswordsImportResponse {
+        imported_items,
+        skipped_existing,
+        skipped_invalid,
+    }))
+}
+
+fn default_backup_path(root: &Path) -> PathBuf {
+    let filename = format!("zann-plain-backup-{}.json", Utc::now().format("%Y%m%d-%H%M%S"));
     root.join("backups").join(filename)
 }
 
-fn write_backup_file(path: &Path, backup: &PlainBackup) -> Result<(), anyhow::Error> {
-    let contents = serde_json::to_string_pretty(backup)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+struct ExportItemStreamer<'a> {
+    services: LocalServices<'a>,
+    item_repo: LocalItemRepo<'a>,
+    vaults: VecDeque<(Uuid, Uuid)>,
+    current_vault: Option<(Uuid, Uuid)>,
+    cursor: Option<(chrono::DateTime<Utc>, Uuid)>,
+    buffer: VecDeque<LocalItem>,
+}
+
+trait BackupItemSource: Send {
+    fn next_item<'a>(
+        &'a mut self,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Option<PlainBackupItem>, anyhow::Error>> + Send + 'a>,
+    >;
+}
+
+impl<'a> BackupItemSource for ExportItemStreamer<'a> {
+    fn next_item<'b>(
+        &'b mut self,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Option<PlainBackupItem>, anyhow::Error>> + Send + 'b>,
+    > {
+        Box::pin(ExportItemStreamer::next_item(self))
     }
-    std::fs::write(path, contents)?;
+}
+
+impl<'a> ExportItemStreamer<'a> {
+    fn new(
+        services: LocalServices<'a>,
+        item_repo: LocalItemRepo<'a>,
+        vaults: VecDeque<(Uuid, Uuid)>,
+    ) -> Self {
+        Self {
+            services,
+            item_repo,
+            vaults,
+            current_vault: None,
+            cursor: None,
+            buffer: VecDeque::new(),
+        }
+    }
+
+    async fn next_item(&mut self) -> Result<Option<PlainBackupItem>, anyhow::Error> {
+        loop {
+            if let Some(item) = self.buffer.pop_front() {
+                let payload = self
+                    .services
+                    .decrypt_payload_for_item(
+                        item.storage_id,
+                        item.vault_id,
+                        item.id,
+                        &item.payload_enc,
+                    )
+                    .await
+                    .map_err(|err| anyhow::anyhow!(err.message))?;
+                let backup_item = PlainBackupItem {
+                    id: Some(item.id.to_string()),
+                    storage_id: item.storage_id.to_string(),
+                    vault_id: item.vault_id.to_string(),
+                    path: item.path.clone(),
+                    name: item.name.clone(),
+                    type_id: item.type_id.clone(),
+                    payload,
+                    updated_at: item.updated_at.to_rfc3339(),
+                    version: item.version,
+                    deleted_at: item.deleted_at.map(|dt| dt.to_rfc3339()),
+                };
+                return Ok(Some(backup_item));
+            }
+
+            if self.current_vault.is_none() {
+                self.current_vault = self.vaults.pop_front();
+                self.cursor = None;
+            }
+
+            let Some((storage_id, vault_id)) = self.current_vault else {
+                return Ok(None);
+            };
+
+            let items = self
+                .item_repo
+                .list_by_vault_paged(
+                    storage_id,
+                    vault_id,
+                    true,
+                    EXPORT_PAGE_LIMIT,
+                    self.cursor,
+                )
+                .await?;
+            if items.is_empty() {
+                self.current_vault = None;
+                self.cursor = None;
+                continue;
+            }
+            if let Some(last) = items.last() {
+                self.cursor = Some((last.updated_at, last.id));
+            }
+            self.buffer = VecDeque::from(items);
+        }
+    }
+}
+
+async fn write_backup_streaming<W>(
+    writer: &mut W,
+    version: u32,
+    exported_at: &str,
+    storages: &[PlainBackupStorage],
+    vaults: &[PlainBackupVault],
+    source: &mut dyn BackupItemSource,
+) -> Result<usize, anyhow::Error>
+where
+    W: std::io::Write,
+{
+    write!(writer, "{{\"version\":")?;
+    serde_json::to_writer(&mut *writer, &version)?;
+    write!(writer, ",\"exported_at\":")?;
+    serde_json::to_writer(&mut *writer, &exported_at)?;
+    write!(writer, ",\"storages\":[")?;
+    for (idx, storage) in storages.iter().enumerate() {
+        if idx > 0 {
+            write!(writer, ",")?;
+        }
+        serde_json::to_writer(&mut *writer, storage)?;
+    }
+    write!(writer, "],\"vaults\":[")?;
+    for (idx, vault) in vaults.iter().enumerate() {
+        if idx > 0 {
+            write!(writer, ",")?;
+        }
+        serde_json::to_writer(&mut *writer, vault)?;
+    }
+    write!(writer, "],\"items\":[")?;
+    let mut items_count = 0usize;
+    let mut item_index = 0usize;
+    loop {
+        let item = source.next_item().await?;
+        let Some(item) = item else {
+            break;
+        };
+        if item_index > 0 {
+            write!(writer, ",")?;
+        }
+        serde_json::to_writer(&mut *writer, &item)?;
+        item_index += 1;
+        items_count += 1;
+    }
+    write!(writer, "]}}")?;
+    Ok(items_count)
+}
+
+struct PlainBackupMeta {
+    version: u32,
+    _exported_at: String,
+    storages: Vec<PlainBackupStorage>,
+    vaults: Vec<PlainBackupVault>,
+}
+
+impl<'de> Deserialize<'de> for PlainBackupMeta {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct MetaVisitor;
+
+        impl<'de> Visitor<'de> for MetaVisitor {
+            type Value = PlainBackupMeta;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("plain backup metadata")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut version: Option<u32> = None;
+                let mut exported_at: Option<String> = None;
+                let mut storages: Option<Vec<PlainBackupStorage>> = None;
+                let mut vaults: Option<Vec<PlainBackupVault>> = None;
+
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        "version" => {
+                            version = Some(map.next_value()?);
+                        }
+                        "exported_at" => {
+                            exported_at = Some(map.next_value()?);
+                        }
+                        "storages" => {
+                            storages = Some(map.next_value()?);
+                        }
+                        "vaults" => {
+                            vaults = Some(map.next_value()?);
+                        }
+                        "items" => {
+                            let _: IgnoredAny = map.next_value()?;
+                        }
+                        _ => {
+                            let _: IgnoredAny = map.next_value()?;
+                        }
+                    }
+                }
+
+                Ok(PlainBackupMeta {
+                    version: version.ok_or_else(|| de::Error::missing_field("version"))?,
+                    _exported_at: exported_at
+                        .ok_or_else(|| de::Error::missing_field("exported_at"))?,
+                    storages: storages.ok_or_else(|| de::Error::missing_field("storages"))?,
+                    vaults: vaults.ok_or_else(|| de::Error::missing_field("vaults"))?,
+                })
+            }
+        }
+
+        deserializer.deserialize_map(MetaVisitor)
+    }
+}
+
+struct ItemsSeed<'a, F> {
+    handler: &'a mut F,
+    index: &'a mut usize,
+}
+
+impl<'de, 'a, F> DeserializeSeed<'de> for ItemsSeed<'a, F>
+where
+    F: FnMut(PlainBackupItem, usize) -> Result<(), String>,
+{
+    type Value = ();
+
+    fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        struct ItemsVisitor<'a, F> {
+            handler: &'a mut F,
+            index: &'a mut usize,
+        }
+
+        impl<'de, 'a, F> Visitor<'de> for ItemsVisitor<'a, F>
+        where
+            F: FnMut(PlainBackupItem, usize) -> Result<(), String>,
+        {
+            type Value = ();
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("plain backup items list")
+            }
+
+            fn visit_seq<M>(self, mut seq: M) -> Result<Self::Value, M::Error>
+            where
+                M: SeqAccess<'de>,
+            {
+                while let Some(item) = seq.next_element::<PlainBackupItem>()? {
+                    let index = *self.index;
+                    *self.index += 1;
+                    (self.handler)(item, index).map_err(de::Error::custom)?;
+                }
+                Ok(())
+            }
+        }
+
+        deserializer.deserialize_seq(ItemsVisitor {
+            handler: self.handler,
+            index: self.index,
+        })
+    }
+}
+
+fn read_backup_metadata(path: &Path) -> Result<PlainBackupMeta, anyhow::Error> {
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let meta = PlainBackupMeta::deserialize(&mut deserializer)?;
+    Ok(meta)
+}
+
+fn stream_backup_items<F>(path: &Path, mut handler: F) -> Result<(), anyhow::Error>
+where
+    F: FnMut(PlainBackupItem, usize) -> Result<(), String>,
+{
+    struct StreamVisitor<'a, F> {
+        handler: &'a mut F,
+        index: usize,
+    }
+
+    impl<'de, 'a, F> Visitor<'de> for StreamVisitor<'a, F>
+    where
+        F: FnMut(PlainBackupItem, usize) -> Result<(), String>,
+    {
+        type Value = ();
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("plain backup stream")
+        }
+
+        fn visit_map<M>(mut self, mut map: M) -> Result<Self::Value, M::Error>
+        where
+            M: MapAccess<'de>,
+        {
+            while let Some(key) = map.next_key::<String>()? {
+                match key.as_str() {
+                    "items" => {
+                        let mut index = self.index;
+                        map.next_value_seed(ItemsSeed {
+                            handler: self.handler,
+                            index: &mut index,
+                        })?;
+                        self.index = index;
+                    }
+                    _ => {
+                        let _: IgnoredAny = map.next_value()?;
+                    }
+                }
+            }
+            Ok(())
+        }
+    }
+
+    let file = File::open(path)?;
+    let reader = BufReader::new(file);
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    deserializer.deserialize_map(StreamVisitor {
+        handler: &mut handler,
+        index: 0,
+    })?;
     Ok(())
 }
 
-fn read_backup_file(path: &Path) -> Result<PlainBackup, anyhow::Error> {
-    let contents = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&contents)?)
+async fn stream_backup_items_async<F, Fut>(
+    path: &Path,
+    mut handler: F,
+) -> Result<(), String>
+where
+    F: FnMut(PlainBackupItem, usize) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let (tx, mut rx) = mpsc::channel(32);
+    let path = path.to_path_buf();
+    let handle = tokio::task::spawn_blocking(move || {
+        let parse_result = stream_backup_items(&path, |item, index| {
+            tx.blocking_send(Ok((item, index)))
+                .map_err(|_| "channel_closed".to_string())
+        });
+        if let Err(err) = parse_result {
+            let _ = tx.blocking_send(Err(err.to_string()));
+        }
+    });
+
+    while let Some(message) = rx.recv().await {
+        match message {
+            Ok((item, index)) => {
+                if let Err(err) = handler(item, index).await {
+                    handle.abort();
+                    return Err(err);
+                }
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    handle.await.map_err(|err| err.to_string())?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+    use std::io::BufWriter;
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use std::collections::VecDeque;
+    use crate::types::PlainBackup;
+
+    struct VecItemSource {
+        items: VecDeque<PlainBackupItem>,
+    }
+
+    impl BackupItemSource for VecItemSource {
+        fn next_item<'a>(
+            &'a mut self,
+        ) -> Pin<
+            Box<dyn Future<Output = Result<Option<PlainBackupItem>, anyhow::Error>> + Send + 'a>,
+        > {
+            Box::pin(async move { Ok(self.items.pop_front()) })
+        }
+    }
+
+    fn sample_payload() -> EncryptedPayload {
+        let mut payload = EncryptedPayload::new("login");
+        payload.fields.insert(
+            "username".to_string(),
+            FieldValue {
+                kind: FieldKind::Text,
+                value: "user@example.com".to_string(),
+                meta: None,
+            },
+        );
+        payload
+    }
+
+    fn temp_path(label: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!("zann-{label}-{}.json", Uuid::now_v7()));
+        path
+    }
+
+    #[test]
+    fn reads_metadata_and_streams_items() {
+        let path = temp_path("backup-meta");
+        let backup = PlainBackup {
+            version: BACKUP_VERSION,
+            exported_at: "2024-01-01T00:00:00Z".to_string(),
+            storages: vec![PlainBackupStorage {
+                id: Uuid::nil().to_string(),
+                kind: StorageKind::LocalOnly.as_i32(),
+                name: "Local".to_string(),
+                server_url: None,
+                server_name: None,
+                server_fingerprint: None,
+                account_subject: None,
+                personal_vaults_enabled: false,
+                auth_method: None,
+            }],
+            vaults: vec![PlainBackupVault {
+                id: Uuid::now_v7().to_string(),
+                storage_id: Uuid::nil().to_string(),
+                name: "Default".to_string(),
+                kind: VaultKind::Personal.as_i32(),
+                is_default: true,
+            }],
+            items: vec![
+                PlainBackupItem {
+                    id: Some(Uuid::now_v7().to_string()),
+                    storage_id: Uuid::nil().to_string(),
+                    vault_id: Uuid::now_v7().to_string(),
+                    path: "example".to_string(),
+                    name: "Example".to_string(),
+                    type_id: "login".to_string(),
+                    payload: sample_payload(),
+                    updated_at: "2024-01-01T00:00:00Z".to_string(),
+                    version: 1,
+                    deleted_at: None,
+                },
+                PlainBackupItem {
+                    id: Some(Uuid::now_v7().to_string()),
+                    storage_id: Uuid::nil().to_string(),
+                    vault_id: Uuid::now_v7().to_string(),
+                    path: "example2".to_string(),
+                    name: "Example 2".to_string(),
+                    type_id: "login".to_string(),
+                    payload: sample_payload(),
+                    updated_at: "2024-01-02T00:00:00Z".to_string(),
+                    version: 1,
+                    deleted_at: None,
+                },
+            ],
+        };
+
+        let file = File::create(&path).expect("create temp backup");
+        serde_json::to_writer(file, &backup).expect("write backup");
+
+        let meta = read_backup_metadata(&path).expect("read metadata");
+        assert_eq!(meta.version, BACKUP_VERSION);
+        assert_eq!(meta.storages.len(), 1);
+        assert_eq!(meta.vaults.len(), 1);
+
+        let mut streamed = Vec::new();
+        stream_backup_items(&path, |item, _index| {
+            streamed.push(item);
+            Ok(())
+        })
+        .expect("stream items");
+        assert_eq!(streamed.len(), 2);
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn streams_items_async() {
+        let path = temp_path("backup-stream-async");
+        let backup = PlainBackup {
+            version: BACKUP_VERSION,
+            exported_at: "2024-01-01T00:00:00Z".to_string(),
+            storages: vec![],
+            vaults: vec![],
+            items: vec![
+                PlainBackupItem {
+                    id: Some(Uuid::now_v7().to_string()),
+                    storage_id: Uuid::nil().to_string(),
+                    vault_id: Uuid::now_v7().to_string(),
+                    path: "one".to_string(),
+                    name: "One".to_string(),
+                    type_id: "login".to_string(),
+                    payload: sample_payload(),
+                    updated_at: "2024-01-01T00:00:00Z".to_string(),
+                    version: 1,
+                    deleted_at: None,
+                },
+                PlainBackupItem {
+                    id: Some(Uuid::now_v7().to_string()),
+                    storage_id: Uuid::nil().to_string(),
+                    vault_id: Uuid::now_v7().to_string(),
+                    path: "two".to_string(),
+                    name: "Two".to_string(),
+                    type_id: "login".to_string(),
+                    payload: sample_payload(),
+                    updated_at: "2024-01-02T00:00:00Z".to_string(),
+                    version: 1,
+                    deleted_at: None,
+                },
+            ],
+        };
+
+        let file = File::create(&path).expect("create temp backup");
+        serde_json::to_writer(file, &backup).expect("write backup");
+
+        let items = Arc::new(Mutex::new(Vec::new()));
+        let items_clone = Arc::clone(&items);
+        tauri::async_runtime::block_on(async {
+            stream_backup_items_async(&path, |item, _index| {
+                let items_clone = Arc::clone(&items_clone);
+                async move {
+                    let mut guard = items_clone.lock().expect("lock items");
+                    guard.push(item);
+                    Ok(())
+                }
+            })
+            .await
+            .expect("stream async");
+        });
+
+        let guard = items.lock().expect("lock items");
+        assert_eq!(guard.len(), 2);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn writes_backup_streaming() {
+        let path = temp_path("backup-write");
+        let storages = vec![PlainBackupStorage {
+            id: Uuid::nil().to_string(),
+            kind: StorageKind::LocalOnly.as_i32(),
+            name: "Local".to_string(),
+            server_url: None,
+            server_name: None,
+            server_fingerprint: None,
+            account_subject: None,
+            personal_vaults_enabled: false,
+            auth_method: None,
+        }];
+        let vaults = vec![PlainBackupVault {
+            id: Uuid::now_v7().to_string(),
+            storage_id: Uuid::nil().to_string(),
+            name: "Default".to_string(),
+            kind: VaultKind::Personal.as_i32(),
+            is_default: true,
+        }];
+        let items = VecDeque::from(vec![
+            PlainBackupItem {
+                id: Some(Uuid::now_v7().to_string()),
+                storage_id: Uuid::nil().to_string(),
+                vault_id: Uuid::now_v7().to_string(),
+                path: "alpha".to_string(),
+                name: "Alpha".to_string(),
+                type_id: "login".to_string(),
+                payload: sample_payload(),
+                updated_at: "2024-01-01T00:00:00Z".to_string(),
+                version: 1,
+                deleted_at: None,
+            },
+            PlainBackupItem {
+                id: Some(Uuid::now_v7().to_string()),
+                storage_id: Uuid::nil().to_string(),
+                vault_id: Uuid::now_v7().to_string(),
+                path: "beta".to_string(),
+                name: "Beta".to_string(),
+                type_id: "login".to_string(),
+                payload: sample_payload(),
+                updated_at: "2024-01-02T00:00:00Z".to_string(),
+                version: 1,
+                deleted_at: None,
+            },
+        ]);
+        let mut source = VecItemSource { items };
+
+        let file = File::create(&path).expect("create temp backup");
+        let mut writer = BufWriter::new(file);
+        let items_count = tauri::async_runtime::block_on(async {
+            write_backup_streaming(
+                &mut writer,
+                BACKUP_VERSION,
+                "2024-01-01T00:00:00Z",
+                &storages,
+                &vaults,
+                &mut source,
+            )
+            .await
+            .expect("write backup")
+        });
+        writer.flush().expect("flush");
+        assert_eq!(items_count, 2);
+
+        let meta = read_backup_metadata(&path).expect("read metadata");
+        assert_eq!(meta.version, BACKUP_VERSION);
+        assert_eq!(meta.storages.len(), 1);
+        assert_eq!(meta.vaults.len(), 1);
+
+        let mut streamed = Vec::new();
+        stream_backup_items(&path, |item, _index| {
+            streamed.push(item);
+            Ok(())
+        })
+        .expect("stream items");
+        assert_eq!(streamed.len(), 2);
+        let _ = std::fs::remove_file(&path);
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -708,8 +1854,8 @@ async fn plain_import_remote(
         ));
         message.to_string()
     };
-    let backup = match read_backup_file(&input_path) {
-        Ok(backup) => backup,
+    let backup_meta = match read_backup_metadata(&input_path) {
+        Ok(meta) => meta,
         Err(err) => {
             append_backup_log(&format!(
                 "import_remote_failed path={} error={}",
@@ -719,11 +1865,11 @@ async fn plain_import_remote(
             return Err(err.to_string());
         }
     };
-    if backup.version != BACKUP_VERSION {
+    if backup_meta.version != BACKUP_VERSION {
         append_backup_log(&format!(
             "import_remote_failed path={} error=unsupported_version version={}",
             input_path.display(),
-            backup.version
+            backup_meta.version
         ));
         return Ok(ApiResponse::err(
             "backup_version_unsupported",
@@ -767,7 +1913,10 @@ async fn plain_import_remote(
         }
     }
 
-    let personal_status_url = format!("{}/v1/vaults/personal/status", addr.trim_end_matches('/'));
+    let personal_status_url = format!(
+        "{}/v1/vaults/personal/status",
+        addr.trim_end_matches('/')
+    );
     let personal_resp = client
         .get(personal_status_url)
         .headers(headers.clone())
@@ -777,9 +1926,10 @@ async fn plain_import_remote(
     let personal_resp = ensure_success(personal_resp)
         .await
         .map_err(|err| log_remote_error(&format!("personal_status_failed: {err}")))?;
-    let personal_status = decode_json_response::<PersonalVaultStatusResponse>(personal_resp)
-        .await
-        .map_err(|err| log_remote_error(&format!("personal_status_decode_failed: {err}")))?;
+    let personal_status =
+        decode_json_response::<PersonalVaultStatusResponse>(personal_resp)
+            .await
+            .map_err(|err| log_remote_error(&format!("personal_status_decode_failed: {err}")))?;
     let personal_vault_id = personal_status
         .personal_vault_id
         .clone()
@@ -790,9 +1940,9 @@ async fn plain_import_remote(
     let mut reused_vaults = 0usize;
     let mut mapped_personal = 0usize;
 
-    for vault in &backup.vaults {
-        let backup_storage_id = Uuid::parse_str(&vault.storage_id)
-            .map_err(|_| log_remote_error("invalid storage id"))?;
+    for vault in &backup_meta.vaults {
+        let backup_storage_id =
+            Uuid::parse_str(&vault.storage_id).map_err(|_| log_remote_error("invalid storage id"))?;
         let backup_vault_id =
             Uuid::parse_str(&vault.id).map_err(|_| log_remote_error("invalid vault id"))?;
         let kind =
@@ -839,9 +1989,7 @@ async fn plain_import_remote(
             if resp.status().is_success() {
                 let created = decode_json_response::<VaultDetailResponse>(resp)
                     .await
-                    .map_err(|err| {
-                        log_remote_error(&format!("vault_create_decode_failed: {err}"))
-                    })?;
+                    .map_err(|err| log_remote_error(&format!("vault_create_decode_failed: {err}")))?;
                 created_id = Some(created.id.clone());
                 existing_by_name.insert(name.clone(), created.id.clone());
                 if attempt > 0 {
@@ -946,53 +2094,104 @@ async fn plain_import_remote(
     let services = LocalServices::new(&state.pool, master_key.as_ref());
     let item_repo = LocalItemRepo::new(&state.pool);
 
-    let mut imported_items = 0usize;
-    let mut skipped_existing = 0usize;
-    let mut skipped_missing_storage = 0usize;
-    let mut skipped_missing_vault = 0usize;
-    let mut skipped_deleted = 0usize;
-
-    for item in &backup.items {
-        if item.deleted_at.is_some() {
-            skipped_deleted += 1;
-            continue;
-        }
-        let backup_storage_id = Uuid::parse_str(&item.storage_id)
-            .map_err(|_| log_remote_error("invalid storage id"))?;
-        let backup_vault_id =
-            Uuid::parse_str(&item.vault_id).map_err(|_| log_remote_error("invalid vault id"))?;
-        let Some(target_vault_id) = vault_map
-            .get(&(backup_storage_id, backup_vault_id))
-            .cloned()
-        else {
-            skipped_missing_vault += 1;
-            continue;
-        };
-        let target_vault_id =
-            Uuid::parse_str(&target_vault_id).map_err(|_| log_remote_error("invalid vault id"))?;
-        let existing = item_repo
-            .get_active_by_vault_path(storage.id, target_vault_id, &item.path)
-            .await
-            .map_err(|err| log_remote_error(&err.to_string()))?;
-        if existing.is_some() {
-            skipped_existing += 1;
-            continue;
-        }
-        match services
-            .put_item(
-                storage.id,
-                target_vault_id,
-                item.path.clone(),
-                item.type_id.clone(),
-                item.payload.clone(),
-            )
-            .await
-        {
-            Ok(_) => imported_items += 1,
-            Err(err) if err.kind == "item_exists" => skipped_existing += 1,
-            Err(err) => return Err(log_remote_error(&err.message)),
-        }
+    #[derive(Default)]
+    struct ImportCounters {
+        imported_items: usize,
+        skipped_existing: usize,
+        skipped_missing_vault: usize,
+        skipped_deleted: usize,
     }
+
+    let counters = Arc::new(Mutex::new(ImportCounters::default()));
+    let path_display = input_path.display().to_string();
+    let vault_map_ref = &vault_map;
+    let services_ref = &services;
+    let item_repo_ref = &item_repo;
+
+    let stream_result = stream_backup_items_async(&input_path, |item, _index| {
+        let counters = Arc::clone(&counters);
+        let path_display = path_display.clone();
+        async move {
+            if item.deleted_at.is_some() {
+                let mut guard = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                guard.skipped_deleted += 1;
+                return Ok(());
+            }
+            let backup_storage_id =
+                Uuid::parse_str(&item.storage_id).map_err(|_| "invalid storage id".to_string())?;
+            let backup_vault_id =
+                Uuid::parse_str(&item.vault_id).map_err(|_| "invalid vault id".to_string())?;
+            let Some(target_vault_id) = vault_map_ref
+                .get(&(backup_storage_id, backup_vault_id))
+                .cloned()
+            else {
+                let mut guard = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                guard.skipped_missing_vault += 1;
+                return Ok(());
+            };
+            let target_vault_id =
+                Uuid::parse_str(&target_vault_id).map_err(|_| "invalid vault id".to_string())?;
+            let existing = item_repo_ref
+                .get_active_by_vault_path(storage.id, target_vault_id, &item.path)
+                .await
+                .map_err(|err| log_remote_error(&err.to_string()))?;
+            if existing.is_some() {
+                let mut guard = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                guard.skipped_existing += 1;
+                return Ok(());
+            }
+            match services_ref
+                .put_item(
+                    storage.id,
+                    target_vault_id,
+                    item.path.clone(),
+                    item.type_id.clone(),
+                    item.payload.clone(),
+                )
+                .await
+            {
+                Ok(_) => {
+                    let mut guard =
+                        counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                    guard.imported_items += 1;
+                }
+                Err(err) if err.kind == "item_exists" => {
+                    let mut guard =
+                        counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+                    guard.skipped_existing += 1;
+                }
+                Err(err) => {
+                    append_backup_log(&format!(
+                        "import_remote_failed path={} error={}",
+                        path_display,
+                        err.message
+                    ));
+                    return Err(log_remote_error(&err.message));
+                }
+            }
+            Ok(())
+        }
+    })
+    .await;
+    if let Err(err) = stream_result {
+        append_backup_log(&format!(
+            "import_remote_failed path={} error={}",
+            input_path.display(),
+            err
+        ));
+        return Err(err);
+    }
+
+    let (imported_items, skipped_existing, skipped_missing_vault, skipped_deleted) = {
+        let counters = counters.lock().map_err(|_| "counter_lock_failed".to_string())?;
+        (
+            counters.imported_items,
+            counters.skipped_existing,
+            counters.skipped_missing_vault,
+            counters.skipped_deleted,
+        )
+    };
+    let skipped_missing_storage = 0usize;
 
     drop(item_repo);
     drop(services);

@@ -1,11 +1,12 @@
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { ComputedRef, Ref } from "vue";
-import type { ItemSummary } from "../../../types";
+import type { ItemCounts, ItemSummary } from "../../../types";
 import { categoryForType, categoryTypes, type ItemCategoryId } from "../../../utils/itemCategories";
 
 type AppItemFiltersOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
   items: Ref<ItemSummary[]>;
+  itemCounts?: Ref<ItemCounts | null> | ComputedRef<ItemCounts | null>;
   isSharedVault: ComputedRef<boolean>;
   selectedFolder: Ref<string | null>;
   selectedCategory?: Ref<string | null>;
@@ -14,6 +15,7 @@ type AppItemFiltersOptions = {
 export function useAppItemFilters({
   t,
   items,
+  itemCounts,
   isSharedVault,
   selectedFolder,
   selectedCategory: selectedCategoryRef,
@@ -21,6 +23,7 @@ export function useAppItemFilters({
   const selectedCategory = selectedCategoryRef ?? ref<string | null>(null);
   const selectedSubtype = ref<string | null>(null);
   const query = ref("");
+  const debouncedQuery = ref("");
   const categoryIds: ItemCategoryId[] = [
     "all",
     "login",
@@ -29,6 +32,8 @@ export function useAppItemFilters({
     "infra",
     "trash",
   ];
+  const DEBOUNCE_MS = 250;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 
   const isDeletedItem = (item: ItemSummary) => !!item.deleted_at;
 
@@ -37,6 +42,23 @@ export function useAppItemFilters({
       acc[id] = 0;
       return acc;
     }, {} as Record<ItemCategoryId, number>);
+
+    if (itemCounts?.value) {
+      const byType = itemCounts.value.by_type ?? {};
+      counts.all = itemCounts.value.all ?? 0;
+      counts.trash = itemCounts.value.trash ?? 0;
+      categoryIds.forEach((categoryId) => {
+        if (categoryId === "all" || categoryId === "trash") {
+          return;
+        }
+        counts[categoryId] = categoryTypes(categoryId).reduce(
+          (sum, typeId) => sum + (byType[typeId] ?? 0),
+          0,
+        );
+      });
+      return counts;
+    }
+
     items.value.forEach((item) => {
       if (isDeletedItem(item)) {
         counts.trash++;
@@ -68,6 +90,24 @@ export function useAppItemFilters({
     selectedCategory.value = categoryId === "kv" ? "infra" : categoryId;
   };
 
+  watch(
+    query,
+    (value) => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        debouncedQuery.value = value;
+      }, DEBOUNCE_MS);
+    },
+    { immediate: true },
+  );
+
+  onBeforeUnmount(() => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+  });
 
   const filteredItems = computed(() => {
     let result = items.value;
@@ -104,8 +144,8 @@ export function useAppItemFilters({
       }
     }
 
-    if (query.value.trim()) {
-      const needle = query.value.toLowerCase();
+    if (debouncedQuery.value.trim()) {
+      const needle = debouncedQuery.value.toLowerCase();
       result = result.filter((item) =>
         [item.name, item.path, item.type_id].some((value) =>
           value.toLowerCase().includes(needle),
@@ -118,6 +158,7 @@ export function useAppItemFilters({
 
   return {
     selectedCategory,
+    selectedSubtype,
     query,
     categoryCounts,
     categories,

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 import type { DetailSection, FieldRow } from "../types";
+import TotpField from "./TotpField.vue";
 
 const { t } = useI18n();
 
@@ -23,6 +24,7 @@ const props = defineProps<{
   showMaskedValue: (path: string) => boolean;
   applyTimeTravelField: (fieldKey: string) => void;
   formatFieldLabel: (key: string) => string;
+  copyToClipboard: (value: string) => Promise<void>;
 }>();
 </script>
 
@@ -63,7 +65,13 @@ const props = defineProps<{
         </div>
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
+            <TotpField
+              v-if="field.kind === 'otp' && field.totp"
+              :data="field.totp"
+              :copy-to-clipboard="copyToClipboard"
+            />
             <button
+              v-else
               type="button"
               class="min-w-0 w-full text-left font-mono text-sm text-[var(--text-primary)] px-1 py-1 transition-colors focus:outline-none"
               :class="[

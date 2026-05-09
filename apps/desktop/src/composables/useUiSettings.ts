@@ -12,6 +12,11 @@ export type UiSettings = {
   lastSelectedSection: string;
   lastSelectedStorageId: string | null;
   lastSelectedVaultByStorage: Record<string, string>;
+  lastSelectedItemByVault: Record<string, string>;
+  lastSelectedFolderByVault: Record<string, string>;
+  lastSearchQuery: string;
+  lastSettingsOpen: boolean;
+  lastSettingsTab: string;
   lastCreateItemType: string;
 };
 
@@ -29,6 +34,11 @@ const defaults: UiSettings = {
   lastSelectedSection: "all",
   lastSelectedStorageId: null,
   lastSelectedVaultByStorage: {},
+  lastSelectedItemByVault: {},
+  lastSelectedFolderByVault: {},
+  lastSearchQuery: "",
+  lastSettingsOpen: false,
+  lastSettingsTab: "general",
   lastCreateItemType: "login",
 };
 

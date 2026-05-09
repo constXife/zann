@@ -220,6 +220,10 @@
     "resolveConflict": "Resolve conflict",
     "resolveConflictDone": "Conflict marked for sync"
   },
+  "totp": {
+    "refreshEvery": "refresh every {seconds}s",
+    "error": "Invalid TOTP secret"
+  },
   "workspace": {
     "contextLabel": "{label} workspace",
     "noSelectionTitle": "Select an item to get started",
@@ -406,9 +410,14 @@
       "importAction": "Import JSON",
       "importSuccess": "Backup imported",
       "importFailed": "Import failed",
+      "importAppleAction": "Import Apple CSV",
+      "importAppleSuccess": "Apple Passwords imported",
+      "importAppleFailed": "Apple Passwords import failed",
       "importPathRequired": "Path is required",
       "importedCounts": "Imported {imported}, skipped existing {skipped}",
       "importedSkippedMissing": "Skipped missing storages {missingStorages}, missing vaults {missingVaults}, deleted {deleted}",
+      "importAppleCounts": "Imported {imported}, skipped existing {skipped}",
+      "importAppleInvalid": "Skipped invalid rows {skipped}",
       "importSyncStart": "Import completed. Syncing with server...",
       "importSyncDone": "Sync completed",
       "importSyncFailed": "Sync failed",
