@@ -61,12 +61,9 @@ fn remote_login_create_master_then_relogin_unlock() {
             &state,
         ))
         .expect("login");
-    assert!(first_login.ok, "login failed: {:?}", first_login.error);
+    assert!(first_login.ok, "login failed");
     assert_eq!(
-        first_login
-            .data
-            .as_ref()
-            .map(|data| data.status.as_str()),
+        first_login.data.as_ref().map(|data| data.status.as_str()),
         Some("success")
     );
 
@@ -78,23 +75,14 @@ fn remote_login_create_master_then_relogin_unlock() {
     drop(core);
 
     let second_login = runtime
-        .block_on(password_login(
-            server_url,
-            email,
-            password,
-            &state,
-        ))
+        .block_on(password_login(server_url, email, password, &state))
         .expect("login");
     assert!(second_login.ok, "login failed");
     assert_eq!(
-        second_login
-            .data
-            .as_ref()
-            .map(|data| data.status.as_str()),
+        second_login.data.as_ref().map(|data| data.status.as_str()),
         Some("success")
     );
 
     let core = create_core(db_url).expect("create core");
-    core.unlock(master_password)
-        .expect("unlock after relogin");
+    core.unlock(master_password).expect("unlock after relogin");
 }
