@@ -1,0 +1,7 @@
+{
+  "name": "zann-kde",
+  "private": true,
+  "scripts": {
+    "e2e": "bun scripts/e2e/run.mjs"
+  }
+}

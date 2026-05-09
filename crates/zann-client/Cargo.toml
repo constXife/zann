@@ -1,0 +1,31 @@
+[package]
+name = "zann-client"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+anyhow = "1"
+argon2 = "0.5"
+base64 = "0.22"
+blake3 = "1"
+chrono = { version = "0.4", features = ["serde"] }
+data-encoding = "2"
+dirs = "5"
+ed25519-dalek = "2"
+rand = "0.8"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+uuid = { version = "1", features = ["v7", "serde"] }
+
+zann-core = { path = "../zann-core" }
+zann-db = { path = "../zann-db", features = ["sqlite"] }
+
+[features]
+# default
+
+[dev-dependencies]
+tempfile = "3"

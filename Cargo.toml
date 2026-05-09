@@ -1,13 +1,16 @@
 [workspace]
 members = [
+  "crates/zann-client",
   "crates/zann-crypto",
   "crates/zann-core",
   "crates/zann-db",
+  "crates/zann-ffi",
   "crates/zann-keystore",
   "crates/zann-server",
   "crates/zann-cli",
 ]
 exclude = [
   "apps/desktop/src-tauri",
+  "apps/kde",
 ]
 resolver = "2"
