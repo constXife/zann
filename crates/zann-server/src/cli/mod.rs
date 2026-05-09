@@ -1,7 +1,9 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+pub mod export;
 pub mod init;
+pub mod provision;
 pub mod tokens;
 
 #[derive(Parser)]
@@ -16,10 +18,14 @@ pub struct Cli {
 enum Command {
     /// Run database migrations
     Migrate,
+    /// Export shared server-encrypted vaults in plaintext for local recovery
+    Export(export::ExportArgs),
     /// Print OpenAPI spec (optionally to a file)
     Openapi(OpenApiArgs),
     /// Initial setup (first user + vault)
     Init(init::InitArgs),
+    /// Privileged provisioning helpers for server-side bootstrap
+    Provision(provision::ProvisionArgs),
     /// Manage service account tokens
     Token(tokens::TokenArgs),
 }
@@ -34,8 +40,10 @@ struct OpenApiArgs {
 pub enum RunMode {
     Server,
     Migrate,
+    Export(export::ExportArgs),
     OpenApi { out: Option<PathBuf> },
     Init(init::InitArgs),
+    Provision(provision::ProvisionArgs),
     Token(tokens::TokenArgs),
 }
 
@@ -44,8 +52,10 @@ pub fn parse_args() -> RunMode {
     match cli.command {
         None => RunMode::Server,
         Some(Command::Migrate) => RunMode::Migrate,
+        Some(Command::Export(args)) => RunMode::Export(args),
         Some(Command::Openapi(args)) => RunMode::OpenApi { out: args.out },
         Some(Command::Init(args)) => RunMode::Init(args),
+        Some(Command::Provision(args)) => RunMode::Provision(args),
         Some(Command::Token(args)) => RunMode::Token(args),
     }
 }
@@ -69,6 +79,54 @@ mod tests {
             panic!("expected openapi command");
         };
         assert_eq!(args.out, Some(PathBuf::from("spec.json")));
+    }
+
+    #[test]
+    fn parse_export_single_vault_command() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "export",
+            "--vault",
+            "infra",
+            "--i-understand-plaintext",
+        ]);
+        let Some(Command::Export(args)) = cli.command else {
+            panic!("expected export command");
+        };
+        assert_eq!(args.vault, vec!["infra".to_string()]);
+        assert!(!args.all_shared);
+        assert!(args.i_understand_plaintext);
+    }
+
+    #[test]
+    fn parse_export_all_shared_to_file_command() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "export",
+            "--all-shared",
+            "--out",
+            "shared-export.json",
+            "--i-understand-plaintext",
+        ]);
+        let Some(Command::Export(args)) = cli.command else {
+            panic!("expected export command");
+        };
+        assert!(args.all_shared);
+        assert_eq!(args.out, Some(PathBuf::from("shared-export.json")));
+        assert!(args.i_understand_plaintext);
+    }
+
+    #[test]
+    fn parse_export_rejects_mixed_scope_flags() {
+        let result = Cli::try_parse_from([
+            "zann-server",
+            "export",
+            "--vault",
+            "infra",
+            "--all-shared",
+            "--i-understand-plaintext",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -130,6 +188,56 @@ mod tests {
         };
         assert_eq!(args.email, "admin@example.com");
         assert_eq!(args.vault_slug, "prod");
+    }
+
+    #[test]
+    fn parse_provision_ensure_vault_command() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "provision",
+            "ensure-vault",
+            "--name",
+            "Infrastructure",
+            "--slug",
+            "infra",
+        ]);
+        let Some(Command::Provision(args)) = cli.command else {
+            panic!("expected provision command");
+        };
+        let provision::ProvisionCommand::EnsureVault(command) = args.command else {
+            panic!("expected ensure-vault command");
+        };
+        assert_eq!(command.name, "Infrastructure");
+        assert_eq!(command.slug, "infra");
+    }
+
+    #[test]
+    fn parse_provision_ensure_token_command() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "provision",
+            "ensure-token",
+            "yogg-grafana",
+            "infra:rlyeh/yogg/grafana",
+            "read",
+            "--rotate",
+            "--write-token-file",
+            "/run/secrets/yogg-zann-token",
+        ]);
+        let Some(Command::Provision(args)) = cli.command else {
+            panic!("expected provision command");
+        };
+        let provision::ProvisionCommand::EnsureToken(command) = args.command else {
+            panic!("expected ensure-token command");
+        };
+        assert_eq!(command.name, "yogg-grafana");
+        assert_eq!(command.target, "infra:rlyeh/yogg/grafana");
+        assert_eq!(command.ops, "read");
+        assert!(command.rotate);
+        assert_eq!(
+            command.write_token_file.as_deref(),
+            Some(std::path::Path::new("/run/secrets/yogg-zann-token"))
+        );
     }
 
     #[test]

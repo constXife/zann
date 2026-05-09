@@ -83,7 +83,7 @@ fn set_config_with_auth(auth_yaml: &str) {
 }
 
 #[test]
-fn default_auth_config_is_internal_open() {
+fn default_auth_config_is_internal_disabled() {
     let _lock = ENV_LOCK.lock().expect("env lock");
     clear_auth_env();
     clear_metrics_env();
@@ -93,9 +93,45 @@ fn default_auth_config_is_internal_open() {
     assert!(matches!(settings.config.auth.mode, AuthMode::Internal));
     assert!(matches!(
         settings.config.auth.internal.registration,
-        InternalRegistration::Open
+        InternalRegistration::Disabled
     ));
     assert!(!settings.config.auth.oidc.enabled);
+}
+
+#[test]
+fn invalid_auth_config_fails_fast() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    clear_auth_env();
+    clear_pepper_env();
+    clear_metrics_env();
+    set_config_with_auth(
+        r#"auth:
+  internal:
+    registration: invite_only
+"#,
+    );
+
+    let err = Settings::from_env_with_options(false).expect_err("config should fail");
+    assert!(err.contains("config parse failed"));
+    assert!(err.contains("invite_only"));
+}
+
+#[test]
+fn explicit_missing_config_path_fails_fast() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    clear_auth_env();
+    clear_pepper_env();
+    clear_metrics_env();
+    env::set_var(
+        "ZANN_CONFIG_PATH",
+        std::env::temp_dir()
+            .join(format!("zann-missing-config-{}.yaml", Uuid::new_v4()))
+            .display()
+            .to_string(),
+    );
+
+    let err = Settings::from_env_with_options(false).expect_err("config should fail");
+    assert!(err.contains("config file not found"));
 }
 
 #[test]

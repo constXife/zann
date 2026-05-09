@@ -2,8 +2,9 @@ use chrono::Utc;
 use std::io::Write;
 use uuid::Uuid;
 use zann_db::local::{
-    KeyWrapType, LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo,
-    LocalPendingChange, LocalStorage, LocalVault, LocalVaultRepo,
+    HistorySource, HistorySyncStatus, KeyWrapType, LocalItem, LocalItemHistory,
+    LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange, LocalStorage, LocalVault,
+    LocalVaultRepo,
 };
 
 use crate::crypto::{decrypt_payload, payload_aad, payload_checksum};
@@ -15,6 +16,8 @@ use crate::types::{
 use crate::util::{parse_rfc3339, storage_name_from_url};
 use zann_core::crypto::{encrypt_blob, SecretKey};
 use zann_core::{ChangeType, StorageKind, SyncStatus, VaultEncryptionType, VaultKind};
+
+const HISTORY_LIMIT: i64 = 5;
 
 fn append_sync_log(message: &str) {
     let Some(home) = dirs::home_dir() else {
@@ -115,8 +118,7 @@ pub(crate) async fn ensure_local_vaults(
         } else {
             KeyWrapType::RemoteStrict
         };
-        let kind = VaultKind::try_from(vault.kind)
-            .map_err(|_| "invalid vault kind".to_string())?;
+        let kind = VaultKind::try_from(vault.kind).map_err(|_| "invalid vault kind".to_string())?;
         let record = LocalVault {
             id: vault_id,
             storage_id: storage_uuid,
@@ -146,7 +148,10 @@ pub(crate) async fn handle_sync_conflict(
         .checksum
         .clone()
         .unwrap_or_else(|| payload_checksum(&payload_enc));
-    let path = change.path.clone().unwrap_or_else(|| "conflict".to_string());
+    let path = change
+        .path
+        .clone()
+        .unwrap_or_else(|| "conflict".to_string());
     let name = change.name.clone().unwrap_or_else(|| path.clone());
     let type_id = change
         .type_id
@@ -179,7 +184,10 @@ pub(crate) async fn handle_sync_conflict(
         existing.checksum = checksum;
         existing.sync_status = SyncStatus::Conflict;
         existing.updated_at = now;
-        item_repo.update(&existing).await.map_err(|err| err.to_string())?;
+        item_repo
+            .update(&existing)
+            .await
+            .map_err(|err| err.to_string())?;
         return Ok(Some(existing.id));
     }
 
@@ -275,7 +283,10 @@ pub(crate) async fn apply_push_applied(
         } else {
             SyncStatus::Synced
         };
-        item_repo.update(&local).await.map_err(|err| err.to_string())?;
+        item_repo
+            .update(&local)
+            .await
+            .map_err(|err| err.to_string())?;
     }
     Ok(())
 }
@@ -324,7 +335,10 @@ pub(crate) async fn apply_pull_change(
             local.sync_status = SyncStatus::Tombstone;
             local.updated_at = updated_at;
             local.version = change.seq;
-            item_repo.update(&local).await.map_err(|err| err.to_string())?;
+            item_repo
+                .update(&local)
+                .await
+                .map_err(|err| err.to_string())?;
         }
         apply_history_payloads(history_repo, storage_id, vault_id, item_id, &change.history)
             .await?;
@@ -372,7 +386,10 @@ pub(crate) async fn apply_pull_change(
         local.deleted_at = None;
         local.sync_status = SyncStatus::Synced;
         local.version = change.seq;
-        item_repo.update(&local).await.map_err(|err| err.to_string())?;
+        item_repo
+            .update(&local)
+            .await
+            .map_err(|err| err.to_string())?;
         apply_history_payloads(history_repo, storage_id, vault_id, item_id, &change.history)
             .await?;
         return Ok(true);
@@ -393,7 +410,10 @@ pub(crate) async fn apply_pull_change(
         updated_at,
         sync_status: SyncStatus::Synced,
     };
-    item_repo.create(&item).await.map_err(|err| err.to_string())?;
+    item_repo
+        .create(&item)
+        .await
+        .map_err(|err| err.to_string())?;
     apply_history_payloads(history_repo, storage_id, vault_id, item_id, &change.history).await?;
     Ok(true)
 }
@@ -427,7 +447,10 @@ pub(crate) async fn apply_shared_pull_change(
             local.sync_status = SyncStatus::Tombstone;
             local.updated_at = updated_at;
             local.version = change.seq;
-            item_repo.update(&local).await.map_err(|err| err.to_string())?;
+            item_repo
+                .update(&local)
+                .await
+                .map_err(|err| err.to_string())?;
         }
         apply_shared_history_payloads(
             history_repo,
@@ -444,7 +467,8 @@ pub(crate) async fn apply_shared_pull_change(
     let Some(payload) = change.payload.as_ref() else {
         return Ok(false);
     };
-    let (payload_enc, checksum) = encrypt_payload_for_cache(master_key, vault_id, item_id, payload)?;
+    let (payload_enc, checksum) =
+        encrypt_payload_for_cache(master_key, vault_id, item_id, payload)?;
     let key_fp = key_fingerprint(master_key);
 
     if let Some(mut local) = existing {
@@ -458,7 +482,10 @@ pub(crate) async fn apply_shared_pull_change(
         local.deleted_at = None;
         local.sync_status = SyncStatus::Synced;
         local.version = change.seq;
-        item_repo.update(&local).await.map_err(|err| err.to_string())?;
+        item_repo
+            .update(&local)
+            .await
+            .map_err(|err| err.to_string())?;
         apply_shared_history_payloads(
             history_repo,
             master_key,
@@ -534,11 +561,13 @@ async fn apply_history_payloads(
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,
             changed_by_device_name: None,
+            source: HistorySource::Server,
+            sync_status: HistorySyncStatus::Confirmed,
             created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
         });
     }
     match history_repo
-        .replace_by_item(storage_id, item_id, &entries)
+        .merge_by_item(storage_id, item_id, &entries, HISTORY_LIMIT)
         .await
     {
         Ok(()) => {
@@ -609,11 +638,13 @@ async fn apply_shared_history_payloads(
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,
             changed_by_device_name: None,
+            source: HistorySource::Server,
+            sync_status: HistorySyncStatus::Confirmed,
             created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
         });
     }
     match history_repo
-        .replace_by_item(storage_id, item_id, &entries)
+        .merge_by_item(storage_id, item_id, &entries, HISTORY_LIMIT)
         .await
     {
         Ok(()) => {

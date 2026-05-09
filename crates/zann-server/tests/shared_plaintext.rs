@@ -639,6 +639,246 @@ async fn service_account_login_allows_shared_access_in_oidc_mode() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn service_account_token_can_set_secret_without_device_id() {
+    let app = TestApp::new_with_smk().await;
+    let email = "shared-secrets-direct@example.com";
+    let user = app.register(email, "password").await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app
+        .create_shared_vault(token, "shared-secrets-direct")
+        .await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    let slug = vault["slug"].as_str().expect("vault slug");
+    let scopes = vec![
+        format!("{slug}/prefix:allowed:write"),
+        format!("{slug}/prefix:allowed:read"),
+    ];
+    let service_account = app.create_service_account(email, scopes).await;
+    let sa_token = service_account["token"].as_str().expect("sa token");
+
+    let (status, created) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{}/secrets/allowed/one", vault_id),
+            Some(sa_token),
+            json!({ "value": "pw-1" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret set failed: {:?}", created);
+    assert_eq!(created["created"], true);
+    assert_eq!(created["value"], "pw-1");
+
+    let (status, fetched) = app
+        .get_json(
+            &format!("/v1/vaults/{}/secrets/allowed/one", vault_id),
+            Some(sa_token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret get failed: {:?}", fetched);
+    assert_eq!(fetched["value"], "pw-1");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn service_account_access_token_can_set_secret_without_device_id() {
+    let app = TestApp::new_with_smk().await;
+    let email = "shared-secrets-sa@example.com";
+    let user = app.register(email, "password").await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app.create_shared_vault(token, "shared-secrets-sa").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    let slug = vault["slug"].as_str().expect("vault slug");
+    let scopes = vec![
+        format!("{slug}/prefix:allowed:write"),
+        format!("{slug}/prefix:allowed:read"),
+    ];
+    let service_account = app.create_service_account(email, scopes).await;
+    let sa_token = service_account["token"].as_str().expect("sa token");
+
+    let (status, login) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/service-account",
+            None,
+            json!({ "token": sa_token }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "sa login failed: {:?}", login);
+    let access_token = login["access_token"].as_str().expect("access token");
+
+    let (status, created) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{}/secrets/allowed/one", vault_id),
+            Some(access_token),
+            json!({ "value": "pw-1" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret set failed: {:?}", created);
+    assert_eq!(created["created"], true);
+    assert_eq!(created["value"], "pw-1");
+
+    let (status, fetched) = app
+        .get_json(
+            &format!("/v1/vaults/{}/secrets/allowed/one", vault_id),
+            Some(access_token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret get failed: {:?}", fetched);
+    assert_eq!(fetched["value"], "pw-1");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn service_account_access_token_can_manage_shared_items_without_device_id() {
+    let app = TestApp::new_with_smk().await;
+    let email = "shared-items-sa@example.com";
+    let user = app.register(email, "password").await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app.create_shared_vault(token, "shared-items-sa").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    let slug = vault["slug"].as_str().expect("vault slug");
+    let scopes = vec![
+        format!("{slug}/prefix:allowed:read"),
+        format!("{slug}/prefix:allowed:write"),
+    ];
+    let service_account = app.create_service_account(email, scopes).await;
+    let sa_token = service_account["token"].as_str().expect("sa token");
+
+    let (status, login) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/service-account",
+            None,
+            json!({ "token": sa_token }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "sa login failed: {:?}", login);
+    let access_token = login["access_token"].as_str().expect("access token");
+
+    let (status, created) = app
+        .send_json(
+            Method::POST,
+            "/v1/shared/items",
+            Some(access_token),
+            json!({
+                "vault_id": vault_id,
+                "path": "allowed/one",
+                "type_id": "secret",
+                "payload": {
+                    "v": 1,
+                    "typeId": "secret",
+                    "fields": {
+                        "database_url": { "kind": "text", "value": "postgres://one" }
+                    }
+                }
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "shared create failed: {:?}",
+        created
+    );
+    let item_id = created["id"].as_str().expect("item id");
+
+    let (status, updated) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/shared/items/{}", item_id),
+            Some(access_token),
+            json!({
+                "payload": {
+                    "v": 1,
+                    "typeId": "secret",
+                    "fields": {
+                        "database_url": { "kind": "text", "value": "postgres://two" }
+                    }
+                }
+            }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "shared update failed: {:?}",
+        updated
+    );
+    assert_eq!(
+        updated["payload"]["fields"]["database_url"]["value"],
+        "postgres://two"
+    );
+
+    let (status, deleted) = app
+        .send_json(
+            Method::DELETE,
+            &format!("/v1/shared/items/{}", item_id),
+            Some(access_token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "shared delete failed: {:?}",
+        deleted
+    );
+    assert!(deleted.is_null());
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn secret_created_via_secrets_endpoint_is_visible_via_shared_items_api() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("shared-secrets-contract@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let vault = app
+        .create_shared_vault(token, "shared-secrets-contract")
+        .await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+
+    let (status, created) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{}/secrets/alpha/one", vault_id),
+            Some(token),
+            json!({ "value": "pw-1" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret set failed: {:?}", created);
+    assert_eq!(created["path"], "/alpha/one");
+
+    let (status, list) = app
+        .get_json(
+            &format!("/v1/shared/items?vault_id={}&prefix=alpha", vault_id),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "shared list failed: {:?}", list);
+    let items = list["items"].as_array().expect("items array");
+    assert_eq!(items.len(), 1, "expected exactly one shared item");
+    assert_eq!(items[0]["path"], "/alpha/one");
+    assert_eq!(items[0]["payload"]["value"], "pw-1");
+    assert_eq!(items[0]["payload"]["policy"], "default");
+
+    let item_id = items[0]["id"].as_str().expect("item id");
+    let (status, detail) = app
+        .get_json(&format!("/v1/shared/items/{}", item_id), Some(token))
+        .await;
+    assert_eq!(status, StatusCode::OK, "shared detail failed: {:?}", detail);
+    assert_eq!(detail["path"], "/alpha/one");
+    assert_eq!(detail["payload"]["value"], "pw-1");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn service_account_token_allows_shared_access_for_system_owner() {
     let app = TestApp::new_with_smk().await;
     let email = "shared-system@example.com";

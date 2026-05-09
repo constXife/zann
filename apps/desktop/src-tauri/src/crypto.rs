@@ -7,8 +7,7 @@ pub fn decrypt_vault_key_with_master(
     master_key: &SecretKey,
     vault: &zann_db::local::LocalVault,
 ) -> Result<SecretKey, String> {
-    let blob = EncryptedBlob::from_bytes(&vault.vault_key_enc)
-        .map_err(|err| err.to_string())?;
+    let blob = EncryptedBlob::from_bytes(&vault.vault_key_enc).map_err(|err| err.to_string())?;
     let aad = vault_key_aad(vault.id);
     let key_bytes = decrypt_blob(master_key, &blob, &aad).map_err(|err| err.to_string())?;
     if key_bytes.len() != 32 {

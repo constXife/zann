@@ -93,9 +93,7 @@ type AppModalsProps = {
   exportPlainBackup: unknown;
   importPlainBackup: unknown;
   importApplePasswords: unknown;
-  toast: unknown;
-  toastActionLabel: unknown;
-  toastAction: unknown;
+  toasts: unknown;
   createMode: unknown;
   createModalOpen: unknown;
   createItemVaultId: unknown;
@@ -219,6 +217,7 @@ const paletteOpen = modelRef<unknown>("paletteOpen");
 const paletteQuery = modelRef<unknown>("paletteQuery");
 const paletteIndex = modelRef<unknown>("paletteIndex");
 const settingsOpen = modelRef<unknown>("settingsOpen");
+const toasts = modelRef<unknown>("toasts");
 const createModalOpen = modelRef<unknown>("createModalOpen");
 const createItemVaultId = modelRef<unknown>("createItemVaultId");
 const createItemType = modelRef<unknown>("createItemType");
@@ -376,11 +375,7 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :on-import-apple="importApplePasswords"
   />
 
-  <ToastMessage
-    :message="toast"
-    :action-label="toastActionLabel"
-    :on-action="toastAction || undefined"
-  />
+  <ToastMessage :toasts="toasts" />
 
   <CreateModal
     v-if="createMode === 'vault' && createModalOpen"

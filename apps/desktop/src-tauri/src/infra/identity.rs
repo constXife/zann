@@ -1,7 +1,7 @@
 use base64::Engine;
 use chrono::Utc;
 use data_encoding::BASE32_NOPAD;
-use ed25519_dalek::{Signature, VerifyingKey, Verifier};
+use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
 use crate::types::SystemInfoResponse;
@@ -20,13 +20,11 @@ pub enum IdentityError {
 }
 
 pub fn verify_system_identity(info: &SystemInfoResponse) -> Result<(), IdentityError> {
-    let server_id = info
-        .server_id
-        .as_deref()
-        .ok_or(IdentityError::Missing)?;
+    let server_id = info.server_id.as_deref().ok_or(IdentityError::Missing)?;
     let identity = info.identity.as_ref().ok_or(IdentityError::Missing)?;
 
-    let public_key_bytes = decode_b64(&identity.public_key).map_err(|_| IdentityError::InvalidKey)?;
+    let public_key_bytes =
+        decode_b64(&identity.public_key).map_err(|_| IdentityError::InvalidKey)?;
     if public_key_bytes.len() != 32 {
         return Err(IdentityError::InvalidKey);
     }
@@ -38,8 +36,8 @@ pub fn verify_system_identity(info: &SystemInfoResponse) -> Result<(), IdentityE
 
     let signature_bytes =
         decode_b64(&identity.signature).map_err(|_| IdentityError::InvalidSignatureBytes)?;
-    let signature =
-        Signature::try_from(signature_bytes.as_slice()).map_err(|_| IdentityError::InvalidSignatureBytes)?;
+    let signature = Signature::try_from(signature_bytes.as_slice())
+        .map_err(|_| IdentityError::InvalidSignatureBytes)?;
     let public_key_array: [u8; 32] = public_key_bytes
         .as_slice()
         .try_into()

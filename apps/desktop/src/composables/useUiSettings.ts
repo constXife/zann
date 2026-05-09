@@ -26,8 +26,8 @@ const defaults: UiSettings = {
   language: "system",
   theme: "system",
   sidebarCollapsed: false,
-  sidebarWidth: 280,
-  detailsWidth: 520,
+  sidebarWidth: 240,
+  detailsWidth: 800,
   showLocalStorage: false,
   listDensity: "comfortable",
   defaultVaultId: null,
@@ -47,7 +47,8 @@ function load(): UiSettings {
   if (!stored) {
     return { ...defaults };
   }
-  return { ...defaults, ...JSON.parse(stored) };
+  const parsed = JSON.parse(stored) as Partial<UiSettings>;
+  return { ...defaults, ...parsed };
 }
 
 function save(settings: UiSettings) {

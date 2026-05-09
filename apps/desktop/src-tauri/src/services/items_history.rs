@@ -6,7 +6,7 @@ use crate::types::{
     ApiResponse, ItemHistoryDetail, ItemHistoryGetRequest, ItemHistoryListRequest,
     ItemHistoryRestoreRequest, ItemHistorySummary,
 };
-use zann_db::local::LocalItemHistoryRepo;
+use zann_db::local::{HistorySyncStatus, LocalItemHistoryRepo};
 use zann_db::services::LocalServices;
 
 pub async fn items_history_list(
@@ -58,7 +58,7 @@ async fn list_item_history(
     ensure_unlocked(&state).await?;
     let storage_id = Uuid::parse_str(&req.storage_id).map_err(|_| "invalid storage id")?;
     let item_id = Uuid::parse_str(&req.item_id).map_err(|_| "invalid item id")?;
-    let limit = req.limit.unwrap_or(5).clamp(1, 5);
+    let limit = req.limit.unwrap_or(20).clamp(1, 50);
     let repo = LocalItemHistoryRepo::new(&state.pool);
     let list = repo
         .list_by_item_limit(storage_id, item_id, limit)
@@ -73,6 +73,7 @@ async fn list_item_history(
             changed_by_name: entry.changed_by_name,
             changed_by_email: entry.changed_by_email,
             created_at: entry.created_at.to_rfc3339(),
+            pending: entry.sync_status == HistorySyncStatus::Pending,
         })
         .collect())
 }

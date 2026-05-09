@@ -4,9 +4,7 @@ use crate::state::AppState;
 use crate::types::ApiResponse;
 use zann_core::SecurityProfile;
 
-pub async fn types_list(
-    state: State<'_, AppState>,
-) -> Result<ApiResponse<Vec<String>>, String> {
+pub async fn types_list(state: State<'_, AppState>) -> Result<ApiResponse<Vec<String>>, String> {
     let mut keys = state
         .security_profiles
         .profiles()

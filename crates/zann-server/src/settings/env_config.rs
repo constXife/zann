@@ -37,25 +37,23 @@ pub(super) fn check_key_file_permissions(_path: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn load_config(path: &str) -> ServerConfig {
-    if !Path::new(path).exists() {
-        return ServerConfig::default();
+pub(super) fn load_config(path: &str) -> Result<ServerConfig, String> {
+    let config_path = Path::new(path);
+    if !config_path.exists() {
+        if path == "config.yaml" {
+            return Ok(ServerConfig::default());
+        }
+        return Err(format!("config file not found: {path}"));
     }
 
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(err) => {
-            warn!(event = "config_read_failed", path, error = %err);
-            return ServerConfig::default();
-        }
-    };
-    match serde_yaml::from_str(&contents) {
-        Ok(config) => config,
-        Err(err) => {
-            warn!(event = "config_parse_failed", path, error = %err);
-            ServerConfig::default()
-        }
-    }
+    let contents = fs::read_to_string(config_path).map_err(|err| {
+        warn!(event = "config_read_failed", path, error = %err);
+        format!("config read failed ({path}): {err}")
+    })?;
+    serde_yaml::from_str(&contents).map_err(|err| {
+        warn!(event = "config_parse_failed", path, error = %err);
+        format!("config parse failed ({path}): {err}")
+    })
 }
 
 pub(super) fn apply_auth_env_overrides(config: &mut ServerConfig) {

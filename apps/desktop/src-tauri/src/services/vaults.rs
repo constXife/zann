@@ -48,13 +48,13 @@ pub async fn vault_create(
         return Ok(ApiResponse::err("name_required", "name is required"));
     }
     let kind = match req.kind {
-        Some(value) => VaultKind::try_from(value)
-            .map_err(|_| "invalid vault kind".to_string())?,
+        Some(value) => VaultKind::try_from(value).map_err(|_| "invalid vault kind".to_string())?,
         None => VaultKind::Personal,
     };
     let cache_policy = match req.cache_policy {
-        Some(value) => CachePolicy::try_from(value)
-            .map_err(|_| "invalid cache policy".to_string())?,
+        Some(value) => {
+            CachePolicy::try_from(value).map_err(|_| "invalid cache policy".to_string())?
+        }
         None => CachePolicy::Full,
     };
     let storage_repo = LocalStorageRepo::new(&state.pool);
@@ -122,7 +122,12 @@ pub async fn vault_reset_personal(
     let addr = storage
         .server_url
         .clone()
-        .or_else(|| config.contexts.get(&context_name).map(|ctx| ctx.addr.clone()))
+        .or_else(|| {
+            config
+                .contexts
+                .get(&context_name)
+                .map(|ctx| ctx.addr.clone())
+        })
         .ok_or_else(|| "server url missing".to_string())?;
     let client = reqwest::Client::new();
     let access_token = ensure_access_token_for_context(
@@ -250,7 +255,13 @@ async fn list_vaults(
 fn slugify_name(name: &str) -> String {
     let mut slug = name
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>();
     while slug.contains("--") {
         slug = slug.replace("--", "-");
@@ -285,7 +296,12 @@ async fn create_remote_vault(
     let addr = storage
         .server_url
         .clone()
-        .or_else(|| config.contexts.get(&context_name).map(|ctx| ctx.addr.clone()))
+        .or_else(|| {
+            config
+                .contexts
+                .get(&context_name)
+                .map(|ctx| ctx.addr.clone())
+        })
         .ok_or_else(|| "server url missing".to_string())?;
     let storage_uuid = storage.id;
     let client = reqwest::Client::new();

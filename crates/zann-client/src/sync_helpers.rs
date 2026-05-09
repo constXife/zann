@@ -2,8 +2,9 @@ use chrono::Utc;
 use std::io::Write;
 use uuid::Uuid;
 use zann_db::local::{
-    KeyWrapType, LocalItem, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo,
-    LocalPendingChange, LocalStorage, LocalVault, LocalVaultRepo,
+    HistorySource, HistorySyncStatus, KeyWrapType, LocalItem, LocalItemHistory,
+    LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange, LocalStorage, LocalVault,
+    LocalVaultRepo,
 };
 
 use crate::crypto::{decrypt_payload, payload_aad, payload_checksum};
@@ -373,6 +374,8 @@ pub async fn apply_pull_change(
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,
             changed_by_device_name: None,
+            source: HistorySource::Server,
+            sync_status: HistorySyncStatus::Confirmed,
             created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
         })
         .collect::<Vec<_>>();
@@ -478,6 +481,8 @@ pub async fn apply_shared_pull_change(
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,
             changed_by_device_name: None,
+            source: HistorySource::Server,
+            sync_status: HistorySyncStatus::Confirmed,
             created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
         })
         .collect::<Vec<_>>();

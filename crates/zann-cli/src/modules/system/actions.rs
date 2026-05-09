@@ -94,7 +94,8 @@ pub(crate) async fn handle_run_command(
             .map_err(|_| anyhow::anyhow!("secret not found: {}", path))?;
     let item = fetch_shared_item(client, &addr, &access_token, &vault_id, item_id).await?;
     let mut env_values = std::collections::HashMap::new();
-    for (key, value) in flatten_payload(payload_or_error(&item)?) {
+    let payload = payload_or_error(&item)?;
+    for (key, value) in flatten_payload(&payload) {
         if !is_valid_env_key(&key) {
             eprintln!(
                 "Warning: Key \"{}\" is not a valid shell identifier. Skipped.",

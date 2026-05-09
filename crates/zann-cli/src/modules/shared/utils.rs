@@ -84,13 +84,48 @@ pub(crate) fn secret_not_found_error(path: &str) -> anyhow::Error {
 
 pub(crate) fn payload_or_error(
     item: &crate::modules::shared::SharedItemResponse,
-) -> anyhow::Result<&zann_core::EncryptedPayload> {
-    item.payload.as_ref().ok_or_else(|| {
+) -> anyhow::Result<EncryptedPayload> {
+    let payload = item.payload.as_ref().ok_or_else(|| {
         anyhow::anyhow!(
             "payload unavailable for {} (encrypted payloads are not supported here)",
             item.path
         )
-    })
+    })?;
+
+    if let Ok(payload) = serde_json::from_value::<EncryptedPayload>(payload.clone()) {
+        return Ok(payload);
+    }
+
+    if let Ok(payload) = serde_json::from_value::<LegacySecretPayload>(payload.clone()) {
+        let mut normalized = EncryptedPayload::new("secret");
+        normalized.fields.insert(
+            "password".to_string(),
+            FieldValue {
+                kind: FieldKind::Password,
+                value: payload.value,
+                meta: None,
+            },
+        );
+        if let Some(meta) = payload.meta {
+            for (key, value) in meta {
+                normalized.fields.insert(
+                    key,
+                    FieldValue {
+                        kind: FieldKind::Text,
+                        value,
+                        meta: None,
+                    },
+                );
+            }
+        }
+        normalized.extra = Some(HashMap::from([("policy".to_string(), payload.policy)]));
+        return Ok(normalized);
+    }
+
+    anyhow::bail!(
+        "payload unavailable for {} (unsupported payload format)",
+        item.path
+    )
 }
 
 pub(crate) fn normalize_prefix(prefix: Option<&str>) -> Option<String> {
@@ -141,3 +176,14 @@ pub(crate) fn parse_item_timestamp(value: &str) -> anyhow::Result<chrono::DateTi
         .map(|ts| ts.with_timezone(&chrono::Utc))
         .map_err(|err| anyhow::anyhow!("invalid timestamp '{value}': {err}"))
 }
+
+#[derive(serde::Deserialize)]
+struct LegacySecretPayload {
+    value: String,
+    policy: String,
+    #[serde(default)]
+    meta: Option<HashMap<String, String>>,
+}
+use std::collections::HashMap;
+
+use zann_core::{EncryptedPayload, FieldKind, FieldValue};

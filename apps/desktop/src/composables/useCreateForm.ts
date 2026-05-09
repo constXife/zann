@@ -22,6 +22,8 @@ type UseCreateFormOptions = {
   buildPayload: (typeId: string) => EncryptedPayload;
   applyPayload: (payload: EncryptedPayload, typeId: string) => void;
   submitCreate: () => void;
+  shouldConfirmTypeChange?: () => boolean;
+  confirmTypeChange?: (nextTypeId: string, onConfirm: () => void) => boolean;
 };
 
 export const useCreateForm = (options: UseCreateFormOptions) => {
@@ -35,7 +37,6 @@ export const useCreateForm = (options: UseCreateFormOptions) => {
   };
 
   const pathTokens = ref<string[]>([]);
-  const pathInput = ref("");
   const folderInput = ref("");
   const nameInput = ref("");
   const tokenDeleteArmed = ref(false);
@@ -62,13 +63,9 @@ export const useCreateForm = (options: UseCreateFormOptions) => {
   const generatorMemorable = ref(false);
 
   const currentPathInput = computed({
-    get: () => (isPanel.value ? folderInput.value : pathInput.value),
+    get: () => folderInput.value,
     set: (value: string) => {
-      if (isPanel.value) {
-        folderInput.value = value;
-      } else {
-        pathInput.value = value;
-      }
+      folderInput.value = value;
     },
   });
 
@@ -401,8 +398,21 @@ export const useCreateForm = (options: UseCreateFormOptions) => {
   };
 
   const selectType = (typeId: string) => {
-    options.createItemType.value = typeId;
-    typeMenuOpen.value = false;
+    if (typeId === options.createItemType.value) {
+      typeMenuOpen.value = false;
+      return;
+    }
+    const applyChange = () => {
+      options.createItemType.value = typeId;
+      typeMenuOpen.value = false;
+    };
+    if (options.shouldConfirmTypeChange?.()) {
+      const handled = options.confirmTypeChange?.(typeId, applyChange);
+      if (handled) {
+        return;
+      }
+    }
+    applyChange();
   };
 
   const pathDraft = computed(() =>
@@ -589,7 +599,6 @@ export const useCreateForm = (options: UseCreateFormOptions) => {
       pathTokens.value = options.createItemFolder.value
         ? options.createItemFolder.value.split("/").filter(Boolean)
         : [];
-      pathInput.value = options.createItemTitle.value;
       nameInput.value = options.createItemTitle.value;
       folderInput.value = "";
       titleSnapshot.value = options.createItemTitle.value;
@@ -606,15 +615,10 @@ export const useCreateForm = (options: UseCreateFormOptions) => {
   );
 
   watch(
-    () => [pathTokens.value, pathInput.value, folderInput.value, nameInput.value, isPanel.value],
-    ([tokens, input, folderValue, nameValue, panel]) => {
-      if (panel) {
-        options.createItemFolder.value = [...tokens, folderValue].filter(Boolean).join("/");
-        options.createItemTitle.value = nameValue;
-      } else {
-        options.createItemFolder.value = tokens.join("/");
-        options.createItemTitle.value = input;
-      }
+    () => [pathTokens.value, folderInput.value, nameInput.value],
+    ([tokens, folderValue, nameValue]) => {
+      options.createItemFolder.value = [...tokens, folderValue].filter(Boolean).join("/");
+      options.createItemTitle.value = nameValue;
     },
     { deep: true },
   );

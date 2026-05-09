@@ -4,8 +4,8 @@ use serde::Deserialize;
 use crate::infra::http::fetch_json;
 use crate::infra::identity::{verify_system_identity, IdentityError};
 use crate::types::{
-    OidcConfigResponse, OidcDiscovery, OidcExchangeResponse, SystemInfoResponse, TokenErrorResponse,
-    TokenResponse,
+    OidcConfigResponse, OidcDiscovery, OidcExchangeResponse, SystemInfoResponse,
+    TokenErrorResponse, TokenResponse,
 };
 
 pub async fn exchange_authorization_code(
@@ -37,14 +37,30 @@ pub async fn exchange_authorization_code(
             .map_err(|err| err.to_string());
     }
 
-    let error = response
-        .json::<TokenErrorResponse>()
-        .await
-        .unwrap_or(TokenErrorResponse {
-            error: "unknown".to_string(),
-            error_description: None,
-        });
-    Err(error.error)
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let body_trimmed = body.trim();
+    if let Ok(error) = serde_json::from_str::<TokenErrorResponse>(body_trimmed) {
+        let description = error
+            .error_description
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| format!(": {value}"))
+            .unwrap_or_default();
+        return Err(format!(
+            "OIDC token exchange failed: {status} {}{} (endpoint={}, client_id={}, redirect_uri={})",
+            error.error, description, discovery.token_endpoint, oidc.client_id, redirect_uri
+        ));
+    }
+
+    let body_summary = if body_trimmed.is_empty() {
+        "empty response body".to_string()
+    } else {
+        body_trimmed.replace('\n', " ")
+    };
+    Err(format!(
+        "OIDC token exchange failed: {status} {body_summary} (endpoint={}, client_id={}, redirect_uri={})",
+        discovery.token_endpoint, oidc.client_id, redirect_uri
+    ))
 }
 
 pub async fn exchange_oidc_for_session(
@@ -89,9 +105,9 @@ pub async fn fetch_system_info(
 fn format_identity_error(err: IdentityError) -> String {
     match err {
         IdentityError::Missing => "server_identity_missing".to_string(),
-        IdentityError::InvalidId | IdentityError::InvalidKey | IdentityError::InvalidSignatureBytes => {
-            "server_identity_invalid".to_string()
-        }
+        IdentityError::InvalidId
+        | IdentityError::InvalidKey
+        | IdentityError::InvalidSignatureBytes => "server_identity_invalid".to_string(),
         IdentityError::InvalidSignature => "server_identity_invalid".to_string(),
         IdentityError::TimeSkew { skew_seconds } => format!("server_time_skew:{skew_seconds}"),
     }
@@ -130,7 +146,11 @@ pub async fn fetch_prelogin(
     let base = format!("{}/v1/auth/prelogin", addr.trim_end_matches('/'));
     let mut url = reqwest::Url::parse(&base).map_err(|err| err.to_string())?;
     url.query_pairs_mut().append_pair("email", email);
-    let response = client.get(url).send().await.map_err(|err| err.to_string())?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();

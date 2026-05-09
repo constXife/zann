@@ -2,6 +2,12 @@
 export default {
   content: ["./index.html", "./src/**/*.{vue,ts}"],
   darkMode: "class",
+  safelist: [
+    {
+      pattern:
+        /(bg|text)-category-(all|login|note|card|identity|api|kv|infra|ssh_key|database|cloud_iam|file_secret|server_credentials|security)/,
+    },
+  ],
   theme: {
     extend: {
       borderRadius: {

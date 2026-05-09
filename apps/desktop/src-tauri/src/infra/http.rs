@@ -40,14 +40,15 @@ pub async fn fetch_json<T: for<'de> serde::Deserialize<'de>>(
     client: &reqwest::Client,
     url: &str,
 ) -> Result<T, String> {
-    let response = client.get(url).send().await.map_err(|err| err.to_string())?;
+    let response = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|err| err.to_string())?;
     if !response.status().is_success() {
         let status = response.status();
         let body = response.text().await.unwrap_or_default();
         return Err(format!("Request failed: {status} {body}"));
     }
-    response
-        .json::<T>()
-        .await
-        .map_err(|err| err.to_string())
+    response.json::<T>().await.map_err(|err| err.to_string())
 }

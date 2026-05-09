@@ -13,7 +13,7 @@ type UseItemsOptions = {
   unlocked: Ref<boolean>;
   listLoading: Ref<boolean>;
   listLoadingMore?: Ref<boolean>;
-  onFatalError: (message: string) => void;
+  listError: Ref<string>;
   t: Translator;
   onAfterLoad?: () => void;
 };
@@ -26,9 +26,13 @@ export const useItems = (options: UseItemsOptions) => {
   const itemCounts = ref<ItemCounts | null>(null);
   const defaultLimit = 200;
 
-  const setLoading = (value: boolean) => {
-    options.listLoading.value = value;
+  const resetPageState = () => {
+    nextCursor.value = null;
+    hasMore.value = false;
+    totalCount.value = null;
+    itemCounts.value = null;
   };
+
   const setLoadingMore = (value: boolean) => {
     if (options.listLoadingMore) {
       options.listLoadingMore.value = value;
@@ -51,34 +55,37 @@ export const useItems = (options: UseItemsOptions) => {
       const key = response.error?.kind ?? "generic";
       throw createErrorWithCause(options.t(`errors.${key}`), response.error);
     }
-    if (append) {
-      items.value = [...items.value, ...response.data.items];
-    } else {
-      items.value = response.data.items;
-    }
+    items.value = append ? [...items.value, ...response.data.items] : response.data.items;
     nextCursor.value = response.data.next_cursor ?? null;
     totalCount.value = response.data.total_count;
     itemCounts.value = response.data.counts ?? null;
     hasMore.value = !!nextCursor.value;
+    options.listError.value = "";
   };
 
-  const loadItems = async () => {
+  const loadItems = async (loadOptions?: { silent?: boolean }) => {
+    const shouldToggleLoading = !loadOptions?.silent;
     if (!options.selectedVaultId.value || !options.initialized.value || !options.unlocked.value) {
       items.value = [];
-      nextCursor.value = null;
-      hasMore.value = false;
-      totalCount.value = null;
-      itemCounts.value = null;
+      resetPageState();
+      options.listError.value = "";
+      if (shouldToggleLoading) {
+        options.listLoading.value = false;
+      }
       return;
     }
-    setLoading(true);
+    if (shouldToggleLoading) {
+      options.listLoading.value = true;
+    }
     try {
       await fetchPage(null, false);
       options.onAfterLoad?.();
     } catch (err) {
-      options.onFatalError(String(err));
+      options.listError.value = String(err);
     } finally {
-      setLoading(false);
+      if (shouldToggleLoading) {
+        options.listLoading.value = false;
+      }
     }
   };
 
@@ -93,7 +100,7 @@ export const useItems = (options: UseItemsOptions) => {
     try {
       await fetchPage(nextCursor.value, true);
     } catch (err) {
-      options.onFatalError(String(err));
+      options.listError.value = String(err);
     } finally {
       setLoadingMore(false);
     }

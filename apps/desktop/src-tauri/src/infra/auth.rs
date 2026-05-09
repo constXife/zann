@@ -26,10 +26,7 @@ pub async fn ensure_access_token_for_context(
         .cloned()
         .ok_or_else(|| "token entry not found".to_string())?;
 
-    let expires_at = entry
-        .access_expires_at
-        .as_deref()
-        .and_then(parse_rfc3339);
+    let expires_at = entry.access_expires_at.as_deref().and_then(parse_rfc3339);
     let needs_refresh = expires_at
         .map(|expires_at| Utc::now() + ChronoDuration::seconds(REFRESH_SKEW_SECONDS) >= expires_at)
         .unwrap_or(false);
@@ -71,8 +68,7 @@ pub async fn ensure_access_token_for_context(
         expires_in: u64,
     }
     let auth: AuthResponse = response.json().await.map_err(|err| err.to_string())?;
-    let new_expires =
-        (Utc::now() + ChronoDuration::seconds(auth.expires_in as i64)).to_rfc3339();
+    let new_expires = (Utc::now() + ChronoDuration::seconds(auth.expires_in as i64)).to_rfc3339();
 
     if let Some(ctx) = config.contexts.get_mut(context_name) {
         if let Some(entry) = ctx.tokens.get_mut(token_name) {

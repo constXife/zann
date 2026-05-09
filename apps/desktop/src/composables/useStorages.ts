@@ -14,7 +14,7 @@ type UseStoragesOptions = {
   t: Translator;
   onFatalError: (message: string) => void;
   onReloadVaults: () => Promise<void>;
-  onReloadItems: () => Promise<void>;
+  onReloadItems: (options?: { silent?: boolean }) => Promise<void>;
   localStorageId: string;
   onSessionExpired?: (serverUrl: string | null) => Promise<void> | void;
   localStorageVisible?: Ref<boolean>;
@@ -262,7 +262,7 @@ export const useStorages = (options: UseStoragesOptions) => {
 
       await loadStorages();
       await options.onReloadVaults();
-      await options.onReloadItems();
+      await options.onReloadItems({ silent: true });
       success = true;
     } catch (err) {
       let errorMsg = String(err);
@@ -283,8 +283,10 @@ export const useStorages = (options: UseStoragesOptions) => {
 
       if (
         errorKind === "session_expired" ||
+        errorKind === "context_missing" ||
         errorMsg.includes("session_expired") ||
-        errorMsg.includes("token not set")
+        errorMsg.includes("token not set") ||
+        errorMsg.includes("context not found")
       ) {
         const storage = targetStorages[0];
         await options.onSessionExpired?.(storage?.server_url ?? null);

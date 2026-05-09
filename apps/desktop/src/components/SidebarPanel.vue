@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Button from "./ui/Button.vue";
 import CategoryIcon from "./CategoryIcon.vue";
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
@@ -11,6 +12,7 @@ type SyncStatus = "idle" | "syncing" | "synced" | "error";
 const { t } = useI18n();
 
 const props = defineProps<{
+  hidden?: boolean;
   onCollapse: () => void;
   storageDropdownOpen: boolean;
   storages: StorageSummary[];
@@ -96,39 +98,43 @@ const hideCreateLocalVault = computed(() => {
   return props.storages.length > 0 &&
     props.storages.every((storage) => storage.kind === StorageKind.LocalOnly);
 });
+
 </script>
 
 <template>
   <aside
-    class="relative flex flex-col border-r border-[var(--border-color)] bg-[var(--bg-primary)] transition-all duration-200 overflow-hidden"
+    class="relative flex flex-col bg-[var(--bg-primary)] transition-all duration-200 overflow-hidden"
+    :class="hidden ? '' : 'border-r border-[var(--border-color)]'"
   >
-    <button
-      type="button"
-      class="absolute right-3 top-[8px] z-[60] rounded-lg p-1 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
-      @click="onCollapse"
+    <Button
+      variant="ghost"
+      size="icon-sm"
+      class="absolute right-3 top-[8px] z-[60]"
       :title="t('sidebar.collapse')"
       data-tauri-drag-region="false"
+      @click="onCollapse"
     >
       <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 4H5a1 1 0 00-1 1v14a1 1 0 001 1h4m0-16v16m0-16h10a1 1 0 011 1v14a1 1 0 01-1 1H9" />
       </svg>
-    </button>
+    </Button>
 
     <div
       class="relative flex items-center gap-3 p-3 pt-12"
       data-tauri-drag-region
     >
-      <button
-        type="button"
-        class="flex h-9 w-9 items-center justify-center rounded-full bg-[var(--bg-tertiary)] text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
-        @click="openSettings('accounts')"
+      <Button
+        variant="ghost"
+        size="icon"
+        class="rounded-full bg-[var(--bg-tertiary)]"
         :title="t('common.settings')"
         data-tauri-drag-region="false"
+        @click="openSettings('accounts')"
       >
         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
         </svg>
-      </button>
+      </Button>
 
       <button
         type="button"
@@ -523,8 +529,6 @@ const hideCreateLocalVault = computed(() => {
             'bg-category-login/15 text-category-login': cat.id === 'login',
             'bg-category-note/15 text-category-note': cat.id === 'note',
             'bg-category-card/15 text-category-card': cat.id === 'card',
-            'bg-category-identity/15 text-category-identity': cat.id === 'identity',
-            'bg-category-api/15 text-category-api': cat.id === 'api',
             'bg-category-kv/15 text-category-kv': cat.id === 'kv',
             'bg-category-infra/15 text-category-infra': cat.id === 'infra',
             'bg-category-security/15 text-category-security': cat.id === 'trash',

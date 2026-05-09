@@ -18,11 +18,11 @@ type AppEventHandlersOptions = {
   selectedItem: Ref<{ id: string } | null>;
   copyPrimarySecret: () => Promise<void> | void;
   revealToggle: () => void;
-  openCreateModal: (mode: "item" | "vault") => void;
+  openCreateModal: (mode: "item" | "vault", options?: { openTypeMenu?: boolean }) => void;
   detailsPanel: Ref<{ focusSearch?: () => void } | null>;
   moveSelection: (delta: number) => void;
   selectedItemId: Ref<string | null>;
-  loadItemDetail: (itemId: string) => Promise<void>;
+  loadItemDetail: (itemId: string, options?: { silent?: boolean }) => Promise<void>;
   settingsOpen: Ref<boolean>;
   openSettings: (tab?: "general" | "accounts") => void;
   lockSession: () => Promise<void> | void;

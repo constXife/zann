@@ -2,9 +2,7 @@ use tauri::State;
 
 use crate::services::vaults as vaults_service;
 use crate::state::AppState;
-use crate::types::{
-    ApiResponse, VaultCreateRequest, VaultListRequest, VaultSummary,
-};
+use crate::types::{ApiResponse, VaultCreateRequest, VaultListRequest, VaultSummary};
 
 #[tauri::command]
 pub async fn vault_list(

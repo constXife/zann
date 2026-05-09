@@ -298,6 +298,13 @@ async fn service_account_repo_crud() {
         .expect("list_by_prefix");
     assert_eq!(by_prefix.len(), 1);
 
+    let active = sa_repo
+        .get_active_by_owner_and_name(user.id, "ci")
+        .await
+        .expect("get_active_by_owner_and_name")
+        .expect("active service account");
+    assert_eq!(active.id, account.id);
+
     let list = sa_repo
         .list_by_owner(user.id, 10, 0, "asc")
         .await
@@ -346,6 +353,40 @@ async fn service_account_repo_crud() {
         .await
         .expect("revoke");
     assert_eq!(revoked, 1);
+
+    let active = sa_repo
+        .get_active_by_owner_and_name(user.id, "ci")
+        .await
+        .expect("get_active_by_owner_and_name after revoke");
+    assert!(active.is_none());
+
+    let expired_account = ServiceAccount {
+        id: Uuid::now_v7(),
+        owner_user_id: user.id,
+        name: "expired-ci".to_string(),
+        description: Some("Expired CI token".to_string()),
+        token_hash: "expired_hash".to_string(),
+        token_prefix: "zann_sa_exp".to_string(),
+        scopes: SqlxJson(vec!["vault:read".to_string()]),
+        allowed_ips: None,
+        expires_at: Some(now - chrono::Duration::hours(1)),
+        last_used_at: None,
+        last_used_ip: None,
+        last_used_user_agent: None,
+        use_count: 0,
+        created_at: now,
+        revoked_at: None,
+    };
+    sa_repo
+        .create(&expired_account)
+        .await
+        .expect("create expired service account");
+
+    let expired = sa_repo
+        .get_active_by_owner_and_name(user.id, "expired-ci")
+        .await
+        .expect("get_active_by_owner_and_name after expiry");
+    assert!(expired.is_none());
 }
 
 #[tokio::test]

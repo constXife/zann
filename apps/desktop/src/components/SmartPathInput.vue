@@ -115,7 +115,7 @@ const onPaste = (event: ClipboardEvent) => {
         autocorrect="off"
         autocapitalize="off"
         spellcheck="false"
-        class="flex-1 bg-transparent focus:outline-none"
+        class="flex-1 bg-transparent text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none"
         :class="inputClass"
         :placeholder="props.placeholder"
         :data-testid="props.inputTestId"

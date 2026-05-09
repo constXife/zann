@@ -6,6 +6,69 @@ use zann_core::{AuthMethod, ChangeType, StorageKind, SyncStatus, VaultKind};
 
 use super::KeyWrapType;
 
+#[derive(Debug)]
+pub struct LocalEnumError(&'static str);
+
+impl std::fmt::Display for LocalEnumError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::error::Error for LocalEnumError {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistorySource {
+    Local = 1,
+    Server = 2,
+    UiOptimistic = 3,
+}
+
+impl HistorySource {
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+impl TryFrom<i32> for HistorySource {
+    type Error = LocalEnumError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Local),
+            2 => Ok(Self::Server),
+            3 => Ok(Self::UiOptimistic),
+            _ => Err(LocalEnumError("invalid history source")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HistorySyncStatus {
+    Pending = 1,
+    Confirmed = 2,
+    Rejected = 3,
+}
+
+impl HistorySyncStatus {
+    pub fn as_i32(self) -> i32 {
+        self as i32
+    }
+}
+
+impl TryFrom<i32> for HistorySyncStatus {
+    type Error = LocalEnumError;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Pending),
+            2 => Ok(Self::Confirmed),
+            3 => Ok(Self::Rejected),
+            _ => Err(LocalEnumError("invalid history sync status")),
+        }
+    }
+}
+
 fn parse_uuid(row: &SqliteRow, column: &str) -> Result<Uuid, sqlx_core::Error> {
     match row.try_get::<String, _>(column) {
         Ok(value) => Uuid::parse_str(&value).map_err(|err| sqlx_core::Error::Decode(Box::new(err))),
@@ -96,6 +159,8 @@ pub struct LocalItemHistory {
     pub changed_by_name: Option<String>,
     pub changed_by_device_id: Option<Uuid>,
     pub changed_by_device_name: Option<String>,
+    pub source: HistorySource,
+    pub sync_status: HistorySyncStatus,
     pub created_at: DateTime<Utc>,
 }
 
@@ -199,6 +264,8 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalPendingChange {
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItemHistory {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
         let change_type: i32 = row.try_get("change_type")?;
+        let source: i32 = row.try_get("source")?;
+        let sync_status: i32 = row.try_get("sync_status")?;
         Ok(Self {
             id: parse_uuid(row, "id")?,
             storage_id: parse_uuid(row, "storage_id")?,
@@ -213,6 +280,10 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItemHistory {
             changed_by_name: row.try_get("changed_by_name")?,
             changed_by_device_id: row.try_get("changed_by_device_id")?,
             changed_by_device_name: row.try_get("changed_by_device_name")?,
+            source: HistorySource::try_from(source)
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
+            sync_status: HistorySyncStatus::try_from(sync_status)
+                .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
             created_at: row.try_get("created_at")?,
         })
     }

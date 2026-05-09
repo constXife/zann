@@ -228,6 +228,45 @@ impl<'a> ServiceAccountRepo<'a> {
             .await
     }
 
+    pub async fn get_active_by_owner_and_name(
+        &self,
+        owner_user_id: Uuid,
+        name: &str,
+    ) -> Result<Option<ServiceAccount>, sqlx_core::Error> {
+        query_as!(
+            ServiceAccount,
+            r#"
+            SELECT
+                id as "id",
+                owner_user_id as "owner_user_id",
+                name,
+                description,
+                token_hash,
+                token_prefix,
+                scopes as "scopes",
+                allowed_ips as "allowed_ips",
+                expires_at as "expires_at",
+                last_used_at as "last_used_at",
+                last_used_ip as "last_used_ip",
+                last_used_user_agent as "last_used_user_agent",
+                use_count as "use_count",
+                created_at as "created_at",
+                revoked_at as "revoked_at"
+            FROM service_accounts
+            WHERE owner_user_id = $1
+              AND name = $2
+              AND revoked_at IS NULL
+              AND (expires_at IS NULL OR expires_at > NOW())
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+            owner_user_id,
+            name
+        )
+        .fetch_optional(self.pool)
+        .await
+    }
+
     pub async fn list_by_prefix(
         &self,
         token_prefix: &str,

@@ -31,7 +31,8 @@ pub use item_history_repo::LocalItemHistoryRepo;
 pub use item_repo::LocalItemRepo;
 pub use metadata_repo::MetadataRepo;
 pub use models::{
-    LocalItem, LocalItemHistory, LocalPendingChange, LocalStorage, LocalSyncCursor, LocalVault,
+    HistorySource, HistorySyncStatus, LocalItem, LocalItemHistory, LocalPendingChange,
+    LocalStorage, LocalSyncCursor, LocalVault,
 };
 pub use pending_change_repo::PendingChangeRepo;
 pub use storage_repo::LocalStorageRepo;

@@ -22,10 +22,7 @@ pub async fn storages_list(
         .clone()
         .ok_or_else(|| "vault is locked".to_string())?;
     let services = LocalServices::new(&state.pool, master_key.as_ref());
-    let storages = services
-        .list_storages()
-        .await
-        .map_err(|err| err.message)?;
+    let storages = services.list_storages().await.map_err(|err| err.message)?;
     Ok(ApiResponse::ok(
         storages
             .into_iter()
@@ -269,7 +266,10 @@ pub async fn storage_reveal(
     };
 
     if storage.kind != StorageKind::LocalOnly {
-        return Ok(ApiResponse::err("not_local", "can only reveal local storages"));
+        return Ok(ApiResponse::err(
+            "not_local",
+            "can only reveal local storages",
+        ));
     }
 
     let db_path = crate::state::local_db_path(&state.root);
@@ -436,10 +436,12 @@ pub async fn local_factory_reset(
     let settings_path = state.root.join(crate::constants::SETTINGS_FILENAME);
     let _ = std::fs::remove_file(&settings_path);
 
-    let _ = app.biometry().remove_data(tauri_plugin_biometry::RemoveDataOptions {
-        domain: crate::constants::BIOMETRY_DOMAIN.to_string(),
-        name: crate::constants::BIOMETRY_NAME.to_string(),
-    });
+    let _ = app
+        .biometry()
+        .remove_data(tauri_plugin_biometry::RemoveDataOptions {
+            domain: crate::constants::BIOMETRY_DOMAIN.to_string(),
+            name: crate::constants::BIOMETRY_NAME.to_string(),
+        });
 
     {
         let mut mk = state.master_key.write().await;

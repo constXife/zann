@@ -59,6 +59,17 @@ server-test-db:
     podman compose -p zann_test -f compose.test.yaml up -d db
     bash -euo pipefail -c 'set +e; TEST_DATABASE_URL={{pg_test_url}} RUST_TEST_THREADS=1 cargo test -p zann-server --features postgres-tests -- --test-threads=1; status=$?; set -e; podman compose -p zann_test -f compose.test.yaml down; exit $status'
 
+server-create-db-pg db:
+    DATABASE_URL={{db}} cargo run -p zann-db --features postgres --bin create_database
+
+server-migrate-pg db:
+    just server-create-db-pg {{db}}
+    ZANN_CONFIG_PATH=config/ci.yaml ZANN_DB_URL={{db}} cargo run -p zann-server --bin zann-server -- migrate
+
+server-test-pg db:
+    just server-migrate-pg {{db}}
+    ZANN_CONFIG_PATH=config/ci.yaml ZANN_DB_URL={{db}} TEST_DATABASE_URL={{db}} RUST_TEST_THREADS=1 cargo test -p zann-server --features postgres-tests -- --test-threads=1
+
 test-db-down:
     podman compose -p zann_test -f compose.test.yaml down
 

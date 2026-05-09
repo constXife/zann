@@ -70,6 +70,31 @@ pub(crate) struct ItemHistoryDetailResponse {
     pub(crate) created_at: String,
 }
 
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct CreateSharedItemRequest {
+    pub(crate) vault_id: String,
+    pub(crate) path: String,
+    pub(crate) type_id: String,
+    #[serde(default)]
+    pub(crate) tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) favorite: Option<bool>,
+    pub(crate) payload: JsonValue,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct UpdateSharedItemRequest {
+    #[serde(default)]
+    pub(crate) path: Option<String>,
+    #[serde(default)]
+    pub(crate) type_id: Option<String>,
+    #[serde(default)]
+    pub(crate) tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub(crate) favorite: Option<bool>,
+    pub(crate) payload: JsonValue,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct RotateStartRequest {
     #[serde(default)]

@@ -38,6 +38,15 @@ pub(crate) struct SecretRequest {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub(crate) struct SecretSetRequest {
+    value: String,
+    #[serde(default)]
+    policy: Option<String>,
+    #[serde(default)]
+    meta: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct BatchEnsureRequest {
     secrets: Vec<SecretRequest>,
 }
@@ -74,7 +83,10 @@ pub(crate) struct BatchResult {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/v1/vaults/:vault_id/secrets/*path", get(get_secret))
+        .route(
+            "/v1/vaults/:vault_id/secrets/*path",
+            get(get_secret).put(set_secret),
+        )
         .route("/v1/vaults/:vault_id/secrets/ensure", post(ensure_secret))
         .route("/v1/vaults/:vault_id/secrets/rotate", post(rotate_secret))
         .route(
@@ -153,6 +165,44 @@ async fn ensure_secret(
                 &payload.path,
                 Some(label),
             );
+            map_secret_error(err)
+        }
+    }
+}
+
+async fn set_secret(
+    State(state): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    Path((vault_id, path)): Path<(String, String)>,
+    Json(payload): Json<SecretSetRequest>,
+) -> impl IntoResponse {
+    let start = Instant::now();
+    let result = service::set_secret(
+        &state,
+        &identity,
+        &vault_id,
+        &path,
+        &payload.value,
+        payload.policy.as_deref(),
+        payload.meta.clone(),
+    )
+    .await;
+    let elapsed = start.elapsed().as_secs_f64();
+    match result {
+        Ok((record, created)) => {
+            let result_label = if created { "created" } else { "updated" };
+            metrics::secrets_operation("set", result_label, elapsed);
+            audit::secrets_event(&identity, "set", result_label, &vault_id, &path, None);
+            (
+                StatusCode::OK,
+                Json(secret_response(record, None, Some(created))),
+            )
+                .into_response()
+        }
+        Err(err) => {
+            let label = error_label(&err);
+            metrics::secrets_operation("set", label, elapsed);
+            audit::secrets_event(&identity, "set", label, &vault_id, &path, Some(label));
             map_secret_error(err)
         }
     }

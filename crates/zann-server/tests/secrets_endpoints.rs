@@ -221,6 +221,56 @@ async fn secrets_ensure_get_rotate_roundtrip() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn secrets_set_creates_and_updates_explicit_values() {
+    let app = TestApp::new_with_smk().await;
+    let email = "secrets-set@example.com";
+    let password = "password-1";
+    app.register(email, password).await;
+    let token = app.login(email, password).await;
+
+    let vault = app.create_shared_vault(&token, "secrets-set").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+
+    let payload = json!({ "value": "first-value" });
+    let (status, created) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{}/secrets/db/password", vault_id),
+            Some(&token),
+            payload,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set failed: {:?}", created);
+    assert_eq!(created["created"], true);
+    assert_eq!(created["value"], "first-value");
+    let first_version = created["version"].as_i64().expect("version");
+
+    let payload = json!({ "value": "second-value" });
+    let (status, updated) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{}/secrets/db/password", vault_id),
+            Some(&token),
+            payload,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "set update failed: {:?}", updated);
+    assert_eq!(updated["created"], false);
+    assert_eq!(updated["value"], "second-value");
+    assert!(updated["version"].as_i64().unwrap_or(0) > first_version);
+
+    let (status, fetched) = app
+        .get_json(
+            &format!("/v1/vaults/{}/secrets/db/password", vault_id),
+            Some(&token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "get failed: {:?}", fetched);
+    assert_eq!(fetched["value"], "second-value");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn secrets_batch_endpoints() {
     let app = TestApp::new_with_smk().await;
     let email = "secrets-batch@example.com";

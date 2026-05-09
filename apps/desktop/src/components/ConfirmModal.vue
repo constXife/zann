@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
+import Button from "./ui/Button.vue";
 
 type Translator = (key: string, params?: Record<string, unknown>) => string;
 
@@ -54,15 +55,15 @@ watch(
           </div>
           <h3 class="text-lg font-semibold">{{ title }}</h3>
         </div>
-        <button
-          type="button"
-          class="rounded-lg p-1.5 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
+        <Button
+          variant="ghost"
+          size="icon-sm"
           @click="emit('update:open', false)"
         >
           <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
-        </button>
+        </Button>
       </div>
 
       <p class="mt-4 text-sm text-[var(--text-secondary)]">
@@ -83,26 +84,22 @@ watch(
       </div>
 
       <div class="mt-6 flex justify-end gap-2">
-        <button
-          type="button"
-          class="rounded-lg px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)] transition-colors"
+        <Button
+          variant="secondary"
+          size="sm"
           @click="emit('update:open', false)"
         >
           {{ cancelLabel ?? t("common.cancel") }}
-        </button>
-        <button
-          type="button"
-          class="rounded-lg px-4 py-2 text-sm font-medium text-white hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
-          :class="danger ? 'bg-category-security' : 'bg-[var(--accent)]'"
-          :disabled="busy || confirmDisabled"
+        </Button>
+        <Button
+          :variant="danger ? 'destructive' : 'default'"
+          size="sm"
+          :loading="busy"
+          :disabled="confirmDisabled"
           @click="emit('confirm')"
         >
-          <svg v-if="busy" class="inline-block h-4 w-4 animate-spin mr-1" viewBox="0 0 24 24" fill="none">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v2a6 6 0 00-6 6H4z"></path>
-          </svg>
           {{ confirmLabel }}
-        </button>
+        </Button>
       </div>
     </div>
   </div>

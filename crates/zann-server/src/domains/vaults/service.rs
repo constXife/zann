@@ -152,6 +152,7 @@ pub async fn create_vault(
             tags.into_iter()
                 .map(|tag| tag.trim().to_string())
                 .filter(|tag| !tag.is_empty())
+                .take(crate::domains::items::service::MAX_TAGS)
                 .collect::<Vec<String>>()
         })
         .filter(|tags| !tags.is_empty())

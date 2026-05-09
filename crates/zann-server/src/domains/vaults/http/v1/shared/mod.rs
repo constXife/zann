@@ -15,8 +15,16 @@ const ROTATION_STATE_STALE: &str = "stale";
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/v1/shared/items", get(handlers::list_shared_items))
-        .route("/v1/shared/items/:item_id", get(handlers::get_shared_item))
+        .route(
+            "/v1/shared/items",
+            get(handlers::list_shared_items).post(handlers::create_shared_item),
+        )
+        .route(
+            "/v1/shared/items/:item_id",
+            get(handlers::get_shared_item)
+                .put(handlers::update_shared_item)
+                .delete(handlers::delete_shared_item),
+        )
         .route(
             "/v1/shared/items/:item_id/rotate/start",
             post(handlers::rotate_start),

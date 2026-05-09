@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import CategoryIcon from "./CategoryIcon.vue";
+import TypePickerMenu from "./TypePickerMenu.vue";
 import type { Translator } from "../types/createForm";
 
 const props = defineProps<{
@@ -10,8 +11,11 @@ const props = defineProps<{
   typeOptions: string[];
   typeGroups: { id: string; label: string; types: string[] }[];
   typeMeta: Record<string, { icon: string }>;
+  showAllTypesOption?: boolean;
+  onShowAllTypes?: () => void;
   currentTypeLabel: string;
   currentTypeIcon: string;
+  currentTypeId: string;
   getTypeLabel: (typeId: string) => string;
   t: Translator;
   onToggleTypeMenu: () => void;
@@ -36,42 +40,27 @@ const props = defineProps<{
           class="flex items-center gap-2 rounded-lg bg-[var(--bg-tertiary)] px-3 py-1.5 text-sm font-medium hover:bg-[var(--bg-hover)] transition-colors"
           @click="props.onToggleTypeMenu"
         >
-          <CategoryIcon :icon="props.currentTypeIcon" class="h-4 w-4" />
+          <CategoryIcon
+            :icon="props.currentTypeIcon"
+            :class="['h-4 w-4', `text-category-${props.currentTypeId}`]"
+          />
           <span>{{ props.currentTypeLabel }}</span>
           <svg class="h-3.5 w-3.5 text-[var(--text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
           </svg>
         </button>
-        <div
-          v-if="props.typeMenuOpen"
-          class="absolute left-0 top-full mt-2 w-44 rounded-lg border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl z-50"
-        >
-          <template
-            v-for="group in (props.typeGroups.length
-              ? props.typeGroups
-              : [{ id: 'default', label: 'Types', types: props.typeOptions.length ? props.typeOptions : ['login'] }])"
-            :key="group.id"
-          >
-            <div class="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
-              {{ group.label }}
-            </div>
-            <button
-              v-for="type in group.types"
-              :key="type"
-              type="button"
-              class="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-[var(--bg-hover)] transition-colors"
-              @click="props.onSelectType(type)"
-            >
-              <CategoryIcon :icon="props.typeMeta[type]?.icon ?? 'key'" class="h-4 w-4" />
-              <span>{{ props.getTypeLabel(type) }}</span>
-            </button>
-          </template>
-        </div>
-        <div
-          v-if="props.typeMenuOpen"
-          class="fixed inset-0 z-40"
-          @click="props.onCloseTypeMenu"
-        ></div>
+        <TypePickerMenu
+          :open="props.typeMenuOpen"
+          :type-options="props.typeOptions"
+          :type-groups="props.typeGroups"
+          :type-meta="props.typeMeta"
+          :get-type-label="props.getTypeLabel"
+          :show-all-types-option="props.showAllTypesOption"
+          :show-all-types-label="props.t('create.showAllTypes')"
+          :on-show-all-types="props.onShowAllTypes"
+          :on-select-type="props.onSelectType"
+          :on-close="props.onCloseTypeMenu"
+        />
       </div>
       <div>
         <h3 class="text-lg font-semibold">

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onErrorCaptured, onMounted, ref, toRef, watch } from "vue";
+import Button from "./ui/Button.vue";
 import CreateAdvancedFields from "./CreateAdvancedFields.vue";
 import CreateKvTable from "./CreateKvTable.vue";
 import CreateMainFields from "./CreateMainFields.vue";
@@ -30,6 +31,7 @@ const showFolderSuggestions = defineModel<boolean>("showFolderSuggestions", { re
 const props = defineProps<{
   createMode: "vault" | "item" | null;
   variant?: "modal" | "panel";
+  isOffline?: boolean;
   vaults: VaultSummary[];
   flatFolderPaths: string[];
   createItemFields: FieldInput[];
@@ -39,6 +41,17 @@ const props = defineProps<{
   customFields: FieldInput[];
   typeOptions: string[];
   typeGroups: { id: string; label: string; types: string[] }[];
+  showAllTypesOption?: boolean;
+  enableAllTypes?: () => void;
+  openTypeMenuOnOpen?: boolean;
+  consumeOpenTypeMenu?: () => void;
+  openConfirm?: (options: {
+    title: string;
+    message: string;
+    confirmLabel: string;
+    cancelLabel?: string;
+    onConfirm: () => Promise<void> | void;
+  }) => void;
   createVaultError: string;
   createItemError: string;
   createItemErrorKey: string;
@@ -85,37 +98,47 @@ const submitTitle = computed(() => submitDisabledReason.value || "");
 
 const nameInputEl = ref<HTMLInputElement | null>(null);
 const pathInputRef = ref<{ focusInput?: () => void } | null>(null);
-const focusTitleInput = async () => {
+const kvTableRef = ref<{ focusFirstKey?: () => void } | null>(null);
+const focusDefaultField = async () => {
   if (!createModalOpen.value || props.createMode !== "item") {
     return;
   }
   await nextTick();
-  if (isPanel.value) {
-    nameInputEl.value?.focus();
-    nameInputEl.value?.select();
-  } else {
-    pathInputRef.value?.focusInput?.();
+  if (createItemType.value === "kv" && createItemTitle.value.trim()) {
+    kvTableRef.value?.focusFirstKey?.();
+    return;
   }
+  nameInputEl.value?.focus();
+  nameInputEl.value?.select();
 };
 
 watch(
   () => createModalOpen.value,
   (open) => {
     if (open) {
-      void focusTitleInput();
+      void focusDefaultField();
     }
   },
 );
 
 onMounted(() => {
-  void focusTitleInput();
+  void focusDefaultField();
 });
 
 watch(
   () => props.createMode,
   (mode) => {
     if (mode === "item" && createModalOpen.value) {
-      void focusTitleInput();
+      void focusDefaultField();
+    }
+  },
+);
+
+watch(
+  () => props.createItemErrorKey,
+  (key) => {
+    if (key === "fields_required") {
+      kvTableRef.value?.focusFirstKey?.();
     }
   },
 );
@@ -129,7 +152,7 @@ onErrorCaptured((err, instance, info) => {
   return false;
 });
 
-const {
+  const {
   applyPastePayload,
   applyRawEditor,
   applyPathInsert,
@@ -200,14 +223,41 @@ const {
   buildPayload: props.buildPayload,
   applyPayload: props.applyPayload,
   submitCreate: props.submitCreate,
+  shouldConfirmTypeChange: () => {
+    const hasData = props.createItemFields.some((field) => {
+      if (field.isCustom) {
+        return field.key.trim().length > 0 || field.value.trim().length > 0;
+      }
+      return field.value.trim().length > 0;
+    });
+    return hasData;
+  },
+  confirmTypeChange: (nextTypeId, onConfirm) => {
+    if (props.openConfirm) {
+      props.openConfirm({
+        title: t("create.changeTypeTitle"),
+        message: t("create.changeTypeBody"),
+        confirmLabel: t("create.changeTypeConfirm"),
+        cancelLabel: t("common.cancel"),
+        onConfirm,
+      });
+      return true;
+    }
+    if (window.confirm(t("create.changeTypeBody"))) {
+      onConfirm();
+    }
+    return true;
+  },
 });
+
+// Removed auto-open of type dropdown on create.
 </script>
 <template>
   <component
       :is="isPanel ? 'section' : 'div'"
       v-if="createModalOpen"
       :class="isPanel
-      ? 'flex flex-1 min-w-0 flex-col overflow-y-auto border-l border-[var(--border-color)] bg-[var(--bg-secondary)]'
+      ? 'flex min-w-0 shrink-0 flex-col overflow-y-auto border-l border-[var(--border-color)] bg-[var(--bg-secondary)]'
       : 'fixed inset-0 flex items-center justify-center bg-black/40 dark:bg-black/60 backdrop-blur-xl'"
       @click.self="!isPanel && closeModal()"
       @paste="handlePaste"
@@ -215,17 +265,22 @@ const {
     <CreatePanelHeader
       v-if="isPanel && createMode === 'item'"
       :vault-name="selectedVaultName()"
-      :path-tokens="pathTokens"
+      :item-title="nameInput"
+      :folder-label="createItemFolder"
       :busy="createItemBusy"
       :submit-disabled="submitDisabled"
       :submit-title="submitTitle"
       :is-editing="Boolean(props.createEditingItemId)"
+      :is-offline="props.isOffline"
       :type-menu-open="typeMenuOpen"
       :type-options="typeOptions"
       :type-groups="typeGroups"
+      :show-all-types-option="Boolean(props.showAllTypesOption)"
+      :on-show-all-types="props.enableAllTypes"
       :type-meta="typeMeta"
       :current-type-label="currentTypeLabel"
       :current-type-icon="currentTypeIcon"
+      :current-type-id="createItemType"
       :get-type-label="getTypeLabel"
       :t="t"
       :on-cancel="closeModal"
@@ -237,91 +292,41 @@ const {
 
     <div
         :class="isPanel
-        ? 'w-full max-w-2xl mx-auto px-6 py-6'
-        : 'w-full max-w-2xl rounded-xl bg-[var(--bg-secondary)] p-6 shadow-2xl relative'"
+        ? 'w-full max-w-[640px] mx-auto px-6 py-6'
+        : 'w-full max-w-[640px] rounded-xl bg-[var(--bg-secondary)] p-6 shadow-2xl relative'"
     >
       <div
           :class="isPanel
           ? 'rounded-2xl border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-6 shadow-sm'
           : ''"
       >
-        <div v-if="isPanel && createMode === 'item'" class="space-y-6">
-          <label class="block space-y-2 text-xs text-[var(--text-tertiary)]">
-            <span class="font-semibold uppercase tracking-wide">{{ t("create.itemPath") }}</span>
-            <SmartPathInput
-                v-model="currentPathInput"
-                dense
-                :vault-name="selectedVaultName()"
-                :path-tokens="pathTokens"
-                :token-delete-armed="tokenDeleteArmed"
-                :vault-shake="vaultShake"
-                :placeholder="t('create.itemFolderPlaceholder')"
-                :suggestions="filteredPathSuggestions"
-                :has-error="['vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long'].includes(props.createItemErrorKey)"
-                input-test-id="create-path"
-                @focus="showFolderSuggestions = true"
-                @blur="scheduleHideFolderSuggestions"
-                @keydown="handlePathKeydown"
-                @paste="handlePathPaste"
-                @insert-path="applyPathInsert"
-                @apply-suggestion="applySuggestion"
-            />
-            <span
-              v-if="['vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long'].includes(props.createItemErrorKey)"
-              class="text-[11px] text-category-security"
-            >
-              {{ createItemError }}
-            </span>
-          </label>
-
-          <input
-            v-model="nameInput"
-            ref="nameInputEl"
-            type="text"
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-            class="mt-6 w-full -ml-2 rounded-lg border-none bg-transparent px-2 py-1 text-3xl font-bold tracking-tight text-[var(--text-primary)] placeholder-[var(--text-secondary)] transition-colors hover:bg-zinc-800/50 focus:bg-zinc-900/80 focus:outline-none"
-            :class="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists'].includes(props.createItemErrorKey) ? 'bg-category-security/10 ring-2 ring-category-security/40' : ''"
-            :placeholder="t('create.itemTitlePlaceholderPanel')"
-            data-testid="create-name"
-            @beforeinput="allowTokenBeforeInput"
-            @keydown="allowTokenKeydown"
-            @paste="handleTokenPaste"
-          />
-          <span
-            v-if="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists'].includes(props.createItemErrorKey)"
-            class="text-xs text-category-security"
-          >
-            {{ createItemError }}
-          </span>
-        </div>
-
     <CreateModalHeader
-      v-else
+      v-if="!isPanel"
       :create-mode="createMode"
       :is-editing="Boolean(props.createEditingItemId)"
       :type-menu-open="typeMenuOpen"
       :copy-menu-open="copyMenuOpen"
       :type-options="typeOptions"
       :type-groups="typeGroups"
+      :show-all-types-option="Boolean(props.showAllTypesOption)"
+      :on-show-all-types="props.enableAllTypes"
       :type-meta="typeMeta"
-          :current-type-label="currentTypeLabel"
-          :current-type-icon="currentTypeIcon"
-          :get-type-label="getTypeLabel"
-          :t="t"
-          :on-toggle-type-menu="toggleTypeMenu"
-          :on-select-type="selectType"
-          :on-close-type-menu="closeTypeMenu"
-          :on-toggle-copy-menu="toggleCopyMenu"
-          :on-close-copy-menu="closeCopyMenu"
-          :on-copy-json="copyJson"
-          :on-copy-env="copyEnv"
-          :on-copy-raw="copyRaw"
-          :on-open-raw-editor="openRawEditor"
-          :on-close="closeModal"
-        />
+      :current-type-label="currentTypeLabel"
+      :current-type-icon="currentTypeIcon"
+      :current-type-id="createItemType"
+      :get-type-label="getTypeLabel"
+      :t="t"
+      :on-toggle-type-menu="toggleTypeMenu"
+      :on-select-type="selectType"
+      :on-close-type-menu="closeTypeMenu"
+      :on-toggle-copy-menu="toggleCopyMenu"
+      :on-close-copy-menu="closeCopyMenu"
+      :on-copy-json="copyJson"
+      :on-copy-env="copyEnv"
+      :on-copy-raw="copyRaw"
+      :on-open-raw-editor="openRawEditor"
+      :on-close="closeModal"
+    />
         <div
             v-if="copyNotice"
             class="absolute bottom-6 right-6 rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] px-3 py-1.5 text-xs text-[var(--text-primary)] shadow-lg"
@@ -335,20 +340,20 @@ const {
         >
           <span class="text-[var(--text-primary)]">{{ pastePromptMessage }}</span>
           <div class="flex items-center gap-2">
-            <button
-                type="button"
-                class="rounded-md px-3 py-1 text-xs font-semibold text-[var(--accent)] hover:bg-[var(--bg-hover)]"
+            <Button
+                variant="link"
+                size="xs"
                 @click="applyPastePayload"
             >
               {{ t("create.pasteReplace") }}
-            </button>
-            <button
-                type="button"
-                class="rounded-md px-3 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            </Button>
+            <Button
+                variant="secondary"
+                size="xs"
                 @click="dismissPastePrompt"
             >
               {{ t("common.cancel") }}
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -365,23 +370,67 @@ const {
             v-else
             :class="isPanel ? 'mt-4 space-y-4' : 'mt-4 space-y-4 max-h-[60vh] overflow-y-auto'"
         >
-          <label v-if="!isPanel" class="block space-y-1 text-sm">
-          <span class="font-medium uppercase tracking-wide text-xs text-[var(--text-secondary)]">
-            {{ t("create.itemLocation") }}
-          </span>
-            <p class="text-xs text-[var(--text-tertiary)]">
+          <label
+            class="block space-y-2 text-xs text-[var(--text-tertiary)]"
+            :class="isPanel ? '' : 'text-[var(--text-secondary)]'"
+          >
+            <span
+              class="font-semibold uppercase tracking-wide"
+              :class="isPanel ? '' : 'text-xs'"
+            >
+              {{ t("create.itemTitle") }}
+            </span>
+            <input
+              v-model="nameInput"
+              ref="nameInputEl"
+              type="text"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              class="w-full rounded-lg bg-[var(--bg-secondary)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              :class="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists'].includes(props.createItemErrorKey) ? 'bg-category-security/10 ring-2 ring-category-security/40' : ''"
+              :placeholder="isPanel ? t('create.itemTitlePlaceholderPanel') : t('create.itemTitlePlaceholder')"
+              data-testid="create-name"
+              @beforeinput="allowTokenBeforeInput"
+              @keydown="allowTokenKeydown"
+              @paste="handleTokenPaste"
+            />
+            <span class="text-[11px] text-[var(--text-tertiary)]">
+              {{ t("create.itemTitleHelp") }}
+            </span>
+            <span
+              v-if="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists'].includes(props.createItemErrorKey)"
+              class="text-xs text-category-security"
+            >
+              {{ createItemError }}
+            </span>
+          </label>
+
+          <label class="block space-y-1 text-sm">
+            <span
+              class="font-medium uppercase tracking-wide text-xs text-[var(--text-secondary)]"
+              :class="isPanel ? 'text-[var(--text-tertiary)] font-semibold' : ''"
+            >
+              {{ isPanel ? t("create.itemPath") : t("create.itemLocation") }}
+            </span>
+            <p v-if="!isPanel" class="text-xs text-[var(--text-tertiary)]">
               {{ t("create.itemPathHint") }}
             </p>
             <SmartPathInput
                 v-model="currentPathInput"
                 ref="pathInputRef"
+                :dense="isPanel"
                 :vault-name="selectedVaultName()"
                 :path-tokens="pathTokens"
                 :token-delete-armed="tokenDeleteArmed"
                 :vault-shake="vaultShake"
-                :placeholder="t('create.itemTitlePlaceholder')"
+                :placeholder="t('create.itemFolderPlaceholder')"
                 :suggestions="filteredPathSuggestions"
-                :has-error="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists', 'vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long'].includes(props.createItemErrorKey)"
+                :has-error="(isPanel
+                  ? ['vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long']
+                  : ['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists', 'vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long']
+                ).includes(props.createItemErrorKey)"
                 input-test-id="create-path"
                 @focus="showFolderSuggestions = true"
                 @blur="scheduleHideFolderSuggestions"
@@ -390,8 +439,14 @@ const {
                 @insert-path="applyPathInsert"
                 @apply-suggestion="applySuggestion"
             />
+            <p class="text-xs text-[var(--text-tertiary)]">
+              {{ t("create.itemPathBackspaceHint") }}
+            </p>
             <span
-              v-if="['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists', 'vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long'].includes(props.createItemErrorKey)"
+              v-if="(isPanel
+                ? ['vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long']
+                : ['name_required', 'name_invalid_chars', 'name_too_long', 'item_exists', 'vault_required', 'path_invalid', 'path_segment_invalid', 'path_segment_invalid_chars', 'path_segments_limit', 'path_too_long']
+              ).includes(props.createItemErrorKey)"
               class="text-xs text-category-security"
             >
               {{ createItemError }}
@@ -403,10 +458,17 @@ const {
             {{ t("create.itemData") }}
           </span>
           </div>
+          <p
+            v-if="createItemType === 'kv'"
+            class="text-xs text-[var(--text-tertiary)]"
+          >
+            {{ t("create.kvHint") }}
+          </p>
 
           <template v-if="createItemType === 'kv'">
             <div :class="['fields_required', 'field_key_invalid', 'field_key_duplicate'].includes(props.createItemErrorKey) ? 'rounded-lg ring-2 ring-category-security/40' : ''">
             <CreateKvTable
+                ref="kvTableRef"
                 :fields="createItemFields"
                 :can-remove="canRemoveKvRow"
                 :revealed-fields="revealedFields"
@@ -499,32 +561,29 @@ const {
         </p>
 
         <div v-if="!isPanel" class="mt-6 flex justify-end gap-2">
-          <button
-              type="button"
-              class="rounded-lg px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] active:bg-[var(--bg-active)]"
+          <Button
+              variant="secondary"
+              size="sm"
               @click="closeModal"
           >
             {{ t("common.close") }}
-          </button>
-          <button
-              type="button"
-              class="flex items-center gap-2 rounded-lg bg-gray-800 dark:bg-gray-600 px-4 py-2 text-sm font-semibold text-white transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-              :disabled="createItemBusy || createVaultBusy || submitDisabled"
+          </Button>
+          <Button
+              size="sm"
+              :loading="createItemBusy || createVaultBusy"
+              :disabled="submitDisabled"
               :title="submitTitle"
-              @click="submitCreate"
               data-testid="create-submit"
+              @click="submitCreate"
           >
-            <svg
-                v-if="createItemBusy || createVaultBusy"
-                class="h-4 w-4 animate-spin"
-                viewBox="0 0 24 24"
-                fill="none"
-            >
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v2a6 6 0 00-6 6H4z"></path>
-            </svg>
-            <span>{{ props.createEditingItemId ? t("common.save") : t("common.create") }}</span>
-          </button>
+            {{
+              props.createEditingItemId
+                ? t("common.save")
+                : props.isOffline
+                  ? t("create.createOffline")
+                  : t("common.create")
+            }}
+          </Button>
         </div>
       </div>
 

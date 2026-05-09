@@ -8,8 +8,9 @@ use zann_crypto::crypto::SecretKey;
 use zann_crypto::vault_crypto as core_crypto;
 
 use crate::local::{
-    KeyWrapType, LocalItemHistory, LocalItemHistoryRepo, LocalItemRepo, LocalPendingChange,
-    LocalStorageRepo, LocalVault, LocalVaultRepo, PendingChangeRepo,
+    HistorySource, HistorySyncStatus, KeyWrapType, LocalItemHistory, LocalItemHistoryRepo,
+    LocalItemRepo, LocalPendingChange, LocalStorageRepo, LocalVault, LocalVaultRepo,
+    PendingChangeRepo,
 };
 use crate::SqlitePool;
 
@@ -471,24 +472,31 @@ impl<'a> LocalServices<'a> {
                 Ok(Some(storage)) => storage.kind == StorageKind::LocalOnly,
                 _ => false,
             };
+            let (source, sync_status) = if is_local_only {
+                (HistorySource::Local, HistorySyncStatus::Confirmed)
+            } else {
+                (HistorySource::Local, HistorySyncStatus::Pending)
+            };
+            let history_repo = LocalItemHistoryRepo::new(self.pool);
+            let history = LocalItemHistory {
+                id: Uuid::now_v7(),
+                storage_id,
+                vault_id: item.vault_id,
+                item_id: item.id,
+                payload_enc: prev_payload_enc,
+                checksum: prev_checksum,
+                version: prev_version,
+                change_type: ChangeType::Update,
+                changed_by_email: "local".to_string(),
+                changed_by_name: None,
+                changed_by_device_id: None,
+                changed_by_device_name: None,
+                source,
+                sync_status,
+                created_at: now,
+            };
+            let _ = history_repo.create(&history).await;
             if is_local_only {
-                let history_repo = LocalItemHistoryRepo::new(self.pool);
-                let history = LocalItemHistory {
-                    id: Uuid::now_v7(),
-                    storage_id,
-                    vault_id: item.vault_id,
-                    item_id: item.id,
-                    payload_enc: prev_payload_enc,
-                    checksum: prev_checksum,
-                    version: prev_version,
-                    change_type: ChangeType::Update,
-                    changed_by_email: "local".to_string(),
-                    changed_by_name: None,
-                    changed_by_device_id: None,
-                    changed_by_device_name: None,
-                    created_at: now,
-                };
-                let _ = history_repo.create(&history).await;
                 let _ = history_repo
                     .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
                     .await;
@@ -521,6 +529,12 @@ impl<'a> LocalServices<'a> {
         item_id: Uuid,
         version: i64,
     ) -> ServiceResult<()> {
+        if version < 1 {
+            return Err(ServiceError::new(
+                "invalid_version",
+                "version must be positive",
+            ));
+        }
         let repo = LocalItemRepo::new(self.pool);
         let Some(mut item) = repo
             .get_by_id(storage_id, item_id)
@@ -543,6 +557,16 @@ impl<'a> LocalServices<'a> {
 
         let prev_version = item.version;
         let now = Utc::now();
+        let storage_repo = LocalStorageRepo::new(self.pool);
+        let is_local_only = match storage_repo.get(storage_id).await {
+            Ok(Some(storage)) => storage.kind == StorageKind::LocalOnly,
+            _ => false,
+        };
+        let (source, sync_status) = if is_local_only {
+            (HistorySource::Local, HistorySyncStatus::Confirmed)
+        } else {
+            (HistorySource::Local, HistorySyncStatus::Pending)
+        };
         let history_snapshot = LocalItemHistory {
             id: Uuid::now_v7(),
             storage_id,
@@ -556,12 +580,20 @@ impl<'a> LocalServices<'a> {
             changed_by_name: None,
             changed_by_device_id: None,
             changed_by_device_name: None,
+            source,
+            sync_status,
             created_at: now,
         };
-        let _ = history_repo.create(&history_snapshot).await;
-        let _ = history_repo
-            .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
-            .await;
+        history_repo
+            .create(&history_snapshot)
+            .await
+            .map_err(|err| ServiceError::new("history_create_failed", err.to_string()))?;
+        if is_local_only {
+            history_repo
+                .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
+                .await
+                .map_err(|err| ServiceError::new("history_prune_failed", err.to_string()))?;
+        }
 
         let key = self.payload_key_for_id(storage_id, item.vault_id).await?;
         let key_fp = Self::key_fingerprint(&key);

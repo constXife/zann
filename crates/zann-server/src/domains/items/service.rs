@@ -22,6 +22,7 @@ use crate::domains::errors::ServiceError;
 use crate::infra::metrics;
 
 pub const ITEM_HISTORY_LIMIT: i64 = 5;
+pub const MAX_TAGS: usize = 50;
 const MAX_CIPHERTEXT_BYTES: usize = 10 * 1024 * 1024;
 
 pub type ItemsError = ServiceError;
@@ -503,9 +504,12 @@ pub async fn create_item(
     let name = basename_from_path(path);
     let type_id = type_id.to_string();
 
-    let tags = command
-        .tags
-        .map(|tags| tags.into_iter().filter(|t| !t.trim().is_empty()).collect());
+    let tags = command.tags.map(|tags| {
+        tags.into_iter()
+            .filter(|t| !t.trim().is_empty())
+            .take(MAX_TAGS)
+            .collect()
+    });
     let tags = tags.filter(|tags: &Vec<String>| !tags.is_empty());
 
     let item_id = Uuid::now_v7();
@@ -735,7 +739,11 @@ pub async fn update_item(
         }
     }
     if let Some(tags) = command.tags {
-        let tags: Vec<String> = tags.into_iter().filter(|t| !t.trim().is_empty()).collect();
+        let tags: Vec<String> = tags
+            .into_iter()
+            .filter(|t| !t.trim().is_empty())
+            .take(MAX_TAGS)
+            .collect();
         let tags = if tags.is_empty() { None } else { Some(tags) };
         if item.tags.as_ref().map(|t| t.0.clone()) != tags {
             item.tags = tags.map(SqlxJson);

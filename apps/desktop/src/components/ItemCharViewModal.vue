@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, watch } from "vue";
 import { useI18n } from "vue-i18n";
 
 const props = defineProps<{
   open: boolean;
   label: string;
   value: string;
+  canCopy?: boolean;
+  onCopy?: () => void;
 }>();
 
 const emit = defineEmits<{ (e: "close"): void }>();
@@ -101,6 +103,43 @@ const getCharClass = (char: string) => {
 };
 
 const lines = computed(() => props.value.split("\n"));
+const charCount = computed(() => Array.from(props.value).length);
+
+const handleKeydown = (event: KeyboardEvent) => {
+  if (event.key === "Escape") {
+    emit("close");
+  }
+};
+
+const handleBlur = () => {
+  emit("close");
+};
+
+const bindGlobalListeners = () => {
+  window.addEventListener("keydown", handleKeydown);
+  window.addEventListener("blur", handleBlur);
+};
+
+const removeGlobalListeners = () => {
+  window.removeEventListener("keydown", handleKeydown);
+  window.removeEventListener("blur", handleBlur);
+};
+
+watch(
+  () => props.open,
+  (isOpen) => {
+    if (isOpen) {
+      bindGlobalListeners();
+    } else {
+      removeGlobalListeners();
+    }
+  },
+  { immediate: true },
+);
+
+onBeforeUnmount(() => {
+  removeGlobalListeners();
+});
 </script>
 
 <template>
@@ -110,17 +149,32 @@ const lines = computed(() => props.value.split("\n"));
     @click.self="emit('close')"
   >
     <div class="inline-block w-fit max-w-[92vw] rounded-2xl border border-[var(--border-color)] bg-[var(--bg-secondary)] p-12 shadow-2xl text-center">
-      <div class="flex items-center justify-between">
-        <div class="text-sm font-semibold text-[var(--text-primary)]">
-          {{ label }}
+      <div class="flex items-center justify-between gap-4">
+        <div class="text-left">
+          <div class="text-sm font-semibold text-[var(--text-primary)]">
+            {{ label }}
+          </div>
+          <div class="mt-1 text-xs text-[var(--text-tertiary)]">
+            {{ t("items.charCount", { count: charCount }) }}
+          </div>
         </div>
-        <button
-          type="button"
-          class="rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
-          @click="emit('close')"
-        >
-          {{ t("common.close") }}
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            v-if="props.canCopy && props.onCopy"
+            type="button"
+            class="rounded px-2 py-1 text-xs font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            @click="props.onCopy"
+          >
+            {{ t("items.copyValue") }}
+          </button>
+          <button
+            type="button"
+            class="rounded px-2 py-1 text-xs text-[var(--text-secondary)] hover:bg-[var(--bg-hover)]"
+            @click="emit('close')"
+          >
+            {{ t("common.close") }}
+          </button>
+        </div>
       </div>
       <div class="mt-6 space-y-6 text-[var(--text-primary)]">
         <div

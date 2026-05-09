@@ -9,7 +9,7 @@ type UseConflictActionsOptions = {
   selectedItem: Ref<ItemDetail | null>;
   selectedStorageId: Ref<string>;
   runRemoteSync: (storageId?: string | null) => Promise<boolean>;
-  loadItems: () => Promise<void>;
+  loadItems: (options?: { silent?: boolean }) => Promise<void>;
   t: Translator;
   showToast: (message: string, options?: { duration?: number }) => void;
   formatError: (error: unknown) => string;

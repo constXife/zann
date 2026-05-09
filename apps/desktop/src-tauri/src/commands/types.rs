@@ -6,9 +6,7 @@ use crate::types::ApiResponse;
 use zann_core::SecurityProfile;
 
 #[tauri::command]
-pub async fn types_list(
-    state: State<'_, AppState>,
-) -> Result<ApiResponse<Vec<String>>, String> {
+pub async fn types_list(state: State<'_, AppState>) -> Result<ApiResponse<Vec<String>>, String> {
     types_service::types_list(state).await
 }
 

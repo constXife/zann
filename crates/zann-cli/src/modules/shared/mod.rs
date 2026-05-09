@@ -10,18 +10,23 @@ mod resolve;
 pub(crate) mod types;
 mod utils;
 
-pub(crate) use actions::{handle_get, handle_list, handle_materialize, handle_render};
+pub(crate) use actions::{
+    handle_create, handle_delete, handle_get, handle_list, handle_materialize, handle_render,
+    handle_set, handle_update,
+};
 pub(crate) use fetch::{fetch_shared_item, fetch_shared_items};
 pub(crate) use format::{flatten_payload, format_env_flat, format_kv_flat, is_valid_env_key};
 pub(crate) use format_table::print_list_table;
-pub(crate) use http::fetch_vaults;
+pub(crate) use http::{
+    create_shared_item, delete_shared_item, fetch_vaults, set_secret_value, update_shared_item,
+};
 pub(crate) use render::render_shared_template;
 pub(crate) use render_fs::materialize_shared;
 pub(crate) use resolve::{
     resolve_path_arg, resolve_path_for_context, resolve_shared_item_id, resolve_vault_arg,
 };
 pub(crate) use types::{
-    ItemSummaryResponse, ItemsResponse, SharedItemResponse, SharedItemsResponse,
+    ItemSummaryResponse, ItemsResponse, SecretResponse, SharedItemResponse, SharedItemsResponse,
     SharedListJsonItem, SharedListJsonResponse, VaultListResponse,
 };
 pub(crate) use utils::{

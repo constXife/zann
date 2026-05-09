@@ -47,41 +47,53 @@ pub async fn identity_from_oidc(
             .ok_or("user_not_found")?
     } else {
         let email = oidc_token.email.clone().ok_or("email_missing")?;
-        let params = KdfParams {
-            algorithm: state.config.auth.kdf.algorithm.clone(),
-            iterations: state.config.auth.kdf.iterations,
-            memory_kb: state.config.auth.kdf.memory_kb,
-            parallelism: state.config.auth.kdf.parallelism,
-        };
-        let user = User {
-            id: uuid::Uuid::now_v7(),
-            email,
-            full_name: None,
-            password_hash: None,
-            kdf_salt: random_kdf_salt(),
-            kdf_algorithm: params.algorithm.clone(),
-            kdf_iterations: i64::from(params.iterations),
-            kdf_memory_kb: i64::from(params.memory_kb),
-            kdf_parallelism: i64::from(params.parallelism),
-            recovery_key_hash: None,
-            status: UserStatus::Active,
-            deleted_at: None,
-            deleted_by_user_id: None,
-            deleted_by_device_id: None,
-            row_version: 1,
-            created_at: Utc::now(),
-            updated_at: Utc::now(),
-            last_login_at: None,
-        };
-
-        user_repo.create(&user).await.map_err(|err| {
+        let user = if let Some(existing) = user_repo.get_by_email(&email).await.map_err(|err| {
             tracing::error!(
-                event = "auth_oidc_user_create_failed",
+                event = "auth_oidc_user_lookup_failed",
                 error = %err,
-                "Failed to create OIDC user"
+                "Failed to load user by email"
             );
             "db_error"
-        })?;
+        })? {
+            existing
+        } else {
+            let params = KdfParams {
+                algorithm: state.config.auth.kdf.algorithm.clone(),
+                iterations: state.config.auth.kdf.iterations,
+                memory_kb: state.config.auth.kdf.memory_kb,
+                parallelism: state.config.auth.kdf.parallelism,
+            };
+            let user = User {
+                id: uuid::Uuid::now_v7(),
+                email,
+                full_name: None,
+                password_hash: None,
+                kdf_salt: random_kdf_salt(),
+                kdf_algorithm: params.algorithm.clone(),
+                kdf_iterations: i64::from(params.iterations),
+                kdf_memory_kb: i64::from(params.memory_kb),
+                kdf_parallelism: i64::from(params.parallelism),
+                recovery_key_hash: None,
+                status: UserStatus::Active,
+                deleted_at: None,
+                deleted_by_user_id: None,
+                deleted_by_device_id: None,
+                row_version: 1,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                last_login_at: None,
+            };
+
+            user_repo.create(&user).await.map_err(|err| {
+                tracing::error!(
+                    event = "auth_oidc_user_create_failed",
+                    error = %err,
+                    "Failed to create OIDC user"
+                );
+                "db_error"
+            })?;
+            user
+        };
 
         let identity = zann_core::OidcIdentity {
             id: uuid::Uuid::now_v7(),

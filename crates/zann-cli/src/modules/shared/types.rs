@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::collections::BTreeMap;
-use zann_core::EncryptedPayload;
 
 #[derive(Deserialize)]
 pub struct VaultListResponse {
@@ -18,11 +18,21 @@ pub struct SharedItemsResponse {
     pub next_cursor: Option<String>,
 }
 
+#[derive(Deserialize, Serialize)]
+pub struct SecretResponse {
+    pub path: String,
+    pub vault_id: String,
+    pub value: String,
+    pub policy: String,
+    pub version: i64,
+    pub created: Option<bool>,
+}
+
 #[derive(Deserialize, Serialize, Clone)]
 pub struct SharedItemResponse {
     pub id: String,
     pub path: String,
-    pub payload: Option<EncryptedPayload>,
+    pub payload: Option<JsonValue>,
     #[serde(default)]
     pub payload_enc: Option<Vec<u8>>,
 }
