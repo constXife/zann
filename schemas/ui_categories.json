@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "min_client_version": "0.8.0",
+  "updated_at": "2026-01-26T05:05:45Z",
+  "fallback_category_id": "all",
+  "categories": [
+    {
+      "id": "all",
+      "labels": [{ "key": "nav.allItems" }],
+      "icon": "grid",
+      "view": "items_list",
+      "scope": "both",
+      "group": "items",
+      "order": 10,
+      "filter": { "is_deleted": false }
+    },
+    {
+      "id": "login",
+      "labels": [{ "key": "nav.logins" }],
+      "icon": "key",
+      "view": "items_list",
+      "scope": "both",
+      "group": "items",
+      "order": 20,
+      "filter": { "type_ids": ["login"], "is_deleted": false }
+    },
+    {
+      "id": "note",
+      "labels": [{ "key": "nav.notes" }],
+      "icon": "doc",
+      "view": "items_list",
+      "scope": "both",
+      "group": "items",
+      "order": 30,
+      "filter": { "type_ids": ["note"], "is_deleted": false }
+    },
+    {
+      "id": "card",
+      "labels": [{ "key": "nav.cards" }],
+      "icon": "card",
+      "view": "items_list",
+      "scope": "both",
+      "group": "items",
+      "order": 40,
+      "filter": { "type_ids": ["card"], "is_deleted": false }
+    },
+    {
+      "id": "identity",
+      "labels": [{ "key": "nav.identity" }],
+      "icon": "person",
+      "view": "items_list",
+      "scope": "both",
+      "group": "items",
+      "order": 50,
+      "filter": { "type_ids": ["identity"], "is_deleted": false }
+    },
+    {
+      "id": "api",
+      "labels": [{ "key": "nav.api" }],
+      "icon": "network",
+      "view": "items_list",
+      "scope": "both",
+      "group": "items",
+      "order": 60,
+      "filter": { "type_ids": ["api"], "is_deleted": false }
+    },
+    {
+      "id": "kv",
+      "labels": [{ "key": "nav.kv" }],
+      "icon": "list",
+      "view": "items_list",
+      "scope": "both",
+      "group": "items",
+      "order": 70,
+      "filter": { "type_ids": ["kv"], "is_deleted": false }
+    },
+    {
+      "id": "infra",
+      "labels": [{ "key": "nav.infrastructure" }],
+      "icon": "network",
+      "view": "items_list",
+      "scope": "both",
+      "group": "items",
+      "order": 80,
+      "filter": {
+        "type_ids": ["ssh_key", "database", "cloud_iam", "file_secret", "server_credentials"],
+        "is_deleted": false
+      }
+    },
+    {
+      "id": "trash",
+      "labels": [
+        { "key": "nav.trash" },
+        { "when": { "scope": "shared" }, "key": "items.trashShared" }
+      ],
+      "icon": "trash",
+      "view": "trash",
+      "scope": "both",
+      "group": "items",
+      "order": 90
+    }
+  ]
+}
