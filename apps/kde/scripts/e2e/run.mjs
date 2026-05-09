@@ -25,8 +25,24 @@ const runCommand = (command, args, options = {}) =>
     });
   });
 
-const commandExists = (command) =>
-  runCommand("sh", ["-c", `command -v ${command} >/dev/null 2>&1`]);
+const commandExists = async (command) => {
+  const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  const exts =
+    process.platform === "win32"
+      ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+          .split(";")
+          .filter(Boolean)
+      : [""];
+  for (const dir of dirs) {
+    for (const ext of exts) {
+      try {
+        await fs.access(path.join(dir, command + ext), fsConstants.X_OK);
+        return;
+      } catch {}
+    }
+  }
+  throw new Error(`command not found: ${command}`);
+};
 
 const resolveRustRunner = async () => {
   if (process.env.ZANN_E2E_USE_BUN === "1") {
