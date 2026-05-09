@@ -215,6 +215,13 @@ export function useAppLayout({
     updateListWidth();
   });
 
+  watch(listContainerEl, (el) => {
+    if (!el) {
+      return;
+    }
+    viewportHeight.value = el.clientHeight;
+  });
+
   watch(
     () => uiSettings.value.sidebarCollapsed,
     () => {

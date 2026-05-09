@@ -51,6 +51,7 @@ type AppShellProps = {
   openFolderMenu: unknown;
   selectFolderFilter: unknown;
   listPanel: unknown;
+  totalItemsCount: unknown;
   filteredItems: unknown;
   totalListHeight: unknown;
   listOffset: unknown;
@@ -130,6 +131,7 @@ type AppShellProps = {
   copyEnv: unknown;
   copyJson: unknown;
   copyRaw: unknown;
+  copyToClipboard: unknown;
   copyHistoryPassword: unknown;
   restoreHistoryVersion: unknown;
   fetchHistoryPayload: unknown;
@@ -155,6 +157,36 @@ type AppShellProps = {
 };
 
 const props = defineProps<AppShellProps>();
+const listPanel = props.listPanel as Ref<unknown> | null;
+const detailsPanel = props.detailsPanel as Ref<unknown> | null;
+
+const assignListPanel = (el: unknown) => {
+  let listContainer: HTMLElement | null = null;
+  const component = el as {
+    $el?: HTMLElement | null;
+    listContainer?: { value?: HTMLElement | null };
+  } | null;
+  const rootEl = component?.$el ?? (el as HTMLElement | null);
+  if (rootEl && typeof rootEl.querySelector === "function") {
+    listContainer = rootEl.querySelector("[data-item-list-container]");
+  }
+  if (!listContainer) {
+    listContainer = component?.listContainer?.value ?? null;
+  }
+  if (listPanel) {
+    if (listContainer) {
+      listPanel.value = { listContainer: { value: listContainer } };
+    } else {
+      listPanel.value = el;
+    }
+  }
+};
+
+const assignDetailsPanel = (el: unknown) => {
+  if (detailsPanel) {
+    detailsPanel.value = el;
+  }
+};
 const t = props.t;
 const isLocalStorage = computed(
   () => (props.currentStorage as { kind?: number } | null)?.kind === StorageKind.LocalOnly,
@@ -249,12 +281,13 @@ const uiSettings = modelRef<unknown>("uiSettings");
     />
 
     <ItemListPanel
-      ref="listPanel"
+      :ref="assignListPanel"
       class="shrink-0"
       :sidebar-collapsed="uiSettings.sidebarCollapsed"
       :categories="categories"
       :selected-category="selectedCategory"
       :filtered-items="filteredItems"
+      :total-items-count="props.totalItemsCount"
       :list-loading="listLoading"
       :total-list-height="totalListHeight"
       :list-offset="listOffset"
@@ -335,7 +368,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
 
     <ItemDetailsPanel
       v-else
-      ref="detailsPanel"
+      :ref="assignDetailsPanel"
       v-model:query="query"
       :detail-loading="detailLoading"
       :error-message="itemDetailError"
@@ -352,6 +385,7 @@ const uiSettings = modelRef<unknown>("uiSettings");
       :copy-env="copyEnv"
       :copy-json="copyJson"
       :copy-raw="copyRaw"
+      :copy-to-clipboard="copyToClipboard"
       :copy-history-password="copyHistoryPassword"
       :restore-history-version="restoreHistoryVersion"
       :fetch-history-payload="fetchHistoryPayload"

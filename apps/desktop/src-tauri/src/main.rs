@@ -18,7 +18,8 @@ use crate::infra::config::save_settings;
 use commands::auth::{
     get_server_info, password_login, password_register, remote_begin_login, remote_trust_fingerprint,
 };
-use commands::backup::{backup_plain_export, backup_plain_import};
+use commands::backup::{backup_apple_import, backup_plain_export, backup_plain_import};
+use commands::totp::totp_generate;
 use commands::items::{
     items_delete, items_empty_trash, items_get, items_list, items_purge, items_purge_trash,
     items_put, items_resolve_conflict, items_restore, items_update, pending_changes_count,
@@ -90,6 +91,8 @@ fn main() {
             open_logs,
             backup_plain_export,
             backup_plain_import,
+            backup_apple_import,
+            totp_generate,
             vault_list,
             items_list,
             pending_changes_count,

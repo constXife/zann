@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use zann_core::EncryptedPayload;
 
 #[derive(Serialize)]
@@ -499,6 +500,26 @@ pub struct ItemsListRequest {
     pub vault_id: String,
     #[serde(default)]
     pub include_deleted: bool,
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ItemsListResponse {
+    pub items: Vec<ItemSummary>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub total_count: usize,
+    pub counts: ItemCounts,
+}
+
+#[derive(Serialize)]
+pub struct ItemCounts {
+    pub all: usize,
+    pub trash: usize,
+    pub by_type: HashMap<String, usize>,
 }
 
 #[derive(Deserialize)]
@@ -654,6 +675,20 @@ pub struct PlainBackupImportResponse {
     pub skipped_missing_storage: usize,
     pub skipped_missing_vault: usize,
     pub skipped_deleted: usize,
+}
+
+#[derive(Serialize)]
+pub struct TotpCodeResponse {
+    pub code: String,
+    pub remaining_seconds: u32,
+    pub period: u32,
+}
+
+#[derive(Serialize)]
+pub struct ApplePasswordsImportResponse {
+    pub imported_items: usize,
+    pub skipped_existing: usize,
+    pub skipped_invalid: usize,
 }
 
 #[derive(Deserialize, Serialize)]

@@ -180,6 +180,10 @@
     "resolveConflict": "Разрешить конфликт",
     "resolveConflictDone": "Конфликт отправлен на синхронизацию"
   },
+  "totp": {
+    "refreshEvery": "обновляется каждые {seconds}с",
+    "error": "Некорректный TOTP-секрет"
+  },
   "onboarding": {
     "createFirstVault": "Создайте первое хранилище",
     "createVault": "Создать хранилище",
@@ -355,9 +359,14 @@
       "importAction": "Импорт JSON",
       "importSuccess": "Резервная копия импортирована",
       "importFailed": "Ошибка импорта",
+      "importAppleAction": "Импорт Apple CSV",
+      "importAppleSuccess": "Apple Passwords импортированы",
+      "importAppleFailed": "Ошибка импорта Apple Passwords",
       "importPathRequired": "Путь обязателен",
       "importedCounts": "Импортировано {imported}, пропущено существующих {skipped}",
       "importedSkippedMissing": "Пропущено: нет хранилищ {missingStorages}, нет сейфов {missingVaults}, удалено {deleted}",
+      "importAppleCounts": "Импортировано {imported}, пропущено существующих {skipped}",
+      "importAppleInvalid": "Пропущено некорректных строк {skipped}",
       "importSyncStart": "Импорт завершен. Синхронизация с сервером...",
       "importSyncDone": "Синхронизация завершена",
       "importSyncFailed": "Ошибка синхронизации",

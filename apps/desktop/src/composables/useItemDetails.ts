@@ -11,6 +11,7 @@ import type {
   ItemHistoryDetail,
   ItemHistorySummary,
   Settings,
+  TotpFieldData,
 } from "../types";
 import { getSchemaFieldDefs, getSchemaKeys, resolveSchemaLabel } from "../data/secretSchemas";
 import { createErrorWithCause } from "./errors";
@@ -37,6 +38,7 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
   const revealedFields = ref(new Set<string>());
   const revealTimer = ref<number | null>(null);
   const historyToken = ref(0);
+  const detailToken = ref(0);
   const timeTravelActive = ref(false);
   const timeTravelIndex = ref(0);
   const timeTravelPayload = ref<EncryptedPayload | null>(null);
@@ -80,6 +82,8 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
     if (!options.initialized.value || !options.unlocked.value) {
       return;
     }
+    const current = detailToken.value + 1;
+    detailToken.value = current;
     const preserveTimeTravel =
       timeTravelActive.value && selectedItem.value?.id === itemId;
     const preservedIndex = timeTravelIndex.value;
@@ -103,6 +107,9 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       const response = await invoke<ApiResponse<ItemDetail>>("items_get", {
         req: { storage_id: options.selectedStorageId.value, item_id: itemId },
       });
+      if (detailToken.value !== current) {
+        return;
+      }
       if (!response.ok || !response.data) {
         const key = response.error?.kind ?? "generic";
         const message = response.error?.message;
@@ -114,6 +121,9 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
       pendingHistoryEntries.value = [];
       historyError.value = "";
       await loadItemHistory(response.data);
+      if (detailToken.value !== current) {
+        return;
+      }
       if (preserveTimeTravel) {
         timeTravelActive.value = true;
         await setTimeTravelIndex(preservedIndex);
@@ -124,10 +134,15 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
         vaultId: response.data.vault_id,
       });
     } catch (err) {
+      if (detailToken.value !== current) {
+        return;
+      }
       options.onError?.(String(err));
       console.warn("[details] load_item_err", { itemId, error: String(err) });
     } finally {
-      detailLoading.value = false;
+      if (detailToken.value === current) {
+        detailLoading.value = false;
+      }
     }
   };
 
@@ -280,12 +295,62 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
     const fields: FieldRow[] = [];
     const payloadFields = payload.fields ?? {};
 
+    const extractTotpData = (payload: EncryptedPayload, key: string): TotpFieldData | null => {
+      const field = payload.fields?.[key];
+      if (!field || field.kind !== "otp") {
+        return null;
+      }
+      let secret = field.value;
+      let algorithm = payload.extra?.otp_algorithm ?? "SHA1";
+      let digits = Number.parseInt(payload.extra?.otp_digits ?? "6", 10);
+      let period = Number.parseInt(payload.extra?.otp_period ?? "30", 10);
+
+      if (secret.startsWith("otpauth://")) {
+        try {
+          const url = new URL(secret);
+          const secretParam = url.searchParams.get("secret");
+          if (secretParam) {
+            secret = secretParam;
+          }
+          const algoParam = url.searchParams.get("algorithm");
+          if (algoParam) {
+            algorithm = algoParam;
+          }
+          const digitsParam = url.searchParams.get("digits");
+          if (digitsParam) {
+            digits = Number.parseInt(digitsParam, 10);
+          }
+          const periodParam = url.searchParams.get("period");
+          if (periodParam) {
+            period = Number.parseInt(periodParam, 10);
+          }
+        } catch {
+          // ignore invalid otpauth url
+        }
+      }
+
+      if (!Number.isFinite(digits) || digits <= 0) {
+        digits = 6;
+      }
+      if (!Number.isFinite(period) || period <= 0) {
+        period = 30;
+      }
+
+      return {
+        secret,
+        algorithm,
+        digits,
+        period,
+      };
+    };
+
     schemaDefs.forEach((def) => {
       const item = payloadFields[def.key];
       if (!item) return;
+      const totp = extractTotpData(payload, def.key);
       const masked = item.meta?.masked ?? (item.kind === "password" || item.kind === "otp");
-      const copyable = item.meta?.copyable ?? true;
-      const revealable = item.meta?.masked ?? masked;
+      const copyable = totp ? false : item.meta?.copyable ?? true;
+      const revealable = totp ? false : item.meta?.masked ?? masked;
       fields.push({
         key: resolveSchemaLabel(options.t, typeId, def.key),
         value: item.value,
@@ -294,6 +359,7 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
         masked,
         copyable,
         revealable,
+        totp,
       });
     });
 
@@ -303,9 +369,10 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
     customKeys.forEach((key) => {
       const item = payloadFields[key];
       if (!item) return;
+      const totp = extractTotpData(payload, key);
       const masked = item.meta?.masked ?? (item.kind === "password" || item.kind === "otp");
-      const copyable = item.meta?.copyable ?? true;
-      const revealable = item.meta?.masked ?? masked;
+      const copyable = totp ? false : item.meta?.copyable ?? true;
+      const revealable = totp ? false : item.meta?.masked ?? masked;
       fields.push({
         key,
         value: item.value,
@@ -314,6 +381,7 @@ export const useItemDetails = (options: UseItemDetailsOptions) => {
         masked,
         copyable,
         revealable,
+        totp,
       });
     });
     if (typeId === "file_secret" && payload.extra) {

@@ -1,10 +1,11 @@
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import type { ComputedRef, Ref } from "vue";
-import type { ItemSummary } from "../../../types";
+import type { ItemCounts, ItemSummary } from "../../../types";
 
 type AppItemFiltersOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
   items: Ref<ItemSummary[]>;
+  itemCounts?: Ref<ItemCounts | null> | ComputedRef<ItemCounts | null>;
   isSharedVault: ComputedRef<boolean>;
   selectedFolder: Ref<string | null>;
   selectedCategory?: Ref<string | null>;
@@ -13,12 +14,16 @@ type AppItemFiltersOptions = {
 export function useAppItemFilters({
   t,
   items,
+  itemCounts,
   isSharedVault,
   selectedFolder,
   selectedCategory: selectedCategoryRef,
 }: AppItemFiltersOptions) {
   const selectedCategory = selectedCategoryRef ?? ref<string | null>(null);
   const query = ref("");
+  const debouncedQuery = ref("");
+  const DEBOUNCE_MS = 250;
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null;
   const infraTypes = new Set([
     "ssh_key",
     "database",
@@ -41,6 +46,22 @@ export function useAppItemFilters({
       infra: 0,
       trash: 0,
     };
+    if (itemCounts?.value) {
+      const byType = itemCounts.value.by_type ?? {};
+      counts.all = itemCounts.value.all ?? 0;
+      counts.trash = itemCounts.value.trash ?? 0;
+      counts.login = byType.login ?? 0;
+      counts.note = byType.note ?? 0;
+      counts.card = byType.card ?? 0;
+      counts.identity = byType.identity ?? 0;
+      counts.api = byType.api ?? 0;
+      counts.kv = byType.kv ?? 0;
+      counts.infra = 0;
+      infraTypes.forEach((typeId) => {
+        counts.infra += byType[typeId] ?? 0;
+      });
+      return counts;
+    }
     items.value.forEach((item) => {
       if (isDeletedItem(item)) {
         counts.trash++;
@@ -76,6 +97,25 @@ export function useAppItemFilters({
   const selectCategory = (categoryId: string) => {
     selectedCategory.value = categoryId;
   };
+
+  watch(
+    query,
+    (value) => {
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+      debounceTimer = setTimeout(() => {
+        debouncedQuery.value = value;
+      }, DEBOUNCE_MS);
+    },
+    { immediate: true },
+  );
+
+  onBeforeUnmount(() => {
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+  });
 
   const filteredItems = computed(() => {
     let result = items.value;
@@ -113,8 +153,8 @@ export function useAppItemFilters({
       }
     }
 
-    if (query.value.trim()) {
-      const needle = query.value.toLowerCase();
+    if (debouncedQuery.value.trim()) {
+      const needle = debouncedQuery.value.toLowerCase();
       result = result.filter((item) =>
         [item.name, item.path, item.type_id].some((value) =>
           value.toLowerCase().includes(needle),

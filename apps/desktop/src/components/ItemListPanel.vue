@@ -24,6 +24,7 @@ const props = defineProps<{
   lastSyncTime: string | null;
   retrySync: () => void;
   filteredItems: ItemSummary[];
+  totalItemsCount?: number | null;
   listLoading: boolean;
   totalListHeight: number;
   listOffset: number;
@@ -89,7 +90,6 @@ const formatDeletedAt = (value?: string | null) => {
 };
 
 const handleSelectItem = (itemId: string) => {
-  console.info("[item_list] select_item", { itemId });
   props.selectItem(itemId);
 };
 </script>
@@ -252,7 +252,9 @@ const handleSelectItem = (itemId: string) => {
               {{ t("nav.shared") }}
             </span>
           </div>
-          <div class="text-xs text-[var(--text-secondary)] leading-none mt-1">{{ filteredItems.length }} items</div>
+          <div class="text-xs text-[var(--text-secondary)] leading-none mt-1">
+            {{ totalItemsCount ?? filteredItems.length }} items
+          </div>
         </div>
       </div>
       <div class="flex items-center gap-2">
@@ -291,6 +293,7 @@ const handleSelectItem = (itemId: string) => {
     <div
       ref="listContainer"
       class="flex-1 overflow-auto"
+      data-item-list-container
       @scroll="onListScroll"
     >
       <div v-if="listLoading" class="space-y-1 p-2">

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import ItemCharViewModal from "./ItemCharViewModal.vue";
+import TotpField from "./TotpField.vue";
 import type {
   DetailSection,
   EncryptedPayload,
@@ -28,6 +29,7 @@ const props = defineProps<{
   copyEnv: () => void;
   copyJson: () => void;
   copyRaw: () => void;
+  copyToClipboard: (value: string) => Promise<void>;
   copyHistoryPassword: (version: number) => void;
   restoreHistoryVersion: (entry: ItemHistorySummary) => void;
   fetchHistoryPayload: (version: number) => Promise<{
@@ -413,7 +415,7 @@ onBeforeUnmount(() => {
 
     <div class="flex-1 overflow-auto px-4 pb-4">
       <div
-        v-if="detailLoading"
+        v-if="detailLoading && !selectedItem"
         class="space-y-3 animate-pulse"
       >
         <div class="h-4 w-24 rounded bg-[var(--bg-hover)]"></div>
@@ -431,6 +433,29 @@ onBeforeUnmount(() => {
           <div class="flex items-center justify-between gap-4">
             <div class="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
               <span class="font-semibold text-[var(--text-tertiary)]">🔒 {{ vaultName }}</span>
+              <svg
+                v-if="detailLoading"
+                class="h-3.5 w-3.5 text-[var(--text-tertiary)] animate-spin"
+                viewBox="0 0 24 24"
+                fill="none"
+                aria-hidden="true"
+              >
+                <circle
+                  class="opacity-30"
+                  cx="12"
+                  cy="12"
+                  r="9"
+                  stroke="currentColor"
+                  stroke-width="2"
+                />
+                <path
+                  class="opacity-80"
+                  d="M21 12a9 9 0 0 1-9 9"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
               <template v-for="crumb in breadcrumbs" :key="crumb.path">
                 <span class="text-[var(--text-tertiary)]">/</span>
                 <button
@@ -689,7 +714,7 @@ onBeforeUnmount(() => {
                   : ''"
             >
               <div class="grid grid-cols-[180px,1fr] gap-4 items-start">
-                <div class="text-xs font-mono font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                <div class="text-xs font-mono font-semibold uppercase tracking-wide text-[var(--text-tertiary)] py-1">
                   {{ formatFieldLabel(field.key) }}
                   <span
                     v-if="timeTravelActive && diffStatus(field) === 'added'"
@@ -706,21 +731,27 @@ onBeforeUnmount(() => {
                 </div>
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0 flex-1">
+                    <TotpField
+                      v-if="field.kind === 'otp' && field.totp"
+                      :data="field.totp"
+                      :copy-to-clipboard="props.copyToClipboard"
+                    />
                     <button
+                      v-else
                       type="button"
-                    class="min-w-0 w-full text-left font-mono text-sm text-[var(--text-primary)] px-1 py-1 transition-colors focus:outline-none"
-                    :class="[
-                      field.copyable ? 'hover:bg-[var(--bg-hover)] cursor-pointer rounded-md' : '',
-                      timeTravelActive && diffStatus(field) === 'modified' ? 'bg-emerald-500/10 rounded-md' : '',
-                    ]"
-                    @click="handleCopy(field)"
-                  >
-                  <span
-                    v-if="field.masked && showMaskedValue(field.path)"
-                    class="tracking-widest text-base leading-none text-[var(--text-primary)]"
-                  >
-                    ••••••••••••
-                  </span>
+                      class="min-w-0 w-full text-left font-mono text-sm text-[var(--text-primary)] px-1 py-1 transition-colors focus:outline-none"
+                      :class="[
+                        field.copyable ? 'hover:bg-[var(--bg-hover)] cursor-pointer rounded-md' : '',
+                        timeTravelActive && diffStatus(field) === 'modified' ? 'bg-emerald-500/10 rounded-md' : '',
+                      ]"
+                      @click="handleCopy(field)"
+                    >
+                      <span
+                        v-if="field.masked && showMaskedValue(field.path)"
+                        class="tracking-widest text-base leading-none text-[var(--text-primary)]"
+                      >
+                        ••••••••••••
+                      </span>
                       <span
                         v-else
                         class="break-words text-[var(--text-primary)]"
@@ -826,7 +857,7 @@ onBeforeUnmount(() => {
               class="group border-b border-white/5 py-3 last:border-b-0 bg-red-500/10"
             >
               <div class="grid grid-cols-[180px,1fr] gap-4 items-start">
-                <div class="text-xs font-mono font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+                <div class="text-xs font-mono font-semibold uppercase tracking-wide text-[var(--text-tertiary)] py-1">
                   {{ formatFieldLabel(entry.field.key) }}
                   <span class="ml-2 rounded-full bg-red-500/20 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-red-200">
                     {{ t("items.historyDeletedTag") }}

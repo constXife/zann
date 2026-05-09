@@ -86,6 +86,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     openFolderMenu: foldersState.openFolderMenu,
     selectFolderFilter: foldersState.selectFolderFilter,
     listPanel: layoutState.listPanel,
+    totalItemsCount: core.totalItemsCount ?? null,
     filteredItems: selectionState.filteredItems,
     totalListHeight: layoutState.totalListHeight,
     listOffset: layoutState.listOffset,
@@ -166,6 +167,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     copyEnv: itemActions.copyEnv,
     copyJson: itemActions.copyJson,
     copyRaw: itemActions.copyRaw,
+    copyToClipboard: core.copyToClipboard,
     copyHistoryPassword: itemActions.copyHistoryPassword,
     restoreHistoryVersion: itemActions.restoreHistoryVersion,
     fetchHistoryPayload: detailState.fetchHistoryPayload,
@@ -257,6 +259,7 @@ export function useAppBindings(options: AppBindingsOptions) {
     rebindBiometrics: settingsActions.rebindBiometrics,
     exportPlainBackup: settingsActions.exportPlainBackup,
     importPlainBackup: settingsActions.importPlainBackup,
+    importApplePasswords: settingsActions.importApplePasswords,
     showLocalSection: storageState.showLocalSection,
     hasLocalVaults: storageState.hasLocalVaults,
     getStorageInfo: storageState.getStorageInfo,
@@ -369,6 +372,8 @@ export function useAppBindings(options: AppBindingsOptions) {
 
   const shellModelKeys = new Set([
     "uiSettings",
+    "listPanel",
+    "detailsPanel",
     "createModalOpen",
     "createItemVaultId",
     "createItemType",

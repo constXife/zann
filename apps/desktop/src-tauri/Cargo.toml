@@ -29,6 +29,11 @@ reqwest = { version = "0.12", features = ["json", "gzip", "deflate", "stream", "
 chrono = { version = "0.4", features = ["serde"] }
 blake3 = "1"
 rfd = "0.14"
+csv = "1"
+url = "2"
+percent-encoding = "2"
+tokio = { version = "1", features = ["rt", "sync"] }
+totp-rs = { version = "5.5", default-features = false }
 
 zann-core = { path = "../../../crates/zann-core", default-features = false, features = ["sqlite"] }
 zann-db = { path = "../../../crates/zann-db", default-features = false, features = ["sqlite"] }

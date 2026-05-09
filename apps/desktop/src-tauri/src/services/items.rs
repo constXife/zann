@@ -4,9 +4,9 @@ use uuid::Uuid;
 
 use crate::state::{ensure_unlocked, AppState};
 use crate::types::{
-    ApiResponse, ItemDeleteRequest, ItemDetail, ItemGetRequest, ItemPutRequest, ItemSummary,
-    ItemUpdateRequest, ItemsEmptyTrashRequest, ItemsListRequest, ItemsTrashPurgeRequest,
-    PendingChangesCountRequest,
+    ApiResponse, ItemCounts, ItemDeleteRequest, ItemDetail, ItemGetRequest, ItemPutRequest,
+    ItemSummary, ItemUpdateRequest, ItemsEmptyTrashRequest, ItemsListRequest, ItemsListResponse,
+    ItemsTrashPurgeRequest, PendingChangesCountRequest,
 };
 use zann_core::{ChangeType, EncryptedPayload, ItemListParams, ItemsService, SyncStatus};
 use zann_db::local::{LocalItemRepo, LocalPendingChange, LocalVaultRepo, PendingChangeRepo};
@@ -15,8 +15,17 @@ use zann_db::services::LocalServices;
 pub async fn items_list(
     state: State<'_, AppState>,
     req: ItemsListRequest,
-) -> Result<ApiResponse<Vec<ItemSummary>>, String> {
-    Ok(match list_items(state, req.storage_id, req.vault_id, req.include_deleted).await {
+) -> Result<ApiResponse<ItemsListResponse>, String> {
+    Ok(match list_items(
+        state,
+        req.storage_id,
+        req.vault_id,
+        req.include_deleted,
+        req.limit,
+        req.cursor,
+    )
+    .await
+    {
         Ok(data) => ApiResponse::ok(data),
         Err(message) => ApiResponse::err("items_list_failed", &message),
     })
@@ -299,7 +308,9 @@ async fn list_items(
     storage_id: String,
     vault_id: String,
     include_deleted: bool,
-) -> Result<Vec<ItemSummary>, String> {
+    limit: Option<u32>,
+    cursor: Option<String>,
+) -> Result<ItemsListResponse, String> {
     ensure_unlocked(&state).await?;
     let storage_id = Uuid::parse_str(&storage_id).map_err(|_| "invalid storage id")?;
     let vault_id = Uuid::parse_str(&vault_id).map_err(|_| "invalid vault id")?;
@@ -310,20 +321,23 @@ async fn list_items(
         .clone()
         .ok_or_else(|| "vault is locked".to_string())?;
     let services = LocalServices::new(&state.pool, master_key.as_ref());
-    let items = services
+    let page = services
         .list_items(
             storage_id,
             vault_id,
             ItemListParams {
                 include_deleted,
+                limit,
+                cursor,
                 ..ItemListParams::default()
             },
         )
         .await
-        .map_err(|err| err.message)?
-        .items;
-    Ok(items
-        .into_iter()
+        .map_err(|err| err.message)?;
+    Ok(ItemsListResponse {
+        items: page
+            .items
+            .into_iter()
         .map(|item| ItemSummary {
             id: item.id.to_string(),
             vault_id: item.vault_id.to_string(),
@@ -334,7 +348,15 @@ async fn list_items(
             updated_at: item.updated_at.to_rfc3339(),
             deleted_at: item.deleted_at.map(|value| value.to_rfc3339()),
         })
-        .collect())
+        .collect(),
+        next_cursor: page.next_cursor,
+        total_count: page.total_count,
+        counts: ItemCounts {
+            all: page.counts.all,
+            trash: page.counts.trash,
+            by_type: page.counts.by_type,
+        },
+    })
 }
 
 async fn get_item(
