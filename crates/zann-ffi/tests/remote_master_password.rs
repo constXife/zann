@@ -85,7 +85,7 @@ fn remote_login_create_master_then_relogin_unlock() {
             &state,
         ))
         .expect("login");
-    assert!(second_login.ok, "login failed: {:?}", second_login.error);
+    assert!(second_login.ok, "login failed");
     assert_eq!(
         second_login
             .data
