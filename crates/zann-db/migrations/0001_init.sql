@@ -83,6 +83,39 @@ CREATE UNIQUE INDEX idx_items_cache_storage_vault_path
 CREATE INDEX idx_items_cache_storage_vault_id
     ON items_cache(storage_id, vault_id);
 
+CREATE VIRTUAL TABLE items_cache_fts USING fts5(
+    name,
+    path,
+    type_id,
+    content='items_cache',
+    content_rowid='rowid'
+);
+
+CREATE TRIGGER items_cache_fts_insert
+AFTER INSERT ON items_cache
+BEGIN
+    INSERT INTO items_cache_fts(rowid, name, path, type_id)
+    VALUES (new.rowid, new.name, new.path, new.type_id);
+END;
+
+CREATE TRIGGER items_cache_fts_delete
+AFTER DELETE ON items_cache
+BEGIN
+    INSERT INTO items_cache_fts(items_cache_fts, rowid, name, path, type_id)
+    VALUES ('delete', old.rowid, old.name, old.path, old.type_id);
+END;
+
+CREATE TRIGGER items_cache_fts_update
+AFTER UPDATE ON items_cache
+BEGIN
+    INSERT INTO items_cache_fts(items_cache_fts, rowid, name, path, type_id)
+    VALUES ('delete', old.rowid, old.name, old.path, old.type_id);
+    INSERT INTO items_cache_fts(rowid, name, path, type_id)
+    VALUES (new.rowid, new.name, new.path, new.type_id);
+END;
+
+INSERT INTO items_cache_fts(items_cache_fts) VALUES ('rebuild');
+
 CREATE TABLE item_history (
     id BLOB PRIMARY KEY NOT NULL,
     storage_id BLOB NOT NULL,
