@@ -153,6 +153,7 @@ pub(crate) async fn begin_login(
         scope,
         oidc_config.audience.as_deref().unwrap_or("<none>")
     );
+    println!("[oidc] authorization_url={}", auth_url);
     let login_id_for_thread = login_id.clone();
     let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
     guard.insert(
@@ -265,26 +266,50 @@ fn listen_for_oidc_callback(
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                let (code, oauth_state) = parse_oidc_request(&mut stream, port)?;
-                println!("[oidc] callback received for login_id={}", login_id);
-                respond_html(
-                    &mut stream,
-                    "Login complete",
-                    "You can return to the app and close this window.",
-                )?;
-                let app_handle = app.clone();
-                tauri::async_runtime::spawn(async move {
-                    let login_id_for_error = login_id.clone();
-                    if let Err(err) =
-                        complete_oidc_login(&app_handle, login_id, code, oauth_state).await
-                    {
-                        let _ = emit_oidc_status(
-                            &app_handle,
-                            oidc_status_error(&login_id_for_error, err),
+                // Browsers fire speculative connections (favicon, prefetch, /, the
+                // user navigating to 127.0.0.1:8765 by hand). Treat anything that
+                // is not the OAuth callback as noise and keep listening — losing
+                // the listener to a stray request leaves the real IdP redirect
+                // hitting a closed port.
+                match parse_oidc_request(&mut stream, port) {
+                    Ok(OidcRequest::Callback { code, state }) => {
+                        println!("[oidc] callback received for login_id={}", login_id);
+                        let _ = respond_html(
+                            &mut stream,
+                            "Login complete",
+                            "You can return to the app and close this window.",
+                        );
+                        let app_handle = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let login_id_for_error = login_id.clone();
+                            if let Err(err) =
+                                complete_oidc_login(&app_handle, login_id, code, state).await
+                            {
+                                let _ = emit_oidc_status(
+                                    &app_handle,
+                                    oidc_status_error(&login_id_for_error, err),
+                                );
+                            }
+                        });
+                        return Ok(());
+                    }
+                    Ok(OidcRequest::IdpError { error, description }) => {
+                        let detail = description
+                            .unwrap_or_else(|| "Authorization failed.".to_string());
+                        let _ = respond_html(&mut stream, "Login error", &detail);
+                        return Err(format!("authorization error: {error}"));
+                    }
+                    Ok(OidcRequest::Ignored { path }) => {
+                        let _ = respond_not_found(&mut stream);
+                        println!(
+                            "[oidc] ignoring stray request path={path} login_id={login_id}"
                         );
                     }
-                });
-                return Ok(());
+                    Err(err) => {
+                        let _ = respond_not_found(&mut stream);
+                        println!("[oidc] failed to parse stray request: {err}");
+                    }
+                }
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() > deadline {
@@ -297,10 +322,24 @@ fn listen_for_oidc_callback(
     }
 }
 
+enum OidcRequest {
+    Callback {
+        code: String,
+        state: String,
+    },
+    IdpError {
+        error: String,
+        description: Option<String>,
+    },
+    Ignored {
+        path: String,
+    },
+}
+
 fn parse_oidc_request(
     stream: &mut std::net::TcpStream,
     port: u16,
-) -> Result<(String, String), String> {
+) -> Result<OidcRequest, String> {
     let mut buffer = [0u8; 8192];
     let size = stream.read(&mut buffer).map_err(|err| err.to_string())?;
     if size == 0 {
@@ -311,45 +350,55 @@ fn parse_oidc_request(
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
     let path = parts.next().unwrap_or_default();
-    if method != "GET" {
-        respond_html(stream, "Invalid request", "Expected GET request.")?;
-        return Err("invalid request method".to_string());
-    }
-    if !path.starts_with('/') {
-        respond_html(stream, "Invalid request", "Malformed callback URL.")?;
-        return Err("invalid request path".to_string());
+    if method != "GET" || !path.starts_with('/') {
+        return Ok(OidcRequest::Ignored {
+            path: path.to_string(),
+        });
     }
     let full_url = format!("http://127.0.0.1:{port}{path}");
     let url = reqwest::Url::parse(&full_url).map_err(|err| err.to_string())?;
+    if url.path() != "/oidc/callback" {
+        return Ok(OidcRequest::Ignored {
+            path: path.to_string(),
+        });
+    }
     let mut code = None;
     let mut state = None;
     let mut error = None;
     let mut error_description = None;
     for (key, value) in url.query_pairs() {
-        if key == "code" {
-            code = Some(value.to_string());
-        } else if key == "state" {
-            state = Some(value.to_string());
-        } else if key == "error" {
-            error = Some(value.to_string());
-        } else if key == "error_description" {
-            error_description = Some(value.to_string());
+        match key.as_ref() {
+            "code" => code = Some(value.to_string()),
+            "state" => state = Some(value.to_string()),
+            "error" => error = Some(value.to_string()),
+            "error_description" => error_description = Some(value.to_string()),
+            _ => {}
         }
     }
     if let Some(error) = error {
-        let detail = error_description.unwrap_or_else(|| "Authorization failed.".to_string());
-        respond_html(stream, "Login error", &detail).ok();
-        return Err(format!("authorization error: {error}"));
+        return Ok(OidcRequest::IdpError {
+            error,
+            description: error_description,
+        });
     }
-    let code = code.ok_or_else(|| {
-        respond_html(stream, "Login error", "Missing authorization code.").ok();
-        "missing code".to_string()
-    })?;
-    let state = state.ok_or_else(|| {
-        respond_html(stream, "Login error", "Missing state parameter.").ok();
-        "missing state".to_string()
-    })?;
-    Ok((code, state))
+    match (code, state) {
+        (Some(code), Some(state)) => Ok(OidcRequest::Callback { code, state }),
+        _ => Ok(OidcRequest::Ignored {
+            path: path.to_string(),
+        }),
+    }
+}
+
+fn respond_not_found(stream: &mut std::net::TcpStream) -> Result<(), String> {
+    let body = "Not found";
+    let response = format!(
+        "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|err| err.to_string())
 }
 
 fn respond_html(
