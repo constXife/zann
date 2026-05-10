@@ -616,6 +616,7 @@ pub struct ItemUpdateRequest {
     pub payload: EncryptedPayload,
 }
 
+#[cfg(test)]
 #[derive(Serialize, Deserialize)]
 pub struct PlainBackup {
     pub version: u32,

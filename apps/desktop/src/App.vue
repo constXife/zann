@@ -480,6 +480,12 @@ const openExternal = async (url: string) => {
     return;
   }
   try {
+    await invoke("open_external_url", { url });
+    return;
+  } catch (err) {
+    console.warn("[shell] open_external_url failed, falling back", err);
+  }
+  try {
     await openShell(url);
   } catch {
     globalThis.open?.(url, "_blank");
