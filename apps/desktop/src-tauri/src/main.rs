@@ -32,6 +32,7 @@ use commands::session::{
     session_rebind_biometrics, session_status, session_unlock_with_biometrics,
     session_unlock_with_password, status, system_locale, unlock, update_settings,
 };
+use commands::shell::open_external_url;
 use commands::storage::{
     app_version, local_clear_data, local_factory_reset, open_data_folder, open_logs,
     storage_delete, storage_disconnect, storage_info, storage_reveal, storage_sign_out,
@@ -42,7 +43,29 @@ use commands::types::{publish_list, publish_trigger, types_list, types_show};
 use commands::vaults::{vault_create, vault_list, vault_reset_personal};
 use state::{build_state, AppState};
 
+#[cfg(all(target_os = "linux", not(any(target_arch = "wasm32"))))]
+fn apply_webkitgtk_workarounds() {
+    // WebKitGTK 2.4x+ on Wayland intermittently fails with
+    // `Gdk-Message: Error 71 (Protocol error) dispatching to Wayland display`
+    // when the DMA-BUF renderer negotiates buffers the compositor rejects.
+    // Disable the DMA-BUF path (and accelerated compositing as a backstop)
+    // unless the developer has overridden these explicitly.
+    for (key, value) in [
+        ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
+        ("WEBKIT_DISABLE_COMPOSITING_MODE", "1"),
+    ] {
+        if std::env::var_os(key).is_none() {
+            std::env::set_var(key, value);
+        }
+    }
+}
+
+#[cfg(not(all(target_os = "linux", not(any(target_arch = "wasm32")))))]
+fn apply_webkitgtk_workarounds() {}
+
 fn main() {
+    apply_webkitgtk_workarounds();
+
     std::panic::set_hook(Box::new(|info| {
         eprintln!("[tauri] panic: {info}");
     }));
@@ -116,7 +139,8 @@ fn main() {
             publish_trigger,
             get_settings,
             update_settings,
-            unlock
+            unlock,
+            open_external_url
         ])
         .setup(|app| {
             let app_handle = app.app_handle();
