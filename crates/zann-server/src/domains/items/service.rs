@@ -496,11 +496,11 @@ pub async fn create_item(
     )
     .await?;
 
-    let path = command.path.trim();
     let type_id = command.type_id.trim();
-    if path.is_empty() || type_id.is_empty() {
+    if type_id.is_empty() {
         return Err(ItemsError::BadRequest("invalid_item"));
     }
+    let path = validate_item_path(&command.path)?;
     let name = basename_from_path(path);
     let type_id = type_id.to_string();
 
@@ -702,10 +702,7 @@ pub async fn update_item(
     let mut updated = false;
     let mut payload_changed = false;
     if let Some(path) = command.path.as_deref() {
-        let path = path.trim();
-        if path.is_empty() {
-            return Err(ItemsError::BadRequest("invalid_path"));
-        }
+        let path = validate_item_path(path)?;
         if path != item.path {
             item.path = path.to_string();
             updated = true;
@@ -1296,6 +1293,23 @@ pub async fn restore_item_version(
     );
     tracing::info!(event = "item_restored", item_id = %item_id, "Item restored");
     Ok(ItemWithVault { vault, item })
+}
+
+pub(crate) fn validate_item_path(path: &str) -> Result<&str, ItemsError> {
+    let path = path.trim();
+    if path.is_empty() {
+        return Err(ItemsError::BadRequest("invalid_path"));
+    }
+    if path.starts_with('/') {
+        return Err(ItemsError::BadRequest("invalid_path_leading_slash"));
+    }
+    if path.ends_with('/') {
+        return Err(ItemsError::BadRequest("invalid_path_trailing_slash"));
+    }
+    if path.contains("//") {
+        return Err(ItemsError::BadRequest("invalid_path_double_slash"));
+    }
+    Ok(path)
 }
 
 pub(crate) fn basename_from_path(path: &str) -> String {
