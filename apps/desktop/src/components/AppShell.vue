@@ -54,6 +54,7 @@ type AppShellProps = {
   openFolderMenu: unknown;
   selectFolderFilter: unknown;
   listPanel: unknown;
+  totalItemsCount: unknown;
   filteredItems: unknown;
   totalListHeight: unknown;
   listOffset: unknown;
