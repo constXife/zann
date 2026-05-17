@@ -52,12 +52,18 @@ pub(crate) async fn update_shared_item(
     addr: &str,
     access_token: &str,
     item_id: &str,
-    payload: JsonValue,
+    payload: Option<JsonValue>,
+    new_path: Option<&str>,
 ) -> anyhow::Result<SharedItemResponse> {
     let url = format!("{}/v1/shared/items/{}", addr.trim_end_matches('/'), item_id);
-    let body = serde_json::json!({
-        "payload": payload,
-    });
+    let mut body = serde_json::Map::new();
+    if let Some(payload) = payload {
+        body.insert("payload".to_string(), payload);
+    }
+    if let Some(path) = new_path {
+        body.insert("path".to_string(), JsonValue::String(path.to_string()));
+    }
+    let body = JsonValue::Object(body);
     let response = client
         .put(url)
         .bearer_auth(access_token)

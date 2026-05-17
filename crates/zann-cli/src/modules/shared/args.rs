@@ -81,6 +81,8 @@ pub struct UpdateArgs {
     pub vault: Option<String>,
     #[arg(long, help = "New item type")]
     pub type_id: Option<String>,
+    #[arg(long, help = "Rename item to a new path")]
+    pub new_path: Option<String>,
     #[arg(
         long,
         short = 'f',

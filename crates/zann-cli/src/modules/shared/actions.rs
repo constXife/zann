@@ -140,8 +140,22 @@ pub(crate) async fn handle_update(
     .await
     .map_err(|_| secret_not_found_error(&path))?;
 
-    let type_id = args.type_id.as_deref().unwrap_or("secret");
-    let payload = build_payload_from_args(&args.field, args.stdin, type_id)?;
+    let has_payload_change = args.stdin || !args.field.is_empty();
+    if !has_payload_change && args.new_path.is_none() && args.type_id.is_none() {
+        anyhow::bail!(
+            "Nothing to update: pass --field, --stdin, --new-path or --type-id"
+        );
+    }
+    let payload = if has_payload_change {
+        let type_id = args.type_id.as_deref().unwrap_or("secret");
+        Some(build_payload_from_args(&args.field, args.stdin, type_id)?)
+    } else {
+        // Server requires payload in the update request; reuse the current one
+        // so metadata-only changes (rename, type_id) work without re-sending fields.
+        let current =
+            fetch_shared_item(ctx.client, ctx.addr, &ctx.access_token, &vault_id, item_id).await?;
+        Some(serde_json::to_value(payload_or_error(&current)?)?)
+    };
 
     let item = update_shared_item(
         ctx.client,
@@ -149,6 +163,7 @@ pub(crate) async fn handle_update(
         &ctx.access_token,
         &item_id.to_string(),
         payload,
+        args.new_path.as_deref(),
     )
     .await?;
 
@@ -215,7 +230,8 @@ pub(crate) async fn handle_set(args: SetArgs, ctx: &mut CommandContext<'_>) -> a
                 ctx.addr,
                 &ctx.access_token,
                 &item_id.to_string(),
-                serde_json::to_value(payload)?,
+                Some(serde_json::to_value(payload)?),
+                None,
             )
             .await?;
             println!(
