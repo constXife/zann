@@ -52,6 +52,7 @@ const props = defineProps<{
   altRevealAll: boolean;
   toggleReveal: (path: string) => void;
   copyField: (field: FieldRow) => void;
+  copyToClipboard: (value: string) => Promise<void>;
   copyEnv: (options?: { includeProtected?: boolean }) => void;
   copyJson: (options?: { includeProtected?: boolean }) => void;
   copyRaw: () => void;

@@ -143,6 +143,7 @@ type AppShellProps = {
   copyEnv: unknown;
   copyJson: unknown;
   copyRaw: unknown;
+  copyToClipboard: unknown;
   copyHistoryPassword: unknown;
   restoreHistoryVersion: unknown;
   fetchHistoryPayload: unknown;
@@ -614,6 +615,7 @@ const formattedLastSync = computed(() => {
           :alt-reveal-all="altRevealAll"
           :toggle-reveal="toggleReveal"
           :copy-field="copyField"
+          :copy-to-clipboard="copyToClipboard"
           :copy-env="copyEnv"
           :copy-json="copyJson"
           :copy-raw="copyRaw"
