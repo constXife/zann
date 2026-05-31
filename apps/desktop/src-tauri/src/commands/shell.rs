@@ -34,13 +34,24 @@ fn open_linux(url: &str) -> Result<(), String> {
     // and skips KIO, which is what we want.
     let mut errors: Vec<String> = Vec::new();
 
+    // The app forces `GDK_BACKEND=x11` for its own WebKitGTK window (see
+    // `apply_webkitgtk_workarounds` in main.rs). That value is inherited by
+    // child processes, which makes the launched browser try to run under
+    // XWayland too and can stop it from opening. Drop it for these spawns so
+    // the browser uses its own preferred display backend.
+    let spawn = |cmd: &str| {
+        let mut command = Command::new(cmd);
+        command.env_remove("GDK_BACKEND");
+        command
+    };
+
     if let Ok(browser) = std::env::var("BROWSER") {
         for entry in browser.split(':') {
             let entry = entry.trim();
             if entry.is_empty() {
                 continue;
             }
-            match Command::new(entry).arg(url).spawn() {
+            match spawn(entry).arg(url).spawn() {
                 Ok(_) => {
                     println!("[shell] launched browser via $BROWSER={entry}");
                     return Ok(());
@@ -50,7 +61,7 @@ fn open_linux(url: &str) -> Result<(), String> {
         }
     }
 
-    match Command::new("gio").arg("open").arg(url).status() {
+    match spawn("gio").arg("open").arg(url).status() {
         Ok(status) if status.success() => {
             println!("[shell] launched browser via gio open");
             return Ok(());
@@ -59,7 +70,7 @@ fn open_linux(url: &str) -> Result<(), String> {
         Err(err) => errors.push(format!("gio open: {err}")),
     }
 
-    match Command::new("xdg-open").arg(url).status() {
+    match spawn("xdg-open").arg(url).status() {
         Ok(status) if status.success() => {
             println!("[shell] launched browser via xdg-open");
             return Ok(());

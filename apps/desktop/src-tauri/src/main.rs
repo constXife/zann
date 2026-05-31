@@ -58,6 +58,26 @@ fn apply_webkitgtk_workarounds() {
             std::env::set_var(key, value);
         }
     }
+
+    // Under native Wayland, wry/tao allocate the GTK3 webview surface
+    // incorrectly: `window.innerWidth/innerHeight` come back negative and the
+    // layout viewport explodes (ICB ~1e9 px), leaving the UI unusable. This is
+    // independent of the WebKitGTK version (reproduced on 2.50.x and 2.52.x)
+    // and of the DMA-BUF renderer above. Running under XWayland takes the X11
+    // size-allocation path, which is correct.
+    //
+    // Tracking: https://github.com/tauri-apps/wry/issues/1727
+    // Remove once tao's GTK4 port (tauri-apps/tao#1104) ships in a release.
+    //
+    // Respect an explicit GDK_BACKEND so users on compositors where native
+    // Wayland works can opt back in with `GDK_BACKEND=wayland`.
+    let session_is_wayland = std::env::var("XDG_SESSION_TYPE")
+        .map(|kind| kind.eq_ignore_ascii_case("wayland"))
+        .unwrap_or(false);
+    let is_wayland = session_is_wayland || std::env::var_os("WAYLAND_DISPLAY").is_some();
+    if is_wayland && std::env::var_os("GDK_BACKEND").is_none() {
+        std::env::set_var("GDK_BACKEND", "x11");
+    }
 }
 
 #[cfg(not(all(target_os = "linux", not(any(target_arch = "wasm32")))))]
