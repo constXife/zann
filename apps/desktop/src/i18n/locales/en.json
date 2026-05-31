@@ -42,7 +42,8 @@
     "database": "Database",
     "cloud_iam": "Cloud IAM",
     "file_secret": "File Secret",
-    "server_credentials": "Server Credentials"
+    "server_credentials": "Server Credentials",
+    "secret": "Secret"
   },
   "fields": {
     "username": "Username",
