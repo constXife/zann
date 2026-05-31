@@ -42,7 +42,8 @@
     "database": "База данных",
     "cloud_iam": "Облачные ключи",
     "file_secret": "Файл",
-    "server_credentials": "Учетные данные сервера"
+    "server_credentials": "Учетные данные сервера",
+    "secret": "Секрет"
   },
   "fields": {
     "username": "Имя пользователя",
