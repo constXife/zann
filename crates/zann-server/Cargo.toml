@@ -31,7 +31,7 @@ ipnet = "2.9"
 thiserror = "1"
 opentelemetry = "0.26"
 opentelemetry-otlp = { version = "0.26", features = ["http-proto", "reqwest-client"] }
-opentelemetry_sdk = { version = "0.26", features = ["rt-tokio"] }
+opentelemetry_sdk = { version = "0.32", features = ["rt-tokio"] }
 sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio"] }
 sqlx-postgres = { version = "0.8", default-features = false, features = ["uuid"] }
 rand = "0.8"
