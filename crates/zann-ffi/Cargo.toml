@@ -3,6 +3,7 @@ name = "zann-ffi"
 version = "0.1.0"
 edition = "2021"
 publish = false
+license = "MIT"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
