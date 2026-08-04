@@ -292,12 +292,17 @@ pub fn build_app(metrics_config: &MetricsConfig, state: AppState) -> Router {
                 let parent = global::get_text_map_propagator(|prop| {
                     prop.extract(&HeaderExtractor(request.headers()))
                 });
-                if let Some(opentelemetry::Value::String(value)) =
-                    parent.baggage().get("zann.test_run_id")
-                {
+                // Baggage values are plain StringValue since opentelemetry 0.28,
+                // no longer wrapped in the generic Value enum.
+                if let Some(value) = parent.baggage().get("zann.test_run_id") {
                     span.record("test_run_id", value.as_str());
                 }
-                span.set_parent(parent);
+                // set_parent is fallible since tracing-opentelemetry 0.33; a
+                // failure only means this span is not linked to the caller's
+                // trace, so it stays at debug to avoid per-request log noise.
+                if let Err(err) = span.set_parent(parent) {
+                    tracing::debug!(event = "otel_set_parent_failed", error = %err);
+                }
                 let span_cx = span.context();
                 let span_ref = span_cx.span();
                 let span_context = span_ref.span_context();
