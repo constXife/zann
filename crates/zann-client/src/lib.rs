@@ -18,4 +18,7 @@ pub mod auth_password;
 pub mod sync;
 pub mod sync_helpers;
 
-pub use state::{CliConfig, CliContext, ClientState, IdentityConfig, PendingLogin, PendingLoginResult, TokenEntry};
+pub use state::{
+    CliConfig, CliContext, ClientState, IdentityConfig, PendingLogin, PendingLoginResult,
+    TokenEntry,
+};
