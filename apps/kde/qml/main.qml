@@ -361,7 +361,7 @@ K.ApplicationWindow {
 
             // Progress arc
             if (otpRow.totpResult) {
-              var progress = otpRow.totpResult.remaining / otpRow.totpResult.period
+              var progress = otpRow.totpResult.remaining_seconds / otpRow.totpResult.period
               var startAngle = -Math.PI / 2
               var endAngle = startAngle + (2 * Math.PI * progress)
 
@@ -376,10 +376,10 @@ K.ApplicationWindow {
 
         Label {
           anchors.centerIn: parent
-          text: otpRow.totpResult ? otpRow.totpResult.remaining : ""
+          text: otpRow.totpResult ? otpRow.totpResult.remaining_seconds : ""
           font.pointSize: 9
           font.bold: true
-          color: otpRow.totpResult && otpRow.totpResult.remaining <= 5 ? K.Theme.negativeTextColor : K.Theme.textColor
+          color: otpRow.totpResult && otpRow.totpResult.remaining_seconds <= 5 ? K.Theme.negativeTextColor : K.Theme.textColor
         }
       }
 

@@ -66,6 +66,24 @@ pub struct ItemSummary {
     pub deleted: bool,
 }
 
+impl zann_ui_core::ItemLike for ItemSummary {
+    fn title(&self) -> &str {
+        &self.title
+    }
+
+    fn type_id(&self) -> &str {
+        &self.type_id
+    }
+
+    fn path(&self) -> &str {
+        &self.path
+    }
+
+    fn is_deleted(&self) -> bool {
+        self.deleted
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ItemCountsFfi {
     pub all: u64,
@@ -77,6 +95,20 @@ pub struct ItemCountsFfi {
 pub struct ItemTypeCount {
     pub type_id: String,
     pub count: u64,
+}
+
+impl From<&ItemCountsFfi> for zann_ui_core::ItemCounts {
+    fn from(counts: &ItemCountsFfi) -> Self {
+        Self {
+            all: counts.all,
+            trash: counts.trash,
+            by_type: counts
+                .by_type
+                .iter()
+                .map(|entry| (entry.type_id.clone(), entry.count))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

@@ -7443,12 +7443,12 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-shell",
  "tokio",
- "totp-rs",
  "url",
  "uuid",
  "zann-core",
  "zann-db",
  "zann-keystore",
+ "zann-ui-core",
 ]
 
 [[package]]
@@ -7460,6 +7460,17 @@ dependencies = [
  "keyring",
  "serde",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "zann-ui-core"
+version = "0.1.0"
+dependencies = [
+ "data-encoding",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "totp-rs",
 ]
 
 [[package]]

@@ -8,6 +8,7 @@ members = [
   "crates/zann-keystore",
   "crates/zann-server",
   "crates/zann-cli",
+  "crates/zann-ui-core",
 ]
 exclude = [
   "apps/desktop/src-tauri",
