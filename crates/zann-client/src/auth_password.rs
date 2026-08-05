@@ -163,8 +163,8 @@ pub async fn password_login(
     }
     let auth: InternalLoginResponse = response.json().await.map_err(|err| err.to_string())?;
 
-    let info = fetch_system_info(&client, &server_url).await.map_err(|e| e)?;
-    let prelogin = fetch_prelogin(&client, &server_url, &email).await.map_err(|e| e)?;
+    let info = fetch_system_info(&client, &server_url).await?;
+    let prelogin = fetch_prelogin(&client, &server_url, &email).await?;
     let result = PendingLoginResult {
         access_token: auth.access_token,
         refresh_token: auth.refresh_token,
@@ -266,8 +266,8 @@ pub async fn password_register(
     }
     let auth: InternalLoginResponse = response.json().await.map_err(|err| err.to_string())?;
 
-    let info = fetch_system_info(&client, &server_url).await.map_err(|e| e)?;
-    let prelogin = fetch_prelogin(&client, &server_url, &email).await.map_err(|e| e)?;
+    let info = fetch_system_info(&client, &server_url).await?;
+    let prelogin = fetch_prelogin(&client, &server_url, &email).await?;
     let result = PendingLoginResult {
         access_token: auth.access_token,
         refresh_token: auth.refresh_token,

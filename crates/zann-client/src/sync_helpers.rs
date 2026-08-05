@@ -403,7 +403,7 @@ pub async fn apply_shared_pull_change(
         None => None,
     };
 
-    let payload = change.payload.as_ref().map(|value| value.clone());
+    let payload = change.payload.clone();
     let (payload_enc, checksum) = if let Some(payload) = payload.as_ref() {
         encrypt_payload_for_cache(master_key, vault_id, item_id, payload)?
     } else {

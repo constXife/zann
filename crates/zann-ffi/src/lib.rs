@@ -581,7 +581,7 @@ impl CoreFacade {
         let response = self
             .runtime
             .block_on(zann_client::sync::remote_sync(storage_id, &state, master_key.as_ref()))
-            .map_err(|err| CoreError::Service(err))?;
+            .map_err(CoreError::Service)?;
         if response.ok {
             Ok(())
         } else {
