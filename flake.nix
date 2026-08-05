@@ -51,11 +51,86 @@
 
           meta.mainProgram = "zann";
         };
+
+      # apps/cosmic живёт вне воркспейса и собирается свежим stable, а не пином
+      # из rust-toolchain.toml: rust-version у libcosmic выше.
+      zannCosmic = let
+        toolchain = pkgs.rust-bin.stable.latest.default;
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = toolchain;
+          rustc = toolchain;
+        };
+        # Библиотеки, которые грузятся через dlopen и потому не попадают в
+        # rpath: без них приложение падает на старте с NoWaylandLib.
+        runtimeLibs = with pkgs; [
+          libxkbcommon
+          wayland
+          vulkan-loader
+          libGL
+        ];
+      in
+        rustPlatform.buildRustPackage {
+          pname = "zann-cosmic";
+          version = "0.1.0-unstable-2026-08-05";
+          src = self;
+          cargoRoot = "apps/cosmic";
+          buildAndTestSubdir = "apps/cosmic";
+          # libcosmic держит iced git-подмодулем, а хешированный fetchgit
+          # подмодули не выкачивает — крейты из iced/ тогда не находятся.
+          # Submodules умеет только ветка allowBuiltinFetchGit, она же
+          # избавляет от одиннадцати outputHashes. Цена — fetch на этапе
+          # вычисления вместо content-addressed выборки.
+          cargoLock = {
+            lockFile = ./apps/cosmic/Cargo.lock;
+            allowBuiltinFetchGit = true;
+          };
+
+          # И пример seed_demo_vault, и tests/flows.rs создают записи через
+          # debug_create_kv_item, который в zann-ffi объявлен под
+          # #[cfg(debug_assertions)] и в release не существует. Поэтому пакет
+          # собирает только бинарь и не гоняет тесты — их место в
+          # `just cosmic-test`, где сборка идёт в debug.
+          cargoBuildFlags = [ "--bin" "zann-cosmic" ];
+          doCheck = false;
+
+          nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
+          buildInputs = with pkgs; [
+            openssl
+            libxkbcommon
+            wayland
+            expat
+            fontconfig
+            freetype
+          ] ++ runtimeLibs;
+
+          # Иконки лежат у Tauri-приложения: логотип у продукта один.
+          postInstall = ''
+            install -Dm644 apps/cosmic/data/com.rlyeh.zann.Cosmic.desktop \
+              $out/share/applications/com.rlyeh.zann.Cosmic.desktop
+            for pair in 32:32x32 64:64x64 128:128x128 256:128x128@2x 512:icon; do
+              size="''${pair%%:*}"; src="''${pair##*:}"
+              install -Dm644 "apps/desktop/src-tauri/icons/''${src}.png" \
+                "$out/share/icons/hicolor/''${size}x''${size}/apps/com.rlyeh.zann.Cosmic.png"
+            done
+            wrapProgram $out/bin/zann-cosmic \
+              --prefix LD_LIBRARY_PATH : ${nixpkgs.lib.makeLibraryPath runtimeLibs}
+          '';
+
+          meta = {
+            mainProgram = "zann-cosmic";
+            description = "COSMIC-native zann client";
+            license = nixpkgs.lib.licenses.mit;
+            platforms = [ "x86_64-linux" ];
+          };
+        };
     in
     {
       packages = nixpkgs.lib.genAttrs packageSystems (s: rec {
         zann-cli = zannCliFor s;
         default = zann-cli;
+      } // nixpkgs.lib.optionalAttrs (s == system) {
+        # COSMIC-клиент только под x86_64: libcosmic на aarch64 никто не проверял.
+        zann-cosmic = zannCosmic;
       });
 
       devShells.${system} = {
