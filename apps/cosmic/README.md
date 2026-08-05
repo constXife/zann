@@ -1,7 +1,7 @@
 # COSMIC PoC
 
 Minimal COSMIC-native PoC built on [libcosmic](https://github.com/pop-os/libcosmic)
-(iced), next to the Qt/Kirigami PoC in `apps/kde`.
+(iced).
 
 Scope: connect to a server (password or SSO, including confirming a changed
 server key) or set up a local vault, unlock it with the master password, browse
@@ -11,9 +11,9 @@ with a reveal toggle, one-time codes and copy-to-clipboard.
 Not covered: creating or editing items, folders, attachments, and anything the
 other clients do beyond reading.
 
-Like `apps/kde`, this crate is excluded from the root workspace: libcosmic is a
-git dependency and the root `Cargo.lock` must stay free of git sources (the Nix
-package derives its vendoring from it).
+The crate is excluded from the root workspace: libcosmic is a git dependency and
+the root `Cargo.lock` must stay free of git sources (the Nix package derives its
+vendoring from it).
 
 ## Layout
 
@@ -77,6 +77,18 @@ cargo run
 
 The seed writes a few key/value items plus one login with a masked password and
 a one-time code, so the detail drawer has something to hide and to count down.
+
+## Connecting without a server
+
+`tools/mock-server` answers the endpoints a password login needs
+(`/v1/system/info`, `/v1/auth/prelogin`, `/v1/auth/register`, `/v1/auth/login`,
+`/v1/vaults/personal/status`), which is enough to walk the connect screen end to
+end. It does not implement sync, so the pull after unlocking fails — the vault
+still opens and reports it.
+
+```bash
+cargo run --manifest-path ../../tools/mock-server/Cargo.toml   # 127.0.0.1:18081
+```
 
 ## Renderer
 

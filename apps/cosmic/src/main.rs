@@ -2,9 +2,9 @@
 
 //! COSMIC-native PoC for zann.
 //!
-//! It covers the same slice the Qt PoC in `apps/kde` does: connect to a server
-//! (or set up a local vault), unlock it with the master password, browse the
-//! items and read a secret. Every rule that decides *what* is shown — the nav
+//! It connects to a server (or sets up a local vault), unlocks it with the
+//! master password, browses the items and reads a secret. Every rule that
+//! decides *what* is shown — the nav
 //! categories, the client-side filter — comes from `zann-ui-core`, so this app
 //! only owns its widgets.
 //!

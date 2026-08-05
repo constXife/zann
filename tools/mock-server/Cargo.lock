@@ -636,7 +636,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zann-kde-mock-server"
+name = "zann-mock-server"
 version = "0.1.0"
 dependencies = [
  "base64",

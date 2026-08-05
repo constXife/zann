@@ -36,7 +36,7 @@ pub fn open_at(db_url: String) -> Result<(Facade, AppStatusFfi), String> {
 }
 
 /// Connecting to a server rewrites the identity config, so the facade has to be
-/// rebuilt from it afterwards — same as the Qt PoC does.
+/// rebuilt from it afterwards.
 pub fn reopen() -> Result<Facade, String> {
     create_core(default_db_url()).map_err(|err| err.to_string())
 }

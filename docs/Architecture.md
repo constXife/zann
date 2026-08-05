@@ -40,7 +40,7 @@
   - FFI surface (UniFFI or cxx).
 
 ### UI Layer
-- Desktop native (Qt/Kirigami for KDE PoC).
+- Desktop native (libcosmic/iced for the COSMIC PoC).
 - UI holds no business logic; it only calls core APIs.
 - UI receives typed DTOs (no raw DB rows).
 
@@ -92,7 +92,7 @@
 
 ## Rollout (PoC)
 1) Core API facade covering unlock/list/detail/edit/import/export.
-2) KDE UI with list/search/detail.
+2) COSMIC UI with list/search/detail.
 3) Streaming import/export validated on large files.
 4) Perf and memory baselines.
 

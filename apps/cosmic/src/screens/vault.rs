@@ -18,8 +18,7 @@ use crate::backend::off_thread;
 use crate::session::Session;
 
 /// Label keys come from `schemas/ui_categories.json`; until the clients share
-/// an i18n catalogue every frontend maps them itself, the same way the Qt PoC
-/// does.
+/// an i18n catalogue every frontend maps them itself.
 fn translate_label_key(key: &str) -> &'static str {
     match key {
         "nav.allItems" => "All items",
