@@ -229,11 +229,17 @@ jobs:
       issues: write
       pull-requests: write
       security-events: write
+    env:
+      # The action builds cargo-audit from source, and its dependencies now
+      # need a newer rustc than the 1.92 pinned in rust-toolchain.toml. This
+      # job only reads Cargo.lock, so the toolchain it uses says nothing about
+      # how the project itself is built.
+      RUSTUP_TOOLCHAIN: stable
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Security audit
-        uses: rustsec/audit-check@v1.4.1
+        uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 

@@ -1,10 +1,8 @@
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
-use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig};
 use opentelemetry_sdk::propagation::TraceContextPropagator;
-use opentelemetry_sdk::runtime;
-use opentelemetry_sdk::trace::{Sampler, Tracer};
+use opentelemetry_sdk::trace::{Sampler, SdkTracer, SdkTracerProvider};
 use opentelemetry_sdk::Resource;
 use sha2::{Digest, Sha256};
 use std::fs;
@@ -17,12 +15,17 @@ use zann_crypto::crypto::SecretKey;
 
 #[allow(dead_code)]
 pub(crate) struct OtelGuard {
-    tracer: Tracer,
+    tracer: SdkTracer,
+    /// Kept so the batch exporter can be flushed on drop: the global
+    /// `shutdown_tracer_provider` helper is gone since opentelemetry 0.28.
+    provider: SdkTracerProvider,
 }
 
 impl Drop for OtelGuard {
     fn drop(&mut self) {
-        global::shutdown_tracer_provider();
+        if let Err(err) = self.provider.shutdown() {
+            tracing::warn!(event = "otel_shutdown_failed", error = %err);
+        }
     }
 }
 
@@ -65,7 +68,7 @@ pub(crate) fn init_tracing(
 
     let otel_guard = if settings.config.tracing.otel.enabled {
         match init_otel(&settings.config.tracing.otel) {
-            Ok(tracer) => Some(OtelGuard { tracer }),
+            Ok(guard) => Some(guard),
             Err(err) => {
                 tracing::warn!(event = "otel_init_failed", error = %err);
                 None
@@ -105,12 +108,12 @@ pub(crate) fn init_tracing(
 }
 
 #[allow(dead_code)]
-fn init_otel(config: &OtelConfig) -> Result<Tracer, String> {
+fn init_otel(config: &OtelConfig) -> Result<OtelGuard, String> {
     if config.insecure.unwrap_or(false) && !allow_insecure_otel() {
         return Err("otel_insecure_not_allowed".to_string());
     }
 
-    let mut exporter = opentelemetry_otlp::new_exporter().http();
+    let mut exporter = opentelemetry_otlp::SpanExporter::builder().with_http();
     if let Some(endpoint) = config.endpoint.as_deref() {
         exporter = exporter.with_endpoint(endpoint);
     }
@@ -146,23 +149,23 @@ fn init_otel(config: &OtelConfig) -> Result<Tracer, String> {
         1.0
     };
     let sampler = Sampler::TraceIdRatioBased(ratio);
-    let tracer_provider = opentelemetry_otlp::new_pipeline()
-        .tracing()
-        .with_exporter(exporter)
-        .with_trace_config(
-            opentelemetry_sdk::trace::Config::default()
-                .with_resource(Resource::new(vec![KeyValue::new(
-                    "service.name",
-                    service_name,
-                )]))
-                .with_sampler(sampler),
-        )
-        .install_batch(runtime::Tokio)
-        .map_err(|err| format!("otel_install_failed: {err}"))?;
+    let exporter = exporter
+        .build()
+        .map_err(|err| format!("otel_exporter_failed: {err}"))?;
+    // Batching no longer takes a runtime argument: since opentelemetry 0.28
+    // the SDK spawns its own exporter thread.
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_batch_exporter(exporter)
+        .with_resource(Resource::builder().with_service_name(service_name).build())
+        .with_sampler(sampler)
+        .build();
     global::set_text_map_propagator(TraceContextPropagator::new());
     let tracer = tracer_provider.tracer("zann-server");
-    global::set_tracer_provider(tracer_provider);
-    Ok(tracer)
+    global::set_tracer_provider(tracer_provider.clone());
+    Ok(OtelGuard {
+        tracer,
+        provider: tracer_provider,
+    })
 }
 
 fn allow_insecure_otel() -> bool {

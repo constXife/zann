@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::Path;
 
 use tempfile::tempdir;
 use zann_client::auth_password::password_login;
@@ -16,7 +16,7 @@ fn env_or_skip(key: &str) -> Option<String> {
     }
 }
 
-fn make_db_url(root: &PathBuf) -> String {
+fn make_db_url(root: &Path) -> String {
     let path = root.join("zann.sqlite");
     format!("sqlite://{}", path.display())
 }

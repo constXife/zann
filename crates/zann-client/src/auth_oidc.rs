@@ -86,9 +86,9 @@ pub async fn begin_login(
     let client = reqwest::Client::new();
     let oidc_config_url = format!("{}/v1/auth/oidc/config", server_url.trim_end_matches('/'));
     let oidc_config =
-        crate::http::fetch_json::<OidcConfigResponse>(&client, &oidc_config_url).await.map_err(|e| e)?;
+        crate::http::fetch_json::<OidcConfigResponse>(&client, &oidc_config_url).await?;
     let discovery_url = format!("{}/.well-known/openid-configuration", oidc_config.issuer);
-    let discovery = crate::http::fetch_json::<OidcDiscovery>(&client, &discovery_url).await.map_err(|e| e)?;
+    let discovery = crate::http::fetch_json::<OidcDiscovery>(&client, &discovery_url).await?;
 
     let redirect_port = 8765;
     let listener = TcpListener::bind(format!("127.0.0.1:{redirect_port}"))
