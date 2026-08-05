@@ -71,12 +71,16 @@ identity config is written next to the database, so give it its own directory):
 ```bash
 mkdir -p /tmp/zann-demo
 export ZANN_DB_URL=sqlite:///tmp/zann-demo/local.sqlite
-cargo run --example seed_demo_vault   # master password: demo-password
+export ZANN_DEMO_PASSWORD=pick-your-own
+cargo run --example seed_demo_vault
 cargo run
 ```
 
-The seed writes a few key/value items plus one login with a masked password and
-a one-time code, so the detail drawer has something to hide and to count down.
+Both variables are required. The seed creates a real vault, so its master
+password is yours to choose rather than a constant published here.
+
+It writes a few key/value items plus one login with a masked password and a
+one-time code, so the detail drawer has something to hide and to count down.
 
 ## Connecting without a server
 

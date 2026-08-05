@@ -1,14 +1,16 @@
 //! Seeds a throwaway vault so the PoC can be tried without touching a real one.
 //!
 //! ```bash
-//! export ZANN_DB_URL=sqlite:///tmp/zann-demo/local.sqlite
 //! mkdir -p /tmp/zann-demo
-//! cargo run --example seed_demo_vault   # master password: demo-password
+//! export ZANN_DB_URL=sqlite:///tmp/zann-demo/local.sqlite
+//! export ZANN_DEMO_PASSWORD=pick-your-own
+//! cargo run --example seed_demo_vault
 //! cargo run
 //! ```
 //!
 //! The identity config lands next to the database file, so point `ZANN_DB_URL`
-//! at a directory of its own.
+//! at a directory of its own. Both variables are required: this creates a real
+//! vault, and a vault whose master password ships in the repository is not one.
 
 use zann_ffi::{create_core, ItemUpdate};
 
@@ -37,8 +39,8 @@ const DEMO_LOGIN: &str = r#"{
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_url = std::env::var("ZANN_DB_URL")
         .map_err(|_| "set ZANN_DB_URL to a sqlite:// path in a directory of its own")?;
-    let password =
-        std::env::var("ZANN_DEMO_PASSWORD").unwrap_or_else(|_| "demo-password".to_string());
+    let password = std::env::var("ZANN_DEMO_PASSWORD")
+        .map_err(|_| "set ZANN_DEMO_PASSWORD to the master password for the demo vault")?;
 
     let core = create_core(db_url.clone())?;
     if core.app_status()?.initialized {
