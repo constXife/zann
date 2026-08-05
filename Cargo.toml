@@ -13,5 +13,6 @@ members = [
 exclude = [
   "apps/desktop/src-tauri",
   "apps/kde",
+  "apps/cosmic",
 ]
 resolver = "2"

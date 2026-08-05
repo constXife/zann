@@ -1,0 +1,36 @@
+[package]
+name = "zann-cosmic"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+name = "zann_cosmic"
+path = "src/lib.rs"
+
+[[bin]]
+name = "zann-cosmic"
+path = "src/main.rs"
+
+[dependencies]
+dirs = "5"
+# libcosmic is not published on crates.io; pin the revision so the PoC builds
+# reproducibly. Default features bring winit + wayland + tokio; `wgpu` puts the
+# renderer on the GPU, like the system COSMIC apps.
+libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "dc1cf9f00cbe2902a52166492654bb9fee8a73d1", features = [
+  "wgpu",
+] }
+open = "5"
+reqwest = { version = "0.12", features = ["rustls-tls"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+zann-client = { path = "../../crates/zann-client" }
+zann-core = { path = "../../crates/zann-core" }
+zann-crypto = { path = "../../crates/zann-crypto" }
+zann-db = { path = "../../crates/zann-db", features = ["sqlite"] }
+zann-ffi = { path = "../../crates/zann-ffi" }
+zann-ui-core = { path = "../../crates/zann-ui-core" }
+
+[dev-dependencies]
+tempfile = "3"

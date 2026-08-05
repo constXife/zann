@@ -58,53 +58,86 @@
         default = zann-cli;
       });
 
-      devShells.${system}.default = pkgs.mkShell {
-        packages = with pkgs; [
-          rustToolchain
-          k6
-          pkg-config
-          openssl
-          jemalloc
-          llvm
-          qt6.qtbase
-          qt6.qtdeclarative
-          qt6.qtsvg
-          kdePackages.kirigami
-          libxkbcommon
-          wayland
-          wayland-protocols
-          glib
-          gtk3
-          gdk-pixbuf
-          pango
-          cairo
-          atk
-          libsoup_3
-          webkitgtk_4_1
-          xorg.xvfb
-          libayatana-appindicator
-        ];
-        LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
-          pkgs.openssl
-          pkgs.qt6.qtbase
-          pkgs.qt6.qtdeclarative
-          pkgs.qt6.qtsvg
-          pkgs.kdePackages.kirigami
-          pkgs.libxkbcommon
-          pkgs.wayland
-          pkgs.glib
-          pkgs.gtk3
-          pkgs.gdk-pixbuf
-          pkgs.pango
-          pkgs.cairo
-          pkgs.atk
-          pkgs.libsoup_3
-          pkgs.webkitgtk_4_1
-          pkgs.libayatana-appindicator
-        ];
-        OPENSSL_DIR = pkgs.openssl.dev;
-        OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
-        OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+      devShells.${system} = {
+        default = pkgs.mkShell {
+          packages = with pkgs; [
+            rustToolchain
+            k6
+            pkg-config
+            openssl
+            jemalloc
+            llvm
+            qt6.qtbase
+            qt6.qtdeclarative
+            qt6.qtsvg
+            kdePackages.kirigami
+            libxkbcommon
+            wayland
+            wayland-protocols
+            glib
+            gtk3
+            gdk-pixbuf
+            pango
+            cairo
+            atk
+            libsoup_3
+            webkitgtk_4_1
+            xorg.xvfb
+            libayatana-appindicator
+          ];
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.openssl
+            pkgs.qt6.qtbase
+            pkgs.qt6.qtdeclarative
+            pkgs.qt6.qtsvg
+            pkgs.kdePackages.kirigami
+            pkgs.libxkbcommon
+            pkgs.wayland
+            pkgs.glib
+            pkgs.gtk3
+            pkgs.gdk-pixbuf
+            pkgs.pango
+            pkgs.cairo
+            pkgs.atk
+            pkgs.libsoup_3
+            pkgs.webkitgtk_4_1
+            pkgs.libayatana-appindicator
+          ];
+          OPENSSL_DIR = pkgs.openssl.dev;
+          OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+          OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+        };
+
+        # apps/cosmic живёт вне воркспейса и тянет libcosmic, чей rust-version
+        # опережает пин из rust-toolchain.toml. Отдельный шелл со свежим stable
+        # не трогает сборку остального репозитория.
+        cosmic = pkgs.mkShell {
+          packages = with pkgs; [
+            rust-bin.stable.latest.default
+            pkg-config
+            openssl
+            libxkbcommon
+            wayland
+            wayland-protocols
+            expat
+            fontconfig
+            freetype
+            libGL
+            vulkan-loader
+          ];
+          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
+            pkgs.libxkbcommon
+            pkgs.wayland
+            pkgs.expat
+            pkgs.fontconfig
+            pkgs.freetype
+            pkgs.libGL
+            pkgs.vulkan-loader
+          ];
+          OPENSSL_DIR = pkgs.openssl.dev;
+          OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+          OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+        };
       };
     };
 }
