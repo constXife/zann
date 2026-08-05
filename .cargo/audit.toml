@@ -1,2 +1,20 @@
 [advisories]
-ignore = ["RUSTSEC-2024-0388", "RUSTSEC-2024-0384"]
+ignore = [
+  "RUSTSEC-2024-0388",
+  "RUSTSEC-2024-0384",
+  # RUSTSEC-2023-0071 - Marvin Attack, a timing sidechannel in `rsa` that can
+  # leak a private key. Upstream has no patch; the constant-time rewrite has
+  # been open since 2023, so no version bump clears it.
+  #
+  # `rsa` reaches us through `jsonwebtoken` <- `zann-server`, which only ever
+  # verifies: the sole RSA usage is `Validation::new(Algorithm::RS256)` in
+  # `domains/auth/core/oidc.rs`, checking OIDC tokens against the provider's
+  # public JWKS. There is no `EncodingKey` anywhere in `crates/zann-server/src`,
+  # so the server performs no RSA private-key operation. The attack targets
+  # private-key decryption and signing; public-key verification handles no
+  # secret whose timing could leak.
+  #
+  # Revisit if the server ever signs or decrypts with RSA, or if `jsonwebtoken`
+  # drops the dependency.
+  "RUSTSEC-2023-0071",
+]
