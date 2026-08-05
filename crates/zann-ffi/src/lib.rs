@@ -7,10 +7,8 @@ use serde_json::Value;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 use zann_client::state::ClientState;
-use zann_client::sync_helpers::key_fingerprint;
 use zann_core::{ItemCounts, ItemListParams, ItemsService, VaultsService};
 use zann_crypto::crypto::SecretKey;
-use zann_crypto::passwords::{kdf_fingerprint, KdfParams as CryptoKdfParams};
 use zann_crypto::secrets::{FieldKind, FieldValue};
 use zann_crypto::vault_crypto;
 use zann_crypto::EncryptedPayload;
@@ -210,28 +208,6 @@ impl CoreFacade {
             .map_err(|err| CoreError::Service(err.to_string()))
     }
 
-    fn log_master_key_debug(&self, action: &str, key: &SecretKey) {
-        if std::env::var("ZANN_DEBUG_MASTER").is_err() {
-            return;
-        }
-        let params = CryptoKdfParams {
-            algorithm: self.identity.kdf_params.algorithm.clone(),
-            iterations: self.identity.kdf_params.iterations,
-            memory_kb: self.identity.kdf_params.memory_kb,
-            parallelism: self.identity.kdf_params.parallelism,
-        };
-        let salt_fp = kdf_fingerprint(&self.identity.kdf_salt, &params).ok();
-        let stored_salt_fp = self.identity.salt_fingerprint.clone();
-        let key_fp = key_fingerprint(key);
-        eprintln!(
-            "[MASTER-DEBUG] action={} key_fp={} salt_fp={} stored_salt_fp={}",
-            action,
-            key_fp,
-            salt_fp.as_deref().unwrap_or("none"),
-            stored_salt_fp.as_deref().unwrap_or("none")
-        );
-    }
-
     #[cfg(debug_assertions)]
     pub fn debug_create_kv_item(
         &self,
@@ -278,7 +254,6 @@ impl CoreFacade {
 
     pub fn unlock(&self, password: String) -> CoreResult<VaultStatus> {
         let master_key = Arc::new(derive_master_key(&password, &self.identity)?);
-        self.log_master_key_debug("unlock", master_key.as_ref());
         let repo = LocalVaultRepo::new(&self.pool);
         let storage_id = self.storage_id();
         let vaults = self
@@ -556,7 +531,6 @@ impl CoreFacade {
 
         // Derive master key from password
         let master_key = Arc::new(derive_master_key(&password, &self.identity)?);
-        self.log_master_key_debug("initialize", master_key.as_ref());
 
         // Create local storage if none exists
         let storage_repo = LocalStorageRepo::new(&self.pool);
@@ -681,14 +655,6 @@ struct IdentityConfig {
 fn load_or_create_identity_config(db_url: &str) -> CoreResult<IdentityConfig> {
     let root = local_root_from_db_url(db_url);
     let path = root.join("config.json");
-    let debug_master = std::env::var("ZANN_DEBUG_MASTER").is_ok();
-    if debug_master {
-        eprintln!(
-            "[MASTER-DEBUG] identity_root={} config_path={}",
-            root.display(),
-            path.display()
-        );
-    }
     let mut config = match std::fs::read_to_string(&path) {
         Ok(contents) => serde_json::from_str::<Value>(&contents).map_err(|err| {
             CoreError::Service(format!(
@@ -707,12 +673,6 @@ fn load_or_create_identity_config(db_url: &str) -> CoreResult<IdentityConfig> {
         .get("identity")
         .and_then(|value| serde_json::from_value::<IdentityConfig>(value.clone()).ok());
     if let Some(identity) = identity {
-        if debug_master {
-            eprintln!(
-                "[MASTER-DEBUG] identity_loaded salt_fp={}",
-                identity.salt_fingerprint.as_deref().unwrap_or("none")
-            );
-        }
         return Ok(identity);
     }
 
@@ -726,18 +686,6 @@ fn load_or_create_identity_config(db_url: &str) -> CoreResult<IdentityConfig> {
         first_seen_at: None,
         email: None,
     };
-    if debug_master {
-        let params = CryptoKdfParams {
-            algorithm: identity.kdf_params.algorithm.clone(),
-            iterations: identity.kdf_params.iterations,
-            memory_kb: identity.kdf_params.memory_kb,
-            parallelism: identity.kdf_params.parallelism,
-        };
-        let salt_fp = kdf_fingerprint(&identity.kdf_salt, &params)
-            .ok()
-            .unwrap_or_else(|| "none".to_string());
-        eprintln!("[MASTER-DEBUG] identity_created salt_fp={}", salt_fp);
-    }
     let identity_value =
         serde_json::to_value(&identity).map_err(|err| CoreError::Service(err.to_string()))?;
     if let Value::Object(map) = &mut config {
