@@ -1,49 +1,20 @@
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QString, QStringList};
-use data_encoding::BASE32;
-use serde::Deserialize;
 use std::sync::{mpsc, Arc};
-use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
-use totp_rs::{Algorithm, TOTP};
 use tokio::runtime::Runtime;
 use zann_client::types::OidcLoginStatusResponse;
 use zann_db::{connect_sqlite_with_max, migrate_local};
 use zann_core::AuthMethod;
 use zann_ffi::{create_core, CoreFacade, CoreResult, ItemCountsFfi, ItemsFilter, Page};
+use zann_ui_core::{
+    build_folder_tree, category_views, filtered_indices, normalize_server_url, FolderFilter,
+    ItemCounts, ItemFilter, TotpParams, VaultScope,
+};
 
-/// Embed the UI categories schema at compile time
-const UI_CATEGORIES_SCHEMA: &str = include_str!("../../../schemas/ui_categories.json");
 const LOCAL_DB_FILENAME: &str = "local.sqlite";
-
-/// Schema parsing structures
-#[derive(Clone, Deserialize)]
-struct UiCategoriesSchema {
-    categories: Vec<CategoryDef>,
-    #[allow(dead_code)]
-    fallback_category_id: String,
-}
-
-#[derive(Clone, Deserialize)]
-struct CategoryDef {
-    id: String,
-    labels: Vec<LabelDef>,
-    icon: String,
-    order: i32,
-    filter: Option<CategoryFilter>,
-}
-
-#[derive(Clone, Deserialize)]
-struct LabelDef {
-    key: String,
-}
-
-#[derive(Clone, Deserialize)]
-struct CategoryFilter {
-    type_ids: Option<Vec<String>>,
-    #[allow(dead_code)]
-    is_deleted: Option<bool>,
-}
+/// Sentinel QML uses for "items that are not in any folder"
+const NO_FOLDER_SENTINEL: &str = "__no_folder__";
 
 /// Map schema icon names to Kirigami icon names
 fn map_icon_to_kirigami(schema_icon: &str) -> &'static str {
@@ -72,6 +43,7 @@ fn translate_label_key(key: &str) -> &'static str {
         "nav.kv" => "Key/Value",
         "nav.infrastructure" => "Infrastructure",
         "nav.trash" => "Trash",
+        "items.trashShared" => "Shared trash",
         _ => "Unknown",
     }
 }
@@ -798,8 +770,14 @@ impl ffi::AppModel {
         digits: i32,
         period: i32,
     ) -> QString {
-        match generate_totp_internal(&secret.to_string(), &algorithm.to_string(), digits, period) {
-            Ok(response) => QString::from(response),
+        let params = TotpParams {
+            secret: secret.to_string(),
+            algorithm: Some(algorithm.to_string()),
+            digits: (digits > 0).then(|| digits as u32),
+            period: (period > 0).then(|| period as u32),
+        };
+        match zann_ui_core::generate_totp(&params) {
+            Ok(code) => QString::from(serde_json::to_string(&code).unwrap_or_default()),
             Err(_) => QString::from(""),
         }
     }
@@ -1794,17 +1772,6 @@ fn reload_core_from_config(rust: &mut AppModelRust) {
     }
 }
 
-fn normalize_server_url(value: &str) -> String {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return String::new();
-    }
-    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        return trimmed.to_string();
-    }
-    format!("https://{}", trimmed)
-}
-
 fn build_storages_list(storages: &[StorageRow]) -> QStringList {
     let mut list = QStringList::default();
     for storage in storages {
@@ -1938,333 +1905,42 @@ fn serialize_item_detail(item: &zann_ffi::ItemDetail) -> String {
     .unwrap_or_else(|_| "{}".to_string())
 }
 
+/// Render the shared category views for QML: i18n keys become English strings
+/// and schema icon names become Kirigami ones.
 fn serialize_categories(counts: &ItemCountsFfi) -> String {
-    let schema: UiCategoriesSchema = match serde_json::from_str(UI_CATEGORIES_SCHEMA) {
-        Ok(schema) => schema,
-        Err(_) => return "[]".to_string(),
-    };
-
-    // Build a lookup map for type_id -> count
-    let type_counts: std::collections::HashMap<&str, u64> = counts
-        .by_type
-        .iter()
-        .map(|entry| (entry.type_id.as_str(), entry.count))
-        .collect();
-
-    let mut categories: Vec<_> = schema
-        .categories
-        .iter()
-        .map(|cat| {
-            // Compute count based on filter
-            let count = match &cat.filter {
-                None => {
-                    // Special case for trash (no filter in schema means use trash count)
-                    if cat.id == "trash" {
-                        counts.trash
-                    } else {
-                        0
-                    }
-                }
-                Some(filter) => {
-                    match &filter.type_ids {
-                        None => {
-                            // No type_ids filter means "all" category
-                            counts.all
-                        }
-                        Some(type_ids) => {
-                            // Sum counts for all type_ids in the filter
-                            type_ids
-                                .iter()
-                                .map(|tid| type_counts.get(tid.as_str()).copied().unwrap_or(0u64))
-                                .sum::<u64>()
-                        }
-                    }
-                }
-            };
-
-            // Get label from first label entry
-            let label = cat
-                .labels
-                .first()
-                .map(|l| translate_label_key(&l.key))
-                .unwrap_or("Unknown");
-
-            // Map icon to Kirigami
-            let icon = map_icon_to_kirigami(&cat.icon);
-
-            // Build filter for QML
-            let filter_json = cat.filter.as_ref().map(|f| {
-                serde_json::json!({
-                    "type_ids": f.type_ids,
-                    "is_deleted": f.is_deleted,
-                })
-            });
-
-            (
-                cat.order,
-                serde_json::json!({
-                    "id": cat.id,
-                    "label": label,
-                    "icon": icon,
-                    "order": cat.order,
-                    "count": count,
-                    "filter": filter_json,
-                }),
-            )
+    let counts = ItemCounts::from(counts);
+    let categories: Vec<_> = category_views(&counts, VaultScope::Personal)
+        .into_iter()
+        .map(|view| {
+            serde_json::json!({
+                "id": view.id,
+                "label": translate_label_key(&view.label_key),
+                "icon": map_icon_to_kirigami(&view.icon),
+                "order": view.order,
+                "count": view.count,
+            })
         })
         .collect();
-
-    // Sort by order
-    categories.sort_by_key(|(order, _)| *order);
-
-    let result: Vec<_> = categories.into_iter().map(|(_, json)| json).collect();
-    serde_json::to_string(&result).unwrap_or_else(|_| "[]".to_string())
+    serde_json::to_string(&categories).unwrap_or_else(|_| "[]".to_string())
 }
 
 fn serialize_folders(items: &[zann_ffi::ItemSummary]) -> String {
-    use std::collections::{BTreeSet, HashMap};
-
-    #[derive(Default)]
-    struct FolderNode {
-        name: String,
-        path: String,
-        item_count: usize,
-        total_count: usize,
-        children: BTreeSet<String>,
-    }
-
-    let mut folder_paths = BTreeSet::<String>::new();
-    let mut item_counts = HashMap::<String, usize>::new();
-    let mut items_without_folder = 0usize;
-
-    for item in items {
-        let path = item.path.trim();
-        if path.is_empty() {
-            continue;
-        }
-        let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
-        if segments.len() < 2 {
-            items_without_folder += 1;
-            continue;
-        }
-
-        let folder_segments = &segments[..segments.len().saturating_sub(1)];
-        let mut current = String::new();
-        for segment in folder_segments {
-            if !current.is_empty() {
-                current.push('/');
-            }
-            current.push_str(segment);
-            folder_paths.insert(current.clone());
-        }
-        let folder_path = folder_segments.join("/");
-        *item_counts.entry(folder_path).or_insert(0) += 1;
-    }
-
-    let mut nodes = HashMap::<String, FolderNode>::new();
-    let mut roots = BTreeSet::<String>::new();
-
-    for path in &folder_paths {
-        let name = path.split('/').last().unwrap_or(path).to_string();
-        nodes.insert(
-            path.clone(),
-            FolderNode {
-                name,
-                path: path.clone(),
-                item_count: *item_counts.get(path).unwrap_or(&0),
-                total_count: 0,
-                children: BTreeSet::new(),
-            },
-        );
-    }
-
-    for path in &folder_paths {
-        if let Some((parent, _)) = path.rsplit_once('/') {
-            if let Some(parent_node) = nodes.get_mut(parent) {
-                parent_node.children.insert(path.clone());
-            }
-        } else {
-            roots.insert(path.clone());
-        }
-    }
-
-    fn compute_total(path: &str, nodes: &mut HashMap<String, FolderNode>) -> usize {
-        let child_paths = nodes
-            .get(path)
-            .map(|node| node.children.iter().cloned().collect::<Vec<_>>())
-            .unwrap_or_default();
-        let mut total = nodes.get(path).map(|node| node.item_count).unwrap_or(0);
-        for child in child_paths {
-            total += compute_total(&child, nodes);
-        }
-        if let Some(node) = nodes.get_mut(path) {
-            node.total_count = total;
-        }
-        total
-    }
-
-    for root in roots.clone() {
-        compute_total(&root, &mut nodes);
-    }
-
-    fn node_to_json(path: &str, nodes: &HashMap<String, FolderNode>) -> serde_json::Value {
-        let node = match nodes.get(path) {
-            Some(node) => node,
-            None => return serde_json::json!({}),
-        };
-        let children: Vec<_> = node
-            .children
-            .iter()
-            .map(|child| node_to_json(child, nodes))
-            .collect();
-        serde_json::json!({
-            "name": node.name,
-            "path": node.path,
-            "item_count": node.item_count,
-            "total_count": node.total_count,
-            "children": children,
-        })
-    }
-
-    let tree: Vec<_> = roots.iter().map(|path| node_to_json(path, &nodes)).collect();
-    serde_json::to_string(&serde_json::json!({
-        "items_without_folder": items_without_folder,
-        "tree": tree,
-    }))
-    .unwrap_or_else(|_| "{\"items_without_folder\":0,\"tree\":[]}".to_string())
+    serde_json::to_string(&build_folder_tree(items))
+        .unwrap_or_else(|_| "{\"items_without_folder\":0,\"tree\":[]}".to_string())
 }
 
 fn rebuild_filtered_items(model: &mut AppModelRust) {
-    let category = model.current_category.to_string();
-    let filter = category_filter_for(&category);
     let selected_folder = model.selected_folder.to_string();
-    model.filtered_indices.clear();
-    for (idx, item) in model.items.iter().enumerate() {
-        if item_matches_filters(item, &category, filter.as_ref(), &selected_folder) {
-            model.filtered_indices.push(idx);
-        }
-    }
-    model.filtered_items_count = model.filtered_indices.len() as i32;
-}
-
-fn category_filter_for(category_id: &str) -> Option<CategoryFilter> {
-    ui_categories_schema()
-        .categories
-        .iter()
-        .cloned()
-        .find(|cat| cat.id == category_id)
-        .and_then(|cat| cat.filter)
-}
-
-fn item_matches_filters(
-    item: &zann_ffi::ItemSummary,
-    category_id: &str,
-    filter: Option<&CategoryFilter>,
-    selected_folder: &str,
-) -> bool {
-    if let Some(filter) = filter {
-        if let Some(is_deleted) = filter.is_deleted {
-            if is_deleted != item.deleted {
-                return false;
-            }
-        }
-        if let Some(type_ids) = &filter.type_ids {
-            if !type_ids.iter().any(|tid| tid == &item.type_id) {
-                return false;
-            }
-        }
-    } else if category_id == "trash" && !item.deleted {
-        return false;
-    }
-
-    if selected_folder.is_empty() {
-        return true;
-    }
-    if selected_folder == "__no_folder__" {
-        return !item.path.contains('/');
-    }
-    let Some((folder_path, _)) = item.path.rsplit_once('/') else {
-        return false;
+    let filter = ItemFilter {
+        category_id: Some(model.current_category.to_string()),
+        folder: match selected_folder.as_str() {
+            "" => FolderFilter::Any,
+            NO_FOLDER_SENTINEL => FolderFilter::WithoutFolder,
+            path => FolderFilter::Path(path.to_string()),
+        },
+        // The backend already applied the search query when listing items.
+        query: String::new(),
     };
-    folder_path == selected_folder || folder_path.starts_with(&format!("{}/", selected_folder))
-}
-
-fn ui_categories_schema() -> &'static UiCategoriesSchema {
-    static SCHEMA: OnceLock<UiCategoriesSchema> = OnceLock::new();
-    SCHEMA.get_or_init(|| serde_json::from_str(UI_CATEGORIES_SCHEMA).unwrap_or(UiCategoriesSchema {
-        categories: Vec::new(),
-        fallback_category_id: "all".to_string(),
-    }))
-}
-
-fn generate_totp_internal(
-    secret: &str,
-    algorithm: &str,
-    digits: i32,
-    period: i32,
-) -> Result<String, String> {
-    let algorithm = parse_totp_algorithm(algorithm)?;
-    let digits = parse_totp_digits(digits)?;
-    let period = parse_totp_period(period)?;
-    let secret_bytes = decode_totp_secret(secret)?;
-
-    let totp = TOTP::new(algorithm, digits as usize, 1, period as u64, secret_bytes)
-        .map_err(|err| err.to_string())?;
-
-    let code = totp.generate_current().map_err(|err| err.to_string())?;
-
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| "invalid system time".to_string())?
-        .as_secs();
-
-    let remaining = period as u64 - (now % period as u64);
-
-    Ok(serde_json::json!({
-        "code": code,
-        "remaining": remaining,
-        "period": period
-    })
-    .to_string())
-}
-
-fn parse_totp_algorithm(value: &str) -> Result<Algorithm, String> {
-    let normalized = if value.is_empty() {
-        "SHA1"
-    } else {
-        value.trim()
-    }
-    .to_uppercase();
-
-    match normalized.as_str() {
-        "SHA1" => Ok(Algorithm::SHA1),
-        "SHA256" => Ok(Algorithm::SHA256),
-        "SHA512" => Ok(Algorithm::SHA512),
-        _ => Err("unsupported otp algorithm".to_string()),
-    }
-}
-
-fn parse_totp_digits(value: i32) -> Result<u32, String> {
-    let digits = if value <= 0 { 6 } else { value as u32 };
-    match digits {
-        6 | 8 => Ok(digits),
-        _ => Err("unsupported otp digits".to_string()),
-    }
-}
-
-fn parse_totp_period(value: i32) -> Result<u32, String> {
-    let period = if value <= 0 { 30 } else { value as u32 };
-    Ok(period)
-}
-
-fn decode_totp_secret(secret: &str) -> Result<Vec<u8>, String> {
-    let cleaned: String = secret
-        .chars()
-        .filter(|ch| !ch.is_whitespace() && *ch != '-')
-        .collect::<String>()
-        .to_uppercase();
-
-    BASE32
-        .decode(cleaned.as_bytes())
-        .map_err(|_| "invalid otp secret".to_string())
+    model.filtered_indices = filtered_indices(&model.items, &filter);
+    model.filtered_items_count = model.filtered_indices.len() as i32;
 }

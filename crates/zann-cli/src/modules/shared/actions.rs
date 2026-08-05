@@ -142,9 +142,7 @@ pub(crate) async fn handle_update(
 
     let has_payload_change = args.stdin || !args.field.is_empty();
     if !has_payload_change && args.new_path.is_none() && args.type_id.is_none() {
-        anyhow::bail!(
-            "Nothing to update: pass --field, --stdin, --new-path or --type-id"
-        );
+        anyhow::bail!("Nothing to update: pass --field, --stdin, --new-path or --type-id");
     }
     let payload = if has_payload_change {
         let type_id = args.type_id.as_deref().unwrap_or("secret");

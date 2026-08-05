@@ -464,6 +464,24 @@ pub struct ItemSummary {
     pub deleted_at: Option<String>,
 }
 
+impl zann_ui_core::ItemLike for ItemSummary {
+    fn title(&self) -> &str {
+        &self.name
+    }
+
+    fn type_id(&self) -> &str {
+        &self.type_id
+    }
+
+    fn path(&self) -> &str {
+        &self.path
+    }
+
+    fn is_deleted(&self) -> bool {
+        self.deleted_at.is_some()
+    }
+}
+
 #[derive(Serialize)]
 pub struct ItemDetail {
     pub id: String,

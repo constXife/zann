@@ -115,10 +115,7 @@ pub fn insert_pending_login(
     login_id: String,
     pending: PendingLogin,
 ) -> Result<(), String> {
-    let mut guard = state
-        .pending_logins
-        .lock()
-        .map_err(|err| err.to_string())?;
+    let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
     guard.insert(login_id, pending);
     Ok(())
 }
@@ -136,15 +133,11 @@ pub fn update_pending_login_for_fingerprint(
         .as_deref()
         .and_then(|server_id| context_name_for_server_id(state, server_id))
         .unwrap_or_else(|| context_name_from_url(server_url));
-    let Some(existing) =
-        fingerprint_change_for_context(state, &context_name, new_fingerprint)
+    let Some(existing) = fingerprint_change_for_context(state, &context_name, new_fingerprint)
     else {
         return Ok(None);
     };
-    let mut guard = state
-        .pending_logins
-        .lock()
-        .map_err(|err| err.to_string())?;
+    let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
     if let Some(entry) = guard.get_mut(login_id) {
         entry.fingerprint_new = Some(new_fingerprint.to_string());
         entry.fingerprint_trusted = false;
@@ -160,13 +153,11 @@ pub async fn finalize_login(
     result: PendingLoginResult,
 ) -> Result<ApiResponse<OidcLoginStatusResponse>, String> {
     let storage_id_string = apply_login_context(state, &pending.server_url, &result).await?;
-    let personal_status =
-        fetch_personal_status(&pending.server_url, &result.access_token).await.ok();
+    let personal_status = fetch_personal_status(&pending.server_url, &result.access_token)
+        .await
+        .ok();
 
-    let mut guard = state
-        .pending_logins
-        .lock()
-        .map_err(|err| err.to_string())?;
+    let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
     guard.remove(login_id);
 
     Ok(ApiResponse::ok(OidcLoginStatusResponse {
@@ -177,7 +168,9 @@ pub async fn finalize_login(
         email: Some(result.email),
         old_fingerprint: None,
         new_fingerprint: None,
-        personal_vaults_present: personal_status.as_ref().map(|status| status.personal_vaults_present),
+        personal_vaults_present: personal_status
+            .as_ref()
+            .map(|status| status.personal_vaults_present),
         personal_key_envelopes_present: personal_status
             .as_ref()
             .map(|status| status.personal_key_envelopes_present),
@@ -206,8 +199,7 @@ pub async fn fetch_personal_status(
         Err(err) => {
             append_auth_log(&format!(
                 "personal_status_error server={} error={}",
-                server_url,
-                err
+                server_url, err
             ));
             return Err(format!("vault_preflight_failed: {err}"));
         }
@@ -218,10 +210,7 @@ pub async fn fetch_personal_status(
         server_url,
         status.personal_vaults_present,
         status.personal_key_envelopes_present,
-        status
-            .personal_vault_id
-            .as_deref()
-            .unwrap_or("none")
+        status.personal_vault_id.as_deref().unwrap_or("none")
     ));
     Ok(status)
 }
@@ -240,14 +229,16 @@ pub async fn apply_login_context(
         .into_iter()
         .filter(|storage| storage.server_url.as_deref() == Some(server_url))
         .collect::<Vec<_>>();
-    let existing_storage_id = matching_storages.first().map(|storage| storage.id.to_string());
+    let existing_storage_id = matching_storages
+        .first()
+        .map(|storage| storage.id.to_string());
     let token_name = result.token_name.clone();
     let storage_id_string = {
         let context_name = context_name_from_url(server_url);
         let server_id = result.info.server_id.clone();
-        let migrated_storage_id = server_id
-            .as_deref()
-            .and_then(|server_id| migrate_context_for_server_id(&mut config, &context_name, server_id));
+        let migrated_storage_id = server_id.as_deref().and_then(|server_id| {
+            migrate_context_for_server_id(&mut config, &context_name, server_id)
+        });
 
         let context = ensure_context(&mut config, &context_name, server_url);
         if context.storage_id.is_none() {
@@ -298,9 +289,7 @@ pub async fn apply_login_context(
             personal_vaults_enabled: result.info.personal_vaults_enabled,
             auth_method: None,
         };
-        repo.upsert(&storage)
-            .await
-            .map_err(|err| err.to_string())?;
+        repo.upsert(&storage).await.map_err(|err| err.to_string())?;
     }
     Ok(storage_id_string)
 }
@@ -331,7 +320,9 @@ pub fn migrate_context_for_server_id(
 
     let storage_id = old_context.storage_id.clone();
     config.contexts.remove(&old_name);
-    config.contexts.insert(context_name.to_string(), old_context);
+    config
+        .contexts
+        .insert(context_name.to_string(), old_context);
     storage_id
 }
 

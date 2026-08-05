@@ -56,9 +56,10 @@ impl<'a> ItemsService for LocalServices<'a> {
             .as_deref()
             .and_then(|query| build_fts_query(query.trim()));
         let cursor = match params.cursor.as_deref() {
-            Some(cursor) => Some(parse_cursor(cursor).ok_or_else(|| {
-                ServiceError::new("invalid_cursor", "invalid cursor")
-            })?),
+            Some(cursor) => Some(
+                parse_cursor(cursor)
+                    .ok_or_else(|| ServiceError::new("invalid_cursor", "invalid cursor"))?,
+            ),
             None => None,
         };
         let repo = LocalItemRepo::new(self.pool);
@@ -119,7 +120,13 @@ impl<'a> ItemsService for LocalServices<'a> {
                 .await
                 .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
             None => repo
-                .list_by_vault_paged(storage_id, vault_id, params.include_deleted, limit + 1, cursor)
+                .list_by_vault_paged(
+                    storage_id,
+                    vault_id,
+                    params.include_deleted,
+                    limit + 1,
+                    cursor,
+                )
                 .await
                 .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
         };

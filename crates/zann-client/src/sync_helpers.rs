@@ -116,8 +116,7 @@ pub async fn ensure_local_vaults(
         } else {
             KeyWrapType::RemoteStrict
         };
-        let kind = VaultKind::try_from(vault.kind)
-            .map_err(|_| "invalid vault kind".to_string())?;
+        let kind = VaultKind::try_from(vault.kind).map_err(|_| "invalid vault kind".to_string())?;
         let record = LocalVault {
             id: vault_id,
             storage_id: storage_uuid,
@@ -147,7 +146,10 @@ pub async fn handle_sync_conflict(
         .checksum
         .clone()
         .unwrap_or_else(|| payload_checksum(&payload_enc));
-    let path = change.path.clone().unwrap_or_else(|| "conflict".to_string());
+    let path = change
+        .path
+        .clone()
+        .unwrap_or_else(|| "conflict".to_string());
     let name = change.name.clone().unwrap_or_else(|| path.clone());
     let type_id = change
         .type_id
@@ -180,7 +182,10 @@ pub async fn handle_sync_conflict(
         existing.checksum = checksum;
         existing.sync_status = SyncStatus::Conflict;
         existing.updated_at = now;
-        item_repo.update(&existing).await.map_err(|err| err.to_string())?;
+        item_repo
+            .update(&existing)
+            .await
+            .map_err(|err| err.to_string())?;
         return Ok(Some(existing.id));
     }
 
@@ -333,7 +338,10 @@ pub async fn apply_pull_change(
         } else {
             SyncStatus::Synced
         };
-        item_repo.update(&existing).await.map_err(|err| err.to_string())?;
+        item_repo
+            .update(&existing)
+            .await
+            .map_err(|err| err.to_string())?;
     } else {
         let record = LocalItem {
             id: item_id,
@@ -354,7 +362,10 @@ pub async fn apply_pull_change(
                 SyncStatus::Synced
             },
         };
-        item_repo.create(&record).await.map_err(|err| err.to_string())?;
+        item_repo
+            .create(&record)
+            .await
+            .map_err(|err| err.to_string())?;
     }
 
     let history_entries = change
@@ -368,8 +379,7 @@ pub async fn apply_pull_change(
             payload_enc: entry.payload_enc.clone(),
             checksum: entry.checksum.clone(),
             version: entry.version,
-            change_type: ChangeType::try_from(entry.change_type)
-                .unwrap_or(ChangeType::Update),
+            change_type: ChangeType::try_from(entry.change_type).unwrap_or(ChangeType::Update),
             changed_by_email: entry.changed_by_email.clone(),
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,
@@ -438,7 +448,10 @@ pub async fn apply_shared_pull_change(
         } else {
             SyncStatus::Synced
         };
-        item_repo.update(&existing).await.map_err(|err| err.to_string())?;
+        item_repo
+            .update(&existing)
+            .await
+            .map_err(|err| err.to_string())?;
     } else {
         let record = LocalItem {
             id: item_id,
@@ -459,7 +472,10 @@ pub async fn apply_shared_pull_change(
                 SyncStatus::Synced
             },
         };
-        item_repo.create(&record).await.map_err(|err| err.to_string())?;
+        item_repo
+            .create(&record)
+            .await
+            .map_err(|err| err.to_string())?;
     }
 
     let history_entries = change
@@ -475,8 +491,7 @@ pub async fn apply_shared_pull_change(
                 .unwrap_or_default(),
             checksum: entry.checksum.clone(),
             version: entry.version,
-            change_type: ChangeType::try_from(entry.change_type)
-                .unwrap_or(ChangeType::Update),
+            change_type: ChangeType::try_from(entry.change_type).unwrap_or(ChangeType::Update),
             changed_by_email: entry.changed_by_email.clone(),
             changed_by_name: entry.changed_by_name.clone(),
             changed_by_device_id: None,

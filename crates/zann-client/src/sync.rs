@@ -5,12 +5,12 @@ use zann_db::local::{
     LocalStorageRepo, LocalSyncCursor, LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
 };
 
-use crate::crypto::{decrypt_vault_key_with_master, vault_key_aad};
-use crate::tokens::ensure_access_token_for_context;
 use crate::config::{load_config, save_config};
+use crate::crypto::{decrypt_vault_key_with_master, vault_key_aad};
 use crate::http::{auth_headers, decode_json_response, ensure_success};
 use crate::remote::fetch_system_info;
 use crate::state::ClientState;
+use crate::tokens::ensure_access_token_for_context;
 use crate::types::{
     ApiResponse, SyncPullRequest, SyncPullResponse, SyncPushChange, SyncPushRequest,
     SyncPushResponse, SyncSharedPullResponse, SyncSharedPushRequest, VaultListResponse,
@@ -30,7 +30,6 @@ pub async fn remote_sync(
     state: &ClientState,
     master_key: &SecretKey,
 ) -> Result<ApiResponse<serde_json::Value>, String> {
-
     let mut config = load_config(&state.root).unwrap_or_else(|_| Default::default());
     let context_name = config
         .current_context
@@ -153,8 +152,7 @@ pub async fn remote_sync(
     for vault in &vault_details {
         let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
             .map_err(|_| "invalid vault encryption type".to_string())?;
-        let kind = VaultKind::try_from(vault.kind)
-            .map_err(|_| "invalid vault kind".to_string())?;
+        let kind = VaultKind::try_from(vault.kind).map_err(|_| "invalid vault kind".to_string())?;
         if encryption_type != VaultEncryptionType::Client || kind != VaultKind::Personal {
             continue;
         }
@@ -174,8 +172,8 @@ pub async fn remote_sync(
         }
         let vault_key = SecretKey::generate();
         let aad = vault_key_aad(vault_id);
-        let blob = encrypt_blob(master_key, vault_key.as_bytes(), &aad)
-            .map_err(|err| err.to_string())?;
+        let blob =
+            encrypt_blob(master_key, vault_key.as_bytes(), &aad).map_err(|err| err.to_string())?;
         let master_fp = key_fingerprint(master_key);
         let payload = serde_json::json!({ "vault_key_enc": blob.to_bytes() });
         let url = format!("{}/v1/vaults/{}/key", addr.trim_end_matches('/'), vault.id);
@@ -196,7 +194,12 @@ pub async fn remote_sync(
             }
         }
         let _ = vault_repo
-            .update_key(storage_uuid, vault_id, &blob.to_bytes(), KeyWrapType::RemoteStrict)
+            .update_key(
+                storage_uuid,
+                vault_id,
+                &blob.to_bytes(),
+                KeyWrapType::RemoteStrict,
+            )
             .await;
     }
 
@@ -212,8 +215,7 @@ pub async fn remote_sync(
         };
         let encryption_type = VaultEncryptionType::try_from(vault.encryption_type)
             .map_err(|_| "invalid vault encryption type".to_string())?;
-        let kind = VaultKind::try_from(vault.kind)
-            .map_err(|_| "invalid vault kind".to_string())?;
+        let kind = VaultKind::try_from(vault.kind).map_err(|_| "invalid vault kind".to_string())?;
         let should_be_shared =
             encryption_type == VaultEncryptionType::Server && kind == VaultKind::Shared;
         let desired_wrap = if should_be_shared {
@@ -430,18 +432,15 @@ pub async fn remote_sync(
                     Ok(response) => response,
                     Err(_) => break,
                 };
-                let pull = resp.json::<SyncPullResponse>().await.map_err(|err| err.to_string())?;
+                let pull = resp
+                    .json::<SyncPullResponse>()
+                    .await
+                    .map_err(|err| err.to_string())?;
 
                 for change in &pull.changes {
-                    if apply_pull_change(
-                        &item_repo,
-                        &history_repo,
-                        storage_uuid,
-                        vault_id,
-                        change,
-                    )
-                    .await
-                    .is_ok()
+                    if apply_pull_change(&item_repo, &history_repo, storage_uuid, vault_id, change)
+                        .await
+                        .is_ok()
                     {
                         applied_total += 1;
                     }

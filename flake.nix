@@ -1,18 +1,66 @@
 {
-  description = "Zann dev shell";
+  description = "Zann";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, rust-overlay }:
     let
       system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
+      pkgsFor = s: import nixpkgs {
+        system = s;
+        overlays = [ (import rust-overlay) ];
+      };
+      pkgs = pkgsFor system;
+      # Без этого cargo протекал из глобального профиля пользователя,
+      # и проект собирался версией, отличной от rust-toolchain.toml.
+      toolchainFor = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
+      rustToolchain = toolchainFor pkgs;
+
+      # zann-cli ставится и на десктоп, и на aarch64-хосты, поэтому пакет
+      # собирается под обе архитектуры. devShell остаётся x86_64-only —
+      # он тянет Qt и WebKit, которые на aarch64 никому не нужны.
+      packageSystems = [ "x86_64-linux" "aarch64-linux" ];
+
+      zannCliFor = s: let
+        p = pkgsFor s;
+        toolchain = toolchainFor p;
+        rustPlatform = p.makeRustPlatform {
+          cargo = toolchain;
+          rustc = toolchain;
+        };
+      in
+        rustPlatform.buildRustPackage {
+          pname = "zann-cli";
+          version = "0.1.0";
+          src = self;
+          # Не cargoHash: он требует ручного обновления при каждом изменении
+          # зависимостей. Cargo.lock не содержит git-источников, поэтому
+          # вендоринг выводится из него напрямую.
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [ "--bin" "zann" ];
+
+          nativeBuildInputs = [ p.pkg-config ];
+          buildInputs = with p; [
+            openssl
+            dbus
+            libsecret
+          ];
+
+          meta.mainProgram = "zann";
+        };
     in
     {
+      packages = nixpkgs.lib.genAttrs packageSystems (s: rec {
+        zann-cli = zannCliFor s;
+        default = zann-cli;
+      });
+
       devShells.${system}.default = pkgs.mkShell {
         packages = with pkgs; [
+          rustToolchain
           k6
           pkg-config
           openssl

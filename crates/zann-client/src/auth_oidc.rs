@@ -13,14 +13,16 @@ use crate::auth::{
     finalize_login, oidc_status_error, oidc_status_fingerprint_changed,
     update_pending_login_for_fingerprint,
 };
-use crate::constants::TOKEN_OIDC;
 use crate::config::{ensure_context, load_config, save_config};
+use crate::constants::TOKEN_OIDC;
 use crate::remote::{
     exchange_authorization_code, exchange_oidc_for_session, fetch_me_email, fetch_prelogin,
     fetch_system_info,
 };
 use crate::state::{ClientState, PendingLogin, PendingLoginResult};
-use crate::types::{ApiResponse, OidcConfigResponse, OidcDiscovery, OidcLoginStartResponse, OidcLoginStatusResponse};
+use crate::types::{
+    ApiResponse, OidcConfigResponse, OidcDiscovery, OidcLoginStartResponse, OidcLoginStatusResponse,
+};
 use crate::util::context_name_from_url;
 
 fn random_url_safe(size: usize) -> String {
@@ -60,16 +62,34 @@ fn log_jwt_summary(label: &str, token: &str) {
     };
     let header_json: serde_json::Value = serde_json::from_slice(&header).unwrap_or_default();
     let payload_json: serde_json::Value = serde_json::from_slice(&payload).unwrap_or_default();
-    let alg = header_json.get("alg").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let kid = header_json.get("kid").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let iss = payload_json.get("iss").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let alg = header_json
+        .get("alg")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let kid = header_json
+        .get("kid")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let iss = payload_json
+        .get("iss")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
     let aud = payload_json
         .get("aud")
         .map(|v| v.to_string())
         .unwrap_or_else(|| "unknown".to_string());
-    let azp = payload_json.get("azp").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let typ = header_json.get("typ").and_then(|v| v.as_str()).unwrap_or("unknown");
-    let exp = payload_json.get("exp").and_then(|v| v.as_i64()).unwrap_or(0);
+    let azp = payload_json
+        .get("azp")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let typ = header_json
+        .get("typ")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let exp = payload_json
+        .get("exp")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
     println!(
         "[oidc] {label} summary alg={alg} kid={kid} typ={typ} iss={iss} aud={aud} azp={azp} exp={exp}"
     );
@@ -81,7 +101,10 @@ pub async fn begin_login(
     status_tx: Sender<OidcLoginStatusResponse>,
 ) -> Result<ApiResponse<OidcLoginStartResponse>, String> {
     if server_url.trim().is_empty() {
-        return Ok(ApiResponse::err("invalid_server_url", "server_url is required"));
+        return Ok(ApiResponse::err(
+            "invalid_server_url",
+            "server_url is required",
+        ));
     }
     let client = reqwest::Client::new();
     let oidc_config_url = format!("{}/v1/auth/oidc/config", server_url.trim_end_matches('/'));
@@ -91,8 +114,8 @@ pub async fn begin_login(
     let discovery = crate::http::fetch_json::<OidcDiscovery>(&client, &discovery_url).await?;
 
     let redirect_port = 8765;
-    let listener = TcpListener::bind(format!("127.0.0.1:{redirect_port}"))
-        .map_err(|err| err.to_string())?;
+    let listener =
+        TcpListener::bind(format!("127.0.0.1:{redirect_port}")).map_err(|err| err.to_string())?;
     let redirect_uri = format!("http://127.0.0.1:{}/oidc/callback", redirect_port);
 
     let oauth_state = random_url_safe(16);
@@ -118,10 +141,7 @@ pub async fn begin_login(
 
     let login_id = Uuid::now_v7().to_string();
     let login_id_for_thread = login_id.clone();
-    let mut guard = state
-        .pending_logins
-        .lock()
-        .map_err(|err| err.to_string())?;
+    let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
     guard.insert(
         login_id.clone(),
         PendingLogin {
@@ -163,17 +183,20 @@ pub async fn trust_fingerprint(
     status_tx: Sender<OidcLoginStatusResponse>,
 ) -> Result<ApiResponse<()>, String> {
     let pending = {
-        let mut guard = state
-            .pending_logins
-            .lock()
-            .map_err(|err| err.to_string())?;
+        let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
         guard.get_mut(&login_id).cloned()
     };
     let Some(pending) = pending else {
-        return Ok(ApiResponse::err("login_not_found", "login session not found"));
+        return Ok(ApiResponse::err(
+            "login_not_found",
+            "login session not found",
+        ));
     };
     let Some(new_fp) = pending.fingerprint_new.clone() else {
-        return Ok(ApiResponse::err("fingerprint_missing", "no new fingerprint to trust"));
+        return Ok(ApiResponse::err(
+            "fingerprint_missing",
+            "no new fingerprint to trust",
+        ));
     };
 
     let mut config = load_config(&state.root).unwrap_or_else(|_| Default::default());
@@ -184,10 +207,7 @@ pub async fn trust_fingerprint(
         context.server_id = result.info.server_id.clone();
     }
     save_config(&state.root, &config).map_err(|err| err.to_string())?;
-    let mut guard = state
-        .pending_logins
-        .lock()
-        .map_err(|err| err.to_string())?;
+    let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
     if let Some(entry) = guard.get_mut(&login_id) {
         entry.fingerprint_trusted = true;
         if let Some(result) = entry.pending_result.clone() {
@@ -197,13 +217,15 @@ pub async fn trust_fingerprint(
             let status_tx = status_tx.clone();
             std::thread::spawn(move || {
                 let runtime = tokio::runtime::Runtime::new().expect("runtime");
-                let response = runtime.block_on(finalize_login(&state_clone, &login_id, pending, result));
+                let response =
+                    runtime.block_on(finalize_login(&state_clone, &login_id, pending, result));
                 match response {
                     Ok(payload) => {
                         if let Some(data) = payload.data {
                             let _ = status_tx.send(data);
                         } else {
-                            let _ = status_tx.send(oidc_status_error(&login_id, "missing login payload"));
+                            let _ = status_tx
+                                .send(oidc_status_error(&login_id, "missing login payload"));
                         }
                     }
                     Err(err) => {
@@ -320,7 +342,11 @@ fn parse_oidc_request(
     Ok((code, state))
 }
 
-fn respond_html(stream: &mut std::net::TcpStream, title: &str, message: &str) -> Result<(), String> {
+fn respond_html(
+    stream: &mut std::net::TcpStream,
+    title: &str,
+    message: &str,
+) -> Result<(), String> {
     let body = format!(
         "<!doctype html><html><head><meta charset=\"utf-8\"><title>{}</title></head>\
         <body style=\"font-family: sans-serif; padding: 24px;\"><h2>{}</h2><p>{}</p></body></html>",
@@ -331,7 +357,9 @@ fn respond_html(stream: &mut std::net::TcpStream, title: &str, message: &str) ->
         body.len(),
         body
     );
-    stream.write_all(response.as_bytes()).map_err(|err| err.to_string())
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|err| err.to_string())
 }
 
 async fn complete_oidc_login(
@@ -342,10 +370,7 @@ async fn complete_oidc_login(
     status_tx: Sender<OidcLoginStatusResponse>,
 ) -> Result<(), String> {
     let pending = {
-        let guard = state
-            .pending_logins
-            .lock()
-            .map_err(|err| err.to_string())?;
+        let guard = state.pending_logins.lock().map_err(|err| err.to_string())?;
         guard.get(&login_id).cloned()
     };
     let Some(pending) = pending else {
@@ -434,7 +459,11 @@ async fn complete_oidc_login(
         &result,
     )? {
         println!("[oidc] fingerprint changed for {}", pending.server_url);
-        let _ = status_tx.send(oidc_status_fingerprint_changed(&login_id, &existing, &info.server_fingerprint));
+        let _ = status_tx.send(oidc_status_fingerprint_changed(
+            &login_id,
+            &existing,
+            &info.server_fingerprint,
+        ));
         return Ok(());
     }
 

@@ -3403,18 +3403,17 @@ dependencies = [
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
- "data-encoding",
  "dirs",
  "qt-build-utils",
  "reqwest",
  "serde",
  "serde_json",
  "tokio",
- "totp-rs",
  "zann-client",
  "zann-core",
  "zann-db",
  "zann-ffi",
+ "zann-ui-core",
 ]
 
 [[package]]
@@ -3511,6 +3510,18 @@ dependencies = [
  "zann-core",
  "zann-crypto",
  "zann-db",
+ "zann-ui-core",
+]
+
+[[package]]
+name = "zann-ui-core"
+version = "0.1.0"
+dependencies = [
+ "data-encoding",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "totp-rs",
 ]
 
 [[package]]

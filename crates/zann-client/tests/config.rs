@@ -31,7 +31,8 @@ fn save_config_preserves_identity_when_missing() {
         identity: Some(identity.clone()),
     };
 
-    let initial_contents = serde_json::to_string_pretty(&initial_config).expect("serialize initial");
+    let initial_contents =
+        serde_json::to_string_pretty(&initial_config).expect("serialize initial");
     fs::write(&config_path, initial_contents).expect("write initial config");
 
     let mut contexts = HashMap::new();
@@ -72,10 +73,22 @@ fn save_config_preserves_identity_when_missing() {
     assert!(saved.contexts.contains_key("new"));
     let saved_identity = saved.identity.expect("identity preserved");
     assert_eq!(saved_identity.kdf_salt, identity.kdf_salt);
-    assert_eq!(saved_identity.kdf_params.algorithm, identity.kdf_params.algorithm);
-    assert_eq!(saved_identity.kdf_params.iterations, identity.kdf_params.iterations);
-    assert_eq!(saved_identity.kdf_params.memory_kb, identity.kdf_params.memory_kb);
-    assert_eq!(saved_identity.kdf_params.parallelism, identity.kdf_params.parallelism);
+    assert_eq!(
+        saved_identity.kdf_params.algorithm,
+        identity.kdf_params.algorithm
+    );
+    assert_eq!(
+        saved_identity.kdf_params.iterations,
+        identity.kdf_params.iterations
+    );
+    assert_eq!(
+        saved_identity.kdf_params.memory_kb,
+        identity.kdf_params.memory_kb
+    );
+    assert_eq!(
+        saved_identity.kdf_params.parallelism,
+        identity.kdf_params.parallelism
+    );
     assert_eq!(saved_identity.salt_fingerprint, identity.salt_fingerprint);
     assert_eq!(saved_identity.first_seen_at, identity.first_seen_at);
     assert_eq!(saved_identity.email, identity.email);

@@ -6,17 +6,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
+use zann_client::state::ClientState;
+use zann_client::sync_helpers::key_fingerprint;
 use zann_core::{ItemCounts, ItemListParams, ItemsService, VaultsService};
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::passwords::{kdf_fingerprint, KdfParams as CryptoKdfParams};
-use zann_crypto::EncryptedPayload;
 use zann_crypto::secrets::{FieldKind, FieldValue};
 use zann_crypto::vault_crypto;
+use zann_crypto::EncryptedPayload;
 use zann_db::local::{LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVaultRepo};
 use zann_db::services::LocalServices;
 use zann_db::{connect_sqlite_with_max, migrate_local, SqlitePool};
-use zann_client::state::ClientState;
-use zann_client::sync_helpers::key_fingerprint;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {
@@ -66,6 +66,24 @@ pub struct ItemSummary {
     pub deleted: bool,
 }
 
+impl zann_ui_core::ItemLike for ItemSummary {
+    fn title(&self) -> &str {
+        &self.title
+    }
+
+    fn type_id(&self) -> &str {
+        &self.type_id
+    }
+
+    fn path(&self) -> &str {
+        &self.path
+    }
+
+    fn is_deleted(&self) -> bool {
+        self.deleted
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ItemCountsFfi {
     pub all: u64,
@@ -77,6 +95,20 @@ pub struct ItemCountsFfi {
 pub struct ItemTypeCount {
     pub type_id: String,
     pub count: u64,
+}
+
+impl From<&ItemCountsFfi> for zann_ui_core::ItemCounts {
+    fn from(counts: &ItemCountsFfi) -> Self {
+        Self {
+            all: counts.all,
+            trash: counts.trash,
+            by_type: counts
+                .by_type
+                .iter()
+                .map(|entry| (entry.type_id.clone(), entry.count))
+                .collect(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -129,7 +161,7 @@ pub struct StorageSummaryFfi {
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct AppStatusFfi {
-    pub initialized: bool,    // master password has been set (vaults exist)
+    pub initialized: bool, // master password has been set (vaults exist)
     pub locked: bool,
     pub storages_count: u64,
     pub has_local_vault: bool,
@@ -146,10 +178,7 @@ pub struct CoreFacade {
 }
 
 impl CoreFacade {
-    fn services_with_key<'a>(
-        &'a self,
-        master_key: &'a SecretKey,
-    ) -> LocalServices<'a> {
+    fn services_with_key<'a>(&'a self, master_key: &'a SecretKey) -> LocalServices<'a> {
         LocalServices::new(&self.pool, master_key)
     }
 
@@ -261,15 +290,9 @@ impl CoreFacade {
             let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
             vault.id
         } else {
-            let verify = vaults
-                .first()
-                .expect("vaults not empty");
-            vault_crypto::decrypt_vault_key(
-                master_key.as_ref(),
-                verify.id,
-                &verify.vault_key_enc,
-            )
-            .map_err(|_| CoreError::InvalidArgument("invalid password".to_string()))?;
+            let verify = vaults.first().expect("vaults not empty");
+            vault_crypto::decrypt_vault_key(master_key.as_ref(), verify.id, &verify.vault_key_enc)
+                .map_err(|_| CoreError::InvalidArgument("invalid password".to_string()))?;
             let item_repo = LocalItemRepo::new(&self.pool);
             let mut selected = vaults
                 .iter()
@@ -339,8 +362,8 @@ impl CoreFacade {
         if self.master_key.lock().expect("lock poisoned").is_none() {
             return Err(CoreError::Locked);
         }
-        let vault_id =
-            Uuid::parse_str(&id).map_err(|_| CoreError::InvalidArgument("invalid vault id".to_string()))?;
+        let vault_id = Uuid::parse_str(&id)
+            .map_err(|_| CoreError::InvalidArgument("invalid vault id".to_string()))?;
         let repo = LocalVaultRepo::new(&self.pool);
         let vaults = self
             .runtime
@@ -363,11 +386,8 @@ impl CoreFacade {
             cursor: page.cursor,
             include_deleted: filter.include_deleted,
         };
-        let result = self.runtime_block_on(services.list_items(
-            self.storage_id(),
-            vault_id,
-            params,
-        ))?;
+        let result =
+            self.runtime_block_on(services.list_items(self.storage_id(), vault_id, params))?;
         Ok(ItemPage {
             items: result
                 .items
@@ -521,13 +541,17 @@ impl CoreFacade {
 
     pub fn initialize_master_password(&self, password: String) -> CoreResult<VaultStatus> {
         if password.len() < 8 {
-            return Err(CoreError::InvalidArgument("password must be at least 8 characters".to_string()));
+            return Err(CoreError::InvalidArgument(
+                "password must be at least 8 characters".to_string(),
+            ));
         }
 
         // Check if already initialized
         let status = self.app_status()?;
         if status.initialized {
-            return Err(CoreError::InvalidArgument("vault already initialized".to_string()));
+            return Err(CoreError::InvalidArgument(
+                "vault already initialized".to_string(),
+            ));
         }
 
         // Derive master key from password
@@ -580,7 +604,11 @@ impl CoreFacade {
         let state = ClientState::new(self.pool.clone(), root);
         let response = self
             .runtime
-            .block_on(zann_client::sync::remote_sync(storage_id, &state, master_key.as_ref()))
+            .block_on(zann_client::sync::remote_sync(
+                storage_id,
+                &state,
+                master_key.as_ref(),
+            ))
             .map_err(CoreError::Service)?;
         if response.ok {
             Ok(())
@@ -597,8 +625,7 @@ impl CoreFacade {
 
 #[uniffi::export]
 pub fn create_core(db_url: String) -> CoreResult<Arc<CoreFacade>> {
-    let runtime =
-        Runtime::new().map_err(|err| CoreError::InvalidArgument(err.to_string()))?;
+    let runtime = Runtime::new().map_err(|err| CoreError::InvalidArgument(err.to_string()))?;
     let pool = runtime
         .block_on(connect_sqlite_with_max(&db_url, 5))
         .map_err(|err| CoreError::Service(err.to_string()))?;
@@ -683,17 +710,13 @@ fn load_or_create_identity_config(db_url: &str) -> CoreResult<IdentityConfig> {
         if debug_master {
             eprintln!(
                 "[MASTER-DEBUG] identity_loaded salt_fp={}",
-                identity
-                    .salt_fingerprint
-                    .as_deref()
-                    .unwrap_or("none")
+                identity.salt_fingerprint.as_deref().unwrap_or("none")
             );
         }
         return Ok(identity);
     }
 
-    std::fs::create_dir_all(&root)
-        .map_err(|err| CoreError::Service(err.to_string()))?;
+    std::fs::create_dir_all(&root).map_err(|err| CoreError::Service(err.to_string()))?;
     let salt = SecretKey::generate();
     let salt_b64 = base64::engine::general_purpose::STANDARD.encode(salt.as_bytes());
     let identity = IdentityConfig {
@@ -715,15 +738,15 @@ fn load_or_create_identity_config(db_url: &str) -> CoreResult<IdentityConfig> {
             .unwrap_or_else(|| "none".to_string());
         eprintln!("[MASTER-DEBUG] identity_created salt_fp={}", salt_fp);
     }
-    let identity_value = serde_json::to_value(&identity)
-        .map_err(|err| CoreError::Service(err.to_string()))?;
+    let identity_value =
+        serde_json::to_value(&identity).map_err(|err| CoreError::Service(err.to_string()))?;
     if let Value::Object(map) = &mut config {
         map.insert("identity".to_string(), identity_value);
     } else {
         config = serde_json::json!({ "identity": identity_value });
     }
-    let json = serde_json::to_string_pretty(&config)
-        .map_err(|err| CoreError::Service(err.to_string()))?;
+    let json =
+        serde_json::to_string_pretty(&config).map_err(|err| CoreError::Service(err.to_string()))?;
     std::fs::write(&path, json).map_err(|err| CoreError::Service(err.to_string()))?;
     Ok(identity)
 }

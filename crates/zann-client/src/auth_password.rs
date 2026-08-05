@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::constants::TOKEN_SESSION;
-use crate::remote::{fetch_prelogin, fetch_system_info};
 use crate::auth::{
     apply_login_context, context_name_for_server_id, empty_oidc_config, empty_oidc_discovery,
     fetch_personal_status, fingerprint_change_for_context, insert_pending_login,
 };
+use crate::constants::TOKEN_SESSION;
+use crate::remote::{fetch_prelogin, fetch_system_info};
 use crate::state::{ClientState, PendingLogin, PendingLoginResult};
 use crate::types::ApiResponse;
 use crate::util::context_name_from_url;
@@ -133,10 +133,16 @@ pub async fn password_login(
         server_url, email
     );
     if server_url.trim().is_empty() {
-        return Ok(ApiResponse::err("invalid_server_url", "server_url is required"));
+        return Ok(ApiResponse::err(
+            "invalid_server_url",
+            "server_url is required",
+        ));
     }
     if email.trim().is_empty() || password.trim().is_empty() {
-        return Ok(ApiResponse::err("invalid_credentials", "email and password are required"));
+        return Ok(ApiResponse::err(
+            "invalid_credentials",
+            "email and password are required",
+        ));
     }
 
     let client = reqwest::Client::new();
@@ -206,8 +212,9 @@ pub async fn password_login(
     }
 
     let storage_id = apply_login_context(state, &server_url, &result).await?;
-    let personal_status =
-        fetch_personal_status(&server_url, &result.access_token).await.ok();
+    let personal_status = fetch_personal_status(&server_url, &result.access_token)
+        .await
+        .ok();
     Ok(ApiResponse::ok(password_success(
         email,
         storage_id,
@@ -227,10 +234,16 @@ pub async fn password_register(
         server_url, email
     );
     if server_url.trim().is_empty() {
-        return Ok(ApiResponse::err("invalid_server_url", "server_url is required"));
+        return Ok(ApiResponse::err(
+            "invalid_server_url",
+            "server_url is required",
+        ));
     }
     if email.trim().is_empty() || password.trim().is_empty() {
-        return Ok(ApiResponse::err("invalid_credentials", "email and password are required"));
+        return Ok(ApiResponse::err(
+            "invalid_credentials",
+            "email and password are required",
+        ));
     }
 
     let client = reqwest::Client::new();
@@ -309,8 +322,9 @@ pub async fn password_register(
     }
 
     let storage_id = apply_login_context(state, &server_url, &result).await?;
-    let personal_status =
-        fetch_personal_status(&server_url, &result.access_token).await.ok();
+    let personal_status = fetch_personal_status(&server_url, &result.access_token)
+        .await
+        .ok();
     Ok(ApiResponse::ok(password_success(
         email,
         storage_id,

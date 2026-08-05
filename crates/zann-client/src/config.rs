@@ -17,12 +17,14 @@ pub fn save_config(root: &Path, config: &CliConfig) -> Result<(), anyhow::Error>
     let path = root.join(CONFIG_FILENAME);
     let new_value = serde_json::to_value(config)?;
     let merged_value = if let Ok(existing) = std::fs::read_to_string(&path) {
-        if let (Ok(mut existing_value), serde_json::Value::Object(new_map)) =
-            (serde_json::from_str::<serde_json::Value>(&existing), new_value.clone())
-        {
+        if let (Ok(mut existing_value), serde_json::Value::Object(new_map)) = (
+            serde_json::from_str::<serde_json::Value>(&existing),
+            new_value.clone(),
+        ) {
             if let serde_json::Value::Object(existing_map) = &mut existing_value {
                 for (key, value) in new_map {
-                    if key == "identity" && value.is_null() && existing_map.contains_key("identity") {
+                    if key == "identity" && value.is_null() && existing_map.contains_key("identity")
+                    {
                         continue;
                     }
                     existing_map.insert(key, value);
