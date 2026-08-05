@@ -287,11 +287,21 @@ pub async fn apply_pull_change(
     storage_id: Uuid,
     vault_id: Uuid,
     change: &SyncPullChange,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let item_id = Uuid::parse_str(&change.item_id).map_err(|err| err.to_string())?;
+    // A timestamp we cannot read must not be stamped "now": that would make the
+    // change look newer than everything local and win the next comparison.
     let updated_at = match parse_rfc3339(&change.updated_at) {
         Some(value) => value,
-        None => Utc::now(),
+        None => {
+            append_sync_log(&format!(
+                "[pull] invalid updated_at: storage_id={}, item_id={}, value={}",
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
+                change.updated_at
+            ));
+            return Ok(false);
+        }
     };
     let deleted_at = match change.deleted_at.as_ref() {
         Some(value) => parse_rfc3339(value),
@@ -323,7 +333,7 @@ pub async fn apply_pull_change(
                 existing.version,
                 change.seq
             ));
-            return Ok(());
+            return Ok(false);
         }
         existing.path = change.path.clone();
         existing.name = change.name.clone();
@@ -392,7 +402,7 @@ pub async fn apply_pull_change(
 
     apply_history_payloads(history_repo, storage_id, item_id, &history_entries).await?;
 
-    Ok(())
+    Ok(true)
 }
 
 pub async fn apply_shared_pull_change(
@@ -402,11 +412,21 @@ pub async fn apply_shared_pull_change(
     vault_id: Uuid,
     change: &SyncSharedPullChange,
     master_key: &SecretKey,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     let item_id = Uuid::parse_str(&change.item_id).map_err(|err| err.to_string())?;
+    // A timestamp we cannot read must not be stamped "now": that would make the
+    // change look newer than everything local and win the next comparison.
     let updated_at = match parse_rfc3339(&change.updated_at) {
         Some(value) => value,
-        None => Utc::now(),
+        None => {
+            append_sync_log(&format!(
+                "[pull] invalid updated_at: storage_id={}, item_id={}, value={}",
+                redact_uuid(storage_id),
+                redact_uuid(item_id),
+                change.updated_at
+            ));
+            return Ok(false);
+        }
     };
     let deleted_at = match change.deleted_at.as_ref() {
         Some(value) => parse_rfc3339(value),
@@ -433,7 +453,7 @@ pub async fn apply_shared_pull_change(
                 existing.version,
                 change.seq
             ));
-            return Ok(());
+            return Ok(false);
         }
         existing.path = change.path.clone();
         existing.name = change.name.clone();
@@ -504,7 +524,7 @@ pub async fn apply_shared_pull_change(
 
     apply_shared_history_payloads(history_repo, storage_id, item_id, &history_entries).await?;
 
-    Ok(())
+    Ok(true)
 }
 
 async fn apply_history_payloads(

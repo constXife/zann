@@ -389,7 +389,10 @@ pub async fn remote_sync(
                     .map_err(|err| err.to_string())?;
                 let resp = match ensure_success(resp).await {
                     Ok(response) => response,
-                    Err(_) => break,
+                    Err(err) => {
+                        eprintln!("[sync] shared pull failed for vault {}: {err}", vault.id);
+                        return Ok(ApiResponse::err("sync_shared_pull_failed", &err));
+                    }
                 };
                 let pull = resp
                     .json::<SyncSharedPullResponse>()
@@ -405,7 +408,7 @@ pub async fn remote_sync(
                         master_key,
                     )
                     .await
-                    .is_ok()
+                    .unwrap_or(false)
                     {
                         applied_total += 1;
                     }
@@ -430,7 +433,10 @@ pub async fn remote_sync(
                     .map_err(|err| err.to_string())?;
                 let resp = match ensure_success(resp).await {
                     Ok(response) => response,
-                    Err(_) => break,
+                    Err(err) => {
+                        eprintln!("[sync] pull failed for vault {}: {err}", vault.id);
+                        return Ok(ApiResponse::err("sync_pull_failed", &err));
+                    }
                 };
                 let pull = resp
                     .json::<SyncPullResponse>()
@@ -440,7 +446,7 @@ pub async fn remote_sync(
                 for change in &pull.changes {
                     if apply_pull_change(&item_repo, &history_repo, storage_uuid, vault_id, change)
                         .await
-                        .is_ok()
+                        .unwrap_or(false)
                     {
                         applied_total += 1;
                     }
