@@ -158,6 +158,7 @@ pub async fn begin_login(
     );
 
     let state_clone = state.clone();
+    let state_for_cleanup = state.clone();
     let status_tx_listener = status_tx.clone();
     std::thread::spawn(move || {
         if let Err(err) = listen_for_oidc_callback(
@@ -167,6 +168,12 @@ pub async fn begin_login(
             redirect_port,
             status_tx_listener,
         ) {
+            // A login that never completed still holds its verifier, its state
+            // and possibly a session; drop it instead of keeping it for the
+            // lifetime of the process.
+            if let Ok(mut guard) = state_for_cleanup.pending_logins.lock() {
+                guard.remove(&login_id_for_thread);
+            }
             let _ = status_tx.send(oidc_status_error(&login_id_for_thread, err));
         }
     });
@@ -252,29 +259,54 @@ fn listen_for_oidc_callback(
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
-                let (code, oauth_state) = parse_oidc_request(&mut stream, port)?;
-                println!("[oidc] callback received for login_id={}", login_id);
-                respond_html(
-                    &mut stream,
-                    "Login complete",
-                    "You can return to the app and close this window.",
-                )?;
-                let status_tx = status_tx.clone();
-                let state = state.clone();
-                let login_id_clone = login_id.clone();
-                std::thread::spawn(move || {
-                    let runtime = tokio::runtime::Runtime::new().expect("runtime");
-                    if let Err(err) = runtime.block_on(complete_oidc_login(
-                        state,
-                        login_id_clone.clone(),
+                // Browsers fire speculative connections (favicon, prefetch, /, the
+                // user navigating to 127.0.0.1:8765 by hand). Treat anything that
+                // is not the OAuth callback as noise and keep listening — losing
+                // the listener to a stray request leaves the real IdP redirect
+                // hitting a closed port.
+                match parse_oidc_request(&mut stream, port) {
+                    Ok(OidcRequest::Callback {
                         code,
-                        oauth_state,
-                        status_tx.clone(),
-                    )) {
-                        let _ = status_tx.send(oidc_status_error(&login_id_clone, err));
+                        state: oauth_state,
+                    }) => {
+                        println!("[oidc] callback received for login_id={}", login_id);
+                        let _ = respond_html(
+                            &mut stream,
+                            "Login complete",
+                            "You can return to the app and close this window.",
+                        );
+                        let status_tx = status_tx.clone();
+                        let state = state.clone();
+                        let login_id_clone = login_id.clone();
+                        std::thread::spawn(move || {
+                            let runtime = tokio::runtime::Runtime::new().expect("runtime");
+                            if let Err(err) = runtime.block_on(complete_oidc_login(
+                                state,
+                                login_id_clone.clone(),
+                                code,
+                                oauth_state,
+                                status_tx.clone(),
+                            )) {
+                                let _ = status_tx.send(oidc_status_error(&login_id_clone, err));
+                            }
+                        });
+                        return Ok(());
                     }
-                });
-                return Ok(());
+                    Ok(OidcRequest::IdpError { error, description }) => {
+                        let detail =
+                            description.unwrap_or_else(|| "Authorization failed.".to_string());
+                        let _ = respond_html(&mut stream, "Login error", &detail);
+                        return Err(format!("authorization error: {error}"));
+                    }
+                    Ok(OidcRequest::Ignored { path }) => {
+                        let _ = respond_not_found(&mut stream);
+                        println!("[oidc] ignoring stray request path={path} login_id={login_id}");
+                    }
+                    Err(err) => {
+                        let _ = respond_not_found(&mut stream);
+                        println!("[oidc] failed to parse stray request: {err}");
+                    }
+                }
             }
             Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                 if Instant::now() > deadline {
@@ -287,59 +319,86 @@ fn listen_for_oidc_callback(
     }
 }
 
-fn parse_oidc_request(
-    stream: &mut std::net::TcpStream,
-    port: u16,
-) -> Result<(String, String), String> {
+/// What arrived on the redirect listener. Everything that is not the callback
+/// is noise the listener has to survive.
+#[derive(Debug, PartialEq, Eq)]
+enum OidcRequest {
+    Callback {
+        code: String,
+        state: String,
+    },
+    IdpError {
+        error: String,
+        description: Option<String>,
+    },
+    Ignored {
+        path: String,
+    },
+}
+
+fn parse_oidc_request(stream: &mut std::net::TcpStream, port: u16) -> Result<OidcRequest, String> {
     let mut buffer = [0u8; 8192];
     let size = stream.read(&mut buffer).map_err(|err| err.to_string())?;
     if size == 0 {
         return Err("empty request".to_string());
     }
-    let request = String::from_utf8_lossy(&buffer[..size]);
+    parse_oidc_request_line(&String::from_utf8_lossy(&buffer[..size]), port)
+}
+
+fn parse_oidc_request_line(request: &str, port: u16) -> Result<OidcRequest, String> {
     let request_line = request.lines().next().unwrap_or_default();
     let mut parts = request_line.split_whitespace();
     let method = parts.next().unwrap_or_default();
     let path = parts.next().unwrap_or_default();
-    if method != "GET" {
-        respond_html(stream, "Invalid request", "Expected GET request.")?;
-        return Err("invalid request method".to_string());
-    }
-    if !path.starts_with('/') {
-        respond_html(stream, "Invalid request", "Malformed callback URL.")?;
-        return Err("invalid request path".to_string());
+    if method != "GET" || !path.starts_with('/') {
+        return Ok(OidcRequest::Ignored {
+            path: path.to_string(),
+        });
     }
     let full_url = format!("http://127.0.0.1:{port}{path}");
     let url = reqwest::Url::parse(&full_url).map_err(|err| err.to_string())?;
+    if url.path() != "/oidc/callback" {
+        return Ok(OidcRequest::Ignored {
+            path: path.to_string(),
+        });
+    }
     let mut code = None;
     let mut state = None;
     let mut error = None;
     let mut error_description = None;
     for (key, value) in url.query_pairs() {
-        if key == "code" {
-            code = Some(value.to_string());
-        } else if key == "state" {
-            state = Some(value.to_string());
-        } else if key == "error" {
-            error = Some(value.to_string());
-        } else if key == "error_description" {
-            error_description = Some(value.to_string());
+        match key.as_ref() {
+            "code" => code = Some(value.to_string()),
+            "state" => state = Some(value.to_string()),
+            "error" => error = Some(value.to_string()),
+            "error_description" => error_description = Some(value.to_string()),
+            _ => {}
         }
     }
     if let Some(error) = error {
-        let detail = error_description.unwrap_or_else(|| "Authorization failed.".to_string());
-        respond_html(stream, "Login error", &detail).ok();
-        return Err(format!("authorization error: {error}"));
+        return Ok(OidcRequest::IdpError {
+            error,
+            description: error_description,
+        });
     }
-    let code = code.ok_or_else(|| {
-        respond_html(stream, "Login error", "Missing authorization code.").ok();
-        "missing code".to_string()
-    })?;
-    let state = state.ok_or_else(|| {
-        respond_html(stream, "Login error", "Missing state parameter.").ok();
-        "missing state".to_string()
-    })?;
-    Ok((code, state))
+    match (code, state) {
+        (Some(code), Some(state)) => Ok(OidcRequest::Callback { code, state }),
+        _ => Ok(OidcRequest::Ignored {
+            path: path.to_string(),
+        }),
+    }
+}
+
+fn respond_not_found(stream: &mut std::net::TcpStream) -> Result<(), String> {
+    let body = "Not found";
+    let response = format!(
+        "HTTP/1.1 404 Not Found\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(),
+        body
+    );
+    stream
+        .write_all(response.as_bytes())
+        .map_err(|err| err.to_string())
 }
 
 fn respond_html(
@@ -473,4 +532,56 @@ async fn complete_oidc_login(
         let _ = status_tx.send(payload);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PORT: u16 = 8765;
+
+    fn parse(request: &str) -> OidcRequest {
+        parse_oidc_request_line(request, PORT).expect("parsed")
+    }
+
+    #[test]
+    fn callback_carries_code_and_state() {
+        assert_eq!(
+            parse("GET /oidc/callback?code=abc&state=xyz HTTP/1.1\r\nHost: 127.0.0.1\r\n"),
+            OidcRequest::Callback {
+                code: "abc".to_string(),
+                state: "xyz".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn idp_error_is_reported_with_its_description() {
+        assert_eq!(
+            parse("GET /oidc/callback?error=access_denied&error_description=Nope HTTP/1.1\r\n"),
+            OidcRequest::IdpError {
+                error: "access_denied".to_string(),
+                description: Some("Nope".to_string()),
+            }
+        );
+    }
+
+    /// The listener used to exit on the first request it accepted, so a browser
+    /// prefetch or a favicon probe closed the port before the real redirect
+    /// arrived.
+    #[test]
+    fn stray_requests_are_ignored_rather_than_fatal() {
+        for request in [
+            "GET /favicon.ico HTTP/1.1\r\n",
+            "GET / HTTP/1.1\r\n",
+            "POST /oidc/callback?code=abc&state=xyz HTTP/1.1\r\n",
+            "GET /oidc/callback?code=abc HTTP/1.1\r\n",
+            "GET /oidc/callback?state=xyz HTTP/1.1\r\n",
+        ] {
+            assert!(
+                matches!(parse(request), OidcRequest::Ignored { .. }),
+                "expected {request:?} to be ignored"
+            );
+        }
+    }
 }
