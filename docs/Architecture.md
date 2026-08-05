@@ -1,5 +1,9 @@
 # Zann Desktop Architecture (Core + Native UI)
 
+> How much of this the clients actually share today, and what to do about it, is
+> recorded in `docs/adr/0001-shared-client-core.md` in the repository. ADRs are
+> not published to the docs site.
+
 ## Scope
 - Desktop-first PoC with a shared Rust core.
 - Future targets: iOS, Android, and possibly web.
