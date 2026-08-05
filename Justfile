@@ -46,6 +46,16 @@ desktop-build:
 desktop-e2e +args='':
     @echo "E2E is temporarily disabled."
 
+# COSMIC PoC (apps/cosmic): needs the `cosmic` dev shell, see apps/cosmic/README.md
+cosmic-run +args='':
+    cd apps/cosmic && cargo run {{args}}
+
+cosmic-build:
+    cd apps/cosmic && cargo build --release
+
+cosmic-test:
+    cd apps/cosmic && cargo test
+
 db-up:
     podman compose up -d db
 

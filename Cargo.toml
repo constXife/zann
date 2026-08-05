@@ -12,6 +12,7 @@ members = [
 ]
 exclude = [
   "apps/desktop/src-tauri",
-  "apps/kde",
+  "apps/cosmic",
+  "tools/mock-server",
 ]
 resolver = "2"

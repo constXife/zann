@@ -1,5 +1,9 @@
 # Zann Desktop Architecture (Core + Native UI)
 
+> How much of this the clients actually share today, and what to do about it, is
+> recorded in `docs/adr/0001-shared-client-core.md` in the repository. ADRs are
+> not published to the docs site.
+
 ## Scope
 - Desktop-first PoC with a shared Rust core.
 - Future targets: iOS, Android, and possibly web.
@@ -40,7 +44,7 @@
   - FFI surface (UniFFI or cxx).
 
 ### UI Layer
-- Desktop native (Qt/Kirigami for KDE PoC).
+- Desktop native (libcosmic/iced for the COSMIC PoC).
 - UI holds no business logic; it only calls core APIs.
 - UI receives typed DTOs (no raw DB rows).
 
@@ -92,7 +96,7 @@
 
 ## Rollout (PoC)
 1) Core API facade covering unlock/list/detail/edit/import/export.
-2) KDE UI with list/search/detail.
+2) COSMIC UI with list/search/detail.
 3) Streaming import/export validated on large files.
 4) Perf and memory baselines.
 

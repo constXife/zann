@@ -1,6 +1,6 @@
 # UI Categories Mapping (V1)
 
-Goal: ensure all clients (Tauri, KDE, Swift, Windows) render the same navigation categories from `schemas/ui_categories.json`.
+Goal: ensure all clients (Tauri, COSMIC, Swift, Windows) render the same navigation categories from `schemas/ui_categories.json`.
 
 ## Client Responsibilities
 
@@ -32,7 +32,7 @@ Goal: ensure all clients (Tauri, KDE, Swift, Windows) render the same navigation
 ## Platform Mapping (Recommended)
 
 - **Tauri (Vue):** map schema to the existing categories list; replace hardcoded categories with schema parsing.
-- **KDE (QML):** load JSON, map to a model; bind labels through i18n layer.
+- **COSMIC (libcosmic):** `zann-ui-core` parses the schema; the app maps label keys and icon names to the toolkit's own.
 - **Swift (iOS/macOS):** parse JSON into structs; map `labels` to Localizable strings.
 - **Windows:** parse JSON into DTOs; bind `labels` to resource strings.
 
