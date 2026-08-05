@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 license = "MIT"
+
+# `crate-type` belongs to [lib]; under [package] cargo ignores it and never
+# builds the shared library the uniffi bindings load.
+[lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
