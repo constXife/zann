@@ -63,6 +63,39 @@ just cosmic-run
 Optional:
 - `ZANN_DB_URL` overrides the default `sqlite://$HOME/.zann/local.sqlite`.
 
+## Install it as a desktop app
+
+To launch it from the COSMIC launcher instead of a terminal:
+
+```bash
+just cosmic-install     # ~/.local/bin + ~/.local/share/{applications,icons}
+just cosmic-uninstall
+```
+
+That builds the release binary, installs the desktop entry from `data/` with
+`Exec` rewritten to the absolute path, and takes the icons from the Tauri app —
+one logo for the whole product rather than a second copy of the same PNGs.
+
+The binary itself lands in `~/.local/libexec` and `~/.local/bin/zann-cosmic` is
+a wrapper. That is for NixOS: winit `dlopen`s libwayland at startup, and a
+launcher starts `Exec=` with none of the dev shell's environment, so the bare
+binary dies with `NoWaylandLib`. The wrapper carries the `LD_LIBRARY_PATH` of
+the shell that built it — which means it points at store paths, so run
+`just cosmic-install` again after a `nix-collect-garbage`. Packaging it properly
+(`nix build` with `wrapProgram`) is the next step up from this.
+
+Two more things worth knowing:
+
+- The entry's `StartupWMClass` has to equal the app's `APP_ID`
+  (`com.rlyeh.zann.Cosmic`). If they drift apart the window appears without the
+  launcher's name and icon.
+- Launched this way it gets no `ZANN_DB_URL`, so it opens the same
+  `~/.zann/local.sqlite` as the other clients — including running the local
+  migrations against it. That is fine while this is built from the same commit
+  as the client you rely on; it stops being fine the moment you install a build
+  from a branch that is ahead on schema. Point it elsewhere while testing:
+  `ZANN_DB_URL=sqlite:///tmp/zann-demo/local.sqlite zann-cosmic`.
+
 ## Demo vault
 
 To try the PoC without touching a real vault, seed a throwaway one (the

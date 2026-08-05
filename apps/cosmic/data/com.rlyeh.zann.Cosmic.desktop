@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=Zann (COSMIC)
+GenericName=Password Manager
+Comment=Browse your zann vault
+# `just cosmic-install` rewrites this to the absolute installed path, so the
+# launcher does not depend on ~/.local/bin being on PATH.
+Exec=zann-cosmic
+Icon=com.rlyeh.zann.Cosmic
+Terminal=false
+Categories=Utility;Security;
+Keywords=password;vault;secret;totp;
+StartupNotify=true
+# Must equal the app's APP_ID, or the compositor shows the window without the
+# launcher's name and icon.
+StartupWMClass=com.rlyeh.zann.Cosmic

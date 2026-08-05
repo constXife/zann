@@ -56,6 +56,52 @@ cosmic-build:
 cosmic-test:
     cd apps/cosmic && cargo test
 
+# Install into ~/.local so the COSMIC launcher can start it like any other app
+cosmic-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd apps/cosmic && cargo build --release && cd ../..
+    install -Dm755 apps/cosmic/target/release/zann-cosmic "$HOME/.local/libexec/zann-cosmic"
+    # winit dlopens libwayland at startup, so a bare Exec= from the launcher
+    # dies with NoWaylandLib on NixOS, where nothing is in a global lib dir.
+    # Bake in the library path of the shell that built it.
+    {
+      echo '#!/usr/bin/env bash'
+      if [ -n "${LD_LIBRARY_PATH:-}" ]; then
+        echo "export LD_LIBRARY_PATH=\"$LD_LIBRARY_PATH\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}\""
+      fi
+      echo 'exec "$HOME/.local/libexec/zann-cosmic" "$@"'
+    } > "$HOME/.local/bin/zann-cosmic"
+    chmod 755 "$HOME/.local/bin/zann-cosmic"
+    # One logo for the whole product, so the icons come from the Tauri app
+    # rather than a second copy of the same PNGs.
+    for pair in 32:32x32 64:64x64 128:128x128 256:128x128@2x 512:icon; do
+      size="${pair%%:*}"; src="${pair##*:}"
+      install -Dm644 "apps/desktop/src-tauri/icons/${src}.png" \
+        "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/com.rlyeh.zann.Cosmic.png"
+    done
+    install -d "$HOME/.local/share/applications"
+    sed "s|^Exec=zann-cosmic$|Exec=$HOME/.local/bin/zann-cosmic|" \
+      apps/cosmic/data/com.rlyeh.zann.Cosmic.desktop \
+      > "$HOME/.local/share/applications/com.rlyeh.zann.Cosmic.desktop"
+    command -v update-desktop-database >/dev/null && \
+      update-desktop-database "$HOME/.local/share/applications" || true
+    command -v gtk-update-icon-cache >/dev/null && \
+      gtk-update-icon-cache -qtf "$HOME/.local/share/icons/hicolor" || true
+    echo "installed: $HOME/.local/bin/zann-cosmic"
+
+cosmic-uninstall:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    rm -f "$HOME/.local/bin/zann-cosmic" "$HOME/.local/libexec/zann-cosmic"
+    rm -f "$HOME/.local/share/applications/com.rlyeh.zann.Cosmic.desktop"
+    for size in 32 64 128 256 512; do
+      rm -f "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/com.rlyeh.zann.Cosmic.png"
+    done
+    command -v update-desktop-database >/dev/null && \
+      update-desktop-database "$HOME/.local/share/applications" || true
+    echo "removed"
+
 db-up:
     podman compose up -d db
 

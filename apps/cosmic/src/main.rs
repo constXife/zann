@@ -60,7 +60,10 @@ impl cosmic::Application for App {
     type Flags = ();
     type Message = Message;
 
-    const APP_ID: &'static str = "dev.zann.Cosmic";
+    /// Matches `StartupWMClass` in `data/com.rlyeh.zann.Cosmic.desktop`, which
+    /// is how the compositor ties the window to the launcher entry, and shares
+    /// the prefix the Tauri app already uses (`com.rlyeh.zann`).
+    const APP_ID: &'static str = "com.rlyeh.zann.Cosmic";
 
     fn core(&self) -> &Core {
         &self.core
