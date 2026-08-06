@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use zann_ffi::{create_core, AppStatusFfi, CoreFacade, ItemDetail, ItemSummary, ItemsFilter, Page};
+use zann_ffi::{
+    create_core, AppStatusFfi, CoreFacade, ItemDetail, ItemSummary, ItemsFilter, Page,
+    StorageSummaryFfi,
+};
 use zann_ui_core::ItemCounts;
 
 use super::{default_db_url, local_root};
@@ -86,4 +89,11 @@ pub fn items(facade: &CoreFacade, cursor: Option<String>) -> Result<ItemsPage, S
 
 pub fn item_get(facade: &CoreFacade, id: String) -> Result<ItemDetail, String> {
     facade.item_get(id).map_err(|err| err.to_string())
+}
+
+/// The servers and local vaults this machine knows about. One small read with
+/// no key derivation behind it, so unlike the rest of this module it is cheap
+/// enough to call straight from an update.
+pub fn storages(facade: &CoreFacade) -> Result<Vec<StorageSummaryFfi>, String> {
+    facade.list_storages().map_err(|err| err.to_string())
 }

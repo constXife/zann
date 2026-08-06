@@ -4,7 +4,7 @@
 
 use zann_cosmic::backend::local;
 use zann_cosmic::backend::remote::{LoginOutcome, Method, ServerProbe};
-use zann_cosmic::screens::detail::Detail;
+use zann_cosmic::screens::detail::{self, Detail};
 use zann_cosmic::screens::{connect, master, vault};
 use zann_cosmic::session::Session;
 use zann_ffi::ItemUpdate;
@@ -276,6 +276,86 @@ fn walk_sources(root: &str) -> Vec<std::path::PathBuf> {
         }
     }
     found
+}
+
+#[test]
+fn a_revealed_field_hides_itself_once_the_setting_says_to() {
+    let (_dir, session) = vault_with_items();
+    let facade = session.facade();
+    let page = local::items(&facade, None).expect("items");
+    let login = page
+        .items
+        .iter()
+        .find(|item| item.type_id == "login")
+        .expect("login in the page");
+    let detail = Detail::parse(local::item_get(&facade, login.id.clone()).expect("item_get"))
+        .expect("parse");
+    let password = detail
+        .fields
+        .iter()
+        .position(|field| field.key == "password")
+        .expect("password field");
+
+    let mut state = vault::State::new(page, None);
+    state.update(vault::Message::Loaded(Ok(detail)), &session);
+
+    // Off by default, so revealing schedules nothing to take it away.
+    let outcome = state.update(
+        vault::Message::Detail(detail::Message::ToggleReveal(password)),
+        &session,
+    );
+    assert!(matches!(outcome, vault::Outcome::None));
+    assert!(state.detail().expect("detail").fields[password].revealed);
+
+    state.set_reveal_seconds(20);
+    let outcome = state.update(
+        vault::Message::Detail(detail::Message::ToggleReveal(password)),
+        &session,
+    );
+    assert!(
+        matches!(outcome, vault::Outcome::None),
+        "hiding again waits for nothing"
+    );
+
+    let outcome = state.update(
+        vault::Message::Detail(detail::Message::ToggleReveal(password)),
+        &session,
+    );
+    assert!(
+        matches!(outcome, vault::Outcome::Task(_)),
+        "revealing starts the clock"
+    );
+
+    // A stale timer belongs to an earlier reveal and leaves this one alone.
+    // Only the third toggle started a clock, so that clock is the first one.
+    state.update(vault::Message::HideRevealed(0), &session);
+    assert!(state.detail().expect("detail").fields[password].revealed);
+
+    state.update(vault::Message::HideRevealed(1), &session);
+    assert!(!state.detail().expect("detail").fields[password].revealed);
+}
+
+#[test]
+fn settings_round_trip_through_a_file() {
+    let mut settings = zann_cosmic::settings::Settings::default();
+    assert_eq!(settings.auto_lock_minutes, 10);
+    assert!(settings.close_to_tray);
+
+    settings.set(zann_cosmic::settings::Change::AutoLockMinutes(30));
+    settings.set(zann_cosmic::settings::Change::CloseToTray(false));
+
+    let text = serde_json::to_string(&settings).expect("serialize");
+    let back: zann_cosmic::settings::Settings = serde_json::from_str(&text).expect("deserialize");
+    assert_eq!(back, settings);
+
+    // A file written by an older build is missing fields, not broken.
+    let partial: zann_cosmic::settings::Settings =
+        serde_json::from_str(r#"{"auto_lock_minutes": 5}"#).expect("partial");
+    assert_eq!(partial.auto_lock_minutes, 5);
+    assert_eq!(
+        partial.clipboard_clear_seconds,
+        zann_cosmic::settings::Settings::default().clipboard_clear_seconds
+    );
 }
 
 #[test]

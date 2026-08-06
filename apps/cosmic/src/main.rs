@@ -12,18 +12,26 @@
 //! [`Session`], and the routing between screens. Each screen in [`screens`]
 //! owns its own state and messages and reports back through its `Outcome`.
 
+use std::time::{Duration, Instant};
+
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::core::layout::Limits;
-use cosmic::iced::{event, window, Event, Size, Subscription};
+use cosmic::iced::{event, keyboard, mouse, window, Event, Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
-use cosmic::{executor, Application, Element};
-use zann_cosmic::screens::{self, connect, master, vault, welcome, Screen};
+use cosmic::{executor, widget, Application, Element};
+use zann_cosmic::backend::{self, local};
+use zann_cosmic::i18n;
+use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};
 use zann_cosmic::session::Session;
+use zann_cosmic::settings::{Change, Settings as AppSettings};
 use zann_cosmic::tray;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Held for the whole run: dropping this takes the icon down with it.
+    // Ahead of the tray, whose menu labels come from the catalogue and would
+    // otherwise be built in whatever language the environment happens to ask
+    // for rather than the one that was chosen.
+    i18n::set_language(AppSettings::load().language.as_deref());
     let has_tray = tray::start(App::APP_ID, "zann");
 
     let settings = Settings::default()
@@ -33,9 +41,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .min_width(WINDOW_MIN.width)
                 .min_height(WINDOW_MIN.height),
         )
-        // Without a tray the window has nowhere to go and no way back, so the
-        // close button has to keep meaning what it says.
-        .exit_on_close(!has_tray);
+        // Never libcosmic's call. Closing is a preference that can change while
+        // the app runs, so both the header button and the compositor come back
+        // as messages and the shell decides then — see `close_intent`.
+        .exit_on_close(false);
 
     cosmic::app::run::<App>(settings, has_tray)?;
     Ok(())
@@ -58,6 +67,10 @@ const NAV_WIDTH: f32 = 288.0;
 const WINDOW_SIZE: Size = Size::new(1200.0, 700.0);
 const WINDOW_MIN: Size = Size::new(1125.0, 650.0);
 
+/// How often the idle check runs. Coarse on purpose: the shortest auto-lock the
+/// settings offer is a minute, so a finer tick would only burn wakeups.
+const IDLE_TICK: Duration = Duration::from_secs(15);
+
 struct App {
     core: Core,
     shell: Shell,
@@ -68,6 +81,15 @@ struct App {
     /// Wayland cannot unmap a window and map it back, so hiding destroys it and
     /// showing builds a new one. This is what says which of the two it is.
     window_open: bool,
+    settings: AppSettings,
+    /// Shown over whatever is underneath rather than replacing it, so opening
+    /// the settings does not throw away the vault's list and its scroll.
+    settings_screen: Option<Box<settings::State>>,
+    last_activity: Instant,
+    /// What we last put on the clipboard, and how many times we have put
+    /// something there. A timer cannot be cancelled once handed to the runtime,
+    /// so the count is what lets a stale one recognise itself and do nothing.
+    clipboard: (String, u64),
 }
 
 #[derive(Clone, Debug)]
@@ -76,15 +98,27 @@ enum Message {
     Connect(connect::Message),
     Master(master::Message),
     Vault(vault::Message),
+    Settings(settings::Message),
     /// Effects the shell owns because they leave the app.
     Copy(String),
     OpenUrl(String),
     Tray(tray::Command),
+    OpenSettings,
     /// The user asked for the window to go away — from the header bar, or from
-    /// the compositor.
-    HideWindow,
+    /// the compositor. What that means is a setting.
+    CloseIntent,
     /// A window is gone, whoever closed it.
     WindowClosed,
+    Unfocused,
+    IdleTick,
+    /// Any input at all. Only for the idle clock, so it carries nothing.
+    Activity,
+    /// The clipboard's time is up, for the copy that was current when it
+    /// started. A newer copy makes this a no-op.
+    ClipboardExpired(u64),
+    /// What the clipboard holds now, so a copy that is no longer ours is left
+    /// alone.
+    ClipboardRead(Option<String>),
 }
 
 /// Lifts a screen's task into the shell's message type.
@@ -113,6 +147,8 @@ impl cosmic::Application for App {
     }
 
     fn init(core: Core, has_tray: Self::Flags) -> (Self, Task<Self::Message>) {
+        let settings = AppSettings::load();
+
         let shell = match Session::open() {
             Ok((session, status)) => {
                 let screen = if status.initialized {
@@ -135,6 +171,10 @@ impl cosmic::Application for App {
             window_width: WINDOW_SIZE.width,
             has_tray,
             window_open: true,
+            settings,
+            settings_screen: None,
+            last_activity: Instant::now(),
+            clipboard: (String::new(), 0),
         };
         app.set_header_title("zann".to_string());
         let task = match app.core.main_window_id() {
@@ -147,7 +187,7 @@ impl cosmic::Application for App {
     /// The header bar's close button. Returning a message is what stops
     /// libcosmic from closing the window itself, so the shell gets to decide.
     fn on_app_exit(&mut self) -> Option<Self::Message> {
-        self.has_tray.then_some(Message::HideWindow)
+        Some(Message::CloseIntent)
     }
 
     /// Called once a surface is gone. Popups close too, so only the one the
@@ -158,39 +198,29 @@ impl cosmic::Application for App {
             .then_some(Message::WindowClosed)
     }
 
-    /// The nav bar belongs to the vault screen.
+    /// The way into the settings, where the system apps keep theirs.
+    fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
+        if matches!(self.shell, Shell::Blocked(_)) || self.settings_screen.is_some() {
+            return Vec::new();
+        }
+        vec![
+            widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
+                .on_press(Message::OpenSettings)
+                .into(),
+        ]
+    }
+
+    /// The nav bar belongs to the vault screen, and the settings cover it.
     fn nav_model(&self) -> Option<&nav_bar::Model> {
+        if self.settings_screen.is_some() {
+            return None;
+        }
         match &self.shell {
             Shell::Ready {
                 screen: Screen::Vault(vault),
                 ..
             } => Some(vault.nav_model()),
             _ => None,
-        }
-    }
-
-    fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<Self::Message> {
-        if let Shell::Ready {
-            screen: Screen::Vault(vault),
-            ..
-        } = &mut self.shell
-        {
-            vault.activate_nav(id);
-        }
-        Task::none()
-    }
-
-    /// The vault lays its two columns out itself, so it has to be told how much
-    /// of the window the nav bar left it.
-    fn on_window_resize(&mut self, _id: cosmic::iced::window::Id, width: f32, _height: f32) {
-        self.window_width = width;
-        let content_width = self.content_width();
-        if let Shell::Ready {
-            screen: Screen::Vault(vault),
-            ..
-        } = &mut self.shell
-        {
-            vault.set_content_width(content_width);
         }
     }
 
@@ -207,51 +237,103 @@ impl cosmic::Application for App {
             _ => Subscription::none(),
         };
 
-        if !self.has_tray {
-            return screen;
-        }
+        let mut subscriptions = vec![screen];
 
         // The header bar's close button arrives through `on_app_exit`, but a
         // close from the compositor is a plain window event once the window is
-        // no longer allowed to act on one by itself.
-        let close = event::listen_with(|event, _, _| {
-            matches!(event, Event::Window(window::Event::CloseRequested))
-                .then_some(Message::HideWindow)
-        });
+        // no longer allowed to act on one by itself. Focus is read the same
+        // way; whether losing it locks is decided in `update`, because
+        // `listen_with` takes a bare `fn` with nothing captured.
+        subscriptions.push(event::listen_with(|event, _, _| match event {
+            Event::Window(window::Event::CloseRequested) => Some(Message::CloseIntent),
+            Event::Window(window::Event::Unfocused) => Some(Message::Unfocused),
+            _ => None,
+        }));
 
-        Subscription::batch([screen, close, tray::subscription().map(Message::Tray)])
+        if self.has_tray {
+            subscriptions.push(tray::subscription().map(Message::Tray));
+        }
+
+        // Idle is measured from discrete input rather than from the pointer
+        // crossing the window: a mouse moved by a cat is not someone reading
+        // their vault, and it would cost a redraw per motion event to believe
+        // otherwise.
+        if self.settings.auto_lock_minutes > 0 && self.is_unlocked() {
+            subscriptions.push(event::listen_with(|event, _, _| match event {
+                Event::Keyboard(keyboard::Event::KeyPressed { .. })
+                | Event::Mouse(mouse::Event::ButtonPressed(_))
+                | Event::Mouse(mouse::Event::WheelScrolled { .. }) => Some(Message::Activity),
+                _ => None,
+            }));
+            subscriptions.push(cosmic::iced::time::every(IDLE_TICK).map(|_| Message::IdleTick));
+        }
+
+        Subscription::batch(subscriptions)
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
-        // Effects that leave the app are the shell's, whoever asked for them.
+        // Effects that leave the app, and the window itself, are the shell's —
+        // whoever asked for them.
         match message {
-            Message::Copy(value) => return cosmic::iced::clipboard::write(value),
+            Message::Copy(value) => return self.copy(value),
             Message::OpenUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
-                    eprintln!("could not open the browser: {err}");
+                    eprintln!("could not open: {err}");
                 }
                 return Task::none();
             }
-            Message::HideWindow => return self.hide_window(),
+            Message::CloseIntent => {
+                return if self.has_tray && self.settings.close_to_tray {
+                    self.hide_window()
+                } else {
+                    self.quit()
+                };
+            }
             Message::WindowClosed => {
                 self.window_open = false;
                 return Task::none();
             }
-            Message::Tray(tray::Command::Show) => return self.show_window(),
-            Message::Tray(tray::Command::Quit) => return cosmic::iced::exit(),
-            Message::Tray(tray::Command::Lock) => {
-                // Only the open vault holds anything worth locking; the other
-                // screens have nothing to take away.
-                if let Shell::Ready {
-                    session,
-                    screen: screen @ Screen::Vault(_),
-                } = &mut self.shell
-                {
-                    session.lock();
-                    *screen = Screen::Master(master::State::new(master::Mode::Unlock, None));
-                }
+            Message::Unfocused => {
+                return if self.settings.lock_on_focus_loss {
+                    self.lock()
+                } else {
+                    Task::none()
+                };
+            }
+            Message::Activity => {
+                self.last_activity = Instant::now();
                 return Task::none();
             }
+            Message::IdleTick => {
+                let idle = Duration::from_secs(u64::from(self.settings.auto_lock_minutes) * 60);
+                return if self.last_activity.elapsed() >= idle {
+                    self.lock()
+                } else {
+                    Task::none()
+                };
+            }
+            Message::ClipboardExpired(generation) => {
+                // A newer copy has replaced the one this timer was started for.
+                if generation != self.clipboard.1 {
+                    return Task::none();
+                }
+                return self.clear_clipboard();
+            }
+            Message::ClipboardRead(current) => {
+                return if current.as_deref() == Some(self.clipboard.0.as_str()) {
+                    self.wipe_clipboard()
+                } else {
+                    Task::none()
+                };
+            }
+            Message::OpenSettings => return self.open_settings(),
+            Message::Tray(tray::Command::Show) => return self.show_window(),
+            Message::Tray(tray::Command::Settings) => {
+                return Task::batch([self.show_window(), self.open_settings()]);
+            }
+            Message::Tray(tray::Command::Quit) => return self.quit(),
+            Message::Tray(tray::Command::Lock) => return self.lock(),
+            Message::Settings(message) => return self.update_settings(message),
             _ => {}
         }
 
@@ -259,6 +341,7 @@ impl cosmic::Application for App {
         // here and applied once that borrow ends.
         let mut lost_session = None;
         let content_width = self.content_width();
+        let reveal_seconds = self.settings.auto_hide_reveal_seconds;
 
         let task = {
             let Shell::Ready { session, screen } = &mut self.shell else {
@@ -332,6 +415,7 @@ impl cosmic::Application for App {
                         master::Outcome::Opened { page, sync_error } => {
                             let mut vault = vault::State::new(page, sync_error);
                             vault.set_content_width(content_width);
+                            vault.set_reveal_seconds(reveal_seconds);
                             *screen = Screen::Vault(Box::new(vault));
                             Task::none()
                         }
@@ -366,19 +450,192 @@ impl cosmic::Application for App {
     }
 
     fn view(&self) -> Element<'_, Self::Message> {
-        match &self.shell {
-            Shell::Blocked(reason) => blocked_view(reason),
-            Shell::Ready { screen, .. } => match screen {
-                Screen::Welcome => welcome::view().map(Message::Welcome),
-                Screen::Connect(state) => state.view().map(Message::Connect),
-                Screen::Master(state) => state.view().map(Message::Master),
-                Screen::Vault(state) => state.view().map(Message::Vault),
+        match self.settings_screen.as_ref() {
+            Some(settings) => settings.view().map(Message::Settings),
+            None => match &self.shell {
+                Shell::Blocked(reason) => blocked_view(reason),
+                Shell::Ready { screen, .. } => match screen {
+                    Screen::Welcome => welcome::view().map(Message::Welcome),
+                    Screen::Connect(state) => state.view().map(Message::Connect),
+                    Screen::Master(state) => state.view().map(Message::Master),
+                    Screen::Vault(state) => state.view().map(Message::Vault),
+                },
             },
         }
     }
 }
 
 impl App {
+    /// Whether there is anything worth locking. The other screens hold nothing.
+    fn is_unlocked(&self) -> bool {
+        matches!(
+            &self.shell,
+            Shell::Ready {
+                screen: Screen::Vault(_),
+                ..
+            }
+        )
+    }
+
+    fn open_settings(&mut self) -> Task<Message> {
+        if self.settings_screen.is_some() {
+            return Task::none();
+        }
+        let storages = match &self.shell {
+            Shell::Ready { session, .. } => local::storages(&session.facade()).unwrap_or_default(),
+            Shell::Blocked(_) => Vec::new(),
+        };
+        self.settings_screen = Some(Box::new(settings::State::new(
+            self.settings.clone(),
+            storages,
+        )));
+        Task::none()
+    }
+
+    fn update_settings(&mut self, message: settings::Message) -> Task<Message> {
+        let Some(state) = self.settings_screen.as_mut() else {
+            return Task::none();
+        };
+        match state.update(message) {
+            settings::Outcome::None => Task::none(),
+            settings::Outcome::Task(task) => lift(task, Message::Settings),
+            settings::Outcome::OpenUrl(url) => cosmic::task::message(Message::OpenUrl(url)),
+            settings::Outcome::Close => {
+                self.settings_screen = None;
+                Task::none()
+            }
+            settings::Outcome::AddServer => {
+                self.settings_screen = None;
+                if let Shell::Ready { screen, .. } = &mut self.shell {
+                    *screen = Screen::Connect(Box::default());
+                }
+                Task::none()
+            }
+            settings::Outcome::Changed(change) => self.change_setting(change),
+            settings::Outcome::Sync(storage_id) => {
+                let Shell::Ready { session, .. } = &self.shell else {
+                    return Task::none();
+                };
+                let facade = session.facade();
+                lift(
+                    cosmic::task::future(async move {
+                        settings::Message::Synced(
+                            backend::off_thread(move || local::sync(&facade, Some(storage_id)))
+                                .await,
+                        )
+                    }),
+                    Message::Settings,
+                )
+            }
+        }
+    }
+
+    /// A change lands in three places: the shell's copy, the file, and the
+    /// screen that drew the control — which is told rather than left to assume,
+    /// so a write that failed does not show as one that worked.
+    fn change_setting(&mut self, change: Change) -> Task<Message> {
+        self.settings.set(change);
+        if matches!(change, Change::Language(_)) {
+            i18n::set_language(self.settings.language.as_deref());
+            tray::refresh();
+        }
+        if let Err(err) = self.settings.save() {
+            eprintln!("could not save the settings: {err}");
+        }
+        if let Some(state) = self.settings_screen.as_mut() {
+            state.settings_changed(self.settings.clone());
+        }
+        if let Shell::Ready {
+            screen: Screen::Vault(vault),
+            ..
+        } = &mut self.shell
+        {
+            vault.set_reveal_seconds(self.settings.auto_hide_reveal_seconds);
+        }
+        Task::none()
+    }
+
+    /// Locks the vault and shows the unlock screen, taking the clipboard with
+    /// it if that is what the settings ask for.
+    fn lock(&mut self) -> Task<Message> {
+        let Shell::Ready {
+            session,
+            screen: screen @ Screen::Vault(_),
+        } = &mut self.shell
+        else {
+            return Task::none();
+        };
+        session.lock();
+        *screen = Screen::Master(master::State::new(master::Mode::Unlock, None));
+        self.settings_screen = None;
+
+        if self.settings.clipboard_clear_on_lock {
+            self.clear_clipboard()
+        } else {
+            Task::none()
+        }
+    }
+
+    fn quit(&mut self) -> Task<Message> {
+        if self.settings.clipboard_clear_on_exit {
+            // The clear has to land before the runtime stops, so it is chained
+            // rather than left as a task the exit would outrun.
+            return self.wipe_clipboard().chain(cosmic::iced::exit());
+        }
+        cosmic::iced::exit()
+    }
+
+    /// Puts a secret on the clipboard and starts its clock. There is no
+    /// cancelling a task already handed to the runtime, so a later copy is
+    /// recognised by the count rather than by stopping the earlier timer.
+    fn copy(&mut self, value: String) -> Task<Message> {
+        self.clipboard.0 = value.clone();
+        self.clipboard.1 += 1;
+        let generation = self.clipboard.1;
+        let write = cosmic::iced::clipboard::write(value);
+
+        let seconds = u64::from(self.settings.clipboard_clear_seconds);
+        if seconds == 0 {
+            return write;
+        }
+        Task::batch([
+            write,
+            cosmic::task::future(async move {
+                tokio::time::sleep(Duration::from_secs(seconds)).await;
+                Message::ClipboardExpired(generation)
+            }),
+        ])
+    }
+
+    /// Takes back what we put there — but only ours, if the settings say so.
+    /// Reading first costs a round trip through the runtime, which is why the
+    /// answer comes back as a message.
+    fn clear_clipboard(&mut self) -> Task<Message> {
+        if self.clipboard.0.is_empty() {
+            return Task::none();
+        }
+        if self.settings.clipboard_clear_if_unchanged {
+            return cosmic::iced::clipboard::read()
+                .map(|value| cosmic::Action::App(Message::ClipboardRead(value)));
+        }
+        self.wipe_clipboard()
+    }
+
+    fn wipe_clipboard(&mut self) -> Task<Message> {
+        self.clipboard.0.clear();
+        cosmic::iced::clipboard::write(String::new())
+    }
+
+    /// What is left of the window once the nav bar has taken its share — which
+    /// is nothing when the user has collapsed it from the header bar.
+    fn content_width(&self) -> f32 {
+        if self.core.nav_bar_active() {
+            self.window_width - NAV_WIDTH
+        } else {
+            self.window_width
+        }
+    }
+
     /// Into the tray. There is no hiding a window on Wayland — winit says as
     /// much — so this destroys it. Nothing is lost with it: every bit of state
     /// the app has, including the open [`Session`], lives in `App`.
@@ -389,7 +646,12 @@ impl App {
         let Some(id) = self.core.main_window_id().filter(|_| self.window_open) else {
             return Task::none();
         };
-        window::close(id)
+        let lock = if self.settings.lock_on_hidden {
+            self.lock()
+        } else {
+            Task::none()
+        };
+        Task::batch([lock, window::close(id)])
     }
 
     /// Back out of it, into a new window that the shell then treats as its main
@@ -405,16 +667,6 @@ impl App {
         self.window_open = true;
         let title = self.set_window_title("zann".to_string(), id);
         Task::batch([task.discard(), title])
-    }
-
-    /// What is left of the window once the nav bar has taken its share — which
-    /// is nothing when the user has collapsed it from the header bar.
-    fn content_width(&self) -> f32 {
-        if self.core.nav_bar_active() {
-            self.window_width - NAV_WIDTH
-        } else {
-            self.window_width
-        }
     }
 }
 

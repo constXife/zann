@@ -37,7 +37,7 @@ fn local_root() -> PathBuf {
 }
 
 /// The client state and identity config live next to the database file.
-fn client_root(db_url: &str) -> PathBuf {
+pub(crate) fn client_root(db_url: &str) -> PathBuf {
     db_url
         .strip_prefix("sqlite://")
         .and_then(|path| Path::new(path).parent().map(Path::to_path_buf))
