@@ -393,6 +393,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
 }
 
 #[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn push_cannot_touch_items_from_another_vault() {
     let app = TestApp::new().await;
 
