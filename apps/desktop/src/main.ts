@@ -7,8 +7,10 @@ import { fas } from "@fortawesome/free-solid-svg-icons";
 import { far } from "@fortawesome/free-regular-svg-icons";
 import { fab } from "@fortawesome/free-brands-svg-icons";
 import App from "./App.vue";
-import en from "./i18n/locales/en.json";
-import ru from "./i18n/locales/ru.json";
+// The catalogue is shared with the COSMIC client, which reads the same files
+// through `zann-ui-core`, so it lives at the repo root rather than in here.
+import en from "../../../i18n/en.json";
+import ru from "../../../i18n/ru.json";
 import "./styles.css";
 
 const logError = (label: string, value: unknown) => {

@@ -7,6 +7,7 @@ Full contribution rules live in `CONTRIBUTING.md`; this file is a brief, practic
 - `apps/desktop/` holds the Tauri desktop app (frontend + `src-tauri/` backend).
 - `config/` stores environment and policy configs (use `config/config.example.yaml` as a template).
 - `schemas/` includes specs and schema artifacts; `docs/` contains documentation and screenshots.
+- `i18n/` holds the translation catalogue both clients share — the desktop app imports it into `vue-i18n`, the COSMIC app reads it through `zann-ui-core`. Add a string to every language, not just one: a test fails on a key that only exists on one side.
 - `loadtest/` and `grafana/` hold performance tooling; `scripts/` has helper scripts and hooks.
 
 ## Build, Test, and Development Commands
