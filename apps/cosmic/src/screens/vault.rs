@@ -1,9 +1,13 @@
-//! The open vault: nav categories, the item list, and the detail drawer.
+//! The open vault: nav categories, the item list, and the detail column.
+//!
+//! The nav bar is the shell's (libcosmic draws it from [`State::nav_model`]);
+//! the two columns in here are the same split the desktop app has, down to the
+//! widths in [`layout`], so a reader moving between the clients is not asked to
+//! learn a second shape.
 
 use std::time::Duration;
 
-use cosmic::app::context_drawer::{self, ContextDrawer};
-use cosmic::iced::{Alignment, Length, Subscription, Task};
+use cosmic::iced::{event, mouse, Alignment, Event, Length, Subscription, Task};
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
 use cosmic::{theme, widget, Element};
@@ -50,6 +54,17 @@ fn category_icon(schema_icon: &str) -> &'static str {
     }
 }
 
+/// The widths the desktop app's `useAppLayout.ts` uses, so the split lands in
+/// the same place in both clients. The list is the column that carries a width;
+/// the detail takes whatever is left.
+mod layout {
+    pub const LIST_MIN: f32 = 320.0;
+    pub const LIST_MAX: f32 = 560.0;
+    pub const LIST_DEFAULT: f32 = 400.0;
+    pub const DETAIL_MIN: f32 = 560.0;
+    pub const HANDLE: f32 = 5.0;
+}
+
 fn item_icon(type_id: &str) -> &'static str {
     match type_id {
         "login" => "dialog-password-symbolic",
@@ -59,6 +74,14 @@ fn item_icon(type_id: &str) -> &'static str {
         "api" => "network-server-symbolic",
         _ => "view-list-symbolic",
     }
+}
+
+/// A held splitter. Pressing it does not say where the pointer is, so the
+/// origin is recorded on the first move and every later move is a delta from
+/// there — which also means a press that never moves changes nothing.
+struct Drag {
+    origin_x: Option<f32>,
+    origin_width: f32,
 }
 
 pub struct State {
@@ -71,6 +94,12 @@ pub struct State {
     detail: Option<Detail>,
     busy: bool,
     error: Option<String>,
+    /// The width the user dragged the list to. Kept as their intent even while
+    /// a narrow window forces a smaller one, so it returns when the room does.
+    list_width: f32,
+    /// How much room the shell says the two columns have between them.
+    content_width: f32,
+    drag: Option<Drag>,
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +114,9 @@ pub enum Message {
     CloseDetail,
     Lock,
     Tick,
+    ResizeStart,
+    ResizeMove(f32),
+    ResizeEnd,
 }
 
 pub enum Outcome {
@@ -92,8 +124,6 @@ pub enum Outcome {
     Task(Task<Message>),
     /// The clipboard belongs to the shell.
     Copy(String),
-    /// The drawer opened or closed; the shell owns that part of the window.
-    ShowDetail(bool),
     Locked,
 }
 
@@ -109,6 +139,10 @@ impl State {
             detail: None,
             busy: false,
             error: sync_error.map(|err| format!("sync failed: {err}")),
+            list_width: layout::LIST_DEFAULT,
+            // Enough for the default split until the shell reports the window.
+            content_width: layout::LIST_DEFAULT + layout::HANDLE + layout::DETAIL_MIN,
+            drag: None,
         };
         state.apply_page(page, true);
         state.rebuild_nav();
@@ -117,6 +151,25 @@ impl State {
 
     pub fn nav_model(&self) -> &nav_bar::Model {
         &self.nav
+    }
+
+    /// The shell owns the window, so it is the one that knows how much of it
+    /// the nav bar left for these two columns.
+    pub fn set_content_width(&mut self, width: f32) {
+        self.content_width = width;
+    }
+
+    /// Where the splitter currently sits, held to what the window allows.
+    pub fn list_width(&self) -> f32 {
+        self.clamped_list_width(self.list_width)
+    }
+
+    /// The stored width, held to what the window can actually give it. A window
+    /// too narrow for both minimums keeps the list at its own minimum and lets
+    /// the detail take the squeeze, which is the order the desktop app uses.
+    fn clamped_list_width(&self, width: f32) -> f32 {
+        let room = self.content_width - layout::HANDLE - layout::DETAIL_MIN;
+        width.min(room.min(layout::LIST_MAX)).max(layout::LIST_MIN)
     }
 
     /// The items the current category, folder and search leave visible.
@@ -135,26 +188,32 @@ impl State {
         self.nav.activate(id);
     }
 
-    pub fn context_drawer(&self) -> Option<ContextDrawer<'_, Message>> {
-        let detail = self.detail.as_ref()?;
-        Some(
-            context_drawer::context_drawer(
-                detail.view().map(Message::Detail),
-                Message::CloseDetail,
-            )
-            .title(detail.title.clone()),
-        )
-    }
-
-    /// One-time codes roll over every period, so an open drawer with one needs
-    /// a redraw every second.
     pub fn subscription(&self) -> Subscription<Message> {
-        match self.detail.as_ref() {
-            Some(detail) if detail.has_totp() => {
-                cosmic::iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick)
-            }
-            _ => Subscription::none(),
+        let mut subscriptions = Vec::with_capacity(2);
+
+        // One-time codes roll over every period, so a shown one needs a redraw
+        // every second.
+        if self.detail.as_ref().is_some_and(Detail::has_totp) {
+            subscriptions
+                .push(cosmic::iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick));
         }
+
+        // A splitter has to keep following the pointer after it leaves the few
+        // pixels it was pressed on, so the drag is tracked window-wide and only
+        // while it lasts.
+        if self.drag.is_some() {
+            subscriptions.push(event::listen_with(|event, _, _| match event {
+                Event::Mouse(mouse::Event::CursorMoved { position }) => {
+                    Some(Message::ResizeMove(position.x))
+                }
+                Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                    Some(Message::ResizeEnd)
+                }
+                _ => None,
+            }));
+        }
+
+        Subscription::batch(subscriptions)
     }
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
@@ -200,10 +259,7 @@ impl State {
                 }));
             }
 
-            Message::Loaded(Ok(detail)) => {
-                self.detail = Some(detail);
-                return Outcome::ShowDetail(true);
-            }
+            Message::Loaded(Ok(detail)) => self.detail = Some(detail),
 
             Message::Loaded(Err(err)) => self.error = Some(err),
 
@@ -215,10 +271,7 @@ impl State {
                 }
             }
 
-            Message::CloseDetail => {
-                self.detail = None;
-                return Outcome::ShowDetail(false);
-            }
+            Message::CloseDetail => self.detail = None,
 
             Message::Lock => {
                 session.lock();
@@ -226,11 +279,78 @@ impl State {
             }
 
             Message::Tick => {}
+
+            Message::ResizeStart => {
+                self.drag = Some(Drag {
+                    origin_x: None,
+                    origin_width: self.list_width,
+                });
+            }
+
+            Message::ResizeMove(x) => {
+                let Some(drag) = self.drag.as_mut() else {
+                    return Outcome::None;
+                };
+                let origin_x = *drag.origin_x.get_or_insert(x);
+                let desired = drag.origin_width + (x - origin_x);
+                self.list_width = self.clamped_list_width(desired);
+            }
+
+            Message::ResizeEnd => self.drag = None,
         }
         Outcome::None
     }
 
     pub fn view(&self) -> Element<'_, Message> {
+        widget::row::with_capacity(3)
+            .push(widget::container(self.list_view()).width(Length::Fixed(self.list_width())))
+            .push(self.handle_view())
+            .push(widget::container(self.detail_view()).width(Length::Fill))
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// The splitter. It is wider than the line it draws so there is something
+    /// to grab; the pointer says so before the press does.
+    fn handle_view(&self) -> Element<'_, Message> {
+        widget::divider::vertical::default()
+            .apply(widget::container)
+            .width(Length::Fixed(layout::HANDLE))
+            .height(Length::Fill)
+            .align_x(Alignment::Center)
+            .apply(widget::mouse_area)
+            .interaction(mouse::Interaction::ResizingHorizontally)
+            .on_press(Message::ResizeStart)
+            .into()
+    }
+
+    /// The column stays in place with nothing selected, the way the desktop
+    /// app's details panel does, so selecting an item does not reflow the list.
+    fn detail_view(&self) -> Element<'_, Message> {
+        let spacing = theme::spacing();
+
+        let Some(detail) = self.detail.as_ref() else {
+            return super::centered(widget::text::body("Select an item to read it."));
+        };
+
+        let header = widget::row::with_capacity(2)
+            .push(widget::text::title4(detail.title.clone()).width(Length::Fill))
+            .push(
+                widget::button::icon(widget::icon::from_name("window-close-symbolic"))
+                    .on_press(Message::CloseDetail),
+            )
+            .spacing(spacing.space_xs)
+            .align_y(Alignment::Center);
+
+        widget::column::with_capacity(2)
+            .push(header)
+            .push(widget::scrollable(detail.view().map(Message::Detail)).height(Length::Fill))
+            .spacing(spacing.space_s)
+            .padding(spacing.space_s)
+            .into()
+    }
+
+    fn list_view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let visible = self.visible();
 

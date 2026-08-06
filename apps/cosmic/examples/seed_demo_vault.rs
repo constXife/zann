@@ -22,7 +22,7 @@ const DEMO_ITEMS: &[(&str, &str, &str)] = &[
     ("scratch", "note", "nothing to see here"),
 ];
 
-/// A login with a masked password and a one-time code, so the detail drawer has
+/// A login with a masked password and a one-time code, so the detail column has
 /// something to hide and something to count down.
 const DEMO_LOGIN: &str = r#"{
   "v": 1,

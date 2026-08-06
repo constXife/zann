@@ -13,6 +13,7 @@
 //! owns its own state and messages and reports back through its `Outcome`.
 
 use cosmic::app::{Core, Settings, Task};
+use cosmic::iced::core::layout::Limits;
 use cosmic::iced::{Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
@@ -21,7 +22,11 @@ use zann_cosmic::screens::{self, connect, master, vault, welcome, Screen};
 use zann_cosmic::session::Session;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let settings = Settings::default().size(Size::new(1000.0, 700.0));
+    let settings = Settings::default().size(WINDOW_SIZE).size_limits(
+        Limits::NONE
+            .min_width(WINDOW_MIN.width)
+            .min_height(WINDOW_MIN.height),
+    );
     cosmic::app::run::<App>(settings, ())?;
     Ok(())
 }
@@ -34,9 +39,19 @@ enum Shell {
     Ready { session: Session, screen: Screen },
 }
 
+/// What libcosmic reserves for the nav bar: 280px plus the 8px of padding it
+/// puts beside it. The same pair drives its own condensed-layout breakpoint.
+const NAV_WIDTH: f32 = 288.0;
+
+/// Matches the Tauri app's window, whose minimum is the width at which its
+/// three columns still hold their own minimums.
+const WINDOW_SIZE: Size = Size::new(1200.0, 700.0);
+const WINDOW_MIN: Size = Size::new(1125.0, 650.0);
+
 struct App {
     core: Core,
     shell: Shell,
+    window_width: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -90,7 +105,11 @@ impl cosmic::Application for App {
             Err(err) => Shell::Blocked(err),
         };
 
-        let mut app = App { core, shell };
+        let mut app = App {
+            core,
+            shell,
+            window_width: WINDOW_SIZE.width,
+        };
         app.set_header_title("zann".to_string());
         let task = match app.core.main_window_id() {
             Some(id) => app.set_window_title("zann".to_string(), id),
@@ -121,15 +140,17 @@ impl cosmic::Application for App {
         Task::none()
     }
 
-    fn context_drawer(&self) -> Option<cosmic::app::context_drawer::ContextDrawer<'_, Message>> {
-        match &self.shell {
-            Shell::Ready {
-                screen: Screen::Vault(vault),
-                ..
-            } => vault
-                .context_drawer()
-                .map(|drawer| drawer.map(Message::Vault)),
-            _ => None,
+    /// The vault lays its two columns out itself, so it has to be told how much
+    /// of the window the nav bar left it.
+    fn on_window_resize(&mut self, _id: cosmic::iced::window::Id, width: f32, _height: f32) {
+        self.window_width = width;
+        let content_width = self.content_width();
+        if let Shell::Ready {
+            screen: Screen::Vault(vault),
+            ..
+        } = &mut self.shell
+        {
+            vault.set_content_width(content_width);
         }
     }
 
@@ -163,6 +184,7 @@ impl cosmic::Application for App {
         // The screens borrow `self.shell`, so losing the session is recorded
         // here and applied once that borrow ends.
         let mut lost_session = None;
+        let content_width = self.content_width();
 
         let task = {
             let Shell::Ready { session, screen } = &mut self.shell else {
@@ -234,7 +256,9 @@ impl cosmic::Application for App {
                         master::Outcome::None => Task::none(),
                         master::Outcome::Task(task) => lift(task, Message::Master),
                         master::Outcome::Opened { page, sync_error } => {
-                            *screen = Screen::Vault(Box::new(vault::State::new(page, sync_error)));
+                            let mut vault = vault::State::new(page, sync_error);
+                            vault.set_content_width(content_width);
+                            *screen = Screen::Vault(Box::new(vault));
                             Task::none()
                         }
                     }
@@ -248,12 +272,7 @@ impl cosmic::Application for App {
                         vault::Outcome::None => Task::none(),
                         vault::Outcome::Task(task) => lift(task, Message::Vault),
                         vault::Outcome::Copy(value) => cosmic::task::message(Message::Copy(value)),
-                        vault::Outcome::ShowDetail(show) => {
-                            self.core.set_show_context(show);
-                            Task::none()
-                        }
                         vault::Outcome::Locked => {
-                            self.core.set_show_context(false);
                             *screen =
                                 Screen::Master(master::State::new(master::Mode::Unlock, None));
                             Task::none()
@@ -281,6 +300,18 @@ impl cosmic::Application for App {
                 Screen::Master(state) => state.view().map(Message::Master),
                 Screen::Vault(state) => state.view().map(Message::Vault),
             },
+        }
+    }
+}
+
+impl App {
+    /// What is left of the window once the nav bar has taken its share — which
+    /// is nothing when the user has collapsed it from the header bar.
+    fn content_width(&self) -> f32 {
+        if self.core.nav_bar_active() {
+            self.window_width - NAV_WIDTH
+        } else {
+            self.window_width
         }
     }
 }

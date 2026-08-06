@@ -1,4 +1,4 @@
-//! Item detail: turning a decrypted payload into fields the drawer can show.
+//! Item detail: turning a decrypted payload into fields the column can show.
 //!
 //! Owned by [`super::vault`], which wraps these messages in its own.
 

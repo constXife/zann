@@ -39,6 +39,29 @@ shell acts on. Two rules keep this from eroding:
 - no `Option` for something that always exists once the app is running, which is
   why `Session` is not optional and a missing database is a separate shell state.
 
+## The three columns
+
+The open vault is the same shape as the Tauri app: nav categories, the item
+list, the item detail. Only the first is libcosmic's — it is the standard nav
+bar, drawn by the shell from `vault::State::nav_model`, and the header bar's
+toggle collapses it the way the desktop sidebar collapses.
+
+The other two are the vault screen's own `row`, not libcosmic's context drawer.
+The drawer would have done it — setting `core.window.context_is_overlay = false`
+turns it into a real third column — but its width is computed, and the desktop
+app lets the reader drag the boundary. So the split is ours: a `mouse_area` over
+a divider starts the drag, and a window-wide subscription follows the pointer
+until the button comes back up, because it leaves those few pixels immediately.
+
+The widths in `screens::vault::layout` are the ones from the desktop app's
+`useAppLayout.ts`, so the split lands in the same place in both clients, and the
+window's minimum is the width at which both columns still fit their minimums.
+Only the list carries a width; the detail takes what is left, and stays in place
+with nothing selected so that selecting an item never reflows the list.
+
+The shell is the one that knows how much of the window the nav bar left, so it
+tells the screen through `set_content_width` rather than the screen guessing.
+
 ## Prereqs
 
 libcosmic's `rust-version` is ahead of the workspace pin in
@@ -123,7 +146,7 @@ Both variables are required. The seed creates a real vault, so its master
 password is yours to choose rather than a constant published here.
 
 It writes a few key/value items plus one login with a masked password and a
-one-time code, so the detail drawer has something to hide and to count down.
+one-time code, so the detail column has something to hide and to count down.
 
 ## Connecting without a server
 
