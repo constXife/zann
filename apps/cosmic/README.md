@@ -53,6 +53,22 @@ Nothing checks those keys at compile time, so `every_key_the_app_asks_for_is_in_
 does it instead: it reads the sources, picks out anything key-shaped, and fails
 on one the catalogue has never heard of.
 
+## The header bar's menu
+
+COSMIC has no global menu bar — its apps keep theirs in their own header, beside
+the nav-bar toggle, and `header_start` is where this one goes. Lock, Settings
+and Quit live there because they act on the app rather than on whatever screen
+is showing; locking sat in the item list's toolbar first, where it read as an
+action on the list.
+
+The menu prints the shortcut beside each item but does not listen for it, so the
+`subscription` matches `menu::KeyBind` itself. `KeyBind::matches` falls back to
+the physical key, which is what keeps Ctrl+L working on a layout where that key
+does not produce an `l`.
+
+Lock stays in the menu while the vault is shut, disabled rather than hidden, so
+the menu does not change shape between screens.
+
 ## The three columns
 
 The open vault is the same shape as the Tauri app: nav categories, the item

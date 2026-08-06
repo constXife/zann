@@ -165,11 +165,6 @@ fn vault_filters_the_list_and_forwards_copies() {
         &session,
     );
     assert!(matches!(outcome, vault::Outcome::Copy(value) if value == "s3cret"));
-
-    assert!(matches!(
-        state.update(vault::Message::Lock, &session),
-        vault::Outcome::Locked
-    ));
 }
 
 #[test]

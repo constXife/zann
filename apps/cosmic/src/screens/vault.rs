@@ -28,7 +28,7 @@ fn category_icon(schema_icon: &str) -> &'static str {
         "grid" => "view-grid-symbolic",
         "key" => "dialog-password-symbolic",
         "doc" => "text-x-generic-symbolic",
-        "card" => "credit-card-symbolic",
+        "card" => "payment-card-symbolic",
         "person" => "contact-new-symbolic",
         "network" => "network-server-symbolic",
         "list" => "view-list-symbolic",
@@ -52,7 +52,7 @@ fn item_icon(type_id: &str) -> &'static str {
     match type_id {
         "login" => "dialog-password-symbolic",
         "note" => "text-x-generic-symbolic",
-        "card" => "credit-card-symbolic",
+        "card" => "payment-card-symbolic",
         "identity" => "contact-new-symbolic",
         "api" => "network-server-symbolic",
         _ => "view-list-symbolic",
@@ -103,7 +103,6 @@ pub enum Message {
     /// clock started.
     HideRevealed(u64),
     CloseDetail,
-    Lock,
     Tick,
     ResizeStart,
     ResizeMove(f32),
@@ -115,7 +114,6 @@ pub enum Outcome {
     Task(Task<Message>),
     /// The clipboard belongs to the shell.
     Copy(String),
-    Locked,
 }
 
 impl State {
@@ -301,11 +299,6 @@ impl State {
 
             Message::CloseDetail => self.detail = None,
 
-            Message::Lock => {
-                session.lock();
-                return Outcome::Locked;
-            }
-
             Message::Tick => {}
 
             Message::ResizeStart => {
@@ -382,16 +375,12 @@ impl State {
         let spacing = theme::spacing();
         let visible = self.visible();
 
-        let toolbar = widget::row::with_capacity(2)
-            .push(
-                widget::text_input::search_input(t("items.searchPlaceholder"), &self.query)
-                    .on_input(Message::QueryInput)
-                    .on_clear(Message::ClearQuery)
-                    .width(Length::Fill),
-            )
-            .push(widget::button::standard(t("common.lock")).on_press(Message::Lock))
-            .spacing(spacing.space_xs)
-            .align_y(Alignment::Center);
+        // Only the search: locking is an action on the app, not on this list,
+        // and lives in the header bar's menu with the rest of them.
+        let toolbar = widget::text_input::search_input(t("items.searchPlaceholder"), &self.query)
+            .on_input(Message::QueryInput)
+            .on_clear(Message::ClearQuery)
+            .width(Length::Fill);
 
         let list: Element<'_, Message> = if visible.is_empty() {
             widget::text::body(t("items.noItems"))

@@ -12,13 +12,15 @@
 //! [`Session`], and the routing between screens. Each screen in [`screens`]
 //! owns its own state and messages and reports back through its `Outcome`.
 
+use std::collections::HashMap;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::core::layout::Limits;
 use cosmic::iced::{event, keyboard, mouse, window, Event, Size, Subscription};
 use cosmic::prelude::*;
-use cosmic::widget::nav_bar;
+use cosmic::widget::{menu, nav_bar};
 use cosmic::{executor, widget, Application, Element};
 use zann_cosmic::backend::{self, local};
 use zann_cosmic::i18n;
@@ -121,6 +123,45 @@ enum Message {
     ClipboardRead(Option<String>),
 }
 
+/// What the header bar's menu can do. Separate from [`Message`] because the
+/// menu matches actions against the key binds by equality, which a message
+/// carrying a `String` could not do.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Action {
+    Lock,
+    Settings,
+    Quit,
+}
+
+impl menu::Action for Action {
+    type Message = Message;
+
+    fn message(&self) -> Message {
+        match self {
+            Self::Lock => Message::Tray(tray::Command::Lock),
+            Self::Settings => Message::OpenSettings,
+            Self::Quit => Message::Tray(tray::Command::Quit),
+        }
+    }
+}
+
+/// The shortcuts, which the menu also reads to print the hint beside each item.
+/// The same pair the desktop app binds, so muscle memory carries over.
+fn key_binds() -> &'static HashMap<menu::KeyBind, Action> {
+    static BINDS: OnceLock<HashMap<menu::KeyBind, Action>> = OnceLock::new();
+    BINDS.get_or_init(|| {
+        let bind = |character: &str| menu::KeyBind {
+            modifiers: vec![menu::key_bind::Modifier::Ctrl],
+            key: keyboard::Key::Character(character.into()),
+        };
+        HashMap::from([
+            (bind("l"), Action::Lock),
+            (bind(","), Action::Settings),
+            (bind("q"), Action::Quit),
+        ])
+    })
+}
+
 /// Lifts a screen's task into the shell's message type.
 fn lift<M: Send + 'static>(task: cosmic::iced::Task<M>, wrap: fn(M) -> Message) -> Task<Message> {
     task.map(move |message| cosmic::Action::App(wrap(message)))
@@ -198,16 +239,55 @@ impl cosmic::Application for App {
             .then_some(Message::WindowClosed)
     }
 
-    /// The way into the settings, where the system apps keep theirs.
-    fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
-        if matches!(self.shell, Shell::Blocked(_)) || self.settings_screen.is_some() {
+    /// COSMIC has no global menu bar; the apps keep theirs in their own header,
+    /// beside the nav-bar toggle. This is that menu — everything here acts on
+    /// the app rather than on whatever screen happens to be showing, which is
+    /// why locking lives here and not in the item list's toolbar.
+    fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
+        if matches!(self.shell, Shell::Blocked(_)) {
             return Vec::new();
         }
-        vec![
-            widget::button::icon(widget::icon::from_name("preferences-system-symbolic"))
-                .on_press(Message::OpenSettings)
-                .into(),
-        ]
+
+        let unlocked = self.is_unlocked();
+        let lock = if unlocked {
+            menu::Item::Button
+        } else {
+            // Nothing to lock yet, but the item stays so the menu does not
+            // change shape between screens.
+            menu::Item::ButtonDisabled
+        }(
+            i18n::t("common.lock"),
+            Some(widget::icon::from_name("system-lock-screen-symbolic").handle()),
+            Action::Lock,
+        );
+
+        let items = menu::items(
+            key_binds(),
+            vec![
+                lock,
+                menu::Item::Button(
+                    i18n::t("common.settings"),
+                    Some(widget::icon::from_name("preferences-system-symbolic").handle()),
+                    Action::Settings,
+                ),
+                menu::Item::Divider,
+                menu::Item::Button(
+                    i18n::t("common.quit"),
+                    Some(widget::icon::from_name("application-exit-symbolic").handle()),
+                    Action::Quit,
+                ),
+            ],
+        );
+
+        let root = widget::button::icon(widget::icon::from_name("open-menu-symbolic"))
+            .class(cosmic::theme::Button::MenuRoot)
+            .apply(Element::from)
+            .apply(widget::RcElementWrapper::new);
+
+        vec![menu::bar(vec![menu::Tree::with_children(root, items)])
+            .item_width(menu::ItemWidth::Uniform(240))
+            .item_height(menu::ItemHeight::Uniform(36))
+            .into()]
     }
 
     /// The nav bar belongs to the vault screen, and the settings cover it.
@@ -247,6 +327,19 @@ impl cosmic::Application for App {
         subscriptions.push(event::listen_with(|event, _, _| match event {
             Event::Window(window::Event::CloseRequested) => Some(Message::CloseIntent),
             Event::Window(window::Event::Unfocused) => Some(Message::Unfocused),
+            // The menu prints the shortcuts but does not listen for them, so
+            // this is where they are matched. `KeyBind` falls back to the
+            // physical key, which is what makes Ctrl+L work on a layout where
+            // that key does not produce an `l`.
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                ref key,
+                ref physical_key,
+                modifiers,
+                ..
+            }) => key_binds()
+                .iter()
+                .find(|(bind, _)| bind.matches(modifiers, key, Some(physical_key)))
+                .map(|(_, action)| menu::Action::message(action)),
             _ => None,
         }));
 
@@ -430,11 +523,6 @@ impl cosmic::Application for App {
                         vault::Outcome::None => Task::none(),
                         vault::Outcome::Task(task) => lift(task, Message::Vault),
                         vault::Outcome::Copy(value) => cosmic::task::message(Message::Copy(value)),
-                        vault::Outcome::Locked => {
-                            *screen =
-                                Screen::Master(master::State::new(master::Mode::Unlock, None));
-                            Task::none()
-                        }
                     }
                 }
 
