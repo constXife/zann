@@ -24,7 +24,7 @@ use cosmic::widget::{menu, nav_bar};
 use cosmic::{executor, widget, Application, Element};
 use zann_cosmic::backend::{self, local};
 use zann_cosmic::i18n;
-use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};
+use zann_cosmic::screens::{self, connect, master, palette, settings, vault, welcome, Screen};
 use zann_cosmic::session::Session;
 use zann_cosmic::settings::{Change, Settings as AppSettings};
 use zann_cosmic::tray;
@@ -73,6 +73,9 @@ const WINDOW_MIN: Size = Size::new(1125.0, 650.0);
 /// settings offer is a minute, so a finer tick would only burn wakeups.
 const IDLE_TICK: Duration = Duration::from_secs(15);
 
+/// Long enough to read, short enough not to sit on the corner of the window.
+const TOAST_SECONDS: u64 = 3;
+
 struct App {
     core: Core,
     shell: Shell,
@@ -87,7 +90,13 @@ struct App {
     /// Shown over whatever is underneath rather than replacing it, so opening
     /// the settings does not throw away the vault's list and its scroll.
     settings_screen: Option<Box<settings::State>>,
+    /// Over everything, including the settings, because it is how the reader
+    /// reaches things without looking for them.
+    palette: Option<palette::State>,
     last_activity: Instant,
+    /// Short-lived confirmations. Copying used to say nothing at all, and an
+    /// error only ever appeared as small text at the bottom of a column.
+    toasts: widget::toaster::Toasts<Message>,
     /// What we last put on the clipboard, and how many times we have put
     /// something there. A timer cannot be cancelled once handed to the runtime,
     /// so the count is what lets a stale one recognise itself and do nothing.
@@ -121,6 +130,11 @@ enum Message {
     /// What the clipboard holds now, so a copy that is no longer ours is left
     /// alone.
     ClipboardRead(Option<String>),
+    CopyPrimary,
+    FocusSearch,
+    TogglePalette,
+    Palette(palette::Message),
+    ToastClosed(widget::toaster::ToastId),
 }
 
 /// What the header bar's menu can do. Separate from [`Message`] because the
@@ -131,6 +145,12 @@ enum Action {
     Lock,
     Settings,
     Quit,
+    /// Not in the menu — these need an item to act on, so they live in the
+    /// palette, which only offers them when there is one.
+    CopyPrimary,
+    RevealAll,
+    FocusSearch,
+    Palette,
 }
 
 impl menu::Action for Action {
@@ -141,6 +161,10 @@ impl menu::Action for Action {
             Self::Lock => Message::Tray(tray::Command::Lock),
             Self::Settings => Message::OpenSettings,
             Self::Quit => Message::Tray(tray::Command::Quit),
+            Self::CopyPrimary => Message::CopyPrimary,
+            Self::RevealAll => Message::Vault(vault::Message::RevealAll),
+            Self::FocusSearch => Message::FocusSearch,
+            Self::Palette => Message::TogglePalette,
         }
     }
 }
@@ -158,6 +182,16 @@ fn key_binds() -> &'static HashMap<menu::KeyBind, Action> {
             (bind("l"), Action::Lock),
             (bind(","), Action::Settings),
             (bind("q"), Action::Quit),
+            (bind("c"), Action::CopyPrimary),
+            (bind("r"), Action::RevealAll),
+            (bind("k"), Action::Palette),
+            (
+                menu::KeyBind {
+                    modifiers: Vec::new(),
+                    key: keyboard::Key::Character("/".into()),
+                },
+                Action::FocusSearch,
+            ),
         ])
     })
 }
@@ -214,7 +248,9 @@ impl cosmic::Application for App {
             window_open: true,
             settings,
             settings_screen: None,
+            palette: None,
             last_activity: Instant::now(),
+            toasts: widget::toaster::Toasts::new(Message::ToastClosed),
             clipboard: (String::new(), 0),
         };
         app.set_header_title("zann".to_string());
@@ -436,6 +472,27 @@ impl cosmic::Application for App {
             _ => None,
         }));
 
+        // The palette takes the arrows and Escape while it is up, which the
+        // key binds must not, or `/` would fight with typing a query.
+        if self.palette.is_some() {
+            subscriptions.push(event::listen_with(|event, _, _| {
+                let Event::Keyboard(keyboard::Event::KeyPressed { ref key, .. }) = event else {
+                    return None;
+                };
+                let message = match key.as_ref() {
+                    keyboard::Key::Named(keyboard::key::Named::ArrowDown) => {
+                        palette::Message::Move(1)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::ArrowUp) => {
+                        palette::Message::Move(-1)
+                    }
+                    keyboard::Key::Named(keyboard::key::Named::Escape) => palette::Message::Close,
+                    _ => return None,
+                };
+                Some(Message::Palette(message))
+            }));
+        }
+
         if self.has_tray {
             subscriptions.push(tray::subscription().map(Message::Tray));
         }
@@ -505,6 +562,37 @@ impl cosmic::Application for App {
                 }
                 return self.clear_clipboard();
             }
+            Message::CopyPrimary => {
+                let value = match &self.shell {
+                    Shell::Ready {
+                        screen: Screen::Vault(vault),
+                        ..
+                    } => vault
+                        .detail()
+                        .and_then(|detail| detail.primary_secret())
+                        .map(str::to_string),
+                    _ => None,
+                };
+                return match value {
+                    Some(value) => self.copy(value),
+                    None => Task::none(),
+                };
+            }
+            Message::FocusSearch => return widget::text_input::focus(vault::SEARCH_ID.clone()),
+            Message::TogglePalette => {
+                self.palette = match self.palette {
+                    Some(_) => None,
+                    // Only where there is something to reach.
+                    None if self.is_unlocked() => Some(palette::State::new()),
+                    None => None,
+                };
+                return Task::none();
+            }
+            Message::Palette(message) => return self.update_palette(message),
+            Message::ToastClosed(id) => {
+                self.toasts.remove(id);
+                return Task::none();
+            }
             Message::ClipboardRead(current) => {
                 return if current.as_deref() == Some(self.clipboard.0.as_str()) {
                     self.wipe_clipboard()
@@ -527,6 +615,7 @@ impl cosmic::Application for App {
         // here and applied once that borrow ends.
         let mut lost_session = None;
         let mut moved = None;
+        let mut bulk = None;
         let content_width = self.content_width();
         let reveal_seconds = self.settings.auto_hide_reveal_seconds;
         let list_width = self.settings.list_width;
@@ -627,6 +716,10 @@ impl cosmic::Application for App {
                         vault::Outcome::None => Task::none(),
                         vault::Outcome::Task(task) => lift(task, Message::Vault),
                         vault::Outcome::Copy(value) => cosmic::task::message(Message::Copy(value)),
+                        vault::Outcome::Bulk { value, held_back } => {
+                            bulk = Some(held_back);
+                            cosmic::task::message(Message::Copy(value))
+                        }
                         vault::Outcome::Moved(place) => {
                             // Recorded here rather than saved: writing on every
                             // pixel of a drag would hammer the file.
@@ -659,6 +752,14 @@ impl cosmic::Application for App {
         if let Some(err) = lost_session {
             self.shell = Shell::Blocked(err);
         }
+        if let Some(held_back) = bulk.filter(|held_back| *held_back > 0) {
+            // The copy itself already said "copied"; this is the caveat.
+            let note = i18n::t_args(
+                "items.copyEnvExcluded",
+                &[("count", &held_back.to_string())],
+            );
+            return Task::batch([task, self.toast(note)]);
+        }
         if let Some(place) = moved {
             if self.settings.remember(place) {
                 if let Err(err) = self.settings.save() {
@@ -669,8 +770,24 @@ impl cosmic::Application for App {
         task
     }
 
+    fn dialog(&self) -> Option<Element<'_, Self::Message>> {
+        let state = self.palette.as_ref()?;
+        let Shell::Ready {
+            screen: Screen::Vault(vault),
+            ..
+        } = &self.shell
+        else {
+            return None;
+        };
+        // Borrowed for the length of the draw: the palette shows what the list
+        // shows, so it cannot own a copy that goes stale.
+        let candidates = vault.candidates();
+        let rows = state.rows(&candidates, vault.detail().is_some());
+        Some(state.view(rows, candidates).map(Message::Palette))
+    }
+
     fn view(&self) -> Element<'_, Self::Message> {
-        match self.settings_screen.as_ref() {
+        let content = match self.settings_screen.as_ref() {
             Some(settings) => settings.view().map(Message::Settings),
             None => match &self.shell {
                 Shell::Blocked(reason) => blocked_view(reason),
@@ -681,7 +798,8 @@ impl cosmic::Application for App {
                     Screen::Vault(state) => state.view().map(Message::Vault),
                 },
             },
-        }
+        };
+        widget::toaster(&self.toasts, content)
     }
 }
 
@@ -695,6 +813,49 @@ impl App {
                 ..
             }
         )
+    }
+
+    /// The palette borrows the vault's list to draw and to match against, so
+    /// its rows are rebuilt here rather than held.
+    fn update_palette(&mut self, message: palette::Message) -> Task<Message> {
+        let Shell::Ready {
+            screen: Screen::Vault(vault),
+            ..
+        } = &self.shell
+        else {
+            self.palette = None;
+            return Task::none();
+        };
+        let candidates = vault.candidates();
+        let has_item = vault.detail().is_some();
+        let Some(state) = self.palette.as_mut() else {
+            return Task::none();
+        };
+        let rows = state.rows(&candidates, has_item);
+
+        match state.update(message, &rows) {
+            palette::Outcome::None => Task::none(),
+            palette::Outcome::Close => {
+                self.palette = None;
+                Task::none()
+            }
+            palette::Outcome::Run(row) => {
+                self.palette = None;
+                match row {
+                    palette::Row::Command(palette::Command::Lock) => self.lock(),
+                    palette::Row::Command(palette::Command::Settings) => self.open_settings(),
+                    palette::Row::Command(palette::Command::CopyPrimary) => {
+                        cosmic::task::message(Message::CopyPrimary)
+                    }
+                    palette::Row::Command(palette::Command::RevealAll) => {
+                        cosmic::task::message(Message::Vault(vault::Message::RevealAll))
+                    }
+                    palette::Row::Item(id) => {
+                        cosmic::task::message(Message::Vault(vault::Message::Select(id)))
+                    }
+                }
+            }
+        }
     }
 
     fn open_settings(&mut self) -> Task<Message> {
@@ -805,10 +966,18 @@ impl App {
         cosmic::iced::exit()
     }
 
+    /// Says something happened, for a few seconds.
+    fn toast(&mut self, text: String) -> Task<Message> {
+        self.toasts
+            .push(widget::toaster::Toast::new(text).duration(Duration::from_secs(TOAST_SECONDS)))
+            .map(cosmic::Action::App)
+    }
+
     /// Puts a secret on the clipboard and starts its clock. There is no
     /// cancelling a task already handed to the runtime, so a later copy is
     /// recognised by the count rather than by stopping the earlier timer.
     fn copy(&mut self, value: String) -> Task<Message> {
+        let said = self.toast(i18n::t("common.copied"));
         self.clipboard.0 = value.clone();
         self.clipboard.1 += 1;
         let generation = self.clipboard.1;
@@ -816,10 +985,11 @@ impl App {
 
         let seconds = u64::from(self.settings.clipboard_clear_seconds);
         if seconds == 0 {
-            return write;
+            return Task::batch([write, said]);
         }
         Task::batch([
             write,
+            said,
             cosmic::task::future(async move {
                 tokio::time::sleep(Duration::from_secs(seconds)).await;
                 Message::ClipboardExpired(generation)

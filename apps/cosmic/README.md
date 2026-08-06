@@ -39,20 +39,6 @@ shell acts on. Two rules keep this from eroding:
 - no `Option` for something that always exists once the app is running, which is
   why `Session` is not optional and a missing database is a separate shell state.
 
-## The catalogue
-
-The strings come from `i18n/` at the repo root, which
-the desktop app loads into `vue-i18n` and this one reads through
-`zann_ui_core::i18n` — one catalogue rather than two that drift. `screens/*.rs`
-ask for them by the dotted keys the JSON nests, so a string added for one client
-is one the other can already ask for by the same name, and the nav categories
-finally use their `schemas/ui_categories.json` label keys as the catalogue keys
-they always were. Unset means whatever `LC_ALL`/`LC_MESSAGES`/`LANG` asks for.
-
-Nothing checks those keys at compile time, so `every_key_the_app_asks_for_is_in_the_catalogue`
-does it instead: it reads the sources, picks out anything key-shaped, and fails
-on one the catalogue has never heard of.
-
 ## The header bar's menu
 
 COSMIC has no global menu bar — its apps keep theirs in their own header, beside
@@ -99,6 +85,35 @@ Two of the desktop's are deliberately not kept: the search query and the
 selected item. Both record what someone went looking for, and neither is worth
 writing to disk to save a click. A place is only written when it actually
 changes, because dragging a splitter reports on every pixel.
+
+## Shortcuts and the palette
+
+The header menu's three keys are joined by four more that need an item to act
+on — copy the primary secret, reveal every field, focus the search, open the
+palette — so they live in `key_binds` without a menu entry. The palette is where
+they are named instead, because it only offers them when there is something to
+act on.
+
+The palette is a `dialog`, which libcosmic draws above everything including the
+settings. It holds only a query and where the highlight sits: the commands are
+carried out by the shell, and the items are rebuilt from the vault on every
+draw, so it can never offer a row the list no longer has. It narrows the same
+set the list is showing rather than reaching past the category and folder.
+
+While it is up it takes the arrows and Escape, which the key binds must not, or
+`/` would fight with typing a query.
+
+## Copying, and what a copy leaves out
+
+A single field copies as it is. The three bulk copies — `.env`, JSON, raw —
+follow the desktop app: the first two name every field but write `<protected>`
+where a masked one would go, and say how many they held back; raw is the payload
+as the vault stores it, secrets and all, which is what the button says. That
+distinction is the point, so `Detail` keeps the raw payload alongside the fields
+it parsed out of it.
+
+Every copy now says so. Toasts go through `widget::toaster`; before them a copy
+was silent and an error was small text at the bottom of a column.
 
 ## The three columns
 
@@ -150,8 +165,7 @@ a process the user cannot reach.
 
 Whether it hides or quits is a setting, so neither the header button nor the
 compositor decides it — both come back as one message and the shell reads the
-preference then. The vault stays unlocked in the tray, the way the desktop app
-leaves it.
+preference then.
 
 ## Settings
 

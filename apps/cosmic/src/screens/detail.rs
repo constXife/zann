@@ -10,6 +10,9 @@ use zann_ui_core::{generate_totp, TotpParams};
 
 use crate::i18n::{has, t};
 
+/// Stands in for a masked value in a bulk copy, the way the desktop app does.
+const PROTECTED: &str = "<protected>";
+
 /// Fields the schemas put first, in the order a reader expects them.
 const FIELD_ORDER: &[&str] = &[
     "username", "email", "password", "otp", "totp", "url", "key", "value", "notes",
@@ -35,6 +38,9 @@ pub struct Field {
 
 #[derive(Debug, Clone)]
 pub struct Detail {
+    /// Kept whole for "copy raw", which is the payload as the vault stores it
+    /// rather than as this screen chose to read it.
+    pub payload_json: String,
     pub id: String,
     pub title: String,
     pub path: String,
@@ -78,12 +84,79 @@ impl Detail {
         });
 
         Ok(Self {
+            payload_json: detail.payload_json,
             id: detail.id,
             title: detail.title,
             path: detail.path,
             type_id: detail.type_id,
             fields,
         })
+    }
+
+    /// Every field revealed at once, or every one hidden again. Returns what it
+    /// became, so the caller knows whether to start the hiding clock.
+    pub fn reveal_all(&mut self) -> bool {
+        let reveal = self
+            .fields
+            .iter()
+            .any(|field| field.masked && !field.revealed);
+        for field in &mut self.fields {
+            field.revealed = reveal;
+        }
+        reveal
+    }
+
+    /// The field a reader most likely came for: the first masked one, or just
+    /// the first. The same rule the desktop app's `findPrimarySecret` uses.
+    pub fn primary_secret(&self) -> Option<&str> {
+        self.fields
+            .iter()
+            .find(|field| field.masked)
+            .or_else(|| self.fields.first())
+            .map(|field| field.value.as_str())
+    }
+
+    /// `KEY=value` lines. Masked fields are named but not spelled out, so a
+    /// paste into a shell history or a ticket does not carry the secrets; the
+    /// count comes back for the caller to say how many were held back.
+    pub fn as_env(&self) -> (String, usize) {
+        let mut held_back = 0;
+        let mut out = String::new();
+        for field in &self.fields {
+            let value = if field.masked {
+                held_back += 1;
+                PROTECTED
+            } else {
+                field.value.as_str()
+            };
+            out.push_str(&format!("{}={value}\n", field.key));
+        }
+        (out, held_back)
+    }
+
+    /// The same, as a JSON object.
+    pub fn as_json(&self) -> (String, usize) {
+        let mut held_back = 0;
+        let map: serde_json::Map<String, serde_json::Value> = self
+            .fields
+            .iter()
+            .map(|field| {
+                let value = if field.masked {
+                    held_back += 1;
+                    PROTECTED
+                } else {
+                    field.value.as_str()
+                };
+                (
+                    field.key.clone(),
+                    serde_json::Value::String(value.to_string()),
+                )
+            })
+            .collect();
+        (
+            serde_json::to_string_pretty(&map).unwrap_or_default(),
+            held_back,
+        )
     }
 
     /// Only a one-time code needs the app to keep redrawing.
