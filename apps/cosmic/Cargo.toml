@@ -15,6 +15,13 @@ path = "src/main.rs"
 
 [dependencies]
 dirs = "5"
+# The tray, over StatusNotifierItem. `blocking` keeps `tray::start` callable
+# from `main` before iced owns the runtime; `tokio` puts its zbus connection on
+# the same runtime libcosmic already brings.
+ksni = { version = "0.3.6", default-features = false, features = [
+  "blocking",
+  "tokio",
+] }
 # libcosmic is not published on crates.io; pin the revision so the PoC builds
 # reproducibly. Default features bring winit + wayland + tokio; `wgpu` puts the
 # renderer on the GPU, like the system COSMIC apps.

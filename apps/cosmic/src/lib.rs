@@ -10,3 +10,4 @@
 pub mod backend;
 pub mod screens;
 pub mod session;
+pub mod tray;
