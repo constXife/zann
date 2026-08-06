@@ -154,6 +154,14 @@ impl TestApp {
     }
 
     async fn login(&self, email: &str, password: &str) -> String {
+        self.login_full(email, password).await["access_token"]
+            .as_str()
+            .expect("token")
+            .to_string()
+    }
+
+    /// Full login response, for tests that also need the refresh token.
+    async fn login_full(&self, email: &str, password: &str) -> serde_json::Value {
         let payload = json!({
             "email": email,
             "password": password,
@@ -164,7 +172,7 @@ impl TestApp {
             .send_json(Method::POST, "/v1/auth/login", None, payload)
             .await;
         assert_eq!(status, StatusCode::OK, "login failed: {:?}", json);
-        json["access_token"].as_str().expect("token").to_string()
+        json
     }
 
     async fn add_admin_group(&self, user_id: Uuid) {
@@ -211,39 +219,106 @@ async fn devices_list_current_and_revoke() {
     let email = "device@example.com";
     let password = "password-1";
     app.register(email, password).await;
-    let token = app.login(email, password).await;
+    let revoked_token = app.login(email, password).await;
 
-    let (status, list) = app.get_json("/v1/devices", Some(&token)).await;
+    let (status, list) = app.get_json("/v1/devices", Some(&revoked_token)).await;
     assert_eq!(status, StatusCode::OK, "devices list failed: {:?}", list);
     let devices = list["devices"].as_array().expect("devices array");
     assert!(!devices.is_empty());
 
-    let (status, current) = app.get_json("/v1/devices/current", Some(&token)).await;
+    let (status, current) = app
+        .get_json("/v1/devices/current", Some(&revoked_token))
+        .await;
     assert_eq!(
         status,
         StatusCode::OK,
         "current device failed: {:?}",
         current
     );
-    let device_id = current["id"].as_str().expect("device id");
+    let device_id = current["id"].as_str().expect("device id").to_string();
+
+    // Every login registers a fresh device, so this second token is a different
+    // device — the realistic "revoke my other device from this one" flow. The
+    // revoking session has to be a different one now that revocation actually
+    // terminates the target device's sessions.
+    let surviving_token = app.login(email, password).await;
 
     let status = app
         .send_empty(
             Method::DELETE,
             &format!("/v1/devices/{}", device_id),
-            Some(&token),
+            Some(&surviving_token),
         )
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    let (status, list) = app.get_json("/v1/devices", Some(&token)).await;
+    let (status, list) = app.get_json("/v1/devices", Some(&surviving_token)).await;
     assert_eq!(status, StatusCode::OK, "devices list failed: {:?}", list);
     let devices = list["devices"].as_array().expect("devices array");
     let revoked = devices
         .iter()
-        .find(|device| device["id"] == device_id)
+        .find(|device| device["id"].as_str() == Some(device_id.as_str()))
         .and_then(|device| device["revoked_at"].as_str());
     assert!(revoked.is_some());
+
+    // The revoked device loses access; the device that did the revoking keeps it.
+    let status = app
+        .send_empty(Method::GET, "/v1/devices", Some(&revoked_token))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "revoked device kept API access"
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn revoked_device_cannot_refresh() {
+    let app = TestApp::new().await;
+    let email = "device-refresh@example.com";
+    let password = "password-1";
+    app.register(email, password).await;
+
+    let session = app.login_full(email, password).await;
+    let access_token = session["access_token"].as_str().expect("access token");
+    let refresh_token = session["refresh_token"]
+        .as_str()
+        .expect("refresh token")
+        .to_string();
+
+    let (status, current) = app
+        .get_json("/v1/devices/current", Some(access_token))
+        .await;
+    assert_eq!(status, StatusCode::OK, "current device: {:?}", current);
+    let device_id = current["id"].as_str().expect("device id").to_string();
+
+    let admin_token = app.login(email, password).await;
+    let status = app
+        .send_empty(
+            Method::DELETE,
+            &format!("/v1/devices/{}", device_id),
+            Some(&admin_token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // Refresh renews expires_at, so if this succeeded the revoked device could
+    // keep the session alive forever.
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            None,
+            json!({ "refresh_token": refresh_token }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "revoked device refreshed its session: {:?}",
+        body
+    );
 }
 
 #[tokio::test]

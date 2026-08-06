@@ -1,8 +1,8 @@
 use chrono::Utc;
 use zann_core::{extract_groups, AuthSource, Identity, OidcToken, User, UserStatus};
 use zann_db::repo::{
-    GroupMemberRepo, GroupRepo, OidcGroupMappingRepo, OidcIdentityRepo, ServiceAccountRepo,
-    ServiceAccountSessionRepo, SessionRepo, UserRepo,
+    DeviceRepo, GroupMemberRepo, GroupRepo, OidcGroupMappingRepo, OidcIdentityRepo,
+    ServiceAccountRepo, ServiceAccountSessionRepo, SessionRepo, UserRepo,
 };
 
 use crate::app::AppState;
@@ -300,6 +300,27 @@ pub async fn identity_from_service_account_token(
     .await
 }
 
+/// A revoked device must not be able to authenticate, however the caller got
+/// hold of a session row for it.
+pub(crate) async fn device_is_revoked(
+    state: &AppState,
+    device_id: uuid::Uuid,
+) -> Result<bool, &'static str> {
+    let device = DeviceRepo::new(&state.db)
+        .get_by_id(device_id)
+        .await
+        .map_err(|err| {
+            tracing::error!(
+                event = "auth_device_lookup_failed",
+                error = %err,
+                "Failed to load device"
+            );
+            "db_error"
+        })?;
+    // A session whose device row is gone is not trustworthy either.
+    Ok(device.is_none_or(|device| device.revoked_at.is_some()))
+}
+
 pub async fn identity_from_session_token(
     state: &AppState,
     token: &str,
@@ -322,6 +343,12 @@ pub async fn identity_from_session_token(
         })? {
         if session.access_expires_at < Utc::now() {
             return Err("token_expired");
+        }
+        // Deleting the device's sessions on revoke is the primary defence; this
+        // covers a session created concurrently with the revoke, and mirrors the
+        // service-account branch below, which already rejects on revoked_at.
+        if device_is_revoked(state, session.device_id).await? {
+            return Err("device_revoked");
         }
         (
             session.user_id,

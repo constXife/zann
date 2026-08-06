@@ -10,7 +10,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use zann_core::{Device, Identity};
-use zann_db::repo::DeviceRepo;
+use zann_db::repo::{DeviceRepo, SessionRepo};
 
 use crate::app::AppState;
 use crate::infra::metrics;
@@ -180,9 +180,33 @@ async fn revoke_device(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    // Flagging the device is not enough on its own: its sessions stay valid and
+    // its refresh token keeps minting new ones. Drop them here, and let the
+    // revoked_at check in identity resolution cover anything raced in alongside.
+    let sessions_removed = match SessionRepo::new(&state.db)
+        .delete_by_device(device_id)
+        .await
+    {
+        Ok(count) => count,
+        Err(err) => {
+            tracing::error!(
+                event = "device_revoke_sessions_failed",
+                error = %err,
+                device_id = %device_id,
+                "Device flagged but its sessions could not be removed"
+            );
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
+            )
+                .into_response();
+        }
+    };
+
     tracing::info!(
         event = "device_revoked",
         device_id = %device_id,
+        sessions_removed,
         "Device revoked"
     );
     StatusCode::NO_CONTENT.into_response()
