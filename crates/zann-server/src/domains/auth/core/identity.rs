@@ -7,6 +7,7 @@ use zann_db::repo::{
 
 use crate::app::AppState;
 use crate::domains::auth::core::passwords::{hash_service_token, random_kdf_salt, KdfParams};
+use crate::infra::metrics;
 use crate::infra::user_display::{avatar_initials_for_user, display_name_for_user};
 
 const SERVICE_ACCOUNT_PREFIX: &str = "zann_sa_";
@@ -235,13 +236,30 @@ pub async fn identity_from_service_account_token(
         "db_error"
     })?;
 
+    // Nothing to compare against: reject before spending any KDF work. This path
+    // runs in the auth middleware, so without the check an unauthenticated caller
+    // buys a full Argon2id hash per request with a well-formed but unknown token.
+    if accounts.is_empty() {
+        return Err("invalid_token");
+    }
+
     let params = KdfParams {
         algorithm: state.config.auth.kdf.algorithm.clone(),
         iterations: state.config.auth.kdf.iterations,
         memory_kb: state.config.auth.kdf.memory_kb,
         parallelism: state.config.auth.kdf.parallelism,
     };
-    let token_hash = hash_service_token(token, &state.token_pepper, &params)?;
+    let token_hash = {
+        // Bound concurrent hashing like every other KDF site. Held only across the
+        // hash itself, not the lookups that follow.
+        let _permit = metrics::acquire_kdf_permit(&state.argon2_semaphore, "sa_token_auth")
+            .await
+            .map_err(|()| {
+                tracing::error!(event = "auth_sa_kdf_unavailable", "KDF permit unavailable");
+                "db_error"
+            })?;
+        hash_service_token(token, &state.token_pepper, &params)?
+    };
     let account = accounts
         .into_iter()
         .find(|account| account.token_hash == token_hash)
