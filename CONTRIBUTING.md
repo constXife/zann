@@ -33,7 +33,7 @@ Workspace (Rust):
 - Build: `cargo build`
 - Tests: `cargo test` (fast, no DB)
 - Format: `cargo fmt`
-- Lint: `cargo clippy --all-targets --all-features`
+- Lint: `cargo clippy --all-targets --all-features -- -D warnings` (CI gates on `-D warnings`)
 
 Just (optional):
 - Fast tests: `just fast-test` (same as `cargo test`)
