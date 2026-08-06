@@ -65,24 +65,34 @@ Optional:
 
 ## Install it as a desktop app
 
-To launch it from the COSMIC launcher instead of a terminal:
+The packaged way, which is what you want unless you are iterating on the code:
+
+```bash
+nix build .#zann-cosmic          # or: nix profile install .#zann-cosmic
+```
+
+The derivation installs the binary, the desktop entry and the icons into the
+same output, so a `nix profile install` puts all three in the profile and the
+launcher picks the app up on its own. Nothing is left in `~/.local`, and the
+library paths are baked in by `wrapProgram` from the derivation's own inputs, so
+it survives `nix-collect-garbage`.
+
+For a quick loop while changing code, the same thing straight into `~/.local`:
 
 ```bash
 just cosmic-install     # ~/.local/bin + ~/.local/share/{applications,icons}
 just cosmic-uninstall
 ```
 
-That builds the release binary, installs the desktop entry from `data/` with
+That one builds the release binary, installs the desktop entry from `data/` with
 `Exec` rewritten to the absolute path, and takes the icons from the Tauri app —
-one logo for the whole product rather than a second copy of the same PNGs.
-
-The binary itself lands in `~/.local/libexec` and `~/.local/bin/zann-cosmic` is
-a wrapper. That is for NixOS: winit `dlopen`s libwayland at startup, and a
-launcher starts `Exec=` with none of the dev shell's environment, so the bare
-binary dies with `NoWaylandLib`. The wrapper carries the `LD_LIBRARY_PATH` of
-the shell that built it — which means it points at store paths, so run
-`just cosmic-install` again after a `nix-collect-garbage`. Packaging it properly
-(`nix build` with `wrapProgram`) is the next step up from this.
+one logo for the whole product rather than a second copy of the same PNGs. The
+binary lands in `~/.local/libexec` and `~/.local/bin/zann-cosmic` is a wrapper,
+because winit `dlopen`s libwayland at startup and a launcher starts `Exec=` with
+none of the dev shell's environment — the bare binary dies with `NoWaylandLib`.
+That wrapper carries the `LD_LIBRARY_PATH` of the shell that built it, so it
+points at store paths: rerun `just cosmic-install` after a
+`nix-collect-garbage`. The Nix package has no such problem.
 
 Two more things worth knowing:
 
