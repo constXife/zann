@@ -208,6 +208,76 @@ fn the_splitter_stays_between_the_two_minimums() {
     assert_eq!(state.list_width(), 460.0);
 }
 
+/// The catalogue is looked up by string, so nothing stops a typo reaching the
+/// screen as its own key. This is the check the compiler cannot do: every key
+/// the sources ask for has to exist.
+#[test]
+fn every_key_the_app_asks_for_is_in_the_catalogue() {
+    let catalogue = zann_ui_core::i18n::Catalogue::new("en");
+    let mut missing = Vec::new();
+
+    for entry in walk_sources("src") {
+        let source = std::fs::read_to_string(&entry).expect("read a source file");
+        for key in literal_keys(&source) {
+            // `fields.<name>` is built from the item's own field names, which
+            // are data and are meant to fall through to a spelled-out label.
+            if !key.starts_with("fields.") && !catalogue.has(&key) {
+                missing.push(format!("{}: {key}", entry.display()));
+            }
+        }
+    }
+
+    assert!(
+        missing.is_empty(),
+        "keys with no catalogue entry: {missing:#?}"
+    );
+}
+
+/// Every `"a.b"`-shaped string literal in a source file. Dotted lowercase with
+/// no spaces is what a catalogue key looks like — and, as it turns out, what a
+/// filename looks like too, so those are named and skipped.
+fn literal_keys(source: &str) -> Vec<String> {
+    const FILE_SUFFIXES: &[&str] = &[".json", ".sqlite", ".rs", ".toml", ".png", ".desktop"];
+
+    let mut keys = Vec::new();
+    for piece in source.split('"').skip(1).step_by(2) {
+        if FILE_SUFFIXES.iter().any(|suffix| piece.ends_with(suffix)) {
+            continue;
+        }
+        let looks_like_a_key = piece.contains('.')
+            && !piece.contains(' ')
+            && !piece.contains('/')
+            && !piece.contains('{')
+            && piece
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+            && piece.split('.').all(|part| {
+                part.chars().next().is_some_and(char::is_lowercase) && !part.is_empty()
+            })
+            && piece.split('.').count() >= 2;
+        if looks_like_a_key {
+            keys.push(piece.to_string());
+        }
+    }
+    keys
+}
+
+fn walk_sources(root: &str) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return found;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(walk_sources(&path.to_string_lossy()));
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            found.push(path);
+        }
+    }
+    found
+}
+
 #[test]
 fn connect_walks_the_stages_a_server_dictates() {
     let mut state = connect::State::default();

@@ -11,6 +11,7 @@ use zann_ui_core::normalize_server_url;
 use super::centered;
 use crate::backend::off_thread;
 use crate::backend::remote::{LoginOutcome, Method, OidcStatus, Remote, ServerProbe};
+use crate::i18n::t;
 
 /// Which step of the flow the user is on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -349,10 +350,10 @@ impl State {
         };
 
         let mut column = widget::column::with_capacity(5)
-            .push(widget::text::title3(match &self.stage {
-                Stage::Fingerprint { .. } => "Server key changed",
-                _ => "Connect to a server",
-            }))
+            .push(widget::text::title3(t(match &self.stage {
+                Stage::Fingerprint { .. } => "wizard.fingerprintChanged",
+                _ => "wizard.connectTitle",
+            })))
             .spacing(spacing.space_s)
             .width(Length::Fixed(420.0));
 
@@ -366,14 +367,17 @@ impl State {
             column = column.push(widget::text::caption(error.clone()));
         }
 
-        centered(column.push(widget::button::text("Back").on_press(Message::Cancel)))
+        centered(column.push(widget::button::text(t("wizard.back")).on_press(Message::Cancel)))
     }
 
     fn server_form(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
-        let mut submit =
-            widget::button::suggested(if self.busy { "Checking…" } else { "Continue" })
-                .width(Length::Fill);
+        let mut submit = widget::button::suggested(t(if self.busy {
+            "wizard.checking"
+        } else {
+            "common.continue"
+        }))
+        .width(Length::Fill);
         if !self.busy && !self.url.trim().is_empty() {
             submit = submit.on_press(Message::Probe);
         }
@@ -381,7 +385,7 @@ impl State {
         widget::column::with_capacity(2)
             .push(
                 widget::text_input::text_input("https://zann.example.com", &self.url)
-                    .label("Server URL")
+                    .label(t("auth.serverUrl"))
                     .on_input(Message::UrlInput)
                     .on_submit(|_| Message::Probe),
             )
@@ -393,15 +397,15 @@ impl State {
     fn method_picker(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let mut column = widget::column::with_capacity(self.methods.len() + 1)
-            .push(widget::text::body("Choose how to sign in."))
+            .push(widget::text::body(t("auth.selectMethod")))
             .spacing(spacing.space_s);
 
         for method in &self.methods {
             column = column.push(match method {
-                Method::Oidc => widget::button::standard("Single sign-on")
+                Method::Oidc => widget::button::standard(t("auth.oidc"))
                     .width(Length::Fill)
                     .on_press(Message::StartOidc),
-                Method::Password => widget::button::standard("Email and password")
+                Method::Password => widget::button::standard(t("auth.emailPassword"))
                     .width(Length::Fill)
                     .on_press(Message::ChoosePassword),
             });
@@ -414,12 +418,13 @@ impl State {
         let spacing = theme::spacing();
         let ready = !self.busy && !self.email.trim().is_empty() && !self.password.is_empty();
         let label = if self.register {
-            "Create the first account"
+            "auth.signUp"
         } else {
-            "Sign in"
+            "auth.signIn"
         };
-        let mut submit = widget::button::suggested(if self.busy { "Working…" } else { label })
-            .width(Length::Fill);
+        let mut submit =
+            widget::button::suggested(t(if self.busy { "auth.signingIn" } else { label }))
+                .width(Length::Fill);
         if ready {
             submit = submit.on_press(Message::SubmitPassword);
         }
@@ -427,15 +432,15 @@ impl State {
         let mut column = widget::column::with_capacity(4)
             .push(
                 widget::text_input::text_input("you@example.com", &self.email)
-                    .label("Email")
+                    .label(t("auth.email"))
                     .on_input(Message::EmailInput),
             )
             .spacing(spacing.space_s);
 
         if self.register {
             column = column.push(
-                widget::text_input::text_input("Full name", &self.full_name)
-                    .label("Full name")
+                widget::text_input::text_input(t("auth.fullName"), &self.full_name)
+                    .label(t("auth.fullName"))
                     .on_input(Message::FullNameInput),
             );
         }
@@ -443,12 +448,12 @@ impl State {
         column
             .push(
                 widget::text_input::secure_input(
-                    "Password",
+                    t("auth.password"),
                     &self.password,
                     Some(Message::TogglePassword),
                     self.password_hidden,
                 )
-                .label("Password")
+                .label(t("auth.password"))
                 .on_input(Message::PasswordInput)
                 .on_submit(|_| Message::SubmitPassword),
             )
@@ -463,21 +468,18 @@ impl State {
         match self.authorization_url.as_ref() {
             Some(_) => {
                 column = column
-                    .push(widget::text::body(
-                        "Finish signing in in your browser, then come back here.",
-                    ))
+                    .push(widget::text::body(t("wizard.oidcHint")))
                     .push(
-                        widget::button::link("Open the sign-in page again")
-                            .on_press(Message::OpenAuthUrl),
+                        widget::button::link(t("wizard.oidcReopen")).on_press(Message::OpenAuthUrl),
                     )
-                    .push(widget::button::text("Copy the link").on_press(Message::CopyAuthUrl));
+                    .push(widget::button::text(t("auth.copyLink")).on_press(Message::CopyAuthUrl));
             }
             None => {
-                let mut start = widget::button::suggested(if self.busy {
-                    "Starting…"
+                let mut start = widget::button::suggested(t(if self.busy {
+                    "wizard.starting"
                 } else {
-                    "Sign in with SSO"
-                })
+                    "wizard.signInSso"
+                }))
                 .width(Length::Fill);
                 if !self.busy {
                     start = start.on_press(Message::StartOidc);
@@ -491,19 +493,17 @@ impl State {
 
     fn fingerprint_prompt<'a>(&'a self, old: &'a str, new: &'a str) -> Element<'a, Message> {
         let spacing = theme::spacing();
-        let mut trust = widget::button::destructive("Trust the new key").width(Length::Fill);
+        let mut trust =
+            widget::button::destructive(t("wizard.trustFingerprint")).width(Length::Fill);
         if !self.busy {
             trust = trust.on_press(Message::TrustFingerprint);
         }
 
         widget::column::with_capacity(6)
-            .push(widget::text::body(
-                "This server presents a different key than the one you trusted. \
-                 Only continue if you know why it changed.",
-            ))
-            .push(widget::text::caption("Previously trusted"))
+            .push(widget::text::body(t("wizard.fingerprintWarning")))
+            .push(widget::text::caption(t("wizard.oldFingerprint")))
             .push(widget::text::monotext(old.to_string()))
-            .push(widget::text::caption("Now offered"))
+            .push(widget::text::caption(t("wizard.newFingerprint")))
             .push(widget::text::monotext(new.to_string()))
             .push(trust)
             .spacing(spacing.space_xxs)

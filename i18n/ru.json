@@ -25,7 +25,11 @@
     "continue": "Продолжить",
     "undo": "Отменить",
     "save": "Сохранить",
-    "loading": "Загрузка..."
+    "loading": "Загрузка...",
+    "lock": "Заблокировать",
+    "open": "Открыть",
+    "show": "Показать",
+    "quit": "Выйти"
   },
   "sidebar": {
     "collapse": "Свернуть панель",
@@ -79,7 +83,8 @@
     "mime": "MIME тип",
     "size": "Размер",
     "checksum": "Контрольная сумма",
-    "protocol": "Протокол"
+    "protocol": "Протокол",
+    "otp": "Одноразовый код"
   },
   "nav": {
     "vaults": "Хранилища",
@@ -219,7 +224,11 @@
     "historyAfter": "После",
     "historyDraftNotice": "Изменения подготовлены. Нажмите «Редактировать», чтобы сохранить.",
     "resolveConflict": "Разрешить конфликт",
-    "resolveConflictDone": "Конфликт отправлен на синхронизацию"
+    "resolveConflictDone": "Конфликт отправлен на синхронизацию",
+    "loadMore": "Загрузить ещё",
+    "noFields": "У этой записи нет полей.",
+    "loadedCount": "загружено {loaded} из {total}, показано {shown}",
+    "syncFailed": "Синхронизация не удалась: {error}"
   },
   "totp": {
     "refreshEvery": "обновляется каждые {seconds}с",
@@ -271,7 +280,9 @@
     "passwordMismatch": "Пароли не совпадают.",
     "currentAccount": "текущая учетная запись",
     "registerWillSignOutTitle": "Выйти из текущей сессии?",
-    "registerWillSignOutDesc": "Вы вошли как {email}. Создание нового аккаунта завершит текущую сессию. Продолжить?"
+    "registerWillSignOutDesc": "Вы вошли как {email}. Создание нового аккаунта завершит текущую сессию. Продолжить?",
+    "copyLink": "Скопировать ссылку",
+    "serverUrl": "Адрес сервера"
   },
   "wizard": {
     "loading": "Загрузка...",
@@ -315,7 +326,14 @@
     "oldFingerprint": "Старый отпечаток",
     "newFingerprint": "Новый отпечаток",
     "trustFingerprint": "Доверять новому отпечатку",
-    "unknown": "Неизвестно"
+    "unknown": "Неизвестно",
+    "syncAfterUnlock": "Сразу после этого хранилище синхронизируется с сервером.",
+    "fingerprintWarning": "Сервер предъявляет ключ, отличный от того, которому вы доверились. Продолжайте, только если знаете, почему он сменился.",
+    "oidcHint": "Завершите вход в браузере и вернитесь сюда.",
+    "oidcReopen": "Открыть страницу входа заново",
+    "signInSso": "Войти через SSO",
+    "starting": "Запуск…",
+    "checking": "Проверяем…"
   },
   "settings": {
     "title": "Настройки",
@@ -337,7 +355,8 @@
       "trashRetentionHelp": "Удаляются только записи, которые уже синхронизированы.",
       "trashRetentionNever": "Никогда",
       "trashRetention30": "Через 30 дней",
-      "trashRetention90": "Через 90 дней"
+      "trashRetention90": "Через 90 дней",
+      "languageSystem": "Системный"
     },
     "security": "Безопасность",
     "autolock": "Автоблокировка",
@@ -496,7 +515,6 @@
     "rowView": "Таблица",
     "jsonView": "JSON",
     "keyLabel": "Ключ",
-    "valueLabel": "Значение",
     "actionsLabel": "Действия",
     "advanced": "Дополнительно",
     "customFields": "Свои поля",
