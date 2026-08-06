@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::core::layout::Limits;
-use cosmic::iced::{event, keyboard, mouse, window, Event, Size, Subscription};
+use cosmic::iced::{event, keyboard, mouse, window, Event, Length, Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{menu, nav_bar};
 use cosmic::{executor, widget, Application, Element};
@@ -304,6 +304,99 @@ impl cosmic::Application for App {
         }
     }
 
+    /// The default nav bar is the categories and nothing else. The desktop app
+    /// stacks three things in that column — which vault, the categories, the
+    /// folders — and the folders cannot join the categories in one model:
+    /// libcosmic's nav bar has a single selection, while a folder narrows
+    /// whatever category is showing rather than replacing it.
+    ///
+    /// So the categories keep the stock widget and the rest is drawn around it.
+    fn nav_bar(&self) -> Option<Element<'_, cosmic::Action<Message>>> {
+        if !self.core.nav_bar_active() {
+            return None;
+        }
+        let Shell::Ready {
+            screen: Screen::Vault(vault),
+            ..
+        } = &self.shell
+        else {
+            return None;
+        };
+        if self.settings_screen.is_some() {
+            return None;
+        }
+
+        let spacing = cosmic::theme::spacing();
+        let categories = widget::nav_bar(vault.nav_model(), |id| {
+            cosmic::Action::Cosmic(cosmic::app::Action::NavBar(id))
+        });
+
+        let mut column = widget::column::with_capacity(4).spacing(spacing.space_xs);
+        if let Some(vaults) = vault.vaults_view() {
+            column = column.push(vaults.map(|m| cosmic::Action::App(Message::Vault(m))));
+        }
+        column = column
+            .push(categories)
+            .push(widget::divider::horizontal::default())
+            .push(
+                widget::scrollable(vault.folders_view())
+                    .height(Length::Fill)
+                    .apply(Element::from)
+                    .map(|m| cosmic::Action::App(Message::Vault(m))),
+            );
+
+        // The stock nav bar paints its own background through `into_container`,
+        // which is bypassed by building the widget into a column, so the same
+        // style is put back here or the sidebar comes out transparent.
+        Some(
+            column
+                .apply(widget::container)
+                .class(cosmic::theme::Container::custom(
+                    cosmic::widget::nav_bar::nav_bar_style,
+                ))
+                .width(Length::Fixed(NAV_WIDTH - 8.0))
+                .height(Length::Fill)
+                .padding(spacing.space_xxs)
+                .into(),
+        )
+    }
+
+    fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<Self::Message> {
+        let Shell::Ready {
+            screen: Screen::Vault(vault),
+            ..
+        } = &mut self.shell
+        else {
+            return Task::none();
+        };
+        vault.activate_nav(id);
+
+        let category = vault.selected_category();
+        if self
+            .settings
+            .remember(zann_cosmic::settings::Place::Category(category))
+        {
+            if let Err(err) = self.settings.save() {
+                eprintln!("could not save the settings: {err}");
+            }
+        }
+        Task::none()
+    }
+
+    /// The vault lays its two columns out itself, so it has to be told how much
+    /// of the window the nav bar left it.
+    fn on_window_resize(&mut self, _id: cosmic::iced::window::Id, width: f32, _height: f32) {
+        self.window_width = width;
+        let content_width = self.content_width();
+        if let Shell::Ready {
+            screen: Screen::Vault(vault),
+            ..
+        } = &mut self.shell
+        {
+            vault.set_content_width(content_width);
+        }
+    }
+
     fn subscription(&self) -> Subscription<Self::Message> {
         let screen = match &self.shell {
             Shell::Ready {
@@ -433,8 +526,14 @@ impl cosmic::Application for App {
         // The screens borrow `self.shell`, so losing the session is recorded
         // here and applied once that borrow ends.
         let mut lost_session = None;
+        let mut moved = None;
         let content_width = self.content_width();
         let reveal_seconds = self.settings.auto_hide_reveal_seconds;
+        let list_width = self.settings.list_width;
+        let last_category = self.settings.last_category.clone();
+        let last_category = last_category.as_deref();
+        let last_folder = self.settings.last_folder.clone();
+        let last_folder = last_folder.as_deref();
 
         let task = {
             let Shell::Ready { session, screen } = &mut self.shell else {
@@ -509,6 +608,11 @@ impl cosmic::Application for App {
                             let mut vault = vault::State::new(page, sync_error);
                             vault.set_content_width(content_width);
                             vault.set_reveal_seconds(reveal_seconds);
+                            vault.set_vaults(
+                                local::vaults(&session.facade()),
+                                local::current_vault(&session.facade()),
+                            );
+                            vault.restore(list_width, last_category, last_folder);
                             *screen = Screen::Vault(Box::new(vault));
                             Task::none()
                         }
@@ -523,6 +627,27 @@ impl cosmic::Application for App {
                         vault::Outcome::None => Task::none(),
                         vault::Outcome::Task(task) => lift(task, Message::Vault),
                         vault::Outcome::Copy(value) => cosmic::task::message(Message::Copy(value)),
+                        vault::Outcome::Moved(place) => {
+                            // Recorded here rather than saved: writing on every
+                            // pixel of a drag would hammer the file.
+                            moved = Some(place);
+                            Task::none()
+                        }
+                        vault::Outcome::SwitchVault(id) => {
+                            match local::switch_vault(&session.facade(), id) {
+                                Ok(page) => {
+                                    let vaults = local::vaults(&session.facade());
+                                    let current = local::current_vault(&session.facade());
+                                    let mut next = vault::State::new(page, None);
+                                    next.set_content_width(content_width);
+                                    next.set_reveal_seconds(reveal_seconds);
+                                    next.set_vaults(vaults, current);
+                                    *screen = Screen::Vault(Box::new(next));
+                                }
+                                Err(err) => eprintln!("could not switch the vault: {err}"),
+                            }
+                            Task::none()
+                        }
                     }
                 }
 
@@ -533,6 +658,13 @@ impl cosmic::Application for App {
 
         if let Some(err) = lost_session {
             self.shell = Shell::Blocked(err);
+        }
+        if let Some(place) = moved {
+            if self.settings.remember(place) {
+                if let Err(err) = self.settings.save() {
+                    eprintln!("could not save the settings: {err}");
+                }
+            }
         }
         task
     }

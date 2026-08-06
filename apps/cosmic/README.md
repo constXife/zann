@@ -69,6 +69,37 @@ does not produce an `l`.
 Lock stays in the menu while the vault is shut, disabled rather than hidden, so
 the menu does not change shape between screens.
 
+## The sidebar
+
+The desktop app stacks three things in that column: which vault, the categories,
+the folders. libcosmic's nav bar covers only the middle one, and the folders
+cannot simply join the categories in its model — a nav bar has one selection,
+while a folder *narrows* whatever category is showing rather than replacing it,
+the way it does in `useAppItemFilters.ts`.
+
+So `nav_bar` is overridden and the categories keep the stock widget inside it,
+with the vault picker above and the folder tree below. The tree comes from
+`zann_ui_core::build_folder_tree`, which the desktop app already used; the two
+selections stay independent and `ItemFilter` composes them, along with the
+search. The stock widget paints its own background through `into_container`,
+which building it into a column bypasses, so `nav_bar_style` is applied again
+around the whole column.
+
+The vault picker only appears when there is a choice — one vault needs no
+dropdown. Switching is the shell's: it owns the session, so the screen reports
+`Outcome::SwitchVault` rather than reaching for the facade.
+
+## Where the reader left off
+
+`cosmic.json` also keeps the splitter's width, the selected category and the
+selected folder, so the app opens where it was left. Restoring a folder unfolds
+the path down to it, or the selected row would be hidden inside a closed parent.
+
+Two of the desktop's are deliberately not kept: the search query and the
+selected item. Both record what someone went looking for, and neither is worth
+writing to disk to save a click. A place is only written when it actually
+changes, because dragging a splitter reports on every pixel.
+
 ## The three columns
 
 The open vault is the same shape as the Tauri app: nav categories, the item

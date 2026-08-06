@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zann_ffi::{
     create_core, AppStatusFfi, CoreFacade, ItemDetail, ItemSummary, ItemsFilter, Page,
-    StorageSummaryFfi,
+    StorageSummaryFfi, VaultSummaryFfi,
 };
 use zann_ui_core::ItemCounts;
 
@@ -89,6 +89,24 @@ pub fn items(facade: &CoreFacade, cursor: Option<String>) -> Result<ItemsPage, S
 
 pub fn item_get(facade: &CoreFacade, id: String) -> Result<ItemDetail, String> {
     facade.item_get(id).map_err(|err| err.to_string())
+}
+
+/// The sealed vaults on the current storage, for the sidebar's picker.
+pub fn vaults(facade: &CoreFacade) -> Vec<VaultSummaryFfi> {
+    facade.list_vaults().unwrap_or_default()
+}
+
+pub fn current_vault(facade: &CoreFacade) -> Option<String> {
+    facade.current_vault_id()
+}
+
+/// Opens another vault and reads its first page. One call rather than two so
+/// the screen is never built against the vault it just left.
+pub fn switch_vault(facade: &CoreFacade, id: String) -> Result<ItemsPage, String> {
+    facade
+        .set_current_vault(id)
+        .map_err(|err| err.to_string())?;
+    items(facade, None)
 }
 
 /// The servers and local vaults this machine knows about. One small read with
