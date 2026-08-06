@@ -19,25 +19,8 @@ use zann_ui_core::{
 use super::detail::{self, Detail};
 use crate::backend::local::{self, ItemsPage};
 use crate::backend::off_thread;
+use crate::i18n::{t, t_args};
 use crate::session::Session;
-
-/// Label keys come from `schemas/ui_categories.json`; until the clients share
-/// an i18n catalogue every frontend maps them itself.
-fn translate_label_key(key: &str) -> &'static str {
-    match key {
-        "nav.allItems" => "All items",
-        "nav.logins" => "Logins",
-        "nav.notes" => "Notes",
-        "nav.cards" => "Cards",
-        "nav.identity" => "Identity",
-        "nav.api" => "API keys",
-        "nav.kv" => "Key/Value",
-        "nav.infrastructure" => "Infrastructure",
-        "nav.trash" => "Trash",
-        "items.trashShared" => "Shared trash",
-        _ => "Unknown",
-    }
-}
 
 /// Schema icon names mapped onto the freedesktop names COSMIC ships.
 fn category_icon(schema_icon: &str) -> &'static str {
@@ -138,7 +121,7 @@ impl State {
             nav: nav_bar::Model::default(),
             detail: None,
             busy: false,
-            error: sync_error.map(|err| format!("sync failed: {err}")),
+            error: sync_error.map(|err| t_args("items.syncFailed", &[("error", &err)])),
             list_width: layout::LIST_DEFAULT,
             // Enough for the default split until the shell reports the window.
             content_width: layout::LIST_DEFAULT + layout::HANDLE + layout::DETAIL_MIN,
@@ -330,7 +313,7 @@ impl State {
         let spacing = theme::spacing();
 
         let Some(detail) = self.detail.as_ref() else {
-            return super::centered(widget::text::body("Select an item to read it."));
+            return super::centered(widget::text::body(t("items.detailsHint")));
         };
 
         let header = widget::row::with_capacity(2)
@@ -356,17 +339,17 @@ impl State {
 
         let toolbar = widget::row::with_capacity(2)
             .push(
-                widget::text_input::search_input("Search items", &self.query)
+                widget::text_input::search_input(t("items.searchPlaceholder"), &self.query)
                     .on_input(Message::QueryInput)
                     .on_clear(Message::ClearQuery)
                     .width(Length::Fill),
             )
-            .push(widget::button::standard("Lock").on_press(Message::Lock))
+            .push(widget::button::standard(t("common.lock")).on_press(Message::Lock))
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center);
 
         let list: Element<'_, Message> = if visible.is_empty() {
-            widget::text::body("Nothing here.")
+            widget::text::body(t("items.noItems"))
                 .apply(widget::container)
                 .width(Length::Fill)
                 .padding(spacing.space_m)
@@ -385,17 +368,19 @@ impl State {
         };
 
         let mut footer = widget::row::with_capacity(2)
-            .push(widget::text::caption(format!(
-                "{} of {} items loaded, {} shown",
-                self.items.len(),
-                self.total,
-                visible.len()
+            .push(widget::text::caption(t_args(
+                "items.loadedCount",
+                &[
+                    ("loaded", &self.items.len().to_string()),
+                    ("total", &self.total.to_string()),
+                    ("shown", &visible.len().to_string()),
+                ],
             )))
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center);
 
         if self.next_cursor.is_some() {
-            let mut more = widget::button::text("Load more");
+            let mut more = widget::button::text(t("items.loadMore"));
             if !self.busy {
                 more = more.on_press(Message::LoadMore);
             }
@@ -433,7 +418,9 @@ impl State {
         let selected = self.selected_category();
         self.nav.clear();
         for view in category_views(&self.counts, VaultScope::Personal) {
-            let label = format!("{} ({})", translate_label_key(&view.label_key), view.count);
+            // The label key is a catalogue key: `schemas/ui_categories.json` names
+            // the same strings the clients translate.
+            let label = format!("{} ({})", t(&view.label_key), view.count);
             let entity = self
                 .nav
                 .insert()

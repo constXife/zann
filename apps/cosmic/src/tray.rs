@@ -21,6 +21,8 @@ use ksni::blocking::TrayMethods;
 use ksni::menu::StandardItem;
 use ksni::MenuItem;
 
+use crate::i18n::t;
+
 /// What the tray can ask the shell to do. Nothing here is done by the tray
 /// itself — a menu callback that blocks would freeze the menu.
 #[derive(Clone, Copy, Debug)]
@@ -51,9 +53,9 @@ impl Tray {
         let _ = self.commands.unbounded_send(command);
     }
 
-    fn item(&self, label: &str, command: Command) -> MenuItem<Self> {
+    fn item(&self, key: &str, command: Command) -> MenuItem<Self> {
         StandardItem {
-            label: label.to_string(),
+            label: t(key),
             activate: Box::new(move |tray: &mut Self| tray.send(command)),
             ..Default::default()
         }
@@ -80,10 +82,10 @@ impl ksni::Tray for Tray {
 
     fn menu(&self) -> Vec<MenuItem<Self>> {
         vec![
-            self.item("Show", Command::Show),
+            self.item("common.show", Command::Show),
             MenuItem::Separator,
-            self.item("Lock", Command::Lock),
-            self.item("Quit", Command::Quit),
+            self.item("common.lock", Command::Lock),
+            self.item("common.quit", Command::Quit),
         ]
     }
 }

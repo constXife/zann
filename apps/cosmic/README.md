@@ -39,6 +39,20 @@ shell acts on. Two rules keep this from eroding:
 - no `Option` for something that always exists once the app is running, which is
   why `Session` is not optional and a missing database is a separate shell state.
 
+## The catalogue
+
+The strings come from `i18n/` at the repo root, which
+the desktop app loads into `vue-i18n` and this one reads through
+`zann_ui_core::i18n` — one catalogue rather than two that drift. `screens/*.rs`
+ask for them by the dotted keys the JSON nests, so a string added for one client
+is one the other can already ask for by the same name, and the nav categories
+finally use their `schemas/ui_categories.json` label keys as the catalogue keys
+they always were. Unset means whatever `LC_ALL`/`LC_MESSAGES`/`LANG` asks for.
+
+Nothing checks those keys at compile time, so `every_key_the_app_asks_for_is_in_the_catalogue`
+does it instead: it reads the sources, picks out anything key-shaped, and fails
+on one the catalogue has never heard of.
+
 ## The three columns
 
 The open vault is the same shape as the Tauri app: nav categories, the item

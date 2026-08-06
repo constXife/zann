@@ -25,7 +25,11 @@
     "continue": "Continue",
     "undo": "Undo",
     "save": "Save",
-    "loading": "Loading..."
+    "loading": "Loading...",
+    "lock": "Lock",
+    "open": "Open",
+    "show": "Show",
+    "quit": "Quit"
   },
   "sidebar": {
     "collapse": "Collapse sidebar",
@@ -79,7 +83,8 @@
     "mime": "MIME Type",
     "size": "Size",
     "checksum": "Checksum",
-    "protocol": "Protocol"
+    "protocol": "Protocol",
+    "otp": "One-time code"
   },
   "nav": {
     "vaults": "Vaults",
@@ -219,7 +224,11 @@
     "historyAfter": "After",
     "historyDraftNotice": "Draft changes staged. Use Edit to save.",
     "resolveConflict": "Resolve conflict",
-    "resolveConflictDone": "Conflict marked for sync"
+    "resolveConflictDone": "Conflict marked for sync",
+    "loadMore": "Load more",
+    "noFields": "This item has no fields.",
+    "loadedCount": "{loaded} of {total} loaded, {shown} shown",
+    "syncFailed": "Sync failed: {error}"
   },
   "totp": {
     "refreshEvery": "refresh every {seconds}s",
@@ -271,7 +280,9 @@
     "passwordMismatch": "Passwords do not match.",
     "currentAccount": "current account",
     "registerWillSignOutTitle": "Sign out of current session?",
-    "registerWillSignOutDesc": "You are signed in as {email}. Creating a new account will sign you out. Continue?"
+    "registerWillSignOutDesc": "You are signed in as {email}. Creating a new account will sign you out. Continue?",
+    "copyLink": "Copy the link",
+    "serverUrl": "Server URL"
   },
   "wizard": {
     "loading": "Loading...",
@@ -315,7 +326,14 @@
     "oldFingerprint": "Old fingerprint",
     "newFingerprint": "New fingerprint",
     "trustFingerprint": "Trust new fingerprint",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "syncAfterUnlock": "The vault will sync with the server right after this.",
+    "fingerprintWarning": "This server presents a different key than the one you trusted. Only continue if you know why it changed.",
+    "oidcHint": "Finish signing in in your browser, then come back here.",
+    "oidcReopen": "Open the sign-in page again",
+    "signInSso": "Sign in with SSO",
+    "starting": "Starting…",
+    "checking": "Checking…"
   },
   "settings": {
     "title": "Settings",
@@ -337,7 +355,8 @@
       "trashRetentionHelp": "Only deletes items that are already synced.",
       "trashRetentionNever": "Never",
       "trashRetention30": "After 30 days",
-      "trashRetention90": "After 90 days"
+      "trashRetention90": "After 90 days",
+      "languageSystem": "System"
     },
     "security": "Security",
     "autolock": "Auto-lock",
@@ -496,7 +515,6 @@
     "rowView": "Row view",
     "jsonView": "JSON view",
     "keyLabel": "Key",
-    "valueLabel": "Value",
     "actionsLabel": "Actions",
     "advanced": "Advanced",
     "customFields": "Custom fields",

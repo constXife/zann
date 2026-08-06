@@ -6,6 +6,7 @@ use cosmic::{theme, widget, Element};
 use super::centered;
 use crate::backend::local::{self, ItemsPage};
 use crate::backend::off_thread;
+use crate::i18n::t;
 use crate::session::Session;
 
 /// Whether the screen creates a vault or opens one that already exists.
@@ -109,21 +110,25 @@ impl State {
     pub fn view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let (title, action) = match self.mode {
-            Mode::Create => ("Choose a master password", "Create the vault"),
-            Mode::Unlock => ("Unlock your vault", "Unlock"),
+            Mode::Create => ("wizard.passwordTitle", "wizard.create"),
+            Mode::Unlock => ("unlock.title", "common.unlock"),
         };
 
-        let mut submit = widget::button::suggested(if self.busy { "Working…" } else { action })
-            .width(Length::Fill);
+        let mut submit = widget::button::suggested(t(if self.busy {
+            "wizard.processing"
+        } else {
+            action
+        }))
+        .width(Length::Fill);
         if !self.busy && !self.password.is_empty() {
             submit = submit.on_press(Message::Submit);
         }
 
         let mut form = widget::column::with_capacity(5)
-            .push(widget::text::title3(title))
+            .push(widget::text::title3(t(title)))
             .push(
                 widget::text_input::secure_input(
-                    "Master password",
+                    t("wizard.passwordPlaceholder"),
                     &self.password,
                     Some(Message::ToggleVisibility),
                     self.hidden,
@@ -135,15 +140,11 @@ impl State {
             .width(Length::Fixed(360.0));
 
         if self.mode == Mode::Create {
-            form = form.push(widget::text::caption(
-                "At least 8 characters. It is never sent to the server.",
-            ));
+            form = form.push(widget::text::caption(t("wizard.passwordSubtitle")));
         }
 
         if self.sync_after.is_some() {
-            form = form.push(widget::text::caption(
-                "The vault will sync with the server right after this.",
-            ));
+            form = form.push(widget::text::caption(t("wizard.syncAfterUnlock")));
         }
 
         if let Some(error) = self.error.as_ref() {
