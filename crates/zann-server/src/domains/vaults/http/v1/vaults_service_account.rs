@@ -13,7 +13,7 @@ pub(super) async fn list_service_account_vaults(
     state: AppState,
     identity: Identity,
 ) -> axum::response::Response {
-    let resource = "vaults/*";
+    let resource = "vaults";
     let policies = state.policy_store.get();
     if !policies.is_allowed(&identity, "list", resource) {
         metrics::forbidden_access(resource);

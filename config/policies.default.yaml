@@ -32,30 +32,25 @@
   actions: [write]
   resource: "users/me/recovery-kit"
 
-# List vaults and view members/items (narrow examples)
+# Any authenticated user may enumerate the vault collection (the handler returns
+# only vaults they belong to) and create a new vault.
+#
+# Deliberately absent: rules over "vaults/*" or "vaults/*/...". Wildcards here are
+# not segment-bounded, so "vaults/*" also matches "vaults/<id>/items/<id>/file" —
+# a `subject_type: any` rule at that path would hand every user access to every
+# vault's contents. Access inside a vault is decided by membership: with no rule
+# matching, evaluation returns NoMatch and falls through to the vault role check.
 - name: vaults-list
   subject_type: any
   effect: allow
   actions: [list]
-  resource: "vaults/*"
+  resource: "vaults"
 
 - name: vaults-create
   subject_type: any
   effect: allow
   actions: [write]
   resource: "vaults"
-
-- name: vault-items-list
-  subject_type: any
-  effect: allow
-  actions: [list]
-  resource: "vaults/*/items"
-
-- name: vault-members-list
-  subject_type: any
-  effect: allow
-  actions: [list]
-  resource: "vaults/*/members"
 
 # Service accounts for CI/CD
 - name: service-accounts-list

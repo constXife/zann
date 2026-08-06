@@ -42,7 +42,9 @@ pub async fn list_vault_summaries(
     cmd: ListVaultsCommand,
 ) -> Result<Vec<VaultSummary>, VaultServiceError> {
     let policies = state.policy_store.get();
-    let resource = "vaults/*";
+    // The collection itself, not a glob over its children: a rule granting this
+    // must not also grant `vaults/<id>/items` and friends.
+    let resource = "vaults";
     if !policies.is_allowed(identity, "list", resource) {
         metrics::forbidden_access(resource);
         tracing::warn!(

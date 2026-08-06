@@ -104,7 +104,7 @@ async fn personal_status(
     State(state): State<AppState>,
     Extension(identity): Extension<Identity>,
 ) -> impl IntoResponse {
-    let resource = "vaults/*";
+    let resource = "vaults";
     let policies = state.policy_store.get();
     if !policies.is_allowed(&identity, "list", resource) {
         metrics::forbidden_access(resource);
