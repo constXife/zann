@@ -25,6 +25,10 @@ use crate::i18n::{t, t_args};
 use crate::session::Session;
 use crate::settings::Place;
 
+/// The search box, so a shortcut elsewhere in the app can put the cursor in it.
+pub static SEARCH_ID: std::sync::LazyLock<widget::Id> =
+    std::sync::LazyLock::new(|| widget::Id::new("vault-search"));
+
 /// Schema icon names mapped onto the freedesktop names COSMIC ships.
 fn category_icon(schema_icon: &str) -> &'static str {
     match schema_icon {
@@ -123,6 +127,10 @@ pub enum Message {
     SelectFolder(Option<String>),
     ToggleFolder(String),
     SwitchVault(String),
+    RevealAll,
+    CopyEnv,
+    CopyJson,
+    CopyRaw,
     ResizeStart,
     ResizeMove(f32),
     ResizeEnd,
@@ -137,6 +145,11 @@ pub enum Outcome {
     Moved(Place),
     /// Only the shell holds the session, so the switch is asked for.
     SwitchVault(String),
+    /// A copy of everything, and how many secrets it left out.
+    Bulk {
+        value: String,
+        held_back: usize,
+    },
 }
 
 impl State {
@@ -237,6 +250,19 @@ impl State {
     fn clamped_list_width(&self, width: f32) -> f32 {
         let room = self.content_width - layout::HANDLE - layout::DETAIL_MIN;
         width.min(room.min(layout::LIST_MAX)).max(layout::LIST_MIN)
+    }
+
+    /// What the palette may offer, which is what the list is showing — the
+    /// palette narrows the same set rather than reaching past the filters.
+    pub fn candidates(&self) -> Vec<super::palette::Candidate> {
+        self.visible()
+            .into_iter()
+            .map(|item| super::palette::Candidate {
+                id: item.id.clone(),
+                title: item.title.clone(),
+                path: item.path.clone(),
+            })
+            .collect()
     }
 
     /// The items the current category, folder and search leave visible.
@@ -392,6 +418,30 @@ impl State {
             }
 
             Message::SwitchVault(id) => return Outcome::SwitchVault(id),
+
+            Message::RevealAll => {
+                let Some(detail) = self.detail.as_mut() else {
+                    return Outcome::None;
+                };
+                // The same clock a single reveal starts, so a bulk reveal is
+                // not a way around the auto-hide setting.
+                if !detail.reveal_all() || self.reveal_seconds == 0 {
+                    return Outcome::None;
+                }
+                return Outcome::Task(self.schedule_hide());
+            }
+
+            Message::CopyEnv | Message::CopyJson | Message::CopyRaw => {
+                let Some(detail) = self.detail.as_ref() else {
+                    return Outcome::None;
+                };
+                let (value, held_back) = match message {
+                    Message::CopyEnv => detail.as_env(),
+                    Message::CopyJson => detail.as_json(),
+                    _ => (detail.payload_json.clone(), 0),
+                };
+                return Outcome::Bulk { value, held_back };
+            }
 
             Message::ToggleFolder(path) => {
                 if !self.expanded.remove(&path) {
@@ -584,13 +634,21 @@ impl State {
             return super::centered(widget::text::body(t("items.detailsHint")));
         };
 
-        let header = widget::row::with_capacity(2)
+        let header = widget::row::with_capacity(5)
             .push(widget::text::title4(detail.title.clone()).width(Length::Fill))
+            .push(
+                widget::button::icon(widget::icon::from_name("image-red-eye-symbolic"))
+                    .tooltip(t("palette.revealAll"))
+                    .on_press(Message::RevealAll),
+            )
+            .push(widget::button::standard(t("items.copyEnv")).on_press(Message::CopyEnv))
+            .push(widget::button::standard(t("items.copyJson")).on_press(Message::CopyJson))
+            .push(widget::button::standard(t("items.copyRaw")).on_press(Message::CopyRaw))
             .push(
                 widget::button::icon(widget::icon::from_name("window-close-symbolic"))
                     .on_press(Message::CloseDetail),
             )
-            .spacing(spacing.space_xs)
+            .spacing(spacing.space_xxs)
             .align_y(Alignment::Center);
 
         widget::column::with_capacity(2)
@@ -608,6 +666,7 @@ impl State {
         // Only the search: locking is an action on the app, not on this list,
         // and lives in the header bar's menu with the rest of them.
         let toolbar = widget::text_input::search_input(t("items.searchPlaceholder"), &self.query)
+            .id(SEARCH_ID.clone())
             .on_input(Message::QueryInput)
             .on_clear(Message::ClearQuery)
             .width(Length::Fill);

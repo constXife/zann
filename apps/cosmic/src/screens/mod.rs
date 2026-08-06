@@ -6,6 +6,7 @@
 pub mod connect;
 pub mod detail;
 pub mod master;
+pub mod palette;
 pub mod settings;
 pub mod vault;
 pub mod welcome;

@@ -203,6 +203,190 @@ fn the_splitter_stays_between_the_two_minimums() {
     assert_eq!(state.list_width(), 460.0);
 }
 
+#[test]
+fn a_revealed_field_hides_itself_once_the_setting_says_to() {
+    let (_dir, session) = vault_with_items();
+    let facade = session.facade();
+    let page = local::items(&facade, None).expect("items");
+    let login = page
+        .items
+        .iter()
+        .find(|item| item.type_id == "login")
+        .expect("login in the page");
+    let detail = Detail::parse(local::item_get(&facade, login.id.clone()).expect("item_get"))
+        .expect("parse");
+    let password = detail
+        .fields
+        .iter()
+        .position(|field| field.key == "password")
+        .expect("password field");
+
+    let mut state = vault::State::new(page, None);
+    state.update(vault::Message::Loaded(Ok(detail)), &session);
+
+    // Off by default, so revealing schedules nothing to take it away.
+    let outcome = state.update(
+        vault::Message::Detail(detail::Message::ToggleReveal(password)),
+        &session,
+    );
+    assert!(matches!(outcome, vault::Outcome::None));
+    assert!(state.detail().expect("detail").fields[password].revealed);
+
+    state.set_reveal_seconds(20);
+    let outcome = state.update(
+        vault::Message::Detail(detail::Message::ToggleReveal(password)),
+        &session,
+    );
+    assert!(
+        matches!(outcome, vault::Outcome::None),
+        "hiding again waits for nothing"
+    );
+
+    let outcome = state.update(
+        vault::Message::Detail(detail::Message::ToggleReveal(password)),
+        &session,
+    );
+    assert!(
+        matches!(outcome, vault::Outcome::Task(_)),
+        "revealing starts the clock"
+    );
+
+    // A stale timer belongs to an earlier reveal and leaves this one alone.
+    // Only the third toggle started a clock, so that clock is the first one.
+    state.update(vault::Message::HideRevealed(0), &session);
+    assert!(state.detail().expect("detail").fields[password].revealed);
+
+    state.update(vault::Message::HideRevealed(1), &session);
+    assert!(!state.detail().expect("detail").fields[password].revealed);
+}
+
+#[test]
+fn a_folder_narrows_the_list_and_the_place_is_reported() {
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None).expect("items");
+    let mut state = vault::State::new(page, None);
+
+    // The fixture has `work/aws` and `personal/mail`.
+    assert_eq!(state.visible().len(), 2);
+
+    let outcome = state.update(
+        vault::Message::SelectFolder(Some("work".to_string())),
+        &session,
+    );
+    assert!(matches!(
+        outcome,
+        vault::Outcome::Moved(zann_cosmic::settings::Place::Folder(Some(ref path))) if path == "work"
+    ));
+    let visible = state.visible();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].path, "work/aws");
+
+    // A folder and the search compose, they do not replace each other.
+    state.update(vault::Message::QueryInput("mail".to_string()), &session);
+    assert!(state.visible().is_empty(), "mail does not live under work");
+
+    state.update(vault::Message::ClearQuery, &session);
+    state.update(vault::Message::SelectFolder(None), &session);
+    assert_eq!(state.visible().len(), 2);
+}
+
+#[test]
+fn the_last_place_comes_back_with_its_folder_unfolded() {
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None).expect("items");
+    let mut state = vault::State::new(page, None);
+
+    state.set_content_width(1200.0);
+    state.restore(520.0, None, Some("work"));
+    assert_eq!(state.list_width(), 520.0);
+
+    let visible = state.visible();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].path, "work/aws");
+
+    // A path with no folder behind it any more must not hide the whole list.
+    state.restore(520.0, None, None);
+    assert_eq!(state.visible().len(), 2);
+}
+
+#[test]
+fn a_bulk_copy_names_the_secrets_without_spelling_them_out() {
+    let (_dir, session) = vault_with_items();
+    let facade = session.facade();
+    let page = local::items(&facade, None).expect("items");
+    let login = page
+        .items
+        .iter()
+        .find(|item| item.type_id == "login")
+        .expect("login in the page");
+    let detail = Detail::parse(local::item_get(&facade, login.id.clone()).expect("item_get"))
+        .expect("parse");
+
+    let (env, held_back) = detail.as_env();
+    assert_eq!(held_back, 2, "the password and the one-time code");
+    assert!(env.contains("username=demo@example.com"));
+    assert!(env.contains("password=<protected>"));
+    assert!(!env.contains("hunter2"), "a secret must not leave this way");
+
+    let (json, held_back) = detail.as_json();
+    assert_eq!(held_back, 2);
+    assert!(!json.contains("hunter2"));
+
+    // Raw is the payload as stored, secrets and all — it is the one copy that
+    // says so on the button.
+    assert!(detail.payload_json.contains("hunter2"));
+
+    // The one a reader most likely came for is the first masked field.
+    assert_eq!(detail.primary_secret(), Some("hunter2"));
+}
+
+#[test]
+fn the_palette_offers_commands_then_items() {
+    use zann_cosmic::screens::palette;
+
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None).expect("items");
+    let vault = vault::State::new(page, None);
+    let candidates = vault.candidates();
+    let mut state = palette::State::new();
+
+    // Nothing selected, so the two commands that need an item are held back.
+    let rows = state.rows(&candidates, false);
+    assert_eq!(
+        rows.iter()
+            .filter(|row| matches!(row, palette::Row::Command(_)))
+            .count(),
+        2
+    );
+    assert_eq!(
+        rows.iter()
+            .filter(|row| matches!(row, palette::Row::Item(_)))
+            .count(),
+        2
+    );
+
+    // A query narrows both halves at once.
+    state.update(palette::Message::QueryInput("mail".to_string()), &rows);
+    let rows = state.rows(&candidates, true);
+    assert_eq!(rows.len(), 1, "only the item named mail");
+    assert!(matches!(rows[0], palette::Row::Item(_)));
+
+    // Enter runs whatever the highlight is on, and the highlight went back to
+    // the top when the query changed.
+    assert!(matches!(
+        state.update(palette::Message::Submit, &rows),
+        palette::Outcome::Run(palette::Row::Item(_))
+    ));
+
+    // Moving past the end wraps rather than falling off it.
+    let rows = state.rows(&candidates, true);
+    state.update(palette::Message::Move(-1), &rows);
+    assert!(matches!(
+        state.update(palette::Message::Submit, &rows),
+        palette::Outcome::Run(_)
+    ));
+}
+
 /// The catalogue is looked up by string, so nothing stops a typo reaching the
 /// screen as its own key. This is the check the compiler cannot do: every key
 /// the sources ask for has to exist.
@@ -274,63 +458,6 @@ fn walk_sources(root: &str) -> Vec<std::path::PathBuf> {
 }
 
 #[test]
-fn a_revealed_field_hides_itself_once_the_setting_says_to() {
-    let (_dir, session) = vault_with_items();
-    let facade = session.facade();
-    let page = local::items(&facade, None).expect("items");
-    let login = page
-        .items
-        .iter()
-        .find(|item| item.type_id == "login")
-        .expect("login in the page");
-    let detail = Detail::parse(local::item_get(&facade, login.id.clone()).expect("item_get"))
-        .expect("parse");
-    let password = detail
-        .fields
-        .iter()
-        .position(|field| field.key == "password")
-        .expect("password field");
-
-    let mut state = vault::State::new(page, None);
-    state.update(vault::Message::Loaded(Ok(detail)), &session);
-
-    // Off by default, so revealing schedules nothing to take it away.
-    let outcome = state.update(
-        vault::Message::Detail(detail::Message::ToggleReveal(password)),
-        &session,
-    );
-    assert!(matches!(outcome, vault::Outcome::None));
-    assert!(state.detail().expect("detail").fields[password].revealed);
-
-    state.set_reveal_seconds(20);
-    let outcome = state.update(
-        vault::Message::Detail(detail::Message::ToggleReveal(password)),
-        &session,
-    );
-    assert!(
-        matches!(outcome, vault::Outcome::None),
-        "hiding again waits for nothing"
-    );
-
-    let outcome = state.update(
-        vault::Message::Detail(detail::Message::ToggleReveal(password)),
-        &session,
-    );
-    assert!(
-        matches!(outcome, vault::Outcome::Task(_)),
-        "revealing starts the clock"
-    );
-
-    // A stale timer belongs to an earlier reveal and leaves this one alone.
-    // Only the third toggle started a clock, so that clock is the first one.
-    state.update(vault::Message::HideRevealed(0), &session);
-    assert!(state.detail().expect("detail").fields[password].revealed);
-
-    state.update(vault::Message::HideRevealed(1), &session);
-    assert!(!state.detail().expect("detail").fields[password].revealed);
-}
-
-#[test]
 fn settings_round_trip_through_a_file() {
     let mut settings = zann_cosmic::settings::Settings::default();
     assert_eq!(settings.auto_lock_minutes, 10);
@@ -351,55 +478,6 @@ fn settings_round_trip_through_a_file() {
         partial.clipboard_clear_seconds,
         zann_cosmic::settings::Settings::default().clipboard_clear_seconds
     );
-}
-
-#[test]
-fn a_folder_narrows_the_list_and_the_place_is_reported() {
-    let (_dir, session) = vault_with_items();
-    let page = local::items(&session.facade(), None).expect("items");
-    let mut state = vault::State::new(page, None);
-
-    // The fixture has `work/aws` and `personal/mail`.
-    assert_eq!(state.visible().len(), 2);
-
-    let outcome = state.update(
-        vault::Message::SelectFolder(Some("work".to_string())),
-        &session,
-    );
-    assert!(matches!(
-        outcome,
-        vault::Outcome::Moved(zann_cosmic::settings::Place::Folder(Some(ref path))) if path == "work"
-    ));
-    let visible = state.visible();
-    assert_eq!(visible.len(), 1);
-    assert_eq!(visible[0].path, "work/aws");
-
-    // A folder and the search compose, they do not replace each other.
-    state.update(vault::Message::QueryInput("mail".to_string()), &session);
-    assert!(state.visible().is_empty(), "mail does not live under work");
-
-    state.update(vault::Message::ClearQuery, &session);
-    state.update(vault::Message::SelectFolder(None), &session);
-    assert_eq!(state.visible().len(), 2);
-}
-
-#[test]
-fn the_last_place_comes_back_with_its_folder_unfolded() {
-    let (_dir, session) = vault_with_items();
-    let page = local::items(&session.facade(), None).expect("items");
-    let mut state = vault::State::new(page, None);
-
-    state.set_content_width(1200.0);
-    state.restore(520.0, None, Some("work"));
-    assert_eq!(state.list_width(), 520.0);
-
-    let visible = state.visible();
-    assert_eq!(visible.len(), 1);
-    assert_eq!(visible[0].path, "work/aws");
-
-    // A path with no folder behind it any more must not hide the whole list.
-    state.restore(520.0, None, None);
-    assert_eq!(state.visible().len(), 2);
 }
 
 #[test]
