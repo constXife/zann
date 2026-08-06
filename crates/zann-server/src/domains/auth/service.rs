@@ -20,8 +20,8 @@ use crate::domains::access_control::http::scopes_allow_vault;
 use crate::domains::auth::core::identity::identity_from_oidc;
 use crate::domains::auth::core::oidc::validate_oidc_jwt;
 use crate::domains::auth::core::passwords::{
-    derive_auth_hash, hash_password, hash_service_token, kdf_fingerprint, kdf_params_from_user,
-    random_kdf_salt, verify_password, KdfParams,
+    derive_auth_hash_async, hash_password_async, hash_service_token_async, kdf_fingerprint,
+    kdf_params_from_user, random_kdf_salt, verify_password_async, KdfParams,
 };
 use crate::domains::auth::core::tokens::hash_token;
 use crate::domains::auth::helpers::{
@@ -166,22 +166,23 @@ pub async fn register(
             return Err(AuthError::Kdf);
         }
     };
-    let auth_hash = if let Ok(value) = derive_auth_hash(&payload.password, &kdf_salt, &params) {
-        value
-    } else {
-        metrics::auth_register("kdf_error");
-        tracing::error!(
-            event = "auth_register_failed",
-            reason = "kdf_error",
-            email = "redacted",
-            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
-            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
-            "Registration failed"
-        );
-        return Err(AuthError::Kdf);
-    };
+    let auth_hash =
+        if let Ok(value) = derive_auth_hash_async(&payload.password, &kdf_salt, &params).await {
+            value
+        } else {
+            metrics::auth_register("kdf_error");
+            tracing::error!(
+                event = "auth_register_failed",
+                reason = "kdf_error",
+                email = "redacted",
+                ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+                request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+                "Registration failed"
+            );
+            return Err(AuthError::Kdf);
+        };
     let password_hash =
-        if let Ok(value) = hash_password(&auth_hash, &state.password_pepper, &params) {
+        if let Ok(value) = hash_password_async(auth_hash, &state.password_pepper, &params).await {
             value
         } else {
             metrics::auth_register("kdf_error");
@@ -613,7 +614,8 @@ pub async fn login_internal(
             return Err(AuthError::Kdf);
         }
     };
-    let Ok(valid) = verify_password(&user, &payload.password, &state.password_pepper) else {
+    let Ok(valid) = verify_password_async(&user, &payload.password, &state.password_pepper).await
+    else {
         metrics::auth_login("db_error", "internal");
         tracing::error!(
             event = "auth_login_failed",
@@ -1079,21 +1081,22 @@ pub(crate) async fn login_service_account(
                 return Err(AuthError::Kdf);
             }
         };
-    let token_hash =
-        if let Ok(value) = hash_service_token(&payload.token, &state.token_pepper, &params) {
-            value
-        } else {
-            metrics::auth_login("kdf_error", "service_account");
-            tracing::error!(
-                event = "auth_login_failed",
-                reason = "kdf_error",
-                method = "service_account",
-                ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
-                request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
-                "Login failed"
-            );
-            return Err(AuthError::Kdf);
-        };
+    let token_hash = if let Ok(value) =
+        hash_service_token_async(&payload.token, &state.token_pepper, &params).await
+    {
+        value
+    } else {
+        metrics::auth_login("kdf_error", "service_account");
+        tracing::error!(
+            event = "auth_login_failed",
+            reason = "kdf_error",
+            method = "service_account",
+            ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+            request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+            "Login failed"
+        );
+        return Err(AuthError::Kdf);
+    };
 
     let account = if let Some(account) = accounts.into_iter().find(|sa| sa.token_hash == token_hash)
     {

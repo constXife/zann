@@ -6,7 +6,7 @@ use zann_db::repo::{
 };
 
 use crate::app::AppState;
-use crate::domains::auth::core::passwords::{hash_service_token, random_kdf_salt, KdfParams};
+use crate::domains::auth::core::passwords::{hash_service_token_async, random_kdf_salt, KdfParams};
 use crate::infra::metrics;
 use crate::infra::user_display::{avatar_initials_for_user, display_name_for_user};
 
@@ -258,7 +258,7 @@ pub async fn identity_from_service_account_token(
                 tracing::error!(event = "auth_sa_kdf_unavailable", "KDF permit unavailable");
                 "db_error"
             })?;
-        hash_service_token(token, &state.token_pepper, &params)?
+        hash_service_token_async(token, &state.token_pepper, &params).await?
     };
     let account = accounts
         .into_iter()
