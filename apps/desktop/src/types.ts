@@ -25,7 +25,8 @@ export type Settings = {
   clipboard_clear_if_unchanged: boolean;
   auto_hide_reveal_seconds: number;
   require_os_auth: boolean;
-  biometry_dwk_backup?: string | null;
+  /** Whether a wrapped master key is enrolled. Read-only: the backend derives it. */
+  has_biometry_key?: boolean;
   trash_auto_purge_days: number;
   close_to_tray: boolean;
   close_to_tray_notice_shown: boolean;

@@ -7,8 +7,6 @@ license = "MIT"
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
+keyring = "2"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-keyring = "2"
