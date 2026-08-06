@@ -931,6 +931,24 @@ pub async fn refresh(
         return Err(AuthError::Unauthorized("token_expired"));
     }
 
+    // Refresh renews expires_at, so without this a stolen refresh token on a
+    // revoked device would keep the session alive indefinitely.
+    match crate::domains::auth::core::identity::device_is_revoked(state, session.device_id).await {
+        Ok(false) => {}
+        Ok(true) => {
+            tracing::info!(
+                event = "auth_refresh_device_revoked",
+                user_id = "redacted",
+                device_id = %session.device_id,
+                ip = %ctx.client_ip.as_deref().unwrap_or("unknown"),
+                request_id = %ctx.request_id.as_deref().unwrap_or("unknown"),
+                "Refresh rejected for revoked device"
+            );
+            return Err(AuthError::Unauthorized("device_revoked"));
+        }
+        Err(_) => return Err(AuthError::DbError),
+    }
+
     let new_refresh_token = Uuid::now_v7().to_string();
     let new_access_token = Uuid::now_v7().to_string();
     let new_refresh_hash = hash_token(&new_refresh_token, &state.token_pepper);

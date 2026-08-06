@@ -221,4 +221,26 @@ impl<'a> SessionRepo<'a> {
             Span::current().record("db.rows", result.rows_affected() as i64);
         })
     }
+
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(db.system = "postgresql", db.operation = "DELETE", db.query = "sessions.delete_by_device")
+    )]
+    pub async fn delete_by_device(&self, device_id: Uuid) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            DELETE FROM sessions
+            WHERE device_id = $1
+            "#,
+            device_id
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| {
+            let rows = result.rows_affected();
+            Span::current().record("db.rows", rows as i64);
+            rows
+        })
+    }
 }
