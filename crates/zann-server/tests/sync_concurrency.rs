@@ -391,3 +391,140 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         .unwrap_or(0);
     assert_eq!(conflicts_one + conflicts_two, 1);
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn push_cannot_touch_items_from_another_vault() {
+    let app = TestApp::new().await;
+
+    let victim = app.register("victim@example.com", "password-1").await;
+    let victim_token = victim["access_token"].as_str().expect("token");
+    let victim_vault = app.personal_vault(victim_token, "vault-victim").await;
+    let victim_vault_id =
+        Uuid::parse_str(victim_vault["id"].as_str().expect("vault id")).expect("uuid");
+    let item_id = Uuid::now_v7();
+
+    let (status, created) = app
+        .send_json(
+            Method::POST,
+            "/v1/sync/push",
+            Some(victim_token),
+            serde_json::json!({
+                "vault_id": victim_vault_id,
+                "changes": [{
+                    "item_id": item_id,
+                    "operation": ChangeType::Create.as_i32(),
+                    "payload_enc": [1, 2, 3],
+                    "checksum": "checksum-victim",
+                    // Basename matches the name so path normalization is a no-op
+                    // and the assertions below stay about the attacker, not it.
+                    "path": "victim/secret",
+                    "name": "secret",
+                    "type_id": "login"
+                }]
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "victim create failed: {created:?}");
+
+    // A separate account that only knows the victim's item id.
+    let attacker = app.register("attacker@example.com", "password-2").await;
+    let attacker_token = attacker["access_token"].as_str().expect("token");
+    let attacker_vault = app.personal_vault(attacker_token, "vault-attacker").await;
+    let attacker_vault_id =
+        Uuid::parse_str(attacker_vault["id"].as_str().expect("vault id")).expect("uuid");
+
+    for operation in [ChangeType::Update, ChangeType::Delete, ChangeType::Restore] {
+        let (status, response) = app
+            .send_json(
+                Method::POST,
+                "/v1/sync/push",
+                Some(attacker_token),
+                serde_json::json!({
+                    "vault_id": attacker_vault_id,
+                    "changes": [{
+                        "item_id": item_id,
+                        "operation": operation.as_i32(),
+                        "payload_enc": [6, 6, 6],
+                        "checksum": "checksum-attacker",
+                        "path": "attacker/pwned",
+                        "name": "Pwned"
+                    }]
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{operation:?}: {response:?}");
+        assert_eq!(
+            response["applied_changes"]
+                .as_array()
+                .map_or(0, |list| list.len()),
+            0,
+            "{operation:?} must not apply across vaults: {response:?}"
+        );
+        assert_eq!(
+            response["conflicts"][0]["reason"].as_str(),
+            Some("missing_item"),
+            "{operation:?} must not reveal the foreign item: {response:?}"
+        );
+    }
+
+    // Reusing the id via Create must conflict instead of hitting the primary key.
+    let (status, response) = app
+        .send_json(
+            Method::POST,
+            "/v1/sync/push",
+            Some(attacker_token),
+            serde_json::json!({
+                "vault_id": attacker_vault_id,
+                "changes": [{
+                    "item_id": item_id,
+                    "operation": ChangeType::Create.as_i32(),
+                    "payload_enc": [6, 6, 6],
+                    "checksum": "checksum-attacker",
+                    "path": "attacker/pwned",
+                    "name": "Pwned",
+                    "type_id": "login"
+                }]
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "cross-vault create: {response:?}");
+    assert_eq!(
+        response["applied_changes"]
+            .as_array()
+            .map_or(0, |list| list.len()),
+        0,
+        "cross-vault create must not apply: {response:?}"
+    );
+
+    // The victim's item is untouched: still active, still their payload.
+    let (status, pull) = app
+        .send_json(
+            Method::POST,
+            "/v1/sync/pull",
+            Some(victim_token),
+            serde_json::json!({ "vault_id": victim_vault_id }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "victim pull failed: {pull:?}");
+    let changes = pull["changes"].as_array().expect("changes");
+    let change = changes
+        .iter()
+        .find(|change| change["item_id"].as_str() == Some(&item_id.to_string()))
+        .unwrap_or_else(|| panic!("victim item vanished: {pull:?}"));
+    assert_eq!(
+        change["checksum"].as_str(),
+        Some("checksum-victim"),
+        "victim payload was overwritten: {change:?}"
+    );
+    assert_eq!(
+        change["path"].as_str(),
+        Some("victim/secret"),
+        "victim path was overwritten: {change:?}"
+    );
+    assert_ne!(
+        change["operation"].as_i64(),
+        Some(i64::from(ChangeType::Delete.as_i32())),
+        "victim item was tombstoned: {change:?}"
+    );
+}

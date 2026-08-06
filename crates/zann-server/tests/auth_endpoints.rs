@@ -32,6 +32,13 @@ struct TestApp {
 
 impl TestApp {
     async fn new() -> Self {
+        Self::with_kdf_permits(4).await
+    }
+
+    /// `kdf_permits` sizes the Argon2 semaphore. Zero makes any code path that
+    /// takes a KDF permit block forever, which is how
+    /// `unknown_service_account_token_skips_kdf` observes whether hashing happens.
+    async fn with_kdf_permits(kdf_permits: usize) -> Self {
         static INIT: std::sync::Once = std::sync::Once::new();
         INIT.call_once(|| {
             let _ = tracing_subscriber::fmt()
@@ -74,7 +81,7 @@ impl TestApp {
             identity_key: support::test_identity_key(),
             access_token_ttl_seconds: 3600,
             refresh_token_ttl_seconds: 3600,
-            argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
+            argon2_semaphore: std::sync::Arc::new(Semaphore::new(kdf_permits)),
             oidc_jwks_cache: OidcJwksCache::new(),
             config: config_for_state,
             policy_store: PolicyStore::new(PolicySet::from_rules(rules)),
@@ -149,6 +156,17 @@ impl TestApp {
         response.status()
     }
 
+    async fn get_status_with_token(&self, uri: &str, token: &str) -> StatusCode {
+        let request = Request::builder()
+            .method(Method::GET)
+            .uri(uri)
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::empty())
+            .expect("request");
+        let response = self.app.clone().oneshot(request).await.expect("response");
+        response.status()
+    }
+
     async fn send_json_status(
         &self,
         method: Method,
@@ -177,6 +195,36 @@ impl TestApp {
             .await;
         assert_eq!(status, StatusCode::CREATED, "register failed: {:?}", json);
         json
+    }
+
+    /// Inserts a user straight into the database. Unlike `register` this performs
+    /// no KDF, so it is usable on an app built with no KDF permits.
+    async fn seed_user(&self, email: &str) {
+        let now = chrono::Utc::now();
+        let user = zann_core::User {
+            id: Uuid::now_v7(),
+            email: email.to_string(),
+            full_name: None,
+            password_hash: None,
+            kdf_salt: "salt".to_string(),
+            kdf_algorithm: "argon2id".to_string(),
+            kdf_iterations: 1,
+            kdf_memory_kb: 8,
+            kdf_parallelism: 1,
+            recovery_key_hash: None,
+            status: zann_core::UserStatus::Active,
+            deleted_at: None,
+            deleted_by_user_id: None,
+            deleted_by_device_id: None,
+            row_version: 1,
+            created_at: now,
+            updated_at: now,
+            last_login_at: None,
+        };
+        UserRepo::new(&self.pool)
+            .create(&user)
+            .await
+            .expect("create user");
     }
 
     async fn create_service_account(&self, owner_email: &str) -> String {
@@ -382,4 +430,45 @@ async fn service_account_login_rejects_invalid_format() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"], "invalid_token");
+}
+
+/// The service-account branch of the auth middleware runs before any credential
+/// is proven, so a well-formed but unknown token must be rejected without
+/// spending an Argon2id hash — otherwise it is a free unauthenticated CPU sink.
+///
+/// Observed structurally rather than by timing: with a zero-permit KDF semaphore
+/// any path that hashes blocks forever, so "returns promptly" means "did not hash"
+/// and "times out" means "did".
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn unknown_service_account_token_skips_kdf() {
+    use std::time::Duration;
+
+    let app = TestApp::with_kdf_permits(0).await;
+    // Seeded directly: registering would itself need a KDF permit.
+    app.seed_user("sa-owner@example.com").await;
+    let known_token = app.create_service_account("sa-owner@example.com").await;
+
+    // Unknown prefix: no candidate to compare against, so no KDF and no permit.
+    // Seeded tokens are hex, so a `z` in the prefix cannot collide with one.
+    let unknown_token = format!("zann_sa_zzzz{}", Uuid::now_v7().simple());
+    let status = tokio::time::timeout(
+        Duration::from_secs(5),
+        app.get_status_with_token("/v1/vaults", &unknown_token),
+    )
+    .await
+    .expect("unknown service-account token must not wait on a KDF permit");
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // A token whose prefix does exist still has to be verified, which needs a
+    // permit. This is what keeps the assertion above from passing vacuously.
+    let blocked = tokio::time::timeout(
+        Duration::from_secs(1),
+        app.get_status_with_token("/v1/vaults", &known_token),
+    )
+    .await;
+    assert!(
+        blocked.is_err(),
+        "a real service-account token must verify under the KDF semaphore"
+    );
 }

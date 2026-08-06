@@ -3,6 +3,11 @@ name = "zann-desktop"
 version = "0.0.1"
 edition = "2021"
 
+# Own workspace root: the crate has its own Cargo.lock and must not be absorbed
+# by an ancestor workspace when the repo is checked out inside another one
+# (e.g. a git worktree under .claude/worktrees).
+[workspace]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

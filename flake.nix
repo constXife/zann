@@ -173,6 +173,13 @@
           OPENSSL_DIR = pkgs.openssl.dev;
           OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
           OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
+
+          # Нужно для `--features jemalloc` (и, значит, для `--all-features`).
+          # Обёртка gcc из nixpkgs подставляет -D_FORTIFY_SOURCE=2, а debug-профиль
+          # собирается с -O0. glibc на это выдаёт `#warning _FORTIFY_SOURCE requires
+          # compiling with optimization`, а configure у jemalloc компилирует свои
+          # пробы с -Werror — падает каждая, и сборка обрывается на strerror_r.
+          hardeningDisable = [ "fortify" ];
         };
 
         # apps/cosmic живёт вне воркспейса и тянет libcosmic, чей rust-version

@@ -6,8 +6,21 @@ use std::fs;
 use std::path::Path;
 use tempfile::tempdir;
 
+/// Drops every `ZANN_*` variable inherited from the developer's shell. Anyone who
+/// actually uses zann has `ZANN_ADDR` / `ZANN_TOKEN_FILE` / `ZANN_SERVER_FINGERPRINT`
+/// exported, and the CLI reads them — so without this the suite fails locally
+/// while passing in CI.
+pub(crate) fn clear_zann_env(cmd: &mut Command) {
+    for (key, _) in std::env::vars() {
+        if key.starts_with("ZANN_") {
+            cmd.env_remove(key);
+        }
+    }
+}
+
 fn base_cmd(home: &Path) -> Command {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("zann"));
+    clear_zann_env(&mut cmd);
     cmd.env("HOME", home);
     cmd
 }

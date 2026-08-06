@@ -36,25 +36,12 @@ pub trait Keystore: Send + Sync {
     fn delete_dwk(&self) -> Result<(), KeystoreError>;
 }
 
-#[cfg(target_os = "macos")]
-mod macos;
-#[cfg(target_os = "windows")]
-mod windows;
-#[cfg(not(any(target_os = "macos", target_os = "windows")))]
-mod windows;
+mod keyring_store;
 
-#[cfg(target_os = "macos")]
-pub use macos::MacosKeystore;
-#[cfg(not(target_os = "macos"))]
-pub use windows::WindowsKeystore;
+pub use keyring_store::KeyringKeystore;
 
+/// Backed by the platform credential store: Keychain on macOS, Credential
+/// Manager on Windows, Secret Service / keyutils on Linux.
 pub fn default_keystore() -> Box<dyn Keystore> {
-    #[cfg(target_os = "macos")]
-    {
-        Box::new(MacosKeystore::new("zann", "dwk"))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Box::new(WindowsKeystore::new())
-    }
+    Box::new(KeyringKeystore::new("zann", "dwk"))
 }

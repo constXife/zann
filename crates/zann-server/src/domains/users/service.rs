@@ -6,7 +6,7 @@ use zann_db::repo::UserRepo;
 use crate::app::AppState;
 use crate::config::AuthMode;
 use crate::domains::auth::core::passwords::{
-    derive_auth_hash, hash_password, kdf_params_from_user, verify_password,
+    derive_auth_hash_async, hash_password_async, kdf_params_from_user, verify_password_async,
 };
 use crate::domains::errors::ServiceError;
 use crate::infra::metrics;
@@ -179,7 +179,9 @@ pub async fn change_password(
                 return Err(MeError::Kdf);
             }
         };
-    let Ok(valid) = verify_password(&user, &cmd.current_password, &state.password_pepper) else {
+    let Ok(valid) =
+        verify_password_async(&user, &cmd.current_password, &state.password_pepper).await
+    else {
         tracing::error!(event = "users_me_password_failed", "KDF error");
         return Err(MeError::Kdf);
     };
@@ -197,7 +199,8 @@ pub async fn change_password(
                 return Err(MeError::Kdf);
             }
         };
-    let auth_hash = if let Ok(value) = derive_auth_hash(&cmd.new_password, &user.kdf_salt, &params)
+    let auth_hash = if let Ok(value) =
+        derive_auth_hash_async(&cmd.new_password, &user.kdf_salt, &params).await
     {
         value
     } else {
@@ -205,7 +208,7 @@ pub async fn change_password(
         return Err(MeError::Kdf);
     };
     let password_hash =
-        if let Ok(value) = hash_password(&auth_hash, &state.password_pepper, &params) {
+        if let Ok(value) = hash_password_async(auth_hash, &state.password_pepper, &params).await {
             value
         } else {
             tracing::error!(event = "users_me_password_failed", "KDF error");
@@ -286,14 +289,15 @@ pub async fn create_recovery_kit(
                 return Err(MeError::Kdf);
             }
         };
-    let auth_hash = if let Ok(value) = derive_auth_hash(&recovery_key, &user.kdf_salt, &params) {
-        value
-    } else {
-        tracing::error!(event = "users_me_recovery_failed", "KDF error");
-        return Err(MeError::Kdf);
-    };
+    let auth_hash =
+        if let Ok(value) = derive_auth_hash_async(&recovery_key, &user.kdf_salt, &params).await {
+            value
+        } else {
+            tracing::error!(event = "users_me_recovery_failed", "KDF error");
+            return Err(MeError::Kdf);
+        };
     let recovery_key_hash =
-        if let Ok(value) = hash_password(&auth_hash, &state.password_pepper, &params) {
+        if let Ok(value) = hash_password_async(auth_hash, &state.password_pepper, &params).await {
             value
         } else {
             tracing::error!(event = "users_me_recovery_failed", "KDF error");

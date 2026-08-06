@@ -22,6 +22,7 @@ use zann_core::{AppService, StorageKind, VaultKind};
 use zann_db::local::LocalVault;
 use zann_db::local::{KeyWrapType, LocalItemRepo, LocalStorageRepo, LocalVaultRepo, MetadataRepo};
 use zann_db::services::LocalServices;
+use zann_keystore::default_keystore;
 
 fn default_local_kdf_params() -> zann_core::api::auth::KdfParams {
     zann_core::api::auth::KdfParams {
@@ -178,9 +179,47 @@ pub async fn initialize_local_identity(
     Ok(ApiResponse::ok(()))
 }
 
+/// Strip backend-only material and derive UI hints before handing settings to
+/// the webview.
+fn public_settings(settings: &DesktopSettings) -> DesktopSettings {
+    let mut out = settings.clone();
+    out.has_biometry_key = out.wrapped_master_key.is_some();
+    out.legacy_biometry_dwk_backup = None;
+    out
+}
+
+/// Older builds persisted the DWK in cleartext inside `desktop.json`. Move it
+/// into the OS keystore and rewrite the file so the cleartext copy is gone.
+fn migrate_legacy_dwk(root: &std::path::Path, settings: &mut DesktopSettings) {
+    let Some(encoded) = settings.legacy_biometry_dwk_backup.take() else {
+        return;
+    };
+
+    let migrated = base64::engine::general_purpose::STANDARD
+        .decode(&encoded)
+        .ok()
+        .and_then(|bytes| <[u8; 32]>::try_from(bytes.as_slice()).ok())
+        .is_some_and(|key| store_dwk(&SecretKey::from_bytes(key)).is_ok());
+
+    if !migrated {
+        // The keystore is unavailable or the blob was corrupt. Drop the wrapped
+        // key too: without a usable DWK it is dead weight, and the user falls
+        // back to unlocking with the master password.
+        settings.wrapped_master_key = None;
+        settings.auto_unlock = false;
+        eprintln!("[keystore] could not migrate legacy dwk; biometry unlock reset");
+    }
+
+    if let Err(err) = save_settings(root, settings.clone()) {
+        eprintln!("[keystore] failed to rewrite settings after dwk migration: {err}");
+    }
+}
+
 pub async fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapResponse, String> {
-    let settings = load_settings(&state.root).map_err(|err| err.to_string())?;
+    let mut settings = load_settings(&state.root).map_err(|err| err.to_string())?;
+    migrate_legacy_dwk(&state.root, &mut settings);
     *state.settings.write().await = settings.clone();
+    let settings = public_settings(&settings);
 
     // Auto unlock disabled in bootstrap - requires manual unlock with biometrics
     let auto_unlock_error: Option<String> = None;
@@ -306,6 +345,9 @@ pub async fn keystore_status(
     }
 }
 
+/// Enrollment itself happens in `update_settings`, which owns the master key and
+/// wraps it. This only reports whether the keystore is reachable, so the UI can
+/// fail before flipping the toggle.
 #[allow(non_snake_case)]
 pub async fn keystore_enable(
     app: tauri::AppHandle,
@@ -313,11 +355,19 @@ pub async fn keystore_enable(
 ) -> Result<ApiResponse<()>, String> {
     let _ = app;
     let _ = requireBiometrics;
-    Ok(ApiResponse::ok(()))
+    match default_keystore().status() {
+        Ok(status) if status.supported => Ok(ApiResponse::ok(())),
+        Ok(_) => Ok(ApiResponse::err(
+            "keystore_unavailable",
+            "platform keystore is unavailable",
+        )),
+        Err(err) => Ok(ApiResponse::err("keystore_unavailable", &err.to_string())),
+    }
 }
 
 pub async fn keystore_disable(app: tauri::AppHandle) -> Result<ApiResponse<()>, String> {
     let _ = app;
+    clear_dwk();
     Ok(ApiResponse::ok(()))
 }
 
@@ -326,9 +376,9 @@ pub async fn session_unlock_with_biometrics(
     state: State<'_, AppState>,
 ) -> Result<ApiResponse<()>, String> {
     let settings = state.settings.read().await.clone();
-    let Some(dwk_backup) = settings.biometry_dwk_backup.as_ref() else {
+    if settings.wrapped_master_key.is_none() {
         return Ok(ApiResponse::err("keystore_not_found", "Not found"));
-    };
+    }
 
     if let Err(auth_err) = app.biometry().authenticate(
         "Unlock Zann".to_string(),
@@ -348,21 +398,11 @@ pub async fn session_unlock_with_biometrics(
         return Ok(ApiResponse::err("keystore_unavailable", &err_str));
     }
 
-    let dwk_bytes = match base64::engine::general_purpose::STANDARD.decode(dwk_backup) {
-        Ok(bytes) => bytes,
-        Err(err) => return Ok(ApiResponse::err("keystore_unavailable", &err.to_string())),
+    let dwk = match load_dwk() {
+        Ok(Some(dwk)) => dwk,
+        Ok(None) => return Ok(ApiResponse::err("keystore_not_found", "Not found")),
+        Err(err) => return Ok(ApiResponse::err("keystore_unavailable", &err)),
     };
-
-    let dwk_arr: [u8; 32] = match dwk_bytes.as_slice().try_into() {
-        Ok(arr) => arr,
-        Err(_) => {
-            return Ok(ApiResponse::err(
-                "keystore_unavailable",
-                "invalid dwk length",
-            ))
-        }
-    };
-    let dwk = SecretKey::from_bytes(dwk_arr);
 
     // Decrypt master key
     let settings = state.settings.read().await.clone();
@@ -442,12 +482,12 @@ pub async fn session_rebind_biometrics(
             "remember unlock is disabled",
         ));
     }
-    let (wrapped, dwk_backup) = match wrap_master_key_with_biometry(&app, master_key.as_ref()) {
+    let wrapped = match wrap_master_key_with_biometry(&app, master_key.as_ref()) {
         Ok(result) => result,
         Err(err) => return Ok(ApiResponse::err("keystore_unavailable", &err)),
     };
     settings.wrapped_master_key = Some(wrapped);
-    settings.biometry_dwk_backup = dwk_backup;
+    settings.legacy_biometry_dwk_backup = None;
     if let Err(err) = save_settings(&state.root, settings.clone()) {
         return Ok(ApiResponse::err("keystore_error", &err.to_string()));
     }
@@ -460,12 +500,37 @@ pub fn system_locale() -> Result<ApiResponse<String>, String> {
     Ok(ApiResponse::ok(locale))
 }
 
+fn store_dwk(dwk: &SecretKey) -> Result<(), String> {
+    default_keystore()
+        .store_dwk(dwk.as_bytes(), false)
+        .map_err(|err| format!("keystore unavailable: {err}"))
+}
+
+fn load_dwk() -> Result<Option<SecretKey>, String> {
+    let bytes = default_keystore()
+        .load_dwk("Unlock Zann")
+        .map_err(|err| format!("keystore unavailable: {err}"))?;
+    let Some(bytes) = bytes else {
+        return Ok(None);
+    };
+    let key: [u8; 32] = bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| "invalid dwk length".to_string())?;
+    Ok(Some(SecretKey::from_bytes(key)))
+}
+
+fn clear_dwk() {
+    if let Err(err) = default_keystore().delete_dwk() {
+        eprintln!("[keystore] failed to delete dwk: {err}");
+    }
+}
+
 fn wrap_master_key_with_biometry(
     app: &tauri::AppHandle,
     master_key: &SecretKey,
-) -> Result<(String, Option<String>), String> {
+) -> Result<String, String> {
     let dwk = SecretKey::generate();
-    let encoded_dwk = base64::engine::general_purpose::STANDARD.encode(dwk.as_bytes());
 
     app.biometry()
         .authenticate(
@@ -480,14 +545,14 @@ fn wrap_master_key_with_biometry(
             },
         )
         .map_err(|err| err.to_string())?;
-    let dwk_backup = Some(encoded_dwk);
 
     let blob = encrypt_blob(&dwk, master_key.as_bytes(), DWK_AAD).map_err(|err| err.to_string())?;
 
-    Ok((
-        base64::engine::general_purpose::STANDARD.encode(blob.to_bytes()),
-        dwk_backup,
-    ))
+    // The DWK goes to the OS keystore, never to the settings file: storing it
+    // alongside the blob it unwraps would make the wrapping decorative.
+    store_dwk(&dwk)?;
+
+    Ok(base64::engine::general_purpose::STANDARD.encode(blob.to_bytes()))
 }
 
 pub async fn session_autolock_config() -> Result<ApiResponse<AutolockConfig>, String> {
@@ -498,7 +563,7 @@ pub async fn session_autolock_config() -> Result<ApiResponse<AutolockConfig>, St
 }
 
 pub async fn get_settings(state: State<'_, AppState>) -> Result<DesktopSettings, String> {
-    Ok(state.settings.read().await.clone())
+    Ok(public_settings(&*state.settings.read().await))
 }
 
 pub async fn update_settings(
@@ -512,8 +577,9 @@ pub async fn update_settings(
 
     let previous = state.settings.read().await.clone();
     let mut next = settings.clone();
-    if next.biometry_dwk_backup.is_none() {
-        next.biometry_dwk_backup = previous.biometry_dwk_backup.clone();
+    next.legacy_biometry_dwk_backup = None;
+    if next.wrapped_master_key.is_none() {
+        next.wrapped_master_key = previous.wrapped_master_key.clone();
     }
 
     if !previous.remember_unlock && settings.remember_unlock {
@@ -523,20 +589,18 @@ pub async fn update_settings(
             .await
             .clone()
             .ok_or_else(|| "vault is locked".to_string())?;
-        let (wrapped, dwk_backup) = wrap_master_key_with_biometry(&app, master_key.as_ref())?;
-        next.wrapped_master_key = Some(wrapped);
-        next.biometry_dwk_backup = dwk_backup;
+        next.wrapped_master_key = Some(wrap_master_key_with_biometry(&app, master_key.as_ref())?);
     }
 
     if previous.remember_unlock && !settings.remember_unlock {
         next.wrapped_master_key = None;
-        next.biometry_dwk_backup = None;
         next.auto_unlock = false;
+        clear_dwk();
     }
 
     save_settings(&state.root, next.clone()).map_err(|err| err.to_string())?;
     *state.settings.write().await = next.clone();
-    Ok(next)
+    Ok(public_settings(&next))
 }
 
 pub async fn unlock(
@@ -561,9 +625,8 @@ pub async fn unlock(
     if settings.remember_unlock {
         if settings.wrapped_master_key.is_none() {
             match wrap_master_key_with_biometry(&app, master_key.as_ref()) {
-                Ok((wrapped, dwk_backup)) => {
+                Ok(wrapped) => {
                     settings.wrapped_master_key = Some(wrapped);
-                    settings.biometry_dwk_backup = dwk_backup;
                     save_settings(&state.root, settings.clone()).map_err(|err| err.to_string())?;
                     *state.settings.write().await = settings;
                 }

@@ -7,7 +7,7 @@ use zann_db::repo::UserRepo;
 use crate::app::AppState;
 use crate::config::AuthMode;
 use crate::domains::auth::core::passwords::{
-    derive_auth_hash, hash_password, random_kdf_salt, KdfParams,
+    derive_auth_hash_async, hash_password_async, random_kdf_salt, KdfParams,
 };
 use crate::domains::errors::ServiceError;
 use crate::infra::metrics;
@@ -178,14 +178,15 @@ pub async fn create_user(
             return Err(AdminUserError::Kdf);
         }
     };
-    let auth_hash = if let Ok(value) = derive_auth_hash(&cmd.password, &kdf_salt, &params) {
-        value
-    } else {
-        tracing::error!(event = "users_create_failed", "KDF error");
-        return Err(AdminUserError::Kdf);
-    };
+    let auth_hash =
+        if let Ok(value) = derive_auth_hash_async(&cmd.password, &kdf_salt, &params).await {
+            value
+        } else {
+            tracing::error!(event = "users_create_failed", "KDF error");
+            return Err(AdminUserError::Kdf);
+        };
     let password_hash =
-        if let Ok(value) = hash_password(&auth_hash, &state.password_pepper, &params) {
+        if let Ok(value) = hash_password_async(auth_hash, &state.password_pepper, &params).await {
             value
         } else {
             tracing::error!(event = "users_create_failed", "KDF error");
@@ -411,14 +412,15 @@ pub async fn reset_password(
                 return Err(AdminUserError::Kdf);
             }
         };
-    let auth_hash = if let Ok(value) = derive_auth_hash(&password, &user.kdf_salt, &params) {
-        value
-    } else {
-        tracing::error!(event = "users_reset_password_failed", "KDF error");
-        return Err(AdminUserError::Kdf);
-    };
+    let auth_hash =
+        if let Ok(value) = derive_auth_hash_async(&password, &user.kdf_salt, &params).await {
+            value
+        } else {
+            tracing::error!(event = "users_reset_password_failed", "KDF error");
+            return Err(AdminUserError::Kdf);
+        };
     let password_hash =
-        if let Ok(value) = hash_password(&auth_hash, &state.password_pepper, &params) {
+        if let Ok(value) = hash_password_async(auth_hash, &state.password_pepper, &params).await {
             value
         } else {
             tracing::error!(event = "users_reset_password_failed", "KDF error");

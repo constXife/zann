@@ -372,7 +372,15 @@ pub struct DesktopSettings {
     pub auto_unlock: bool,
     pub language: Option<String>,
     pub wrapped_master_key: Option<String>,
-    pub biometry_dwk_backup: Option<String>,
+    /// Legacy slot: the DWK used to be persisted here in cleartext, next to the
+    /// very key it unwraps. Still read so existing installs can be migrated into
+    /// the OS keystore, but never written back and never exposed to the webview.
+    #[serde(rename = "biometry_dwk_backup", skip_serializing)]
+    pub legacy_biometry_dwk_backup: Option<String>,
+    /// Serialize-only hint for the UI: whether a wrapped master key is enrolled.
+    /// Derived by `public_settings`, never read back from the webview.
+    #[serde(skip_deserializing)]
+    pub has_biometry_key: bool,
     pub auto_lock_minutes: u32,
     pub lock_on_focus_loss: bool,
     pub lock_on_hidden: bool,
@@ -394,7 +402,8 @@ impl Default for DesktopSettings {
             auto_unlock: false,
             language: None,
             wrapped_master_key: None,
-            biometry_dwk_backup: None,
+            legacy_biometry_dwk_backup: None,
+            has_biometry_key: false,
             auto_lock_minutes: 10,
             lock_on_focus_loss: false,
             lock_on_hidden: false,

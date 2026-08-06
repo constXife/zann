@@ -12,7 +12,8 @@ Full contribution rules live in `CONTRIBUTING.md`; this file is a brief, practic
 ## Build, Test, and Development Commands
 - `cargo build` builds the Rust workspace.
 - `cargo test` runs the fast, no-DB test suite.
-- `cargo fmt` / `cargo clippy --all-targets --all-features` format and lint Rust code.
+- `cargo fmt` / `cargo clippy --all-targets --all-features -- -D warnings` format and lint Rust code.
+  CI gates on `-D warnings`, so omitting it hides the failures CI will report.
 - Run `cargo fmt` before committing changes; CI enforces formatting.
 - `just fast-test`, `just full-test`, `just test` are convenience wrappers (see `Justfile`).
 - `just server-run` or `just server-run-dev` runs the API server with local migrations.

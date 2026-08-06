@@ -264,3 +264,46 @@ async fn expired_access_token_is_rejected() {
     let status = app.send_empty(Method::GET, "/v1/vaults", Some(token)).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn foreign_vault_items_and_members_are_not_listable() {
+    let app = TestApp::new(3600).await;
+
+    let owner = app.register("owner-list@example.com", "password-1").await;
+    let outsider = app
+        .register("outsider-list@example.com", "password-2")
+        .await;
+    let owner_token = owner["access_token"].as_str().expect("token");
+    let outsider_token = outsider["access_token"].as_str().expect("token");
+
+    let vault = app.personal_vault(owner_token, "vault-list").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    let items = format!("/v1/vaults/{vault_id}/items");
+    let members = format!("/v1/vaults/{vault_id}/members");
+
+    // The member keeps access: it comes from the vault role, not from a policy rule.
+    for path in [&items, &members] {
+        let status = app.send_empty(Method::GET, path, Some(owner_token)).await;
+        assert_eq!(status, StatusCode::OK, "owner must still list {path}");
+    }
+
+    // A non-member must not, even though `vaults` carries a `subject_type: any`
+    // list rule and policy wildcards are not segment-bounded.
+    for path in [&items, &members] {
+        let status = app
+            .send_empty(Method::GET, path, Some(outsider_token))
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "non-member must not list {path}"
+        );
+    }
+
+    // Enumerating the vault collection still works; it only returns own vaults.
+    let status = app
+        .send_empty(Method::GET, "/v1/vaults", Some(outsider_token))
+        .await;
+    assert_eq!(status, StatusCode::OK, "vault collection listing regressed");
+}

@@ -3,12 +3,12 @@ use keyring::Entry;
 
 use crate::{Keystore, KeystoreError, KeystoreStatus, KeystoreStatusReason};
 
-pub struct MacosKeystore {
+pub struct KeyringKeystore {
     service: String,
     account: String,
 }
 
-impl MacosKeystore {
+impl KeyringKeystore {
     pub fn new(service: &str, account: &str) -> Self {
         Self {
             service: service.to_string(),
@@ -23,12 +23,19 @@ impl MacosKeystore {
     }
 }
 
-impl Keystore for MacosKeystore {
+impl Keystore for KeyringKeystore {
     fn status(&self) -> Result<KeystoreStatus, KeystoreError> {
+        // Probe the platform store rather than assuming it is there: on Linux the
+        // Secret Service daemon may simply not be running, which only surfaces on
+        // a real call.
+        let reachable = matches!(
+            self.entry()?.get_password(),
+            Ok(_) | Err(keyring::Error::NoEntry)
+        );
         Ok(KeystoreStatus {
-            supported: true,
+            supported: reachable,
             biometrics_available: false,
-            reason: Some(KeystoreStatusReason::Unavailable),
+            reason: (!reachable).then_some(KeystoreStatusReason::Unavailable),
         })
     }
 

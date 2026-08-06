@@ -31,7 +31,7 @@ const biometricsAttempted = ref(false);
 const canUseBiometrics = computed(() => {
   if (props.allowBiometrics === false) return false;
   if (!props.settings?.remember_unlock) return false;
-  if (!props.settings?.biometry_dwk_backup) return false;
+  if (!props.settings?.has_biometry_key) return false;
   if (!props.keystoreStatus) return true;
   return props.keystoreStatus.supported && props.keystoreStatus.biometrics_available;
 });

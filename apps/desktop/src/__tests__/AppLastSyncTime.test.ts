@@ -392,7 +392,7 @@ describe("App last sync time", () => {
             clipboard_clear_if_unchanged: false,
             auto_hide_reveal_seconds: 20,
             require_os_auth: true,
-            biometry_dwk_backup: null,
+            has_biometry_key: false,
             trash_auto_purge_days: 90,
             close_to_tray: true,
             close_to_tray_notice_shown: false,
