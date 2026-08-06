@@ -354,6 +354,55 @@ fn settings_round_trip_through_a_file() {
 }
 
 #[test]
+fn a_folder_narrows_the_list_and_the_place_is_reported() {
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None).expect("items");
+    let mut state = vault::State::new(page, None);
+
+    // The fixture has `work/aws` and `personal/mail`.
+    assert_eq!(state.visible().len(), 2);
+
+    let outcome = state.update(
+        vault::Message::SelectFolder(Some("work".to_string())),
+        &session,
+    );
+    assert!(matches!(
+        outcome,
+        vault::Outcome::Moved(zann_cosmic::settings::Place::Folder(Some(ref path))) if path == "work"
+    ));
+    let visible = state.visible();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].path, "work/aws");
+
+    // A folder and the search compose, they do not replace each other.
+    state.update(vault::Message::QueryInput("mail".to_string()), &session);
+    assert!(state.visible().is_empty(), "mail does not live under work");
+
+    state.update(vault::Message::ClearQuery, &session);
+    state.update(vault::Message::SelectFolder(None), &session);
+    assert_eq!(state.visible().len(), 2);
+}
+
+#[test]
+fn the_last_place_comes_back_with_its_folder_unfolded() {
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None).expect("items");
+    let mut state = vault::State::new(page, None);
+
+    state.set_content_width(1200.0);
+    state.restore(520.0, None, Some("work"));
+    assert_eq!(state.list_width(), 520.0);
+
+    let visible = state.visible();
+    assert_eq!(visible.len(), 1);
+    assert_eq!(visible[0].path, "work/aws");
+
+    // A path with no folder behind it any more must not hide the whole list.
+    state.restore(520.0, None, None);
+    assert_eq!(state.visible().len(), 2);
+}
+
+#[test]
 fn connect_walks_the_stages_a_server_dictates() {
     let mut state = connect::State::default();
     assert_eq!(state.stage(), &connect::Stage::Server);

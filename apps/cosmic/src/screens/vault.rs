@@ -5,15 +5,17 @@
 //! widths in [`layout`], so a reader moving between the clients is not asked to
 //! learn a second shape.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use cosmic::iced::{event, mouse, Alignment, Event, Length, Subscription, Task};
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
 use cosmic::{theme, widget, Element};
-use zann_ffi::ItemSummary;
+use zann_ffi::{ItemSummary, VaultSummaryFfi};
 use zann_ui_core::{
-    category_views, filtered_indices, FolderFilter, ItemCounts, ItemFilter, VaultScope,
+    build_folder_tree, category_views, filtered_indices, FolderFilter, FolderNode, FolderTree,
+    ItemCounts, ItemFilter, VaultScope,
 };
 
 use super::detail::{self, Detail};
@@ -21,6 +23,7 @@ use crate::backend::local::{self, ItemsPage};
 use crate::backend::off_thread;
 use crate::i18n::{t, t_args};
 use crate::session::Session;
+use crate::settings::Place;
 
 /// Schema icon names mapped onto the freedesktop names COSMIC ships.
 fn category_icon(schema_icon: &str) -> &'static str {
@@ -77,6 +80,17 @@ pub struct State {
     detail: Option<Detail>,
     busy: bool,
     error: Option<String>,
+    /// The sealed vaults on this storage, and which one is open. Handed down
+    /// by the shell, which is the one that can switch them.
+    vaults: Vec<VaultSummaryFfi>,
+    current_vault: Option<String>,
+    /// Rebuilt with the items; the sidebar draws it and the filter reads it.
+    folders: FolderTree,
+    /// Which folder narrows the list. Independent of the category, the way the
+    /// desktop app has them: picking a folder does not widen the type filter.
+    folder: FolderFilter,
+    /// Which folders are unfolded, by path. Everything starts closed.
+    expanded: BTreeSet<String>,
     /// How long a revealed field stays revealed, `0` for as long as it likes.
     reveal_seconds: u32,
     /// Bumped on every reveal, so a hide scheduled for an earlier one does not
@@ -104,6 +118,11 @@ pub enum Message {
     HideRevealed(u64),
     CloseDetail,
     Tick,
+    /// A folder row was picked. `None` is every folder, `Some("")` the items
+    /// that are in none.
+    SelectFolder(Option<String>),
+    ToggleFolder(String),
+    SwitchVault(String),
     ResizeStart,
     ResizeMove(f32),
     ResizeEnd,
@@ -114,6 +133,10 @@ pub enum Outcome {
     Task(Task<Message>),
     /// The clipboard belongs to the shell.
     Copy(String),
+    /// Where the reader now is, for the shell to write down.
+    Moved(Place),
+    /// Only the shell holds the session, so the switch is asked for.
+    SwitchVault(String),
 }
 
 impl State {
@@ -128,6 +151,11 @@ impl State {
             detail: None,
             busy: false,
             error: sync_error.map(|err| t_args("items.syncFailed", &[("error", &err)])),
+            vaults: Vec::new(),
+            current_vault: None,
+            folders: FolderTree::default(),
+            folder: FolderFilter::Any,
+            expanded: BTreeSet::new(),
             reveal_seconds: 0,
             reveal_generation: 0,
             list_width: layout::LIST_DEFAULT,
@@ -148,6 +176,44 @@ impl State {
     /// the nav bar left for these two columns.
     pub fn set_content_width(&mut self, width: f32) {
         self.content_width = width;
+    }
+
+    /// The shell owns the session, so switching vaults is its job; the screen
+    /// is only told what there is and which one it is looking at.
+    pub fn set_vaults(&mut self, vaults: Vec<VaultSummaryFfi>, current: Option<String>) {
+        self.vaults = vaults;
+        self.current_vault = current;
+    }
+
+    /// Restores where the reader left off. Called once, before the first draw.
+    pub fn restore(&mut self, list_width: f32, category: Option<&str>, folder: Option<&str>) {
+        self.list_width = list_width;
+        self.folder = match folder {
+            None => FolderFilter::Any,
+            Some("") => FolderFilter::WithoutFolder,
+            Some(path) => {
+                // Unfold down to it, or the selected row would be hidden.
+                let mut prefix = String::new();
+                for part in path.split('/') {
+                    if !prefix.is_empty() {
+                        prefix.push('/');
+                    }
+                    prefix.push_str(part);
+                    self.expanded.insert(prefix.clone());
+                }
+                FolderFilter::Path(path.to_string())
+            }
+        };
+        if let Some(category) = category {
+            let entity = self.nav.iter().find(|id| {
+                self.nav
+                    .data::<String>(*id)
+                    .is_some_and(|it| it == category)
+            });
+            if let Some(entity) = entity {
+                self.nav.activate(entity);
+            }
+        }
     }
 
     /// The shell owns the settings, so it is the one that says how long a
@@ -276,13 +342,7 @@ impl State {
                 if !revealed || self.reveal_seconds == 0 {
                     return Outcome::None;
                 }
-                self.reveal_generation += 1;
-                let generation = self.reveal_generation;
-                let seconds = u64::from(self.reveal_seconds);
-                return Outcome::Task(cosmic::task::future(async move {
-                    tokio::time::sleep(Duration::from_secs(seconds)).await;
-                    Message::HideRevealed(generation)
-                }));
+                return Outcome::Task(self.schedule_hide());
             }
 
             Message::HideRevealed(generation) => {
@@ -317,7 +377,27 @@ impl State {
                 self.list_width = self.clamped_list_width(desired);
             }
 
-            Message::ResizeEnd => self.drag = None,
+            Message::ResizeEnd => {
+                self.drag = None;
+                return Outcome::Moved(Place::ListWidth(self.list_width));
+            }
+
+            Message::SelectFolder(path) => {
+                self.folder = match path.as_deref() {
+                    None => FolderFilter::Any,
+                    Some("") => FolderFilter::WithoutFolder,
+                    Some(path) => FolderFilter::Path(path.to_string()),
+                };
+                return Outcome::Moved(Place::Folder(path));
+            }
+
+            Message::SwitchVault(id) => return Outcome::SwitchVault(id),
+
+            Message::ToggleFolder(path) => {
+                if !self.expanded.remove(&path) {
+                    self.expanded.insert(path);
+                }
+            }
         }
         Outcome::None
     }
@@ -328,6 +408,156 @@ impl State {
             .push(self.handle_view())
             .push(widget::container(self.detail_view()).width(Length::Fill))
             .height(Length::Fill)
+            .into()
+    }
+
+    /// Starts the clock that hides whatever was just revealed.
+    fn schedule_hide(&mut self) -> Task<Message> {
+        self.reveal_generation += 1;
+        let generation = self.reveal_generation;
+        let seconds = u64::from(self.reveal_seconds);
+        cosmic::task::future(async move {
+            tokio::time::sleep(Duration::from_secs(seconds)).await;
+            Message::HideRevealed(generation)
+        })
+    }
+
+    /// The vault picker that sits above the categories. Only drawn when there
+    /// is a choice to make.
+    pub fn vaults_view(&self) -> Option<Element<'_, Message>> {
+        if self.vaults.len() < 2 {
+            return None;
+        }
+        let names: Vec<String> = self.vaults.iter().map(|it| it.name.clone()).collect();
+        let selected = self
+            .current_vault
+            .as_deref()
+            .and_then(|current| self.vaults.iter().position(|it| it.id == current));
+        let ids: Vec<String> = self.vaults.iter().map(|it| it.id.clone()).collect();
+        Some(
+            widget::dropdown(names, selected, move |index| {
+                Message::SwitchVault(ids[index].clone())
+            })
+            .width(Length::Fill)
+            .into(),
+        )
+    }
+
+    /// The folder tree, under the categories in the sidebar. Its selection is
+    /// its own: a folder narrows whatever category is showing rather than
+    /// replacing it, which is why it cannot live in the nav bar's model.
+    pub fn folders_view(&self) -> Element<'_, Message> {
+        let spacing = theme::spacing();
+        let mut column =
+            widget::column::with_capacity(self.folders.tree.len() + 2).spacing(spacing.space_xxxs);
+
+        column = column.push(self.folder_row(
+            t("nav.folders"),
+            None,
+            self.total_folder_count(),
+            0,
+            None,
+        ));
+
+        for node in &self.folders.tree {
+            column = self.push_folder(column, node, 1);
+        }
+
+        if self.folders.items_without_folder > 0 {
+            column = column.push(self.folder_row(
+                t("nav.noFolder"),
+                Some(String::new()),
+                self.folders.items_without_folder,
+                1,
+                None,
+            ));
+        }
+
+        column.into()
+    }
+
+    fn total_folder_count(&self) -> usize {
+        self.folders
+            .tree
+            .iter()
+            .map(|node| node.total_count)
+            .sum::<usize>()
+            + self.folders.items_without_folder
+    }
+
+    fn push_folder<'a>(
+        &'a self,
+        mut column: widget::Column<'a, Message, cosmic::Theme>,
+        node: &'a FolderNode,
+        depth: u16,
+    ) -> widget::Column<'a, Message, cosmic::Theme> {
+        let expandable = (!node.children.is_empty()).then(|| node.path.clone());
+        column = column.push(self.folder_row(
+            node.name.clone(),
+            Some(node.path.clone()),
+            node.total_count,
+            depth,
+            expandable,
+        ));
+
+        if self.expanded.contains(&node.path) {
+            for child in &node.children {
+                column = self.push_folder(column, child, depth + 1);
+            }
+        }
+        column
+    }
+
+    /// One row: an optional twisty, the name, and how many items are under it.
+    fn folder_row(
+        &self,
+        label: String,
+        path: Option<String>,
+        count: usize,
+        depth: u16,
+        expandable: Option<String>,
+    ) -> Element<'_, Message> {
+        let spacing = theme::spacing();
+        let selected = match (&self.folder, path.as_deref()) {
+            (FolderFilter::Any, None) => true,
+            (FolderFilter::WithoutFolder, Some("")) => true,
+            (FolderFilter::Path(current), Some(path)) => current == path,
+            _ => false,
+        };
+
+        let twisty: Element<'_, Message> = match expandable {
+            Some(path) => {
+                widget::button::icon(widget::icon::from_name(if self.expanded.contains(&path) {
+                    "go-down-symbolic"
+                } else {
+                    "go-next-symbolic"
+                }))
+                .extra_small()
+                .on_press(Message::ToggleFolder(path))
+                .into()
+            }
+            // Keeps the names of childless folders in line with their siblings.
+            None => widget::Space::new().width(Length::Fixed(20.0)).into(),
+        };
+
+        let row = widget::row::with_capacity(3)
+            .push(twisty)
+            .push(widget::text::body(label).width(Length::Fill))
+            .push(widget::text::caption(count.to_string()))
+            .spacing(spacing.space_xxs)
+            .align_y(Alignment::Center);
+
+        widget::button::custom(row)
+            .class(if selected {
+                theme::Button::Suggested
+            } else {
+                theme::Button::Text
+            })
+            .width(Length::Fill)
+            .padding([spacing.space_xxxs, spacing.space_xxs])
+            .on_press(Message::SelectFolder(path))
+            .apply(widget::container)
+            .padding([0, 0, 0, depth * 12])
             .into()
     }
 
@@ -445,6 +675,7 @@ impl State {
         self.counts = page.counts;
         self.next_cursor = page.next_cursor;
         self.total = page.total;
+        self.folders = build_folder_tree(&self.items);
     }
 
     /// Rebuilds the nav entries from the shared schema, keeping the selection.
@@ -471,14 +702,14 @@ impl State {
         }
     }
 
-    fn selected_category(&self) -> Option<String> {
+    pub fn selected_category(&self) -> Option<String> {
         self.nav.active_data::<String>().cloned()
     }
 
     fn filter(&self) -> ItemFilter {
         ItemFilter {
             category_id: self.selected_category(),
-            folder: FolderFilter::Any,
+            folder: self.folder.clone(),
             query: self.query.clone(),
         }
     }

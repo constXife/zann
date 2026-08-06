@@ -19,7 +19,7 @@ use crate::backend::{client_root, default_db_url};
 
 const FILENAME: &str = "cosmic.json";
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
     /// `None` is whatever the environment asks for, which is what an unset
@@ -39,6 +39,15 @@ pub struct Settings {
     pub clipboard_clear_if_unchanged: bool,
     /// Seconds a revealed field stays revealed. `0` is never.
     pub auto_hide_reveal_seconds: u32,
+
+    /// Where the reader left the app, so it opens where they left it. The
+    /// desktop app keeps the same three, and two more this one does not: the
+    /// search query and the selected item. Both say what someone went looking
+    /// for, and neither is worth writing to disk to save a click.
+    pub list_width: f32,
+    pub last_category: Option<String>,
+    /// `None` is every folder; `Some("")` is the items that are in none.
+    pub last_folder: Option<String>,
 }
 
 impl Default for Settings {
@@ -54,6 +63,9 @@ impl Default for Settings {
             clipboard_clear_on_exit: true,
             clipboard_clear_if_unchanged: true,
             auto_hide_reveal_seconds: 20,
+            list_width: 400.0,
+            last_category: None,
+            last_folder: None,
         }
     }
 }
@@ -72,6 +84,15 @@ pub enum Change {
     ClipboardOnExit(bool),
     ClipboardIfUnchanged(bool),
     AutoHideRevealSeconds(u32),
+}
+
+/// Where the reader was, reported by the vault when it moves. Separate from
+/// [`Change`] because nothing here is a preference the settings screen shows.
+#[derive(Clone, Debug)]
+pub enum Place {
+    ListWidth(f32),
+    Category(Option<String>),
+    Folder(Option<String>),
 }
 
 impl Settings {
@@ -105,6 +126,28 @@ impl Settings {
             Change::ClipboardOnExit(value) => self.clipboard_clear_on_exit = value,
             Change::ClipboardIfUnchanged(value) => self.clipboard_clear_if_unchanged = value,
             Change::AutoHideRevealSeconds(value) => self.auto_hide_reveal_seconds = value,
+        }
+    }
+
+    /// Returns whether anything moved, so an unchanged place does not rewrite
+    /// the file — dragging a splitter reports on every pixel.
+    pub fn remember(&mut self, place: Place) -> bool {
+        match place {
+            Place::ListWidth(value) => {
+                let changed = (self.list_width - value).abs() >= 1.0;
+                self.list_width = value;
+                changed
+            }
+            Place::Category(value) => {
+                let changed = self.last_category != value;
+                self.last_category = value;
+                changed
+            }
+            Place::Folder(value) => {
+                let changed = self.last_folder != value;
+                self.last_folder = value;
+                changed
+            }
         }
     }
 }
