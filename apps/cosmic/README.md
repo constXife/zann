@@ -101,7 +101,60 @@ If nothing on the bus will take the icon, `tray::start` says so and the close
 button is left alone — a window with nowhere to go and no way back would leave
 a process the user cannot reach.
 
-The vault stays unlocked in the tray, the way the desktop app leaves it.
+Whether it hides or quits is a setting, so neither the header button nor the
+compositor decides it — both come back as one message and the shell reads the
+preference then. The vault stays unlocked in the tray, the way the desktop app
+leaves it.
+
+## Settings
+
+`src/settings.rs` carries the desktop app's `DesktopSettings` names and its
+defaults, so "auto-lock after 10 minutes" means the same thing in both clients.
+The file is not shared: `desktop.json` holds a wrapped master key and a biometry
+backup this app cannot produce, and a round trip through a struct without those
+fields would drop them, so this one writes `cosmic.json` beside it.
+
+The screen is `screens/settings.rs`, reached from the gear in the header bar and
+from the tray. It is drawn with `widget::settings::section`, the same rows
+cosmic-settings uses, and it lays over whatever is underneath instead of
+replacing it — opening it must not throw away the vault's list and its scroll.
+
+Three of the desktop's five tabs are here, and the two that are missing are
+missing for a reason rather than for now:
+
+- **Backups** sits on `backup_export_file` / `backup_import_file`, which
+  `zann-ffi` answers with `Unimplemented`. The desktop does that work on its own
+  side, so there is nothing for this client to call.
+- **The keystore block** under Security — remember, auto-unlock, Touch ID — is
+  inert on Linux for *both* clients: `zann-keystore` implements macOS and
+  answers `supported: false` everywhere else, which is what greys the whole
+  block out in the desktop app too.
+
+Accounts is here but thinner than the desktop's: listing storages and syncing
+one go through the facade, while sign-out, clear-data and factory-reset are
+Tauri-side commands with no `zann-ffi` behind them.
+
+Language is one of them. The strings come from `i18n/` at the repo root, which
+the desktop app loads into `vue-i18n` and this one reads through
+`zann_ui_core::i18n` — one catalogue rather than two that drift. `screens/*.rs`
+ask for them by the dotted keys the JSON nests, so a string added for one client
+is one the other can already ask for by the same name, and the nav categories
+finally use their `schemas/ui_categories.json` label keys as the catalogue keys
+they always were. Unset means whatever `LC_ALL`/`LC_MESSAGES`/`LANG` asks for.
+
+Nothing checks those keys at compile time, so `every_key_the_app_asks_for_is_in_the_catalogue`
+does it instead: it reads the sources, picks out anything key-shaped, and fails
+on one the catalogue has never heard of.
+
+Everything that is here is wired, not just drawn. Idle is measured from discrete
+input — keys, clicks, the wheel — rather than from the pointer crossing the
+window, because a mouse nudged by a cat is not someone reading their vault and
+believing otherwise would cost a redraw per motion event.
+
+The clipboard and the reveal both hand a timer to the runtime, and a task once
+handed over cannot be called back. Both therefore carry a count: a timer that
+fires for a copy or a reveal that has since been replaced recognises itself and
+does nothing.
 
 ## Prereqs
 

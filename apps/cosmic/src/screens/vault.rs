@@ -77,6 +77,11 @@ pub struct State {
     detail: Option<Detail>,
     busy: bool,
     error: Option<String>,
+    /// How long a revealed field stays revealed, `0` for as long as it likes.
+    reveal_seconds: u32,
+    /// Bumped on every reveal, so a hide scheduled for an earlier one does not
+    /// take away a field the user has only just opened.
+    reveal_generation: u64,
     /// The width the user dragged the list to. Kept as their intent even while
     /// a narrow window forces a smaller one, so it returns when the room does.
     list_width: f32,
@@ -94,6 +99,9 @@ pub enum Message {
     Select(String),
     Loaded(Result<Detail, String>),
     Detail(detail::Message),
+    /// A revealed field's time is up, for the reveal that was current when the
+    /// clock started.
+    HideRevealed(u64),
     CloseDetail,
     Lock,
     Tick,
@@ -122,6 +130,8 @@ impl State {
             detail: None,
             busy: false,
             error: sync_error.map(|err| t_args("items.syncFailed", &[("error", &err)])),
+            reveal_seconds: 0,
+            reveal_generation: 0,
             list_width: layout::LIST_DEFAULT,
             // Enough for the default split until the shell reports the window.
             content_width: layout::LIST_DEFAULT + layout::HANDLE + layout::DETAIL_MIN,
@@ -140,6 +150,16 @@ impl State {
     /// the nav bar left for these two columns.
     pub fn set_content_width(&mut self, width: f32) {
         self.content_width = width;
+    }
+
+    /// The shell owns the settings, so it is the one that says how long a
+    /// revealed field may stay that way.
+    pub fn set_reveal_seconds(&mut self, seconds: u32) {
+        self.reveal_seconds = seconds;
+        if seconds == 0 {
+            // Nothing left to hide; let any timer already out there go stale.
+            self.reveal_generation += 1;
+        }
     }
 
     /// Where the splitter currently sits, held to what the window allows.
@@ -248,9 +268,34 @@ impl State {
 
             Message::Detail(detail::Message::Copy(value)) => return Outcome::Copy(value),
 
-            Message::Detail(message) => {
+            Message::Detail(detail::Message::ToggleReveal(index)) => {
+                let Some(detail) = self.detail.as_mut() else {
+                    return Outcome::None;
+                };
+                detail.update(detail::Message::ToggleReveal(index));
+
+                let revealed = detail.fields.get(index).is_some_and(|field| field.revealed);
+                if !revealed || self.reveal_seconds == 0 {
+                    return Outcome::None;
+                }
+                self.reveal_generation += 1;
+                let generation = self.reveal_generation;
+                let seconds = u64::from(self.reveal_seconds);
+                return Outcome::Task(cosmic::task::future(async move {
+                    tokio::time::sleep(Duration::from_secs(seconds)).await;
+                    Message::HideRevealed(generation)
+                }));
+            }
+
+            Message::HideRevealed(generation) => {
+                // A later reveal has already replaced the one this was for.
+                if generation != self.reveal_generation {
+                    return Outcome::None;
+                }
                 if let Some(detail) = self.detail.as_mut() {
-                    detail.update(message);
+                    for field in &mut detail.fields {
+                        field.revealed = false;
+                    }
                 }
             }
 

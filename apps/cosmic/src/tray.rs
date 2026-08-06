@@ -29,6 +29,8 @@ use crate::i18n::t;
 pub enum Command {
     /// Put the window back, or focus the one that is already there.
     Show,
+    /// The window, with the settings on top of it.
+    Settings,
     Lock,
     Quit,
 }
@@ -83,6 +85,7 @@ impl ksni::Tray for Tray {
     fn menu(&self) -> Vec<MenuItem<Self>> {
         vec![
             self.item("common.show", Command::Show),
+            self.item("common.settings", Command::Settings),
             MenuItem::Separator,
             self.item("common.lock", Command::Lock),
             self.item("common.quit", Command::Quit),
@@ -113,6 +116,15 @@ pub fn start(app_id: &'static str, title: &'static str) -> bool {
     // Both only fail if `start` ran twice, which would leave the second tray
     // talking to a channel nobody reads.
     COMMANDS.set(Mutex::new(Some(receiver))).is_ok() && HANDLE.set(handle).is_ok()
+}
+
+/// Redraws the menu. Its labels come from the catalogue, and the host caches
+/// what it was last given, so a language change has to be pushed rather than
+/// waited for.
+pub fn refresh() {
+    if let Some(handle) = HANDLE.get() {
+        handle.update(|_| {});
+    }
 }
 
 /// The commands the tray has raised. Empty, and cheap, when there is no tray.
