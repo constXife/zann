@@ -14,20 +14,30 @@
 
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::core::layout::Limits;
-use cosmic::iced::{Size, Subscription};
+use cosmic::iced::{event, window, Event, Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
-use cosmic::{executor, Element};
+use cosmic::{executor, Application, Element};
 use zann_cosmic::screens::{self, connect, master, vault, welcome, Screen};
 use zann_cosmic::session::Session;
+use zann_cosmic::tray;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let settings = Settings::default().size(WINDOW_SIZE).size_limits(
-        Limits::NONE
-            .min_width(WINDOW_MIN.width)
-            .min_height(WINDOW_MIN.height),
-    );
-    cosmic::app::run::<App>(settings, ())?;
+    // Held for the whole run: dropping this takes the icon down with it.
+    let has_tray = tray::start(App::APP_ID, "zann");
+
+    let settings = Settings::default()
+        .size(WINDOW_SIZE)
+        .size_limits(
+            Limits::NONE
+                .min_width(WINDOW_MIN.width)
+                .min_height(WINDOW_MIN.height),
+        )
+        // Without a tray the window has nowhere to go and no way back, so the
+        // close button has to keep meaning what it says.
+        .exit_on_close(!has_tray);
+
+    cosmic::app::run::<App>(settings, has_tray)?;
     Ok(())
 }
 
@@ -52,6 +62,12 @@ struct App {
     core: Core,
     shell: Shell,
     window_width: f32,
+    /// Whether there is a tray to hide into. Without one the close button is
+    /// left alone and none of the hiding below ever runs.
+    has_tray: bool,
+    /// Wayland cannot unmap a window and map it back, so hiding destroys it and
+    /// showing builds a new one. This is what says which of the two it is.
+    window_open: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -63,6 +79,12 @@ enum Message {
     /// Effects the shell owns because they leave the app.
     Copy(String),
     OpenUrl(String),
+    Tray(tray::Command),
+    /// The user asked for the window to go away — from the header bar, or from
+    /// the compositor.
+    HideWindow,
+    /// A window is gone, whoever closed it.
+    WindowClosed,
 }
 
 /// Lifts a screen's task into the shell's message type.
@@ -72,7 +94,9 @@ fn lift<M: Send + 'static>(task: cosmic::iced::Task<M>, wrap: fn(M) -> Message) 
 
 impl cosmic::Application for App {
     type Executor = executor::Default;
-    type Flags = ();
+    /// Whether a tray icon went up, which is the one thing about the outside
+    /// world the shell has to be told before it draws anything.
+    type Flags = bool;
     type Message = Message;
 
     /// Matches `StartupWMClass` in `data/com.rlyeh.zann.Cosmic.desktop`, which
@@ -88,7 +112,7 @@ impl cosmic::Application for App {
         &mut self.core
     }
 
-    fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
+    fn init(core: Core, has_tray: Self::Flags) -> (Self, Task<Self::Message>) {
         let shell = match Session::open() {
             Ok((session, status)) => {
                 let screen = if status.initialized {
@@ -109,6 +133,8 @@ impl cosmic::Application for App {
             core,
             shell,
             window_width: WINDOW_SIZE.width,
+            has_tray,
+            window_open: true,
         };
         app.set_header_title("zann".to_string());
         let task = match app.core.main_window_id() {
@@ -116,6 +142,20 @@ impl cosmic::Application for App {
             None => Task::none(),
         };
         (app, task)
+    }
+
+    /// The header bar's close button. Returning a message is what stops
+    /// libcosmic from closing the window itself, so the shell gets to decide.
+    fn on_app_exit(&mut self) -> Option<Self::Message> {
+        self.has_tray.then_some(Message::HideWindow)
+    }
+
+    /// Called once a surface is gone. Popups close too, so only the one the
+    /// shell draws into counts.
+    fn on_close_requested(&self, id: window::Id) -> Option<Self::Message> {
+        self.core
+            .main_window_is(id)
+            .then_some(Message::WindowClosed)
     }
 
     /// The nav bar belongs to the vault screen.
@@ -155,7 +195,7 @@ impl cosmic::Application for App {
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {
-        match &self.shell {
+        let screen = match &self.shell {
             Shell::Ready {
                 screen: Screen::Connect(connect),
                 ..
@@ -165,7 +205,21 @@ impl cosmic::Application for App {
                 ..
             } => vault.subscription().map(Message::Vault),
             _ => Subscription::none(),
+        };
+
+        if !self.has_tray {
+            return screen;
         }
+
+        // The header bar's close button arrives through `on_app_exit`, but a
+        // close from the compositor is a plain window event once the window is
+        // no longer allowed to act on one by itself.
+        let close = event::listen_with(|event, _, _| {
+            matches!(event, Event::Window(window::Event::CloseRequested))
+                .then_some(Message::HideWindow)
+        });
+
+        Subscription::batch([screen, close, tray::subscription().map(Message::Tray)])
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
@@ -175,6 +229,26 @@ impl cosmic::Application for App {
             Message::OpenUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
                     eprintln!("could not open the browser: {err}");
+                }
+                return Task::none();
+            }
+            Message::HideWindow => return self.hide_window(),
+            Message::WindowClosed => {
+                self.window_open = false;
+                return Task::none();
+            }
+            Message::Tray(tray::Command::Show) => return self.show_window(),
+            Message::Tray(tray::Command::Quit) => return cosmic::iced::exit(),
+            Message::Tray(tray::Command::Lock) => {
+                // Only the open vault holds anything worth locking; the other
+                // screens have nothing to take away.
+                if let Shell::Ready {
+                    session,
+                    screen: screen @ Screen::Vault(_),
+                } = &mut self.shell
+                {
+                    session.lock();
+                    *screen = Screen::Master(master::State::new(master::Mode::Unlock, None));
                 }
                 return Task::none();
             }
@@ -281,7 +355,7 @@ impl cosmic::Application for App {
                 }
 
                 // Handled above, before the session was borrowed.
-                Message::Copy(_) | Message::OpenUrl(_) => Task::none(),
+                _ => Task::none(),
             }
         };
 
@@ -305,6 +379,34 @@ impl cosmic::Application for App {
 }
 
 impl App {
+    /// Into the tray. There is no hiding a window on Wayland — winit says as
+    /// much — so this destroys it. Nothing is lost with it: every bit of state
+    /// the app has, including the open [`Session`], lives in `App`.
+    ///
+    /// The process survives with no windows because libcosmic runs as an iced
+    /// daemon, and `exit_on_close(false)` is what stops it exiting anyway.
+    fn hide_window(&mut self) -> Task<Message> {
+        let Some(id) = self.core.main_window_id().filter(|_| self.window_open) else {
+            return Task::none();
+        };
+        window::close(id)
+    }
+
+    /// Back out of it, into a new window that the shell then treats as its main
+    /// one — set before the task runs, because libcosmic routes anything that
+    /// is not the main window to `view_window`, which this app does not have.
+    fn show_window(&mut self) -> Task<Message> {
+        if let Some(id) = self.core.main_window_id().filter(|_| self.window_open) {
+            return cosmic::iced::window::gain_focus(id);
+        }
+
+        let (id, task) = window::open(window_settings());
+        self.core.set_main_window_id(Some(id));
+        self.window_open = true;
+        let title = self.set_window_title("zann".to_string(), id);
+        Task::batch([task.discard(), title])
+    }
+
     /// What is left of the window once the nav bar has taken its share — which
     /// is nothing when the user has collapsed it from the header bar.
     fn content_width(&self) -> f32 {
@@ -314,6 +416,26 @@ impl App {
             self.window_width
         }
     }
+}
+
+/// The window libcosmic would have opened at startup. It builds these from its
+/// own [`Settings`] and keeps them, so reopening has to say the same things
+/// again — client-side decorations above all, or the second window comes up
+/// with the compositor's title bar bolted onto the app's own.
+fn window_settings() -> window::Settings {
+    let mut settings = window::Settings {
+        size: WINDOW_SIZE,
+        min_size: Some(WINDOW_MIN),
+        decorations: false,
+        transparent: true,
+        resizable: true,
+        resize_border: 8,
+        // The whole point of hiding: closing this one must not end the app.
+        exit_on_close_request: false,
+        ..Default::default()
+    };
+    settings.platform_specific.application_id = App::APP_ID.to_string();
+    settings
 }
 
 fn blocked_view(reason: &str) -> Element<'_, Message> {

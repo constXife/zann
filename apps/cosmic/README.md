@@ -62,6 +62,33 @@ with nothing selected so that selecting an item never reflows the list.
 The shell is the one that knows how much of the window the nav bar left, so it
 tells the screen through `set_content_width` rather than the screen guessing.
 
+## The tray
+
+COSMIC has no tray of its own. The panel's status area is a StatusNotifierItem
+host, so `src/tray.rs` puts an SNI on the session bus with `ksni` and the panel
+picks it up — the icon resolves by name, which is why it is the app id the
+hicolor icons are installed under. Add the "Status area" applet to the panel or
+there is nowhere for it to appear.
+
+The close button then hides instead of closing. Wayland has no way to unmap a
+window and map it back — winit's `set_visible` is a no-op there — so hiding
+destroys the window and showing builds a new one. Nothing is lost with it: all
+the state, including the unlocked `Session`, lives in `App` rather than in the
+window. The process survives with none because libcosmic runs as an iced daemon
+and `Settings::exit_on_close(false)` stops it exiting when the main window goes.
+
+Two paths lead into the same message. The header bar's close button arrives
+through `Application::on_app_exit`, whose returning `Some` is what stops
+libcosmic closing the window itself; a close from the compositor arrives as an
+ordinary `window::Event::CloseRequested` once the window is no longer allowed to
+act on one by itself.
+
+If nothing on the bus will take the icon, `tray::start` says so and the close
+button is left alone — a window with nowhere to go and no way back would leave
+a process the user cannot reach.
+
+The vault stays unlocked in the tray, the way the desktop app leaves it.
+
 ## Prereqs
 
 libcosmic's `rust-version` is ahead of the workspace pin in
