@@ -111,9 +111,10 @@ pub(crate) async fn apply_change(
                 r"
                 SELECT updated_at
                 FROM items
-                WHERE id = $1
+                WHERE id = $1 AND vault_id = $2
                 ",
-                change.item_id
+                change.item_id,
+                vault_id
             )
             .fetch_optional(&mut *conn)
             .await
@@ -166,9 +167,10 @@ pub(crate) async fn apply_change(
             created_at as "created_at",
             updated_at as "updated_at"
         FROM items
-        WHERE id = $1
+        WHERE id = $1 AND vault_id = $2
         "#,
-        change.item_id
+        change.item_id,
+        vault_id
     )
     .fetch_optional(&mut *conn)
     .await
@@ -260,7 +262,7 @@ pub(crate) async fn apply_change(
             };
             let item_version = item.version;
 
-            if let Err(err) = query!(
+            let insert_result = match query!(
                 r"
                 INSERT INTO items (
                     id, vault_id, path, name, type_id, tags, favorite, payload_enc, checksum,
@@ -268,6 +270,7 @@ pub(crate) async fn apply_change(
                     deleted_by_device_id, created_at, updated_at
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                ON CONFLICT (id) DO NOTHING
                 ",
                 item.id,
                 item.vault_id,
@@ -291,13 +294,24 @@ pub(crate) async fn apply_change(
             .execute(&mut *conn)
             .await
             {
-                tracing::error!(
-                    event = "sync_push_item_insert_failed",
-                    error = %err,
-                    item_id = %item.id,
-                    "Failed to insert item"
-                );
-                return Err(db_error());
+                Ok(result) => result,
+                Err(err) => {
+                    tracing::error!(
+                        event = "sync_push_item_insert_failed",
+                        error = %err,
+                        item_id = %item.id,
+                        "Failed to insert item"
+                    );
+                    return Err(db_error());
+                }
+            };
+            if insert_result.rows_affected() == 0 {
+                return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
+                    item_id: change.item_id.to_string(),
+                    reason: "already_exists",
+                    server_seq: max_seq.unwrap_or(0),
+                    server_updated_at: now.to_rfc3339(),
+                }));
             }
             item_version
         }
@@ -404,7 +418,7 @@ pub(crate) async fn apply_change(
                     row_version = $8,
                     device_id = $9,
                     updated_at = $10
-                WHERE id = $1
+                WHERE id = $1 AND vault_id = $11
                 ",
                 item.id,
                 item.path,
@@ -415,7 +429,8 @@ pub(crate) async fn apply_change(
                 item.version,
                 item.row_version,
                 item.device_id,
-                item.updated_at
+                item.updated_at,
+                vault_id
             )
             .execute(&mut *conn)
             .await
@@ -514,7 +529,7 @@ pub(crate) async fn apply_change(
                     deleted_by_user_id = $12,
                     deleted_by_device_id = $13,
                     updated_at = $14
-                WHERE id = $1
+                WHERE id = $1 AND vault_id = $15
                 ",
                 item.id,
                 item.path,
@@ -529,7 +544,8 @@ pub(crate) async fn apply_change(
                 item.deleted_at,
                 item.deleted_by_user_id,
                 item.deleted_by_device_id,
-                item.updated_at
+                item.updated_at,
+                vault_id
             )
             .execute(&mut *conn)
             .await
@@ -597,7 +613,7 @@ pub(crate) async fn apply_change(
                     deleted_by_user_id = $7,
                     deleted_by_device_id = $8,
                     updated_at = $9
-                WHERE id = $1
+                WHERE id = $1 AND vault_id = $10
                 ",
                 item.id,
                 item.version,
@@ -607,7 +623,8 @@ pub(crate) async fn apply_change(
                 item.deleted_at,
                 item.deleted_by_user_id,
                 item.deleted_by_device_id,
-                item.updated_at
+                item.updated_at,
+                vault_id
             )
             .execute(&mut *conn)
             .await
