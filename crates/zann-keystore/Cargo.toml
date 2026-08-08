@@ -7,8 +7,19 @@ license = "MIT"
 [dependencies]
 anyhow = "1"
 base64 = "0.22"
+blake3 = "1"
+rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 thiserror = "1"
+zann-crypto = { path = "../zann-crypto" }
+
+[dev-dependencies]
+serde_json = "1"
+
+# FIDO2 over raw HID. Linux and macOS only: on Windows a non-elevated process
+# cannot reach the device this way and has to go through webauthn.dll.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+ctap-hid-fido2 = "3.5"
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
 keyring = "2"

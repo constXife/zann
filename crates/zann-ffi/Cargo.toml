@@ -23,6 +23,7 @@ zann-core = { path = "../zann-core", features = ["sqlite"] }
 zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", features = ["sqlite"] }
 zann-client = { path = "../zann-client" }
+zann-keystore = { path = "../zann-keystore" }
 zann-ui-core = { path = "../zann-ui-core" }
 
 [dev-dependencies]

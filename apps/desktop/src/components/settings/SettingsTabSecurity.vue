@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 import type { KeystoreStatus, Settings } from "../../types";
+import { useHardwareKeys } from "../../composables/useHardwareKeys";
 
 type Translator = (key: string) => string;
 
@@ -25,6 +26,45 @@ const autoUnlockDisabled = computed(
 const requireOsAuthDisabled = computed(
   () => !props.rememberEnabled || (!keystoreSupported.value && !props.settings?.require_os_auth),
 );
+
+const hardwareKeys = useHardwareKeys();
+const hardwareSupported = ref(false);
+const enrolling = ref(false);
+/** Shown once, right after the first key: nobody enrols a backup otherwise. */
+const offerBackupKey = ref(false);
+
+onMounted(async () => {
+  hardwareSupported.value = await hardwareKeys.supported();
+});
+
+const enrolledKeys = computed(() => props.settings?.hardware_keys ?? []);
+const usingHardwareKey = computed(() => props.settings?.unlock_source === "hardware_key");
+
+const enrollKey = async () => {
+  enrolling.value = true;
+  const wasEmpty = enrolledKeys.value.length === 0;
+  const entry = await hardwareKeys.enroll("");
+  enrolling.value = false;
+  if (!entry) {
+    return;
+  }
+  // The source only flips once there is something behind it.
+  props.updateSettings({ remember_unlock: true, unlock_source: "hardware_key" });
+  offerBackupKey.value = wasEmpty;
+};
+
+const removeKey = async (credentialId: string) => {
+  await hardwareKeys.remove(credentialId);
+  props.updateSettings({});
+};
+
+const handleSourceChange = (source: "keystore" | "hardware_key") => {
+  if (source === "hardware_key" && enrolledKeys.value.length === 0) {
+    void enrollKey();
+    return;
+  }
+  props.updateSettings({ unlock_source: source });
+};
 
 const handleRememberUnlockChange = (event: Event) => {
   const checked = (event.target as HTMLInputElement).checked;
@@ -177,6 +217,56 @@ const handleRememberUnlockChange = (event: Event) => {
           />
           <span>{{ t("unlock.remember") }}</span>
         </label>
+
+        <div v-if="hardwareSupported && rememberEnabled" class="ml-6 space-y-2">
+          <label class="flex items-center gap-2 text-[var(--text-secondary)]">
+            <input
+              type="radio"
+              :checked="!usingHardwareKey"
+              @change="handleSourceChange('keystore')"
+            />
+            <span>{{ t("settings.unlockSourceKeystore") }}</span>
+          </label>
+          <label class="flex items-center gap-2 text-[var(--text-secondary)]">
+            <input
+              type="radio"
+              :checked="usingHardwareKey"
+              @change="handleSourceChange('hardware_key')"
+            />
+            <span>{{ t("settings.unlockSourceHardwareKey") }}</span>
+          </label>
+
+          <div v-if="usingHardwareKey" class="ml-6 space-y-2">
+            <div
+              v-for="key in enrolledKeys"
+              :key="key.credential_id"
+              class="flex items-center justify-between gap-3 text-xs text-[var(--text-secondary)]"
+            >
+              <span>{{ key.label }}</span>
+              <button
+                type="button"
+                class="text-category-security hover:underline"
+                @click="removeKey(key.credential_id)"
+              >
+                {{ t("common.delete") }}
+              </button>
+            </div>
+            <button
+              type="button"
+              class="rounded-lg border border-[var(--border-color)] px-3 py-2 text-sm text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-60"
+              :disabled="enrolling"
+              @click="enrollKey"
+            >
+              {{ enrolling ? t("settings.hardwareKeyTouch") : t("settings.hardwareKeyEnrol") }}
+            </button>
+            <p v-if="offerBackupKey" class="text-xs text-[var(--text-tertiary)]">
+              {{ t("settings.hardwareKeyBackupHint") }}
+            </p>
+            <p v-if="hardwareKeys.error.value" class="text-xs text-category-security">
+              {{ t(`errors.${hardwareKeys.error.value}`) }}
+            </p>
+          </div>
+        </div>
         <label class="flex items-center gap-2 text-[var(--text-secondary)]">
           <input
             type="checkbox"
@@ -187,7 +277,12 @@ const handleRememberUnlockChange = (event: Event) => {
           />
           <span>{{ t("unlock.autoUnlock") }}</span>
         </label>
-        <label class="flex items-center gap-2 text-[var(--text-secondary)]">
+        <!-- A touch already proves presence; a biometric prompt on top is
+             ceremony, so the toggle is hidden while a key is the source. -->
+        <label
+          v-if="!usingHardwareKey"
+          class="flex items-center gap-2 text-[var(--text-secondary)]"
+        >
           <input
             type="checkbox"
             class="rounded disabled:opacity-60 disabled:cursor-not-allowed"

@@ -20,17 +20,18 @@ use commands::auth::{
     remote_trust_fingerprint,
 };
 use commands::backup::{backup_apple_import, backup_plain_export, backup_plain_import};
-use commands::totp::totp_generate;
 use commands::items::{
     items_delete, items_empty_trash, items_get, items_list, items_purge, items_purge_trash,
     items_put, items_resolve_conflict, items_restore, items_update, pending_changes_count,
 };
 use commands::items_history::{items_history_get, items_history_list, items_history_restore};
 use commands::session::{
-    app_status, bootstrap, get_settings, initialize_local_identity, initialize_master_password,
-    keystore_disable, keystore_enable, keystore_status, session_autolock_config, session_lock,
-    session_rebind_biometrics, session_status, session_unlock_with_biometrics,
-    session_unlock_with_password, status, system_locale, unlock, update_settings,
+    app_status, bootstrap, get_settings, hardware_key_enroll, hardware_key_present,
+    hardware_key_remove, hardware_key_supported, initialize_local_identity,
+    initialize_master_password, keystore_disable, keystore_enable, keystore_status,
+    session_autolock_config, session_lock, session_rebind_biometrics, session_status,
+    session_unlock_with_biometrics, session_unlock_with_hardware_key, session_unlock_with_password,
+    status, system_locale, unlock, update_settings,
 };
 use commands::shell::open_external_url;
 use commands::storage::{
@@ -39,6 +40,7 @@ use commands::storage::{
     storages_list,
 };
 use commands::sync::{remote_reset, remote_sync, sync_reset_cursor};
+use commands::totp::totp_generate;
 use commands::types::{publish_list, publish_trigger, types_list, types_show};
 use commands::vaults::{vault_create, vault_list, vault_reset_personal};
 use state::{build_state, AppState};
@@ -112,6 +114,11 @@ fn main() {
             keystore_status,
             keystore_enable,
             keystore_disable,
+            hardware_key_supported,
+            hardware_key_present,
+            hardware_key_enroll,
+            hardware_key_remove,
+            session_unlock_with_hardware_key,
             session_autolock_config,
             remote_begin_login,
             remote_trust_fingerprint,

@@ -251,7 +251,10 @@
     "remember": "Запомнить на этом устройстве",
     "autoUnlock": "Авторазблокировка при запуске",
     "touchId": "Разблокировать через Touch ID",
-    "savedUnlock": "Использовать сохранённую разблокировку"
+    "savedUnlock": "Использовать сохранённую разблокировку",
+    "hardwareKeyPrompt": "Вставьте аппаратный ключ",
+    "hardwareKeyTouch": "Коснитесь ключа…",
+    "hardwareKeyRetry": "Повторить"
   },
   "auth": {
     "selectMethod": "Как вы хотите войти?",
@@ -434,7 +437,12 @@
       "links": "Ссылки",
       "documentation": "Документация",
       "sourceCode": "Исходный код"
-    }
+    },
+    "unlockSourceKeystore": "Системное хранилище ключей",
+    "unlockSourceHardwareKey": "Аппаратный ключ",
+    "hardwareKeyEnrol": "Привязать ключ…",
+    "hardwareKeyTouch": "Вставьте ключ и коснитесь его…",
+    "hardwareKeyBackupHint": "Добавьте запасной ключ: если единственный потеряется, останется только мастер-пароль."
   },
   "palette": {
     "placeholder": "Введите команду...",
@@ -497,7 +505,6 @@
     "rowView": "Таблица",
     "jsonView": "JSON",
     "keyLabel": "Ключ",
-    "valueLabel": "Значение",
     "actionsLabel": "Действия",
     "advanced": "Дополнительно",
     "customFields": "Свои поля",
@@ -591,7 +598,15 @@
     "time_sync_title": "Нужна синхронизация времени",
     "server_identity_invalid": "Критическая ошибка безопасности. Сервер не прошел проверку подлинности.",
     "server_identity_missing": "Сервер не передал данные идентификации. Обновите сервер и попробуйте снова.",
-    "server_time_skew": "Не удалось проверить подлинность сервера из-за рассинхронизации времени (≈ {minutes} мин). Проверьте часы на устройстве."
+    "server_time_skew": "Не удалось проверить подлинность сервера из-за рассинхронизации времени (≈ {minutes} мин). Проверьте часы на устройстве.",
+    "hardware_key_absent": "Привязанный аппаратный ключ не подключён",
+    "hardware_key_not_enrolled": "Этот ключ не привязан к хранилищу",
+    "hardware_key_timeout": "Касание не получено",
+    "hardware_key_busy": "Ключ занят другим приложением",
+    "hardware_key_unsupported": "Ключ не поддерживает hmac-secret",
+    "hardware_key_not_accessible": "Ключ виден системе, но недоступен",
+    "hardware_key_unsupported_platform": "Аппаратные ключи пока не поддерживаются на этой платформе",
+    "hardware_key_error": "Ошибка аппаратного ключа"
   },
   "time": {
     "never": "Никогда",
