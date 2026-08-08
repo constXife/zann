@@ -87,6 +87,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      # hidapi собирает C-часть для FIDO2-ключей (zann-keystore) и требует
+      # заголовки libudev; на ubuntu-latest их нет.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
         with:
@@ -135,6 +141,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get clean
           df -h
+      # hidapi собирает C-часть для FIDO2-ключей (zann-keystore) и требует
+      # заголовки libudev; на ubuntu-latest их нет.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
         with:
@@ -195,6 +207,12 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           sudo apt-get clean
           df -h
+      # hidapi собирает C-часть для FIDO2-ключей (zann-keystore) и требует
+      # заголовки libudev; на ubuntu-latest их нет.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libudev-dev
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
         with:
@@ -325,6 +343,7 @@ jobs:
             libayatana-appindicator3-dev \
             libxkbcommon-dev \
             libssl-dev \
+            libudev-dev \
             xvfb
           if ! sudo apt-get install -y webkit2gtk-driver; then
             sudo apt-get install -y webkit2gtk-4.1-driver
