@@ -372,7 +372,11 @@ pub struct DesktopSettings {
     pub auto_unlock: bool,
     pub language: Option<String>,
     pub wrapped_master_key: Option<String>,
-    pub biometry_dwk_backup: Option<String>,
+    /// Pre-keystore installs kept the device wrapping key here, next to the
+    /// key it unwraps. Read once on bootstrap so it can be moved into the OS
+    /// keystore, and never written back — see `migrate_legacy_dwk`.
+    #[serde(rename = "biometry_dwk_backup", skip_serializing)]
+    pub legacy_dwk: Option<String>,
     pub auto_lock_minutes: u32,
     pub lock_on_focus_loss: bool,
     pub lock_on_hidden: bool,
@@ -394,7 +398,7 @@ impl Default for DesktopSettings {
             auto_unlock: false,
             language: None,
             wrapped_master_key: None,
-            biometry_dwk_backup: None,
+            legacy_dwk: None,
             auto_lock_minutes: 10,
             lock_on_focus_loss: false,
             lock_on_hidden: false,

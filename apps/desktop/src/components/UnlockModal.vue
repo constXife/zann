@@ -31,9 +31,9 @@ const biometricsAttempted = ref(false);
 const canUseBiometrics = computed(() => {
   if (props.allowBiometrics === false) return false;
   if (!props.settings?.remember_unlock) return false;
-  if (!props.settings?.biometry_dwk_backup) return false;
+  if (!props.settings?.wrapped_master_key) return false;
   if (!props.keystoreStatus) return true;
-  return props.keystoreStatus.supported && props.keystoreStatus.biometrics_available;
+  return props.keystoreStatus.supported;
 });
 
 const shouldAutoBiometrics = () =>
@@ -113,7 +113,7 @@ onMounted(() => {
         full-width
         @click="onUnlockWithBiometrics"
       >
-        {{ t("unlock.touchId") }}
+        {{ t(keystoreStatus?.biometrics_available ? "unlock.touchId" : "unlock.savedUnlock") }}
       </Button>
       <p v-if="autoUnlockError" class="mt-2 text-xs text-[var(--text-secondary)]">
         Auto-unlock unavailable: {{ autoUnlockError }}
