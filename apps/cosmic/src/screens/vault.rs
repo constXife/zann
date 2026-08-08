@@ -84,6 +84,7 @@ pub enum Message {
     Detail(detail::Message),
     CloseDetail,
     Lock,
+    OpenSettings,
     Tick,
 }
 
@@ -95,6 +96,7 @@ pub enum Outcome {
     /// The drawer opened or closed; the shell owns that part of the window.
     ShowDetail(bool),
     Locked,
+    OpenSettings,
 }
 
 impl State {
@@ -225,6 +227,8 @@ impl State {
                 return Outcome::Locked;
             }
 
+            Message::OpenSettings => return Outcome::OpenSettings,
+
             Message::Tick => {}
         }
         Outcome::None
@@ -234,13 +238,14 @@ impl State {
         let spacing = theme::spacing();
         let visible = self.visible();
 
-        let toolbar = widget::row::with_capacity(2)
+        let toolbar = widget::row::with_capacity(3)
             .push(
                 widget::text_input::search_input("Search items", &self.query)
                     .on_input(Message::QueryInput)
                     .on_clear(Message::ClearQuery)
                     .width(Length::Fill),
             )
+            .push(widget::button::standard("Settings").on_press(Message::OpenSettings))
             .push(widget::button::standard("Lock").on_press(Message::Lock))
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center);

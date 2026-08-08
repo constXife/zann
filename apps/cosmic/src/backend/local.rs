@@ -2,7 +2,10 @@
 
 use std::sync::Arc;
 
-use zann_ffi::{create_core, AppStatusFfi, CoreFacade, ItemDetail, ItemSummary, ItemsFilter, Page};
+use zann_ffi::{
+    create_core, AppStatusFfi, CoreFacade, HardwareKeyFfi, ItemDetail, ItemSummary, ItemsFilter,
+    Page, RememberedUnlockFfi,
+};
 use zann_ui_core::ItemCounts;
 
 use super::{default_db_url, local_root};
@@ -86,4 +89,40 @@ pub fn items(facade: &CoreFacade, cursor: Option<String>) -> Result<ItemsPage, S
 
 pub fn item_get(facade: &CoreFacade, id: String) -> Result<ItemDetail, String> {
     facade.item_get(id).map_err(|err| err.to_string())
+}
+
+// -- Remembered unlock -------------------------------------------------------
+//
+// The policy lives in `zann-keystore` behind `zann-ffi`; this app only asks.
+// Enrolment and unlocking wait on a physical touch, so both belong on a worker
+// thread like everything else here.
+
+pub fn remembered_unlock(facade: &CoreFacade) -> Result<RememberedUnlockFfi, String> {
+    facade.remembered_unlock().map_err(|err| err.to_string())
+}
+
+/// One touch when the source is a hardware key.
+pub fn unlock_remembered(facade: &CoreFacade) -> Result<(), String> {
+    facade
+        .unlock_remembered()
+        .map(|_| ())
+        .map_err(|err| err.to_string())
+}
+
+/// Silent — no touch. Safe to call while the user is doing something else.
+pub fn hardware_key_present(facade: &CoreFacade) -> Result<bool, String> {
+    facade.hardware_key_present().map_err(|err| err.to_string())
+}
+
+/// Two touches: create the credential, then prove it yields a secret.
+pub fn enroll_hardware_key(facade: &CoreFacade, label: String) -> Result<HardwareKeyFfi, String> {
+    facade
+        .enroll_hardware_key(label)
+        .map_err(|err| err.to_string())
+}
+
+pub fn remove_hardware_key(facade: &CoreFacade, credential_id: String) -> Result<(), String> {
+    facade
+        .remove_hardware_key(credential_id)
+        .map_err(|err| err.to_string())
 }

@@ -370,11 +370,17 @@ impl CoreFacade {
     }
 
     /// Enrol the connected authenticator against the open vault. Two touches.
-    pub fn enroll_hardware_key(&self, label: String, now: String) -> CoreResult<HardwareKeyFfi> {
+    pub fn enroll_hardware_key(&self, label: String) -> CoreResult<HardwareKeyFfi> {
         let master_key = self.master_key()?;
         let mut remembered = self.load_remembered()?;
+        // The policy crate stays clock-free, so the timestamp is stamped here
+        // rather than trusted from a caller.
         let entry = remembered
-            .enroll_hardware_key(master_key.as_bytes(), &label, now)
+            .enroll_hardware_key(
+                master_key.as_bytes(),
+                &label,
+                chrono::Utc::now().to_rfc3339(),
+            )
             .map_err(unlock_error)?;
         remembered.unlock_source = UnlockSource::HardwareKey;
         self.save_remembered(&remembered)?;
