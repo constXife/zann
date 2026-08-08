@@ -19,7 +19,8 @@ fn enrols_derives_and_detects_the_authenticator() {
     fido::authenticator_status().expect("an authenticator must be connected");
 
     eprintln!("touch the key twice to enrol");
-    let (credential, enrolled_key) = fido::enroll([9u8; 32]).expect("enrol");
+    let salt: [u8; 32] = rand::random();
+    let (credential, enrolled_key) = fido::enroll(salt).expect("enrol");
     assert!(!credential.credential_id.is_empty());
 
     eprintln!("touch the key to derive");
@@ -41,7 +42,7 @@ fn enrols_derives_and_detects_the_authenticator() {
 
     let stranger = fido::HardwareCredential {
         credential_id: vec![7u8; 64],
-        salt: [9u8; 32],
+        salt,
     };
     assert!(
         !fido::is_present(&stranger),
@@ -53,7 +54,7 @@ fn enrols_derives_and_detects_the_authenticator() {
     eprintln!("touch the key once more to check salt separation");
     let other_salt = fido::HardwareCredential {
         credential_id: credential.credential_id.clone(),
-        salt: [1u8; 32],
+        salt: rand::random(),
     };
     let derived = fido::derive_dwk(&other_salt).expect("derive with another salt");
     assert_ne!(first, derived);

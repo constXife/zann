@@ -254,10 +254,10 @@ impl RememberedUnlock {
         enrolled_at: String,
     ) -> Result<HardwareKeyEntry, UnlockError> {
         use base64::Engine;
-        use rand::{rngs::OsRng, RngCore};
 
-        let mut salt = [0u8; 32];
-        OsRng.fill_bytes(&mut salt);
+        // A fresh salt per enrolment: the same authenticator then derives a
+        // different key for every vault it is enrolled in.
+        let salt: [u8; 32] = rand::random();
 
         let (credential, dwk) = crate::fido::enroll(salt)?;
         let entry = HardwareKeyEntry {
