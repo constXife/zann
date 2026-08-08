@@ -898,9 +898,8 @@ pub async fn session_unlock_with_hardware_key(
 mod settings_format_tests {
     use super::*;
 
-    /// The remembered-unlock fields moved into a shared struct; they must still
-    /// sit at the top level of `desktop.json`, or every existing install loses
-    /// its remembered unlock on upgrade.
+    /// Older `desktop.json` files carry the remembered unlock inline. Parsing
+    /// has to keep working, or an upgrade silently loses every enrolment.
     #[test]
     fn settings_files_written_before_the_move_still_parse() {
         let json = r#"{
@@ -926,7 +925,7 @@ mod settings_format_tests {
             Some("d3JhcHBlZA==")
         );
 
-        // And round-trips back to the same flat shape.
+        // The API shape the UI reads stays flat, whatever the file looks like.
         let written = serde_json::to_string(&settings).expect("serialize");
         assert!(written.contains("\"unlock_source\":\"hardware_key\""));
         assert!(written.contains("\"hardware_keys\":["));

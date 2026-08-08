@@ -8773,6 +8773,7 @@ dependencies = [
  "keyring",
  "rand 0.8.7",
  "serde",
+ "serde_json",
  "thiserror 1.0.69",
  "zann-crypto",
 ]

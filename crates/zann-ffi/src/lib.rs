@@ -195,8 +195,8 @@ pub struct CoreFacade {
     vault_id: Mutex<Option<Uuid>>,
     master_key: Mutex<Option<Arc<SecretKey>>>,
     identity: IdentityConfig,
-    /// Where `config.json` lives; the remembered unlock is persisted next to
-    /// the identity so every client on this machine sees the same enrolments.
+    /// The vault directory. The remembered unlock is persisted there in its own
+    /// file, so every client on this machine sees the same enrolments.
     root: PathBuf,
 }
 
@@ -745,55 +745,13 @@ pub fn create_core(db_url: String) -> CoreResult<Arc<CoreFacade>> {
     }))
 }
 
-/// The remembered unlock is stored beside the identity in `config.json`, not in
-/// a per-app file: the OS keystore holds a single device key for this user, so
-/// two clients with separate copies of this state would silently overwrite each
-/// other's.
-const REMEMBERED_KEY: &str = "remembered_unlock";
-
 impl CoreFacade {
-    fn config_path(&self) -> PathBuf {
-        self.root.join("config.json")
-    }
-
     fn load_remembered(&self) -> CoreResult<RememberedUnlock> {
-        let contents = match std::fs::read_to_string(self.config_path()) {
-            Ok(contents) => contents,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(RememberedUnlock::default())
-            }
-            Err(err) => return Err(CoreError::Service(err.to_string())),
-        };
-        let config: Value =
-            serde_json::from_str(&contents).map_err(|err| CoreError::Service(err.to_string()))?;
-        Ok(config
-            .get(REMEMBERED_KEY)
-            .and_then(|value| serde_json::from_value::<RememberedUnlock>(value.clone()).ok())
-            .unwrap_or_default())
+        RememberedUnlock::load(&self.root).map_err(unlock_error)
     }
 
     fn save_remembered(&self, remembered: &RememberedUnlock) -> CoreResult<()> {
-        let path = self.config_path();
-        let mut config: Value = match std::fs::read_to_string(&path) {
-            Ok(contents) => serde_json::from_str(&contents)
-                .map_err(|err| CoreError::Service(err.to_string()))?,
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                Value::Object(serde_json::Map::new())
-            }
-            Err(err) => return Err(CoreError::Service(err.to_string())),
-        };
-        let value =
-            serde_json::to_value(remembered).map_err(|err| CoreError::Service(err.to_string()))?;
-        match &mut config {
-            Value::Object(map) => {
-                map.insert(REMEMBERED_KEY.to_string(), value);
-            }
-            other => *other = serde_json::json!({ REMEMBERED_KEY: value }),
-        }
-        std::fs::create_dir_all(&self.root).map_err(|err| CoreError::Service(err.to_string()))?;
-        let json = serde_json::to_string_pretty(&config)
-            .map_err(|err| CoreError::Service(err.to_string()))?;
-        std::fs::write(&path, json).map_err(|err| CoreError::Service(err.to_string()))
+        remembered.save(&self.root).map_err(unlock_error)
     }
 }
 

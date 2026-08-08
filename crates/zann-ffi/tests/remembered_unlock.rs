@@ -1,5 +1,7 @@
-//! The remembered unlock shares `config.json` with the identity, so the risk
-//! worth testing is that writing one destroys the other.
+//! The remembered unlock lives in its own file, away from `config.json`. That
+//! separation is the point: `config.json` is written by several typed structs
+//! (the CLI, the client, the desktop) and serde drops fields none of them
+//! model, so an enrolment stored there would vanish on the next write.
 //!
 //! Nothing here needs a credential store or an authenticator: those paths are
 //! covered in `zann-keystore`.
@@ -32,7 +34,7 @@ fn a_fresh_device_has_nothing_remembered() {
 }
 
 #[test]
-fn writing_the_remembered_unlock_leaves_the_identity_intact() {
+fn the_remembered_unlock_is_kept_out_of_config_json() {
     let root = temp_root();
     let db_url = format!("sqlite://{}", root.join("local.sqlite").display());
     let password = format!("test-master-password-{}", Uuid::now_v7());
@@ -48,7 +50,11 @@ fn writing_the_remembered_unlock_leaves_the_identity_intact() {
 
     let config = fs::read_to_string(root.join("config.json")).expect("config.json");
     assert!(config.contains("\"identity\""));
-    assert!(config.contains("\"remembered_unlock\""));
+    assert!(
+        !config.contains("remembered_unlock"),
+        "config.json is shared with clients that would drop this field"
+    );
+    assert!(root.join("unlock.json").exists());
 
     // The identity still derives the same master key, which is the property the
     // whole vault hangs on.

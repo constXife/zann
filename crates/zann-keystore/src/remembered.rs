@@ -11,10 +11,18 @@
 //! What this module deliberately does not do: hold the master key, prompt the
 //! user, or touch a settings file. Callers own all three.
 
+use std::path::{Path, PathBuf};
+
 use serde::{Deserialize, Serialize};
 use zann_crypto::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
 
 use crate::{Keystore, KeystoreError};
+
+/// The remembered unlock lives in its own file, not in `config.json`, because
+/// that one is written by several typed structs (the CLI, the client, the
+/// desktop) and serde drops fields none of them model — an enrolment made by
+/// one client would vanish on the next write by another.
+pub const FILENAME: &str = "unlock.json";
 
 /// Additional authenticated data binding a wrapped master key to this purpose.
 /// Part of the on-disk format: changing it invalidates every remembered unlock.
@@ -90,6 +98,17 @@ impl UnlockError {
     }
 }
 
+/// Nothing here is secret — the wrapped keys are ciphertext — but a file that
+/// says which authenticators open this vault is nobody else's business.
+#[cfg(unix)]
+fn restrict(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+fn restrict(_path: &Path) {}
+
 fn corrupt(message: impl Into<String>) -> UnlockError {
     UnlockError::Corrupt {
         message: message.into(),
@@ -129,6 +148,30 @@ impl RememberedUnlock {
             UnlockSource::Keystore => self.wrapped_master_key.is_some(),
             UnlockSource::HardwareKey => !self.hardware_keys.is_empty(),
         }
+    }
+
+    #[must_use]
+    pub fn path(root: &Path) -> PathBuf {
+        root.join(FILENAME)
+    }
+
+    /// Read what this device remembers. A missing file is a device that
+    /// remembers nothing, not an error.
+    pub fn load(root: &Path) -> Result<Self, UnlockError> {
+        match std::fs::read_to_string(Self::path(root)) {
+            Ok(contents) => serde_json::from_str(&contents).map_err(|err| corrupt(err.to_string())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
+            Err(err) => Err(corrupt(err.to_string())),
+        }
+    }
+
+    pub fn save(&self, root: &Path) -> Result<(), UnlockError> {
+        std::fs::create_dir_all(root).map_err(|err| corrupt(err.to_string()))?;
+        let json = serde_json::to_string_pretty(self).map_err(|err| corrupt(err.to_string()))?;
+        let path = Self::path(root);
+        std::fs::write(&path, json).map_err(|err| corrupt(err.to_string()))?;
+        restrict(&path);
+        Ok(())
     }
 
     // -- OS keystore ------------------------------------------------------
@@ -464,5 +507,59 @@ mod tests {
         assert!(json.contains("\"unlock_source\":\"keystore\""));
         assert!(json.contains("\"hardware_keys\":[]"));
         assert!(json.contains("\"wrapped_master_key\":null"));
+    }
+}
+
+#[cfg(test)]
+mod file_tests {
+    use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("zann-unlock-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        dir
+    }
+
+    #[test]
+    fn a_device_with_no_file_remembers_nothing() {
+        let root = scratch("missing");
+        let remembered = RememberedUnlock::load(&root).expect("load");
+        assert!(!remembered.is_armed());
+    }
+
+    #[test]
+    fn state_survives_a_round_trip_through_the_file() {
+        let root = scratch("round-trip");
+        let remembered = RememberedUnlock {
+            unlock_source: UnlockSource::HardwareKey,
+            hardware_keys: vec![HardwareKeyEntry {
+                label: "YubiKey".to_string(),
+                credential_id: "Y2lk".to_string(),
+                salt: "c2FsdA==".to_string(),
+                wrapped_master_key: "d3JhcHBlZA==".to_string(),
+                enrolled_at: "2026-08-08T00:00:00Z".to_string(),
+            }],
+            wrapped_master_key: None,
+        };
+
+        remembered.save(&root).expect("save");
+        assert_eq!(RememberedUnlock::load(&root).expect("load"), remembered);
+
+        // The file is ours alone: no other client's typed config can drop
+        // fields it does not model.
+        assert!(RememberedUnlock::path(&root).ends_with("unlock.json"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_file_is_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = scratch("perms");
+        RememberedUnlock::default().save(&root).expect("save");
+        let mode = std::fs::metadata(RememberedUnlock::path(&root))
+            .expect("metadata")
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 }

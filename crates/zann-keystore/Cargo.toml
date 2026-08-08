@@ -10,11 +10,9 @@ base64 = "0.22"
 blake3 = "1"
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 thiserror = "1"
 zann-crypto = { path = "../zann-crypto" }
-
-[dev-dependencies]
-serde_json = "1"
 
 # FIDO2 over raw HID. Linux and macOS only: on Windows a non-elevated process
 # cannot reach the device this way and has to go through webauthn.dll.
