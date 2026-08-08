@@ -17,7 +17,7 @@ use cosmic::iced::{Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
 use cosmic::{executor, Element};
-use zann_cosmic::screens::{self, connect, master, vault, welcome, Screen};
+use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};
 use zann_cosmic::session::Session;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -44,6 +44,7 @@ enum Message {
     Welcome(welcome::Message),
     Connect(connect::Message),
     Master(master::Message),
+    Settings(settings::Message),
     Vault(vault::Message),
     /// Effects the shell owns because they leave the app.
     Copy(String),
@@ -92,10 +93,36 @@ impl cosmic::Application for App {
 
         let mut app = App { core, shell };
         app.set_header_title("zann".to_string());
-        let task = match app.core.main_window_id() {
+        let mut task = match app.core.main_window_id() {
             Some(id) => app.set_window_title("zann".to_string(), id),
             None => Task::none(),
         };
+
+        if let Shell::Ready {
+            session,
+            screen: Screen::Master(_),
+        } = &app.shell
+        {
+            let facade = session.facade();
+            task = Task::batch([
+                task,
+                cosmic::task::future(async move {
+                    zann_cosmic::backend::off_thread(move || {
+                        zann_cosmic::backend::local::remembered_unlock(&facade)
+                    })
+                    .await
+                })
+                .map(|remembered: Result<_, String>| match remembered {
+                    Ok(remembered) => cosmic::Action::App(Message::Master(
+                        master::Message::Remembered(remembered),
+                    )),
+                    // Nothing remembered, or nothing readable: the password
+                    // path is always there, so this is not worth a banner.
+                    Err(_) => cosmic::Action::None,
+                }),
+            ]);
+        }
+
         (app, task)
     }
 
@@ -240,6 +267,25 @@ impl cosmic::Application for App {
                     }
                 }
 
+                Message::Settings(message) => {
+                    let Screen::Settings { state, .. } = &mut *screen else {
+                        return Task::none();
+                    };
+                    match state.update(message, session) {
+                        settings::Outcome::None => Task::none(),
+                        settings::Outcome::Task(task) => lift(task, Message::Settings),
+                        settings::Outcome::Close => {
+                            // Take the vault back out of the screen it was
+                            // parked in; `replace` keeps this a move.
+                            let parked = std::mem::replace(&mut *screen, Screen::Welcome);
+                            if let Screen::Settings { vault, .. } = parked {
+                                *screen = Screen::Vault(vault);
+                            }
+                            Task::none()
+                        }
+                    }
+                }
+
                 Message::Vault(message) => {
                     let Screen::Vault(state) = &mut *screen else {
                         return Task::none();
@@ -257,6 +303,18 @@ impl cosmic::Application for App {
                             *screen =
                                 Screen::Master(master::State::new(master::Mode::Unlock, None));
                             Task::none()
+                        }
+                        vault::Outcome::OpenSettings => {
+                            self.core.set_show_context(false);
+                            let load = settings::State::load(session);
+                            let parked = std::mem::replace(&mut *screen, Screen::Welcome);
+                            if let Screen::Vault(vault) = parked {
+                                *screen = Screen::Settings {
+                                    state: settings::State::new(),
+                                    vault,
+                                };
+                            }
+                            lift(load, Message::Settings)
                         }
                     }
                 }
@@ -280,6 +338,7 @@ impl cosmic::Application for App {
                 Screen::Connect(state) => state.view().map(Message::Connect),
                 Screen::Master(state) => state.view().map(Message::Master),
                 Screen::Vault(state) => state.view().map(Message::Vault),
+                Screen::Settings { state, .. } => state.view().map(Message::Settings),
             },
         }
     }

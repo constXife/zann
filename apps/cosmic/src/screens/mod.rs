@@ -6,6 +6,7 @@
 pub mod connect;
 pub mod detail;
 pub mod master;
+pub mod settings;
 pub mod vault;
 pub mod welcome;
 
@@ -20,6 +21,12 @@ pub enum Screen {
     Connect(Box<connect::State>),
     Master(master::State),
     Vault(Box<vault::State>),
+    /// Reached from the vault and always returns to it, so the vault it came
+    /// from is parked here rather than rebuilt from the database.
+    Settings {
+        state: settings::State,
+        vault: Box<vault::State>,
+    },
 }
 
 /// The single-column layout the pre-vault screens share.

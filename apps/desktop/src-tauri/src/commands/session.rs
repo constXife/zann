@@ -4,7 +4,7 @@ use crate::services::session as session_service;
 use crate::state::AppState;
 use crate::types::{
     ApiResponse, AppStatusResponse, AutolockConfig, BootstrapResponse, DesktopSettings,
-    KeystoreStatusResponse, StatusResponse,
+    HardwareKeyEntry, KeystoreStatusResponse, StatusResponse,
 };
 
 #[tauri::command]
@@ -129,4 +129,39 @@ pub async fn unlock(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     session_service::unlock(app, password, state).await
+}
+
+#[tauri::command]
+pub async fn hardware_key_supported() -> Result<ApiResponse<bool>, String> {
+    session_service::hardware_key_supported().await
+}
+
+#[tauri::command]
+pub async fn hardware_key_present(state: State<'_, AppState>) -> Result<ApiResponse<bool>, String> {
+    session_service::hardware_key_present(state).await
+}
+
+#[tauri::command]
+pub async fn hardware_key_enroll(
+    state: State<'_, AppState>,
+    label: String,
+) -> Result<ApiResponse<HardwareKeyEntry>, String> {
+    session_service::hardware_key_enroll(state, label).await
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn hardware_key_remove(
+    state: State<'_, AppState>,
+    credentialId: String,
+) -> Result<ApiResponse<()>, String> {
+    session_service::hardware_key_remove(state, credentialId).await
+}
+
+#[tauri::command]
+pub async fn session_unlock_with_hardware_key(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ApiResponse<()>, String> {
+    session_service::session_unlock_with_hardware_key(app, state).await
 }

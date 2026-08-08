@@ -1,6 +1,6 @@
 //! The open vault: nav categories, the item list, and the detail drawer.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cosmic::app::context_drawer::{self, ContextDrawer};
 use cosmic::iced::{Alignment, Length, Subscription, Task};
@@ -61,6 +61,12 @@ fn item_icon(type_id: &str) -> &'static str {
     }
 }
 
+/// How long the vault stays open with nobody touching it.
+const AUTO_LOCK_AFTER: Duration = Duration::from_secs(10 * 60);
+/// How often that is checked. Coarse on purpose: the timeout is minutes, and
+/// each check can cost a query to the authenticator.
+const IDLE_TICK: Duration = Duration::from_secs(30);
+
 pub struct State {
     items: Vec<ItemSummary>,
     counts: ItemCounts,
@@ -71,6 +77,7 @@ pub struct State {
     detail: Option<Detail>,
     busy: bool,
     error: Option<String>,
+    last_activity: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +91,11 @@ pub enum Message {
     Detail(detail::Message),
     CloseDetail,
     Lock,
+    OpenSettings,
+    /// The idle timer expired; whether that locks depends on the answer below.
+    IdleCheck,
+    /// Whether an enrolled authenticator is still plugged in.
+    KeyPresent(bool),
     Tick,
 }
 
@@ -95,6 +107,7 @@ pub enum Outcome {
     /// The drawer opened or closed; the shell owns that part of the window.
     ShowDetail(bool),
     Locked,
+    OpenSettings,
 }
 
 impl State {
@@ -109,6 +122,7 @@ impl State {
             detail: None,
             busy: false,
             error: sync_error.map(|err| format!("sync failed: {err}")),
+            last_activity: Instant::now(),
         };
         state.apply_page(page, true);
         state.rebuild_nav();
@@ -149,15 +163,26 @@ impl State {
     /// One-time codes roll over every period, so an open drawer with one needs
     /// a redraw every second.
     pub fn subscription(&self) -> Subscription<Message> {
+        let idle = cosmic::iced::time::every(IDLE_TICK).map(|_| Message::IdleCheck);
         match self.detail.as_ref() {
-            Some(detail) if detail.has_totp() => {
-                cosmic::iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick)
-            }
-            _ => Subscription::none(),
+            Some(detail) if detail.has_totp() => Subscription::batch([
+                cosmic::iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick),
+                idle,
+            ]),
+            _ => idle,
         }
     }
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
+        // Anything the user did counts as activity; the timer's own messages do
+        // not, or the vault would never idle out.
+        if !matches!(
+            message,
+            Message::IdleCheck | Message::KeyPresent(_) | Message::Tick
+        ) {
+            self.last_activity = Instant::now();
+        }
+
         match message {
             Message::QueryInput(value) => self.query = value,
 
@@ -225,6 +250,36 @@ impl State {
                 return Outcome::Locked;
             }
 
+            Message::OpenSettings => return Outcome::OpenSettings,
+
+            Message::IdleCheck => {
+                if self.last_activity.elapsed() < AUTO_LOCK_AFTER {
+                    return Outcome::None;
+                }
+                // An inserted key counts as presence: locking every ten minutes
+                // while it sits in the port only teaches people to turn the
+                // timeout off. Pulling the key is what locks.
+                let facade = session.facade();
+                return Outcome::Task(cosmic::task::future(async move {
+                    let present = off_thread(move || {
+                        let remembered = local::remembered_unlock(&facade)?;
+                        if remembered.source != "hardware_key" {
+                            return Ok(false);
+                        }
+                        local::hardware_key_present(&facade)
+                    })
+                    .await;
+                    Message::KeyPresent(present.unwrap_or(false))
+                }));
+            }
+
+            Message::KeyPresent(true) => self.last_activity = Instant::now(),
+
+            Message::KeyPresent(false) => {
+                session.lock();
+                return Outcome::Locked;
+            }
+
             Message::Tick => {}
         }
         Outcome::None
@@ -234,13 +289,14 @@ impl State {
         let spacing = theme::spacing();
         let visible = self.visible();
 
-        let toolbar = widget::row::with_capacity(2)
+        let toolbar = widget::row::with_capacity(3)
             .push(
                 widget::text_input::search_input("Search items", &self.query)
                     .on_input(Message::QueryInput)
                     .on_clear(Message::ClearQuery)
                     .width(Length::Fill),
             )
+            .push(widget::button::standard("Settings").on_press(Message::OpenSettings))
             .push(widget::button::standard("Lock").on_press(Message::Lock))
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center);

@@ -101,6 +101,9 @@
             expat
             fontconfig
             freetype
+            # zann-ffi тянет zann-keystore, а тот hidapi для FIDO2-ключей;
+            # его C-часть требует libudev с заголовками.
+            udev
           ] ++ runtimeLibs;
 
           # Иконки лежат у Tauri-приложения: логотип у продукта один.
@@ -140,6 +143,9 @@
             k6
             pkg-config
             openssl
+            # hidapi (через ctap-hid-fido2) собирает C-часть и требует libudev
+            # с заголовками; без него FIDO2-бэкенд кейстора не компилируется.
+            udev
             jemalloc
             llvm
             libxkbcommon
@@ -183,6 +189,7 @@
             rust-bin.stable.latest.default
             pkg-config
             openssl
+            udev
             libxkbcommon
             wayland
             wayland-protocols

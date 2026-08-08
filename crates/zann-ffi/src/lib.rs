@@ -15,6 +15,7 @@ use zann_crypto::EncryptedPayload;
 use zann_db::local::{LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVaultRepo};
 use zann_db::services::LocalServices;
 use zann_db::{connect_sqlite_with_max, migrate_local, SqlitePool};
+use zann_keystore::{default_keystore, RememberedUnlock, UnlockError, UnlockSource};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {
@@ -165,6 +166,27 @@ pub struct AppStatusFfi {
     pub has_local_vault: bool,
 }
 
+/// One enrolled authenticator, as the UI needs to show it. The wrapped master
+/// key is deliberately absent: clients list and label keys, they do not handle
+/// key material.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct HardwareKeyFfi {
+    pub label: String,
+    pub credential_id: String,
+    pub enrolled_at: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct RememberedUnlockFfi {
+    /// Whether this device can unlock without the master password.
+    pub armed: bool,
+    /// "keystore" or "hardware_key".
+    pub source: String,
+    pub hardware_keys: Vec<HardwareKeyFfi>,
+    /// Whether hardware keys work on this platform at all.
+    pub hardware_supported: bool,
+}
+
 #[derive(uniffi::Object)]
 pub struct CoreFacade {
     runtime: Runtime,
@@ -173,6 +195,9 @@ pub struct CoreFacade {
     vault_id: Mutex<Option<Uuid>>,
     master_key: Mutex<Option<Arc<SecretKey>>>,
     identity: IdentityConfig,
+    /// The vault directory. The remembered unlock is persisted there in its own
+    /// file, so every client on this machine sees the same enrolments.
+    root: PathBuf,
 }
 
 impl CoreFacade {
@@ -206,6 +231,48 @@ impl CoreFacade {
         self.runtime
             .block_on(future)
             .map_err(|err| CoreError::Service(err.to_string()))
+    }
+
+    /// Everything an unlock does once the master key exists, whatever produced
+    /// it. Note the vault-key decryption below doubles as the check that the key
+    /// is the right one, so a key recovered from a stale wrapped copy fails here
+    /// exactly like a wrong password.
+    fn finish_unlock(&self, master_key: Arc<SecretKey>) -> CoreResult<VaultStatus> {
+        let repo = LocalVaultRepo::new(&self.pool);
+        let storage_id = self.storage_id();
+        let vaults = self
+            .runtime
+            .block_on(repo.list_by_storage(storage_id))
+            .map_err(|err| CoreError::Service(err.to_string()))?;
+        let vault_id = if vaults.is_empty() {
+            let services = LocalServices::new(&self.pool, master_key.as_ref());
+            let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
+            vault.id
+        } else {
+            let verify = vaults.first().expect("vaults not empty");
+            vault_crypto::decrypt_vault_key(master_key.as_ref(), verify.id, &verify.vault_key_enc)
+                .map_err(|_| CoreError::InvalidArgument("invalid password".to_string()))?;
+            let item_repo = LocalItemRepo::new(&self.pool);
+            let mut selected = vaults
+                .iter()
+                .find(|vault| vault.is_default)
+                .map(|vault| (vault.id, 0usize))
+                .or_else(|| vaults.first().map(|vault| (vault.id, 0usize)))
+                .expect("vaults not empty");
+            for vault in &vaults {
+                let count = self
+                    .runtime
+                    .block_on(item_repo.count_by_vault(storage_id, vault.id))
+                    .map_err(|err| CoreError::Service(err.to_string()))?;
+                if count as usize > selected.1 {
+                    selected = (vault.id, count as usize);
+                }
+            }
+            selected.0
+        };
+        *self.master_key.lock().expect("lock poisoned") = Some(master_key);
+        *self.vault_id.lock().expect("lock poisoned") = Some(vault_id);
+        Ok(VaultStatus { unlocked: true })
     }
 
     #[cfg(debug_assertions)]
@@ -254,41 +321,100 @@ impl CoreFacade {
 
     pub fn unlock(&self, password: String) -> CoreResult<VaultStatus> {
         let master_key = Arc::new(derive_master_key(&password, &self.identity)?);
-        let repo = LocalVaultRepo::new(&self.pool);
-        let storage_id = self.storage_id();
-        let vaults = self
-            .runtime
-            .block_on(repo.list_by_storage(storage_id))
-            .map_err(|err| CoreError::Service(err.to_string()))?;
-        let vault_id = if vaults.is_empty() {
-            let services = LocalServices::new(&self.pool, master_key.as_ref());
-            let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
-            vault.id
-        } else {
-            let verify = vaults.first().expect("vaults not empty");
-            vault_crypto::decrypt_vault_key(master_key.as_ref(), verify.id, &verify.vault_key_enc)
-                .map_err(|_| CoreError::InvalidArgument("invalid password".to_string()))?;
-            let item_repo = LocalItemRepo::new(&self.pool);
-            let mut selected = vaults
+        self.finish_unlock(master_key)
+    }
+
+    // -- Remembered unlock -------------------------------------------------
+    //
+    // The policy lives in `zann-keystore`; this is the boundary that keeps the
+    // master key on this side of it. Clients ask for an unlock, they never see
+    // or supply key material.
+
+    pub fn remembered_unlock(&self) -> CoreResult<RememberedUnlockFfi> {
+        let remembered = self.load_remembered()?;
+        Ok(RememberedUnlockFfi {
+            armed: remembered.is_armed(),
+            source: match remembered.unlock_source {
+                UnlockSource::Keystore => "keystore".to_string(),
+                UnlockSource::HardwareKey => "hardware_key".to_string(),
+            },
+            hardware_keys: remembered
+                .hardware_keys
                 .iter()
-                .find(|vault| vault.is_default)
-                .map(|vault| (vault.id, 0usize))
-                .or_else(|| vaults.first().map(|vault| (vault.id, 0usize)))
-                .expect("vaults not empty");
-            for vault in &vaults {
-                let count = self
-                    .runtime
-                    .block_on(item_repo.count_by_vault(storage_id, vault.id))
-                    .map_err(|err| CoreError::Service(err.to_string()))?;
-                if count as usize > selected.1 {
-                    selected = (vault.id, count as usize);
-                }
-            }
-            selected.0
-        };
-        *self.master_key.lock().expect("lock poisoned") = Some(master_key);
-        *self.vault_id.lock().expect("lock poisoned") = Some(vault_id);
-        Ok(VaultStatus { unlocked: true })
+                .map(|entry| HardwareKeyFfi {
+                    label: entry.label.clone(),
+                    credential_id: entry.credential_id.clone(),
+                    enrolled_at: entry.enrolled_at.clone(),
+                })
+                .collect(),
+            hardware_supported: cfg!(any(target_os = "linux", target_os = "macos")),
+        })
+    }
+
+    /// Unlock using whichever source this device has armed. Blocks on a touch
+    /// when that source is a hardware key.
+    pub fn unlock_remembered(&self) -> CoreResult<VaultStatus> {
+        let remembered = self.load_remembered()?;
+        let master_key = match remembered.unlock_source {
+            UnlockSource::Keystore => remembered.unlock_with_keystore(default_keystore().as_ref()),
+            UnlockSource::HardwareKey => remembered.unlock_with_hardware_key(),
+        }
+        .map_err(unlock_error)?;
+        self.finish_unlock(Arc::new(SecretKey::from_bytes(master_key)))
+    }
+
+    /// Whether an enrolled authenticator is connected. Silent: no touch, so
+    /// this is safe to poll for auto-lock.
+    pub fn hardware_key_present(&self) -> CoreResult<bool> {
+        Ok(self.load_remembered()?.connected_hardware_key().is_some())
+    }
+
+    /// Enrol the connected authenticator against the open vault. Two touches.
+    pub fn enroll_hardware_key(&self, label: String) -> CoreResult<HardwareKeyFfi> {
+        let master_key = self.master_key()?;
+        let mut remembered = self.load_remembered()?;
+        // The policy crate stays clock-free, so the timestamp is stamped here
+        // rather than trusted from a caller.
+        let entry = remembered
+            .enroll_hardware_key(
+                master_key.as_bytes(),
+                &label,
+                chrono::Utc::now().to_rfc3339(),
+            )
+            .map_err(unlock_error)?;
+        remembered.unlock_source = UnlockSource::HardwareKey;
+        self.save_remembered(&remembered)?;
+        Ok(HardwareKeyFfi {
+            label: entry.label,
+            credential_id: entry.credential_id,
+            enrolled_at: entry.enrolled_at,
+        })
+    }
+
+    pub fn remove_hardware_key(&self, credential_id: String) -> CoreResult<()> {
+        let mut remembered = self.load_remembered()?;
+        remembered.remove_hardware_key(&credential_id);
+        self.save_remembered(&remembered)
+    }
+
+    /// Remember the unlock in the OS credential store instead.
+    pub fn remember_with_keystore(&self) -> CoreResult<()> {
+        let master_key = self.master_key()?;
+        let mut remembered = self.load_remembered()?;
+        remembered
+            .remember_with_keystore(default_keystore().as_ref(), master_key.as_bytes())
+            .map_err(unlock_error)?;
+        self.save_remembered(&remembered)
+    }
+
+    /// Stop remembering entirely. Enrolled authenticators are left alone: they
+    /// carry their own copies and removing them is a separate, explicit act.
+    pub fn forget_remembered(&self) -> CoreResult<()> {
+        let mut remembered = self.load_remembered()?;
+        remembered
+            .forget_keystore(default_keystore().as_ref())
+            .map_err(unlock_error)?;
+        self.save_remembered(&remembered)
     }
 
     pub fn lock(&self) -> CoreResult<VaultStatus> {
@@ -615,7 +741,27 @@ pub fn create_core(db_url: String) -> CoreResult<Arc<CoreFacade>> {
         vault_id: Mutex::new(None),
         master_key: Mutex::new(None),
         identity,
+        root: local_root_from_db_url(&db_url),
     }))
+}
+
+impl CoreFacade {
+    fn load_remembered(&self) -> CoreResult<RememberedUnlock> {
+        RememberedUnlock::load(&self.root).map_err(unlock_error)
+    }
+
+    fn save_remembered(&self, remembered: &RememberedUnlock) -> CoreResult<()> {
+        remembered.save(&self.root).map_err(unlock_error)
+    }
+}
+
+/// Unlock failures keep their identifier so every client shows the same message
+/// for the same cause.
+fn unlock_error(err: UnlockError) -> CoreError {
+    match err {
+        UnlockError::NotRemembered => CoreError::InvalidArgument(err.kind().to_string()),
+        other => CoreError::Service(format!("{}: {other}", other.kind())),
+    }
 }
 
 fn client_root_path() -> CoreResult<PathBuf> {

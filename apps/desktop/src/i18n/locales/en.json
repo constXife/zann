@@ -251,7 +251,10 @@
     "remember": "Remember unlock on this device",
     "autoUnlock": "Unlock automatically on launch",
     "touchId": "Unlock with Touch ID",
-    "savedUnlock": "Use saved unlock"
+    "savedUnlock": "Use saved unlock",
+    "hardwareKeyPrompt": "Insert your hardware key",
+    "hardwareKeyTouch": "Touch the key…",
+    "hardwareKeyRetry": "Try again"
   },
   "auth": {
     "selectMethod": "How would you like to sign in?",
@@ -434,7 +437,12 @@
       "links": "Links",
       "documentation": "Documentation",
       "sourceCode": "Source Code"
-    }
+    },
+    "unlockSourceKeystore": "System keystore",
+    "unlockSourceHardwareKey": "Hardware key",
+    "hardwareKeyEnrol": "Enrol a key…",
+    "hardwareKeyTouch": "Insert the key and touch it…",
+    "hardwareKeyBackupHint": "Add a backup key too: if the only key is lost, unlocking falls back to the master password."
   },
   "palette": {
     "placeholder": "Type a command...",
@@ -497,7 +505,6 @@
     "rowView": "Row view",
     "jsonView": "JSON view",
     "keyLabel": "Key",
-    "valueLabel": "Value",
     "actionsLabel": "Actions",
     "advanced": "Advanced",
     "customFields": "Custom fields",
@@ -591,7 +598,15 @@
     "time_sync_title": "Time sync required",
     "server_identity_invalid": "Critical security error. The server failed identity verification.",
     "server_identity_missing": "Server identity data is missing. Update the server and try again.",
-    "server_time_skew": "Cannot verify server identity due to time drift (about {minutes} minutes). Check your device clock."
+    "server_time_skew": "Cannot verify server identity due to time drift (about {minutes} minutes). Check your device clock.",
+    "hardware_key_absent": "No enrolled hardware key is connected",
+    "hardware_key_not_enrolled": "This key is not enrolled for this vault",
+    "hardware_key_timeout": "No touch received",
+    "hardware_key_busy": "The key is in use by another application",
+    "hardware_key_unsupported": "This key does not support hmac-secret",
+    "hardware_key_not_accessible": "The key is visible to the system but not accessible",
+    "hardware_key_unsupported_platform": "Hardware keys are not supported on this platform yet",
+    "hardware_key_error": "Hardware key error"
   },
   "time": {
     "never": "Never",

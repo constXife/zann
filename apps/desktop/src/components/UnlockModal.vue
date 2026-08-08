@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from "vue";
 import type { KeystoreStatus, Settings } from "../types";
+import { useHardwareKeys } from "../composables/useHardwareKeys";
 import Button from "./ui/Button.vue";
 
 type Translator = (key: string) => string;
@@ -27,14 +28,37 @@ const props = withDefaults(defineProps<{
 
 const passwordInput = ref<HTMLInputElement | null>(null);
 const biometricsAttempted = ref(false);
+const hardwareKeys = useHardwareKeys();
+const hardwareAttempted = ref(false);
+
+const usingHardwareKey = computed(
+  () =>
+    props.allowBiometrics !== false &&
+    props.settings?.remember_unlock === true &&
+    props.settings?.unlock_source === "hardware_key" &&
+    (props.settings?.hardware_keys?.length ?? 0) > 0,
+);
 
 const canUseBiometrics = computed(() => {
   if (props.allowBiometrics === false) return false;
+  if (usingHardwareKey.value) return false;
   if (!props.settings?.remember_unlock) return false;
   if (!props.settings?.wrapped_master_key) return false;
   if (!props.keystoreStatus) return true;
   return props.keystoreStatus.supported;
 });
+
+/**
+ * Ask for the touch as soon as the screen opens rather than behind a button:
+ * the key is already in the port, so a click is pure friction. Runs once per
+ * opening, because a second assertion while the first is pending would just
+ * fight over the device.
+ */
+const unlockWithHardwareKey = async () => {
+  if (hardwareAttempted.value || hardwareKeys.busy.value) return;
+  hardwareAttempted.value = true;
+  await hardwareKeys.unlock();
+};
 
 const shouldAutoBiometrics = () =>
   canUseBiometrics.value &&
@@ -52,7 +76,11 @@ watch(
   ([isOpen]) => {
     if (!isOpen) {
       biometricsAttempted.value = false;
+      hardwareAttempted.value = false;
       return;
+    }
+    if (usingHardwareKey.value) {
+      void unlockWithHardwareKey();
     }
     void focusPassword();
   },
@@ -105,6 +133,23 @@ onMounted(() => {
       >
         {{ t("common.unlock") }}
       </Button>
+      <div v-if="usingHardwareKey" class="mt-4 space-y-2">
+        <p class="text-sm text-[var(--text-secondary)]">
+          {{ hardwareKeys.busy.value ? t("unlock.hardwareKeyTouch") : t("unlock.hardwareKeyPrompt") }}
+        </p>
+        <p v-if="hardwareKeys.error.value" class="text-xs text-category-security">
+          {{ t(`errors.${hardwareKeys.error.value}`) }}
+        </p>
+        <Button
+          v-if="hardwareKeys.error.value && !hardwareKeys.busy.value"
+          variant="outline"
+          size="sm"
+          full-width
+          @click="hardwareAttempted = false; unlockWithHardwareKey()"
+        >
+          {{ t("unlock.hardwareKeyRetry") }}
+        </Button>
+      </div>
       <Button
         v-if="canUseBiometrics"
         class="mt-4"

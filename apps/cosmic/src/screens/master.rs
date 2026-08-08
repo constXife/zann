@@ -7,6 +7,7 @@ use super::centered;
 use crate::backend::local::{self, ItemsPage};
 use crate::backend::off_thread;
 use crate::session::Session;
+use zann_ffi::RememberedUnlockFfi;
 
 /// Whether the screen creates a vault or opens one that already exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,6 +18,9 @@ pub enum Mode {
 
 pub struct State {
     mode: Mode,
+    /// Whether this device can open the vault without the master password, and
+    /// with what. Absent until the shell has asked the facade.
+    remembered: Option<RememberedUnlockFfi>,
     password: String,
     hidden: bool,
     busy: bool,
@@ -27,6 +31,11 @@ pub struct State {
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    /// What this device remembers, answered by the shell on the way in.
+    Remembered(RememberedUnlockFfi),
+    /// Unlock with the remembered source instead of the password. Waits on a
+    /// touch when that source is a hardware key.
+    UseRemembered,
     PasswordInput(String),
     ToggleVisibility,
     Submit,
@@ -47,6 +56,7 @@ impl State {
     pub fn new(mode: Mode, sync_after: Option<String>) -> Self {
         Self {
             mode,
+            remembered: None,
             password: String::new(),
             hidden: true,
             busy: false,
@@ -57,6 +67,17 @@ impl State {
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
+            Message::Remembered(remembered) => {
+                let armed = remembered.armed;
+                self.remembered = Some(remembered);
+                // A key already in the port should not need a click as well.
+                if armed && self.mode == Mode::Unlock && !self.busy {
+                    return self.unlock_remembered(session);
+                }
+            }
+
+            Message::UseRemembered => return self.unlock_remembered(session),
+
             Message::PasswordInput(value) => self.password = value,
 
             Message::ToggleVisibility => self.hidden = !self.hidden,
@@ -106,6 +127,31 @@ impl State {
         Outcome::None
     }
 
+    /// Open the vault with whatever this device remembers. Blocks the worker
+    /// thread on a touch when the source is a hardware key, which is why the
+    /// screen reports itself busy for the whole call.
+    fn unlock_remembered(&mut self, session: &Session) -> Outcome {
+        if self.busy {
+            return Outcome::None;
+        }
+        let facade = session.facade();
+        let storage = self.sync_after.take();
+        self.busy = true;
+        self.error = None;
+        Outcome::Task(cosmic::task::future(async move {
+            Message::Opened(
+                off_thread(move || {
+                    local::unlock_remembered(&facade)?;
+                    let sync_error = storage
+                        .map(|storage| local::sync(&facade, Some(storage)))
+                        .and_then(Result::err);
+                    local::items(&facade, None).map(|page| (page, sync_error))
+                })
+                .await,
+            )
+        }))
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let (title, action) = match self.mode {
@@ -148,6 +194,19 @@ impl State {
 
         if let Some(error) = self.error.as_ref() {
             form = form.push(widget::text::caption(error.clone()));
+        }
+
+        if self.remembered.as_ref().is_some_and(|state| state.armed) && self.mode == Mode::Unlock {
+            let label = if self.busy {
+                "Touch your key…"
+            } else {
+                "Use the saved unlock"
+            };
+            let mut retry = widget::button::standard(label).width(Length::Fill);
+            if !self.busy {
+                retry = retry.on_press(Message::UseRemembered);
+            }
+            form = form.push(retry);
         }
 
         centered(form.push(submit))

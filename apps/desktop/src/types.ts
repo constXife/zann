@@ -12,6 +12,16 @@ export type AppStatus = {
   storages_count: number;
   has_local_vault: boolean;
 };
+export type UnlockSource = "keystore" | "hardware_key";
+
+export type HardwareKeyEntry = {
+  label: string;
+  credential_id: string;
+  salt: string;
+  wrapped_master_key: string;
+  enrolled_at: string;
+};
+
 export type Settings = {
   remember_unlock: boolean;
   auto_unlock: boolean;
@@ -25,6 +35,9 @@ export type Settings = {
   clipboard_clear_if_unchanged: boolean;
   auto_hide_reveal_seconds: number;
   require_os_auth: boolean;
+  /** Where the device key comes from when the unlock is remembered. Exactly one is active. */
+  unlock_source: UnlockSource;
+  hardware_keys: HardwareKeyEntry[];
   /** Master key wrapped by the device key; the device key itself lives in the OS keystore. */
   wrapped_master_key?: string | null;
   trash_auto_purge_days: number;

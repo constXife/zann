@@ -5,7 +5,6 @@ use rand::RngCore;
 use tauri::{Emitter, State};
 use tauri_plugin_biometry::{AuthOptions, BiometryExt};
 
-use crate::constants::DWK_AAD;
 use crate::crypto::decrypt_vault_key_with_master;
 use crate::infra::auth::ensure_access_token_for_context;
 use crate::infra::config::{load_config, load_settings, save_config, save_settings};
@@ -13,10 +12,11 @@ use crate::infra::http::{auth_headers, decode_json_response, ensure_success};
 use crate::state::AppState;
 use crate::types::{
     ApiResponse, AppStatusResponse, AutolockConfig, BootstrapResponse, DesktopSettings,
-    KeystoreStatusResponse, PersonalVaultStatusResponse, StatusResponse, VaultDetailResponse,
+    HardwareKeyEntry, KeystoreStatusResponse, PersonalVaultStatusResponse, StatusResponse,
+    UnlockSource, VaultDetailResponse,
 };
 use uuid::Uuid;
-use zann_core::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
+use zann_core::crypto::SecretKey;
 use zann_core::VaultEncryptionType;
 use zann_core::{AppService, StorageKind, VaultKind};
 use zann_db::local::LocalVault;
@@ -389,9 +389,6 @@ pub async fn session_unlock_with_biometrics(
     state: State<'_, AppState>,
 ) -> Result<ApiResponse<()>, String> {
     let settings = state.settings.read().await.clone();
-    let Some(wrapped) = settings.wrapped_master_key.as_ref() else {
-        return Ok(ApiResponse::err("keystore_not_found", "No wrapped key"));
-    };
 
     if let Err((kind, message)) =
         confirm_with_os_auth(&app, "Unlock Zann", settings.require_os_auth)
@@ -399,52 +396,13 @@ pub async fn session_unlock_with_biometrics(
         return Ok(ApiResponse::err(&kind, &message));
     }
 
-    let dwk_bytes = match default_keystore().load_dwk() {
-        Ok(Some(bytes)) => bytes,
-        Ok(None) => return Ok(ApiResponse::err("keystore_not_found", "Not found")),
-        Err(err) => {
-            let (kind, message) = keystore_error(&err);
-            return Ok(ApiResponse::err(&kind, &message));
-        }
+    let master_key = match settings
+        .remembered
+        .unlock_with_keystore(default_keystore().as_ref())
+    {
+        Ok(key) => std::sync::Arc::new(SecretKey::from_bytes(key)),
+        Err(err) => return Ok(ApiResponse::err(err.kind(), &err.to_string())),
     };
-
-    let dwk_arr: [u8; 32] = match dwk_bytes.as_slice().try_into() {
-        Ok(arr) => arr,
-        Err(_) => {
-            return Ok(ApiResponse::err(
-                "keystore_unavailable",
-                "invalid dwk length",
-            ))
-        }
-    };
-    let dwk = SecretKey::from_bytes(dwk_arr);
-
-    let encoded = match base64::engine::general_purpose::STANDARD.decode(wrapped) {
-        Ok(bytes) => bytes,
-        Err(err) => return Ok(ApiResponse::err("keystore_unavailable", &err.to_string())),
-    };
-
-    let blob = match EncryptedBlob::from_bytes(&encoded) {
-        Ok(blob) => blob,
-        Err(err) => return Ok(ApiResponse::err("keystore_unavailable", &err.to_string())),
-    };
-
-    let master_bytes = match decrypt_blob(&dwk, &blob, DWK_AAD) {
-        Ok(bytes) => bytes,
-        Err(err) => return Ok(ApiResponse::err("keystore_unavailable", &err.to_string())),
-    };
-
-    let master_arr: [u8; 32] = match master_bytes.as_slice().try_into() {
-        Ok(arr) => arr,
-        Err(_) => {
-            return Ok(ApiResponse::err(
-                "keystore_unavailable",
-                "invalid master key length",
-            ))
-        }
-    };
-    let master_key = SecretKey::from_bytes(master_arr);
-    let master_key = std::sync::Arc::new(master_key);
 
     *state.master_key.write().await = Some(std::sync::Arc::clone(&master_key));
     handle_master_key_change(&app, &state, master_key.as_ref()).await?;
@@ -491,12 +449,10 @@ pub async fn session_rebind_biometrics(
             "remember unlock is disabled",
         ));
     }
-    let wrapped = match store_remembered_unlock(&app, master_key.as_ref(), settings.require_os_auth)
+    if let Err((kind, message)) = store_remembered_unlock(&app, &mut settings, master_key.as_ref())
     {
-        Ok(wrapped) => wrapped,
-        Err((kind, message)) => return Ok(ApiResponse::err(&kind, &message)),
-    };
-    settings.wrapped_master_key = Some(wrapped);
+        return Ok(ApiResponse::err(&kind, &message));
+    }
     if let Err(err) = save_settings(&state.root, settings.clone()) {
         return Ok(ApiResponse::err("keystore_error", &err.to_string()));
     }
@@ -509,24 +465,22 @@ pub fn system_locale() -> Result<ApiResponse<String>, String> {
     Ok(ApiResponse::ok(locale))
 }
 
-/// Remember the master key on this device: the DWK goes to the OS keystore and
-/// only the key it wraps is returned for storage in the settings file.
+/// Remember the master key on this device. The OS prompt is this client's job;
+/// everything below it belongs to `zann-keystore`.
 fn store_remembered_unlock(
     app: &tauri::AppHandle,
+    settings: &mut DesktopSettings,
     master_key: &SecretKey,
-    require_os_auth: bool,
-) -> Result<String, (String, String)> {
-    confirm_with_os_auth(app, "Enable unlock on this device", require_os_auth)?;
-
-    let dwk = SecretKey::generate();
-    default_keystore()
-        .store_dwk(dwk.as_bytes())
-        .map_err(|err| keystore_error(&err))?;
-
-    let blob = encrypt_blob(&dwk, master_key.as_bytes(), DWK_AAD)
-        .map_err(|err| ("keystore_error".to_string(), err.to_string()))?;
-
-    Ok(base64::engine::general_purpose::STANDARD.encode(blob.to_bytes()))
+) -> Result<(), (String, String)> {
+    confirm_with_os_auth(
+        app,
+        "Enable unlock on this device",
+        settings.require_os_auth,
+    )?;
+    settings
+        .remembered
+        .remember_with_keystore(default_keystore().as_ref(), master_key.as_bytes())
+        .map_err(|err| (err.kind().to_string(), err.to_string()))
 }
 
 /// Move a pre-keystore DWK out of the settings file.
@@ -541,19 +495,13 @@ fn migrate_legacy_dwk(
 ) -> Option<String> {
     let legacy = settings.legacy_dwk.take()?;
 
-    let stored = base64::engine::general_purpose::STANDARD
-        .decode(&legacy)
-        .map_err(|err| err.to_string())
-        .and_then(|bytes| keystore.store_dwk(&bytes).map_err(|err| err.to_string()));
-
-    let error = match stored {
+    let error = match settings.remembered.adopt_legacy_dwk(keystore, &legacy) {
         Ok(()) => None,
-        Err(message) => {
-            settings.wrapped_master_key = None;
+        Err(err) => {
             settings.remember_unlock = false;
             settings.auto_unlock = false;
             Some(format!(
-                "remembered unlock was reset because the system keystore is unavailable ({message})"
+                "remembered unlock was reset because the system keystore is unavailable ({err})"
             ))
         }
     };
@@ -588,26 +536,40 @@ pub async fn update_settings(
     let previous = state.settings.read().await.clone();
     let mut next = settings.clone();
     next.legacy_dwk = None;
+    // Enrolled keys are owned by the enrol/remove commands; a settings round
+    // trip through the UI must not be able to drop or rewrite them.
+    next.remembered.hardware_keys = previous.remembered.hardware_keys.clone();
 
-    if !previous.remember_unlock && settings.remember_unlock {
+    if next.remembered.unlock_source == UnlockSource::HardwareKey
+        && next.remembered.hardware_keys.is_empty()
+    {
+        return Err("enrol a hardware key first".to_string());
+    }
+
+    let keystore_active = |settings: &DesktopSettings| {
+        settings.remember_unlock && settings.remembered.unlock_source == UnlockSource::Keystore
+    };
+
+    if !keystore_active(&previous) && keystore_active(&next) {
         let master_key = state
             .master_key
             .read()
             .await
             .clone()
             .ok_or_else(|| "vault is locked".to_string())?;
-        let wrapped = store_remembered_unlock(&app, master_key.as_ref(), next.require_os_auth)
+        store_remembered_unlock(&app, &mut next, master_key.as_ref())
             .map_err(|(kind, message)| format!("{kind}: {message}"))?;
-        next.wrapped_master_key = Some(wrapped);
     }
 
-    if previous.remember_unlock && !settings.remember_unlock {
-        if let Err(err) = default_keystore().delete_dwk() {
-            if !matches!(err, KeystoreError::NotFound | KeystoreError::Unsupported) {
-                return Err(err.to_string());
-            }
-        }
-        next.wrapped_master_key = None;
+    if keystore_active(&previous) && !keystore_active(&next) {
+        // Includes switching to a hardware key: leaving the DWK behind would
+        // keep a second, weaker door into the same master key.
+        next.remembered
+            .forget_keystore(default_keystore().as_ref())
+            .map_err(|err| err.to_string())?;
+    }
+
+    if !next.remember_unlock {
         next.auto_unlock = false;
     }
 
@@ -635,10 +597,14 @@ pub async fn unlock(
     *state.master_key.write().await = Some(std::sync::Arc::clone(&master_key));
     handle_master_key_change(&app, &state, master_key.as_ref()).await?;
     let mut settings = state.settings.read().await.clone();
-    if settings.remember_unlock && settings.wrapped_master_key.is_none() {
-        match store_remembered_unlock(&app, master_key.as_ref(), settings.require_os_auth) {
-            Ok(wrapped) => {
-                settings.wrapped_master_key = Some(wrapped);
+    // Only the keystore source is (re)armed on a password unlock; a hardware
+    // key has to be enrolled deliberately, with the token in hand.
+    if settings.remember_unlock
+        && settings.remembered.unlock_source == UnlockSource::Keystore
+        && settings.remembered.wrapped_master_key.is_none()
+    {
+        match store_remembered_unlock(&app, &mut settings, master_key.as_ref()) {
+            Ok(()) => {
                 save_settings(&state.root, settings.clone()).map_err(|err| err.to_string())?;
                 *state.settings.write().await = settings;
             }
@@ -704,7 +670,7 @@ fn log_master_key_context(_label: &str, _password: &str, _identity: &crate::stat
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    use zann_keystore::{KeystoreStatus, KeystoreStatusReason};
+    use zann_keystore::{KeystoreStatus, KeystoreStatusReason, RememberedUnlock};
 
     struct FakeKeystore {
         stored: Mutex<Option<Vec<u8>>>,
@@ -772,7 +738,10 @@ mod tests {
     fn remembered_settings(dwk: &str) -> DesktopSettings {
         DesktopSettings {
             remember_unlock: true,
-            wrapped_master_key: Some("wrapped".to_string()),
+            remembered: RememberedUnlock {
+                wrapped_master_key: Some("wrapped".to_string()),
+                ..RememberedUnlock::default()
+            },
             legacy_dwk: Some(dwk.to_string()),
             ..DesktopSettings::default()
         }
@@ -791,7 +760,10 @@ mod tests {
         assert_eq!(keystore.load_dwk().unwrap(), Some([3u8; 32].to_vec()));
         // The remembered unlock survives, only its key moved.
         assert!(settings.remember_unlock);
-        assert_eq!(settings.wrapped_master_key.as_deref(), Some("wrapped"));
+        assert_eq!(
+            settings.remembered.wrapped_master_key.as_deref(),
+            Some("wrapped")
+        );
         assert!(settings.legacy_dwk.is_none());
 
         let written =
@@ -812,7 +784,7 @@ mod tests {
         assert!(error.is_some());
         assert!(!settings.remember_unlock);
         assert!(!settings.auto_unlock);
-        assert!(settings.wrapped_master_key.is_none());
+        assert!(settings.remembered.wrapped_master_key.is_none());
         assert!(settings.legacy_dwk.is_none());
 
         let written =
@@ -825,7 +797,10 @@ mod tests {
         let root = scratch_dir("noop");
         let mut settings = DesktopSettings {
             remember_unlock: true,
-            wrapped_master_key: Some("wrapped".to_string()),
+            remembered: RememberedUnlock {
+                wrapped_master_key: Some("wrapped".to_string()),
+                ..RememberedUnlock::default()
+            },
             ..DesktopSettings::default()
         };
 
@@ -834,5 +809,126 @@ mod tests {
         assert!(error.is_none());
         assert!(settings.remember_unlock);
         assert!(!root.join(crate::constants::SETTINGS_FILENAME).exists());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Hardware keys
+//
+// The enrolment, derivation and presence logic lives in `zann-keystore` so the
+// COSMIC client can reach the same behaviour. What stays here is the Tauri
+// plumbing: state, settings persistence, and the response shape.
+// ---------------------------------------------------------------------------
+
+/// Whether hardware keys can be used on this platform at all.
+pub async fn hardware_key_supported() -> Result<ApiResponse<bool>, String> {
+    Ok(ApiResponse::ok(cfg!(any(
+        target_os = "linux",
+        target_os = "macos"
+    ))))
+}
+
+/// Whether an enrolled authenticator is connected. Drives auto-lock, so it must
+/// stay silent: no touch, no prompt.
+pub async fn hardware_key_present(state: State<'_, AppState>) -> Result<ApiResponse<bool>, String> {
+    let settings = state.settings.read().await.clone();
+    Ok(ApiResponse::ok(
+        settings.remembered.connected_hardware_key().is_some(),
+    ))
+}
+
+pub async fn hardware_key_enroll(
+    state: State<'_, AppState>,
+    label: String,
+) -> Result<ApiResponse<HardwareKeyEntry>, String> {
+    let Some(master_key) = state.master_key.read().await.clone() else {
+        return Ok(ApiResponse::err("unlock_required", "unlock required"));
+    };
+
+    let mut settings = state.settings.read().await.clone();
+    let entry = match settings.remembered.enroll_hardware_key(
+        master_key.as_bytes(),
+        &label,
+        chrono::Utc::now().to_rfc3339(),
+    ) {
+        Ok(entry) => entry,
+        Err(err) => return Ok(ApiResponse::err(err.kind(), &err.to_string())),
+    };
+
+    save_settings(&state.root, settings.clone()).map_err(|err| err.to_string())?;
+    *state.settings.write().await = settings;
+    Ok(ApiResponse::ok(entry))
+}
+
+pub async fn hardware_key_remove(
+    state: State<'_, AppState>,
+    credential_id: String,
+) -> Result<ApiResponse<()>, String> {
+    let mut settings = state.settings.read().await.clone();
+    settings.remembered.remove_hardware_key(&credential_id);
+
+    // Removing the last key would leave the unlock screen waiting for a token
+    // that can never answer.
+    if !settings.remembered.is_armed() {
+        settings.remember_unlock = false;
+        settings.auto_unlock = false;
+    }
+
+    save_settings(&state.root, settings.clone()).map_err(|err| err.to_string())?;
+    *state.settings.write().await = settings;
+    Ok(ApiResponse::ok(()))
+}
+
+pub async fn session_unlock_with_hardware_key(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<ApiResponse<()>, String> {
+    let settings = state.settings.read().await.clone();
+    let master_key = match settings.remembered.unlock_with_hardware_key() {
+        Ok(key) => std::sync::Arc::new(SecretKey::from_bytes(key)),
+        Err(err) => return Ok(ApiResponse::err(err.kind(), &err.to_string())),
+    };
+
+    *state.master_key.write().await = Some(std::sync::Arc::clone(&master_key));
+    handle_master_key_change(&app, &state, master_key.as_ref()).await?;
+    Ok(ApiResponse::ok(()))
+}
+
+#[cfg(test)]
+mod settings_format_tests {
+    use super::*;
+
+    /// Older `desktop.json` files carry the remembered unlock inline. Parsing
+    /// has to keep working, or an upgrade silently loses every enrolment.
+    #[test]
+    fn settings_files_written_before_the_move_still_parse() {
+        let json = r#"{
+            "remember_unlock": true,
+            "unlock_source": "hardware_key",
+            "wrapped_master_key": "d3JhcHBlZA==",
+            "hardware_keys": [{
+                "label": "YubiKey",
+                "credential_id": "Y2lk",
+                "salt": "c2FsdA==",
+                "wrapped_master_key": "d3JhcHBlZA==",
+                "enrolled_at": "2026-08-08T00:00:00Z"
+            }]
+        }"#;
+
+        let settings: DesktopSettings = serde_json::from_str(json).expect("parse");
+        assert!(settings.remember_unlock);
+        assert_eq!(settings.remembered.unlock_source, UnlockSource::HardwareKey);
+        assert_eq!(settings.remembered.hardware_keys.len(), 1);
+        assert_eq!(settings.remembered.hardware_keys[0].label, "YubiKey");
+        assert_eq!(
+            settings.remembered.wrapped_master_key.as_deref(),
+            Some("d3JhcHBlZA==")
+        );
+
+        // The API shape the UI reads stays flat, whatever the file looks like.
+        let written = serde_json::to_string(&settings).expect("serialize");
+        assert!(written.contains("\"unlock_source\":\"hardware_key\""));
+        assert!(written.contains("\"hardware_keys\":["));
+        assert!(!written.contains("\"remembered\""));
     }
 }

@@ -56,9 +56,14 @@ pub trait Keystore: Send + Sync {
     fn delete_dwk(&self) -> Result<(), KeystoreError>;
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub mod fido;
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 mod keyring_store;
+pub mod remembered;
 mod unsupported;
+
+pub use remembered::{HardwareKeyEntry, RememberedUnlock, UnlockError, UnlockSource};
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 pub use keyring_store::KeyringKeystore;

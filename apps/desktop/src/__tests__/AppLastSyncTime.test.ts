@@ -393,6 +393,8 @@ describe("App last sync time", () => {
             auto_hide_reveal_seconds: 20,
             require_os_auth: true,
             wrapped_master_key: null,
+            unlock_source: "keystore",
+            hardware_keys: [],
             trash_auto_purge_days: 90,
             close_to_tray: true,
             close_to_tray_notice_shown: false,

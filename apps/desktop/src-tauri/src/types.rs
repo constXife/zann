@@ -365,13 +365,19 @@ pub struct KeystoreStatusResponse {
     pub reason: Option<String>,
 }
 
+pub use zann_keystore::{HardwareKeyEntry, RememberedUnlock, UnlockSource};
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct DesktopSettings {
     pub remember_unlock: bool,
     pub auto_unlock: bool,
     pub language: Option<String>,
-    pub wrapped_master_key: Option<String>,
+    /// Which device key opens the remembered unlock, and the keys it opens.
+    /// Flattened so the on-disk field names stay what they were and match the
+    /// other clients.
+    #[serde(flatten)]
+    pub remembered: RememberedUnlock,
     /// Pre-keystore installs kept the device wrapping key here, next to the
     /// key it unwraps. Read once on bootstrap so it can be moved into the OS
     /// keystore, and never written back — see `migrate_legacy_dwk`.
@@ -397,7 +403,7 @@ impl Default for DesktopSettings {
             remember_unlock: false,
             auto_unlock: false,
             language: None,
-            wrapped_master_key: None,
+            remembered: RememberedUnlock::default(),
             legacy_dwk: None,
             auto_lock_minutes: 10,
             lock_on_focus_loss: false,

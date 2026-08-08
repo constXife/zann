@@ -2,6 +2,7 @@ import { watch } from "vue";
 import type { ComputedRef, Ref } from "vue";
 import type { ItemDetail, ItemSummary, Settings, VaultSummary } from "../../../types";
 import type { UiSettings } from "../../useUiSettings";
+import { useHardwareKeys } from "../../useHardwareKeys";
 
 type AppWatchersOptions = {
   initialized: ComputedRef<boolean>;
@@ -147,6 +148,26 @@ export function useAppWatchers({
     }
   });
 
+  const hardwareKeys = useHardwareKeys();
+
+  /**
+   * Idle timeout reached. With a hardware key as the unlock source, an inserted
+   * key counts as presence: locking every few minutes while the key sits in the
+   * port only teaches people to switch auto-lock off. Pulling the key locks.
+   *
+   * The presence check is silent and only runs once per idle period, not on
+   * every tick.
+   */
+  const lockIfKeyIsGone = async (value: Settings) => {
+    if (value.unlock_source === "hardware_key" && value.hardware_keys.length > 0) {
+      if (await hardwareKeys.present()) {
+        lastActivityAt.value = Date.now();
+        return;
+      }
+    }
+    await lockSession();
+  };
+
   watch(
     () => settings.value,
     (value) => {
@@ -167,7 +188,7 @@ export function useAppWatchers({
           }
           const elapsed = Date.now() - lastActivityAt.value;
           if (elapsed > value.auto_lock_minutes * 60 * 1000) {
-            void lockSession();
+            void lockIfKeyIsGone(value);
           }
         }, 1000);
       }
