@@ -250,7 +250,8 @@
     "personalPlaceholder": "Previous master password",
     "remember": "Remember unlock on this device",
     "autoUnlock": "Unlock automatically on launch",
-    "touchId": "Unlock with Touch ID"
+    "touchId": "Unlock with Touch ID",
+    "savedUnlock": "Use saved unlock"
   },
   "auth": {
     "selectMethod": "How would you like to sign in?",
@@ -555,11 +556,11 @@
     "login_failed": "Login failed",
     "session_expired": "Session expired. Please reconnect to the server.",
     "session_expired_relogin": "Session expired. Enter code: {code}",
-    "keystore_unavailable": "Biometrics unavailable",
-    "keystore_cancelled": "Biometric prompt cancelled",
+    "keystore_unavailable": "System keystore unavailable",
+    "keystore_cancelled": "Confirmation cancelled",
     "keystore_not_found": "Saved unlock not found",
-    "keystore_unsupported": "Biometrics not supported",
-    "keystore_error": "Keychain error",
+    "keystore_unsupported": "No system keystore on this platform",
+    "keystore_error": "Keystore error",
     "remember_unlock_disabled": "Remember unlock is disabled",
     "name_required": "Name is required",
     "name_invalid_chars": "Use only letters, numbers, underscores, or hyphens.",

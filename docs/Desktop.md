@@ -29,6 +29,23 @@ bun run tauri build
 - Connect to a server to access shared vaults.
 - Use the server for multi-user access and policy enforcement.
 
+## Remembered unlock
+
+"Remember unlock on this device" stores the master key encrypted with a random
+device key. That device key is kept in the OS credential store — Keychain on
+macOS, Credential Manager on Windows, Secret Service (gnome-keyring, KWallet) on
+Linux — and never in the app's own files.
+
+- Without a working credential store the option cannot be enabled: there is no
+  file fallback, so the master password stays the only way in.
+- On Linux this means a Secret Service provider must be running in the session.
+- "Require OS authentication" adds a biometric prompt where the platform offers
+  one. It gates the app, not the stored key: no backend currently binds the
+  device key to a biometric ACL.
+- Upgrades from earlier versions move the device key out of `desktop.json` on
+  first launch. If it cannot be moved, the remembered unlock is dropped and you
+  are asked for the master password again.
+
 ## Linux notes
 
 On Linux the app renders through the **system WebKitGTK** (`libwebkit2gtk-4.1`),

@@ -250,7 +250,8 @@
     "personalPlaceholder": "Предыдущий мастер‑пароль",
     "remember": "Запомнить на этом устройстве",
     "autoUnlock": "Авторазблокировка при запуске",
-    "touchId": "Разблокировать через Touch ID"
+    "touchId": "Разблокировать через Touch ID",
+    "savedUnlock": "Использовать сохранённую разблокировку"
   },
   "auth": {
     "selectMethod": "Как вы хотите войти?",
@@ -555,11 +556,11 @@
     "login_failed": "Не удалось войти",
     "session_expired": "Сессия истекла. Подключитесь к серверу заново.",
     "session_expired_relogin": "Сессия истекла. Введите код: {code}",
-    "keystore_unavailable": "Биометрия недоступна",
-    "keystore_cancelled": "Биометрия отменена",
+    "keystore_unavailable": "Системное хранилище ключей недоступно",
+    "keystore_cancelled": "Подтверждение отменено",
     "keystore_not_found": "Сохранённая разблокировка не найдена",
-    "keystore_unsupported": "Биометрия не поддерживается",
-    "keystore_error": "Ошибка Keychain",
+    "keystore_unsupported": "На этой платформе нет системного хранилища ключей",
+    "keystore_error": "Ошибка хранилища ключей",
     "remember_unlock_disabled": "Запоминание разблокировки отключено",
     "name_required": "Введите имя",
     "name_invalid_chars": "Используйте только латинские буквы, цифры, подчёркивания или дефисы.",

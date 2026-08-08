@@ -25,7 +25,8 @@ export type Settings = {
   clipboard_clear_if_unchanged: boolean;
   auto_hide_reveal_seconds: number;
   require_os_auth: boolean;
-  biometry_dwk_backup?: string | null;
+  /** Master key wrapped by the device key; the device key itself lives in the OS keystore. */
+  wrapped_master_key?: string | null;
   trash_auto_purge_days: number;
   close_to_tray: boolean;
   close_to_tray_notice_shown: boolean;
