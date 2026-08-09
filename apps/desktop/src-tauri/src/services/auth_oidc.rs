@@ -107,13 +107,9 @@ pub(crate) async fn begin_login(
     }
     let client = reqwest::Client::new();
     let oidc_config_url = format!("{}/v1/auth/oidc/config", server_url.trim_end_matches('/'));
-    let oidc_config = fetch_json::<OidcConfigResponse>(&client, &oidc_config_url)
-        .await
-        .map_err(|e| e)?;
+    let oidc_config = fetch_json::<OidcConfigResponse>(&client, &oidc_config_url).await?;
     let discovery_url = format!("{}/.well-known/openid-configuration", oidc_config.issuer);
-    let discovery = fetch_json::<OidcDiscovery>(&client, &discovery_url)
-        .await
-        .map_err(|e| e)?;
+    let discovery = fetch_json::<OidcDiscovery>(&client, &discovery_url).await?;
 
     let redirect_port = 8765;
     let listener =
@@ -294,16 +290,14 @@ fn listen_for_oidc_callback(
                         return Ok(());
                     }
                     Ok(OidcRequest::IdpError { error, description }) => {
-                        let detail = description
-                            .unwrap_or_else(|| "Authorization failed.".to_string());
+                        let detail =
+                            description.unwrap_or_else(|| "Authorization failed.".to_string());
                         let _ = respond_html(&mut stream, "Login error", &detail);
                         return Err(format!("authorization error: {error}"));
                     }
                     Ok(OidcRequest::Ignored { path }) => {
                         let _ = respond_not_found(&mut stream);
-                        println!(
-                            "[oidc] ignoring stray request path={path} login_id={login_id}"
-                        );
+                        println!("[oidc] ignoring stray request path={path} login_id={login_id}");
                     }
                     Err(err) => {
                         let _ = respond_not_found(&mut stream);
@@ -336,10 +330,7 @@ enum OidcRequest {
     },
 }
 
-fn parse_oidc_request(
-    stream: &mut std::net::TcpStream,
-    port: u16,
-) -> Result<OidcRequest, String> {
+fn parse_oidc_request(stream: &mut std::net::TcpStream, port: u16) -> Result<OidcRequest, String> {
     let mut buffer = [0u8; 8192];
     let size = stream.read(&mut buffer).map_err(|err| err.to_string())?;
     if size == 0 {

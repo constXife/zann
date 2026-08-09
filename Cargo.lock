@@ -6587,6 +6587,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_json",
+ "sqlx-core",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",

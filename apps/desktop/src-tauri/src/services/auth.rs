@@ -313,16 +313,13 @@ pub(crate) fn migrate_context_for_server_id(
     context_name: &str,
     server_id: &str,
 ) -> Option<String> {
-    let Some((old_name, old_context)) = config
+    let (old_name, old_context) = config
         .contexts
         .iter()
         .find(|(name, ctx)| {
             ctx.server_id.as_deref() == Some(server_id) && name.as_str() != context_name
         })
-        .map(|(name, ctx)| (name.clone(), ctx.clone()))
-    else {
-        return None;
-    };
+        .map(|(name, ctx)| (name.clone(), ctx.clone()))?;
 
     let can_replace = config
         .contexts
@@ -341,6 +338,49 @@ pub(crate) fn migrate_context_for_server_id(
         .contexts
         .insert(context_name.to_string(), old_context);
     storage_id
+}
+
+async fn cleanup_duplicate_storages(state: &State<'_, AppState>, server_url: &str, keep_id: Uuid) {
+    let storage_repo = LocalStorageRepo::new(&state.pool);
+    let item_repo = LocalItemRepo::new(&state.pool);
+    let vault_repo = LocalVaultRepo::new(&state.pool);
+    let cursor_repo = SyncCursorRepo::new(&state.pool);
+    let pending_repo = PendingChangeRepo::new(&state.pool);
+
+    let storages = match storage_repo.list().await {
+        Ok(storages) => storages,
+        Err(_) => return,
+    };
+
+    for storage in storages {
+        if storage.id == keep_id {
+            continue;
+        }
+        if storage.server_url.as_deref() != Some(server_url) {
+            continue;
+        }
+        let _ = pending_repo.delete_by_storage(storage.id).await;
+        let _ = cursor_repo.delete_by_storage(storage.id).await;
+        let _ = item_repo.delete_by_storage(storage.id).await;
+        let _ = vault_repo.delete_by_storage(storage.id).await;
+        let _ = storage_repo.delete(storage.id).await;
+
+        if let Ok(mut config) = load_config(&state.root) {
+            let contexts_to_remove: Vec<String> = config
+                .contexts
+                .iter()
+                .filter(|(_, ctx)| ctx.storage_id.as_deref() == Some(&storage.id.to_string()))
+                .map(|(name, _)| name.clone())
+                .collect();
+            for name in contexts_to_remove {
+                config.contexts.remove(&name);
+                if config.current_context.as_deref() == Some(&name) {
+                    config.current_context = None;
+                }
+            }
+            let _ = save_config(&state.root, &config);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -409,48 +449,5 @@ mod tests {
         assert!(migrated.is_none());
         assert!(config.contexts.contains_key("https://old.example"));
         assert!(config.contexts.contains_key("https://new.example"));
-    }
-}
-
-async fn cleanup_duplicate_storages(state: &State<'_, AppState>, server_url: &str, keep_id: Uuid) {
-    let storage_repo = LocalStorageRepo::new(&state.pool);
-    let item_repo = LocalItemRepo::new(&state.pool);
-    let vault_repo = LocalVaultRepo::new(&state.pool);
-    let cursor_repo = SyncCursorRepo::new(&state.pool);
-    let pending_repo = PendingChangeRepo::new(&state.pool);
-
-    let storages = match storage_repo.list().await {
-        Ok(storages) => storages,
-        Err(_) => return,
-    };
-
-    for storage in storages {
-        if storage.id == keep_id {
-            continue;
-        }
-        if storage.server_url.as_deref() != Some(server_url) {
-            continue;
-        }
-        let _ = pending_repo.delete_by_storage(storage.id).await;
-        let _ = cursor_repo.delete_by_storage(storage.id).await;
-        let _ = item_repo.delete_by_storage(storage.id).await;
-        let _ = vault_repo.delete_by_storage(storage.id).await;
-        let _ = storage_repo.delete(storage.id).await;
-
-        if let Ok(mut config) = load_config(&state.root) {
-            let contexts_to_remove: Vec<String> = config
-                .contexts
-                .iter()
-                .filter(|(_, ctx)| ctx.storage_id.as_deref() == Some(&storage.id.to_string()))
-                .map(|(name, _)| name.clone())
-                .collect();
-            for name in contexts_to_remove {
-                config.contexts.remove(&name);
-                if config.current_context.as_deref() == Some(&name) {
-                    config.current_context = None;
-                }
-            }
-            let _ = save_config(&state.root, &config);
-        }
     }
 }

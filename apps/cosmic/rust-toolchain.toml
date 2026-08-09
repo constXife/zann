@@ -1,0 +1,7 @@
+# libcosmic needs a newer rustc than the workspace pins in the repository root.
+# The `cosmic` dev shell supplies its own toolchain and ignores this file; it is
+# here so that a plain `cargo` with rustup does not silently pick up 1.92 from
+# the root and fail with an unhelpful "not supported by the following packages".
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
