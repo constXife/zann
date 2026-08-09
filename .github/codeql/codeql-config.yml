@@ -2,9 +2,10 @@ name: zann
 
 # Test code is not shipped, and scanning it produces findings that describe the
 # test rather than the product: `rust/hard-coded-cryptographic-value` fires on
-# every fixture password a workflow test needs to log in with, and had ninety-six
-# alerts dismissed as "used in tests" before this file existed. Dismissing the
-# next one by hand on every PR is not a review, it is a ritual.
+# every fixture password a workflow test needs to log in with, and well over a
+# hundred of its alerts had been dismissed as "used in tests" before this file
+# existed. Dismissing the next one by hand on every PR is not a review, it is a
+# ritual.
 #
 # The cost is real and worth stating: a genuine flaw in a test helper is now
 # invisible to code scanning. That is accepted because a test helper cannot be
