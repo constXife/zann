@@ -6664,6 +6664,7 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
+ "zann-client",
  "zann-core",
  "zann-crypto",
  "zann-db",
