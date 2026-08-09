@@ -1,0 +1,56 @@
+# Code scanning, moved off GitHub's default setup.
+#
+# Default setup takes languages, a query suite and a threat model, and nothing
+# else — there is no way to tell it which paths to leave alone. That is the only
+# reason this file exists: the exclusions live in .github/codeql/codeql-config.yml
+# and a config file is only read by advanced setup.
+#
+# The language list mirrors what default setup was scanning. `javascript` and
+# `typescript` are not separate entries: both are covered by
+# `javascript-typescript`.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, as default setup was configured. Catches advisories that land in
+    # queries rather than in the code.
+    - cron: "17 4 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+          - language: javascript-typescript
+          - language: python
+          - language: rust
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # None of these four need a build; CodeQL extracts them from source.
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
