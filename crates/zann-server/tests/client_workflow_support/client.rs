@@ -6,13 +6,14 @@ use uuid::Uuid;
 use zann_core::{AuthMethod, EncryptedPayload, ItemsService, StorageKind, VaultKind};
 use zann_crypto::crypto::SecretKey;
 use zann_db::local::{
-    KeyWrapType, LocalStorage, LocalStorageRepo, LocalSyncCursor, LocalVault, LocalVaultRepo,
-    PendingChangeRepo, SyncCursorRepo,
+    KeyWrapType, LocalItem, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalSyncCursor,
+    LocalVault, LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
 };
 use zann_db::{connect_sqlite_with_max, migrate_local, SqlitePool};
 
 use super::sync_helpers::{
-    apply_personal_pull_change, apply_shared_pull_change, build_shared_push_changes,
+    apply_personal_pull_change, apply_push_applied, apply_shared_pull_change,
+    build_shared_push_changes,
 };
 use super::TestApp;
 
@@ -27,10 +28,16 @@ pub struct SyncOutcome {
     pub conflicts: usize,
     pub cursor: Option<String>,
     pub pull_changes: usize,
+    /// How many pulled changes the client accepted, as opposed to how many the
+    /// server sent.
+    pub pull_applied: usize,
 }
 
 pub struct PullOutcome {
     pub changes: usize,
+    /// How many of those the client accepted. A change it silently drops is the
+    /// failure mode these tests exist to catch, so it is counted separately.
+    pub applied: usize,
     pub cursor: Option<String>,
 }
 
@@ -180,6 +187,13 @@ impl LocalClient {
                 "push failed: {:?}",
                 json
             );
+            apply_push_applied(
+                &self.pool,
+                self.storage_id,
+                vault_id,
+                &json["applied_changes"],
+            )
+            .await;
             let applied = json["applied"].as_array().cloned().unwrap_or_default();
             if !applied.is_empty() {
                 let ids: Vec<Uuid> = applied
@@ -222,15 +236,19 @@ impl LocalClient {
         );
         let changes = json["changes"].as_array().cloned().unwrap_or_default();
         let change_count = changes.len();
+        let mut applied = 0;
         for change in changes {
-            apply_personal_pull_change(
+            if apply_personal_pull_change(
                 &self.pool,
                 self.storage_id,
                 vault_id,
                 &self.master_key,
                 change,
             )
-            .await;
+            .await
+            {
+                applied += 1;
+            }
         }
 
         let cursor = LocalSyncCursor {
@@ -242,6 +260,7 @@ impl LocalClient {
         let _ = cursor_repo.upsert(&cursor).await;
         PullOutcome {
             changes: change_count,
+            applied,
             cursor: cursor.cursor,
         }
     }
@@ -271,6 +290,13 @@ impl LocalClient {
                 "shared push failed: {:?}",
                 json
             );
+            apply_push_applied(
+                &self.pool,
+                self.storage_id,
+                vault_id,
+                &json["applied_changes"],
+            )
+            .await;
             let applied = json["applied"].as_array().cloned().unwrap_or_default();
             let conflicts = json["conflicts"].as_array().cloned().unwrap_or_default();
             applied_count = applied.len();
@@ -314,15 +340,19 @@ impl LocalClient {
         );
         let changes = json["changes"].as_array().cloned().unwrap_or_default();
         let change_count = changes.len();
+        let mut pull_applied = 0;
         for change in changes {
-            apply_shared_pull_change(
+            if apply_shared_pull_change(
                 &self.pool,
                 self.storage_id,
                 vault_id,
                 &self.master_key,
                 change,
             )
-            .await;
+            .await
+            {
+                pull_applied += 1;
+            }
         }
         let cursor = LocalSyncCursor {
             storage_id: self.storage_id,
@@ -336,6 +366,36 @@ impl LocalClient {
             conflicts: conflict_count,
             cursor: cursor.cursor,
             pull_changes: change_count,
+            pull_applied,
         }
+    }
+
+    /// Delete an item the way the UI does: the row is marked locally and a
+    /// pending change is queued for the next push.
+    pub async fn delete_item(&self, item_id: Uuid) {
+        let services = zann_db::services::LocalServices::new(&self.pool, &self.master_key);
+        services
+            .delete_item(self.storage_id, item_id)
+            .await
+            .expect("delete item");
+    }
+
+    /// What the UI would list: rows that are neither tombstoned nor
+    /// locally deleted.
+    pub async fn live_item_ids(&self, vault_id: Uuid) -> Vec<Uuid> {
+        let repo = LocalItemRepo::new(&self.pool);
+        repo.list_by_vault(self.storage_id, vault_id, false)
+            .await
+            .expect("list items")
+            .into_iter()
+            .map(|item| item.id)
+            .collect()
+    }
+
+    pub async fn item_row(&self, item_id: Uuid) -> Option<LocalItem> {
+        LocalItemRepo::new(&self.pool)
+            .get_by_id(self.storage_id, item_id)
+            .await
+            .expect("get item")
     }
 }

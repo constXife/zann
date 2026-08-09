@@ -16,19 +16,21 @@ pub async fn items_list(
     state: State<'_, AppState>,
     req: ItemsListRequest,
 ) -> Result<ApiResponse<ItemsListResponse>, String> {
-    Ok(match list_items(
-        state,
-        req.storage_id,
-        req.vault_id,
-        req.include_deleted,
-        req.limit,
-        req.cursor,
+    Ok(
+        match list_items(
+            state,
+            req.storage_id,
+            req.vault_id,
+            req.include_deleted,
+            req.limit,
+            req.cursor,
+        )
+        .await
+        {
+            Ok(data) => ApiResponse::ok(data),
+            Err(message) => ApiResponse::err("items_list_failed", &message),
+        },
     )
-    .await
-    {
-        Ok(data) => ApiResponse::ok(data),
-        Err(message) => ApiResponse::err("items_list_failed", &message),
-    })
 }
 
 pub async fn pending_changes_count(
@@ -197,10 +199,7 @@ pub async fn items_purge_trash(
         .clone()
         .ok_or_else(|| "vault is locked".to_string())?;
     let services = LocalServices::new(&state.pool, master_key.as_ref());
-    match services
-        .purge_trash(storage_id, req.older_than_days)
-        .await
-    {
+    match services.purge_trash(storage_id, req.older_than_days).await {
         Ok(count) => Ok(ApiResponse::ok(count)),
         Err(err) => Ok(ApiResponse::err(&err.kind, &err.message)),
     }
@@ -338,17 +337,17 @@ async fn list_items(
         items: page
             .items
             .into_iter()
-        .map(|item| ItemSummary {
-            id: item.id.to_string(),
-            vault_id: item.vault_id.to_string(),
-            path: item.path,
-            name: item.name,
-            type_id: item.type_id,
-            sync_status: Some(item.sync_status.as_i32()),
-            updated_at: item.updated_at.to_rfc3339(),
-            deleted_at: item.deleted_at.map(|value| value.to_rfc3339()),
-        })
-        .collect(),
+            .map(|item| ItemSummary {
+                id: item.id.to_string(),
+                vault_id: item.vault_id.to_string(),
+                path: item.path,
+                name: item.name,
+                type_id: item.type_id,
+                sync_status: Some(item.sync_status.as_i32()),
+                updated_at: item.updated_at.to_rfc3339(),
+                deleted_at: item.deleted_at.map(|value| value.to_rfc3339()),
+            })
+            .collect(),
         next_cursor: page.next_cursor,
         total_count: page.total_count,
         counts: ItemCounts {

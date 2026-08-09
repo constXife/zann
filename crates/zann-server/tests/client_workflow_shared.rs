@@ -136,6 +136,85 @@ async fn shared_vault_client_server_roundtrip() {
     );
 }
 
+/// The shared counterpart of `personal_delete_reaches_a_second_device`. Worth
+/// having separately: shared vaults take a different code path on both sides —
+/// the server decrypts and re-serves the payload, and the client re-encrypts it
+/// — and the deletion signal is carried differently in each response.
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn shared_delete_reaches_a_second_device() {
+    let app = TestApp::new_with_smk().await;
+    let user = app.register("shared-delete@example.com", "password").await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let client_a = LocalClient::new("http://localhost").await;
+    let client_b = LocalClient::new("http://localhost").await;
+
+    let vault = app.create_shared_vault(token, "shared-delete").await;
+    let vault_id = Uuid::parse_str(vault["id"].as_str().expect("vault id")).expect("vault id");
+    let vault_key_enc: Vec<u8> = vault["vault_key_enc"]
+        .as_array()
+        .map(|bytes| {
+            bytes
+                .iter()
+                .filter_map(|b| b.as_u64().map(|v| v as u8))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    client_a
+        .add_shared_vault(vault_id, vault_key_enc.clone())
+        .await;
+    client_b.add_shared_vault(vault_id, vault_key_enc).await;
+
+    let item_id = client_a
+        .put_item(vault_id, "login", login_payload("pw-doomed"))
+        .await;
+    client_a.sync_shared(&app, token, vault_id).await;
+
+    let pull = client_b.sync_shared(&app, token, vault_id).await;
+    assert_eq!(
+        pull.pull_applied, pull.pull_changes,
+        "client B dropped a change"
+    );
+    assert_eq!(
+        client_b.live_item_ids(vault_id).await,
+        vec![item_id],
+        "client B should see the item before it is deleted"
+    );
+
+    client_a.delete_item(item_id).await;
+    let push = client_a.sync_shared(&app, token, vault_id).await;
+    assert_eq!(push.conflicts, 0, "the delete conflicted");
+    assert_eq!(
+        client_a.pending_count(vault_id).await,
+        0,
+        "the delete should have been accepted, not left pending"
+    );
+
+    let pull = client_b.sync_shared(&app, token, vault_id).await;
+    assert!(
+        pull.pull_changes > 0,
+        "the server did not send the deletion"
+    );
+    assert_eq!(
+        pull.pull_applied, pull.pull_changes,
+        "client B received the deletion and dropped it"
+    );
+
+    let row = client_b.item_row(item_id).await.expect("row still present");
+    assert_eq!(
+        row.sync_status,
+        SyncStatus::Tombstone,
+        "the deleted item was not tombstoned on the second device"
+    );
+    assert!(row.deleted_at.is_some(), "deleted_at was not set");
+    assert!(
+        client_b.live_item_ids(vault_id).await.is_empty(),
+        "the deleted item is still listed on the second device"
+    );
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn shared_push_conflict_on_path_collision() {

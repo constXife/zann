@@ -9,6 +9,17 @@ use tempfile::tempdir;
 fn base_cmd(home: &Path) -> Command {
     let mut cmd = Command::new(assert_cmd::cargo::cargo_bin!("zann"));
     cmd.env("HOME", home);
+    // Clap reads these, so a developer machine with Zann configured would feed
+    // its own server and token into every test. Overriding HOME alone is not
+    // isolation.
+    for name in [
+        "ZANN_ADDR",
+        "ZANN_TOKEN",
+        "ZANN_TOKEN_FILE",
+        "ZANN_SERVER_FINGERPRINT",
+    ] {
+        cmd.env_remove(name);
+    }
     cmd
 }
 
@@ -716,6 +727,42 @@ fn run_command_passes_secret_to_process() {
             "-c",
             "test \"$password\" = \"secret\"",
         ])
+        .assert()
+        .success();
+}
+
+/// `zann-ffi` writes `email` and `salt_fingerprint` as null when it creates an
+/// identity before any account exists. The CLI used to demand strings there, so
+/// a `config.json` written by the desktop or COSMIC client made every command
+/// fail with `invalid type: null, expected a string`.
+#[test]
+fn reads_a_config_written_by_the_facade() {
+    let home_dir = tempdir().expect("tempdir");
+    let home = home_dir.path();
+    let zann_dir = home.join(".zann");
+    fs::create_dir_all(&zann_dir).expect("create .zann");
+    fs::write(
+        zann_dir.join("config.json"),
+        serde_json::to_string_pretty(&json!({
+            "identity": {
+                "kdf_salt": "c2FsdA==",
+                "kdf_params": {
+                    "algorithm": "argon2id",
+                    "iterations": 3,
+                    "memory_kb": 65536,
+                    "parallelism": 4
+                },
+                "salt_fingerprint": null,
+                "first_seen_at": null,
+                "email": null
+            }
+        }))
+        .expect("render config"),
+    )
+    .expect("write config");
+
+    base_cmd(home)
+        .args(["config", "current-context"])
         .assert()
         .success();
 }

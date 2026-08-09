@@ -78,11 +78,11 @@ impl cosmic::Application for App {
         let shell = match Session::open() {
             Ok((session, status)) => {
                 let screen = if status.initialized {
-                    Screen::Master(master::State::new(master::Mode::Unlock, None))
+                    Screen::Master(Box::new(master::State::new(master::Mode::Unlock, None)))
                 } else if status.storages_count > 0 {
                     // A server login already happened but the vault was never
                     // created — finish where that left off.
-                    Screen::Master(master::State::new(master::Mode::Create, None))
+                    Screen::Master(Box::new(master::State::new(master::Mode::Create, None)))
                 } else {
                     Screen::Welcome
                 };
@@ -205,7 +205,7 @@ impl cosmic::Application for App {
                     }
                     *screen = match message {
                         welcome::Message::UseLocalVault => {
-                            Screen::Master(master::State::new(master::Mode::Create, None))
+                            Screen::Master(Box::new(master::State::new(master::Mode::Create, None)))
                         }
                         welcome::Message::ConnectToServer => Screen::Connect(Box::default()),
                     };
@@ -243,8 +243,10 @@ impl cosmic::Application for App {
                                     } else {
                                         master::Mode::Create
                                     };
-                                    *screen =
-                                        Screen::Master(master::State::new(mode, Some(storage_id)));
+                                    *screen = Screen::Master(Box::new(master::State::new(
+                                        mode,
+                                        Some(storage_id),
+                                    )));
                                 }
                                 Err(err) => lost_session = Some(err),
                             }
@@ -283,6 +285,16 @@ impl cosmic::Application for App {
                             }
                             Task::none()
                         }
+                        settings::Outcome::Restored { notice } => {
+                            // The parked vault is a view of a database that no
+                            // longer exists, so it is dropped rather than
+                            // returned to, and the restore locked the vault.
+                            self.core.set_show_context(false);
+                            *screen = Screen::Master(Box::new(
+                                master::State::new(master::Mode::Unlock, None).with_notice(notice),
+                            ));
+                            Task::none()
+                        }
                     }
                 }
 
@@ -300,8 +312,10 @@ impl cosmic::Application for App {
                         }
                         vault::Outcome::Locked => {
                             self.core.set_show_context(false);
-                            *screen =
-                                Screen::Master(master::State::new(master::Mode::Unlock, None));
+                            *screen = Screen::Master(Box::new(master::State::new(
+                                master::Mode::Unlock,
+                                None,
+                            )));
                             Task::none()
                         }
                         vault::Outcome::OpenSettings => {
@@ -310,7 +324,7 @@ impl cosmic::Application for App {
                             let parked = std::mem::replace(&mut *screen, Screen::Welcome);
                             if let Screen::Vault(vault) = parked {
                                 *screen = Screen::Settings {
-                                    state: settings::State::new(),
+                                    state: Box::new(settings::State::new()),
                                     vault,
                                 };
                             }

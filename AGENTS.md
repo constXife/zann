@@ -3,7 +3,10 @@
 Full contribution rules live in `CONTRIBUTING.md`; this file is a brief, practical summary.
 
 ## Project Structure & Module Organization
-- `crates/` contains the Rust workspace crates: `zann-server`, `zann-cli`, `zann-core`, `zann-db`, `zann-keystore`.
+- `crates/` contains the Rust workspace crates: `zann-server`, `zann-cli`, `zann-core`,
+  `zann-crypto`, `zann-db`, `zann-keystore`, `zann-client` (wire types, HTTP, auth, sync),
+  `zann-app` (headless application layer shared by every client), `zann-ui-core`
+  (view logic with no platform dependencies) and `zann-ffi` (the uniffi facade clients call).
 - `apps/desktop/` holds the Tauri desktop app (frontend + `src-tauri/` backend).
 - `config/` stores environment and policy configs (use `config/config.example.yaml` as a template).
 - `schemas/` includes specs and schema artifacts; `docs/` contains documentation and screenshots.

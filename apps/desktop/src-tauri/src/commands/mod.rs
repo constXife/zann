@@ -1,11 +1,11 @@
 pub mod auth;
 pub mod backup;
-pub mod totp;
 pub mod items;
 pub mod items_history;
 pub mod session;
 pub mod shell;
 pub mod storage;
 pub mod sync;
+pub mod totp;
 pub mod types;
 pub mod vaults;

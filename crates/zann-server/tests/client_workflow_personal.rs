@@ -146,6 +146,78 @@ async fn personal_vault_client_server_roundtrip() {
     );
 }
 
+/// A deletion on one device has to reach the others. The unit tests in
+/// `zann-client` pin the apply step down against a hand-built change; this one
+/// runs the whole path — local delete, push, the server's own change feed, pull,
+/// apply — so a disagreement about the wire shape shows up as a live failure
+/// rather than a test of a test.
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn personal_delete_reaches_a_second_device() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("personal-delete@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+
+    let client_a = LocalClient::new("http://localhost").await;
+    let client_b = LocalClient::new_with_master(
+        "http://localhost",
+        SecretKey::from_bytes(*client_a.master_key.as_bytes()),
+    )
+    .await;
+
+    let vault_id = app.personal_vault_id("personal-delete@example.com").await;
+    let vault_key = SecretKey::generate();
+    let vault_key_enc = encrypt_vault_key(&client_a.master_key, vault_id, &vault_key);
+    app.update_vault_key(token, vault_id, vault_key_enc.clone())
+        .await;
+    client_a
+        .add_personal_vault(vault_id, vault_key_enc.clone())
+        .await;
+    client_b.add_personal_vault(vault_id, vault_key_enc).await;
+
+    let item_id = client_a
+        .put_item(vault_id, "login", login_payload("pw-doomed"))
+        .await;
+    client_a.push_personal(&app, token, vault_id).await;
+
+    let pull = client_b.pull_personal(&app, token, vault_id).await;
+    assert_eq!(pull.applied, pull.changes, "client B dropped a change");
+    assert_eq!(
+        client_b.live_item_ids(vault_id).await,
+        vec![item_id],
+        "client B should see the item before it is deleted"
+    );
+
+    client_a.delete_item(item_id).await;
+    client_a.push_personal(&app, token, vault_id).await;
+    assert_eq!(
+        client_a.pending_count(vault_id).await,
+        0,
+        "the delete should have been accepted, not left pending"
+    );
+
+    let pull = client_b.pull_personal(&app, token, vault_id).await;
+    assert!(pull.changes > 0, "the server did not send the deletion");
+    assert_eq!(
+        pull.applied, pull.changes,
+        "client B received the deletion and dropped it"
+    );
+
+    let row = client_b.item_row(item_id).await.expect("row still present");
+    assert_eq!(
+        row.sync_status,
+        SyncStatus::Tombstone,
+        "the deleted item was not tombstoned on the second device"
+    );
+    assert!(row.deleted_at.is_some(), "deleted_at was not set");
+    assert!(
+        client_b.live_item_ids(vault_id).await.is_empty(),
+        "the deleted item is still listed on the second device"
+    );
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn personal_vault_key_mismatch_fails_decrypt() {

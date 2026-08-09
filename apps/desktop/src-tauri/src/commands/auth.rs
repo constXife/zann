@@ -18,8 +18,6 @@ pub async fn get_server_info(
         ));
     }
     let client = reqwest::Client::new();
-    let info = fetch_system_info(&client, &server_url)
-        .await
-        .map_err(|e| e)?;
+    let info = fetch_system_info(&client, &server_url).await?;
     Ok(ApiResponse::ok(info))
 }

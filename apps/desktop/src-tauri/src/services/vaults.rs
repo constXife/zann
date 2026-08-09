@@ -209,12 +209,11 @@ pub async fn vault_reset_personal(
 
     let mut config_updated = false;
     for (_, ctx) in config.contexts.iter_mut() {
-        if ctx.storage_id.as_deref() == Some(&storage_id)
-            || ctx.addr.trim_end_matches('/') == addr.trim_end_matches('/')
+        if (ctx.storage_id.as_deref() == Some(&storage_id)
+            || ctx.addr.trim_end_matches('/') == addr.trim_end_matches('/'))
+            && ctx.expected_master_key_fp.take().is_some()
         {
-            if ctx.expected_master_key_fp.take().is_some() {
-                config_updated = true;
-            }
+            config_updated = true;
         }
     }
     if config_updated {

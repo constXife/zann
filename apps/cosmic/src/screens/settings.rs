@@ -6,7 +6,9 @@
 
 use cosmic::iced::{Alignment, Length, Task};
 use cosmic::{theme, widget, Element};
-use zann_ffi::RememberedUnlockFfi;
+use zann_ffi::{
+    BackupExportReport, RememberedUnlockFfi, SnapshotFfi, SnapshotRestoreFfi, VerifyReportFfi,
+};
 
 use crate::backend::local;
 use crate::backend::off_thread;
@@ -19,6 +21,16 @@ pub struct State {
     enrolling: bool,
     busy: bool,
     error: Option<String>,
+    /// Result of the last export, kept on screen so the path can be read off
+    /// and the file found.
+    exported: Option<BackupExportReport>,
+    snapshots: Vec<SnapshotFfi>,
+    restore_target: String,
+    /// The snapshot a restore has been asked for but not yet confirmed.
+    /// Restoring throws away everything since it was taken, so it is never one
+    /// click away from a list of dates.
+    confirming: Option<SnapshotFfi>,
+    verified: Option<Box<VerifyReportFfi>>,
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +40,17 @@ pub enum Message {
     Remove(String),
     UseKeystore,
     Forget,
+    Export,
+    Exported(Result<BackupExportReport, String>),
+    Snapshot,
+    Snapshots(Result<Vec<SnapshotFfi>, String>),
+    /// Ask for a restore. Shows the confirmation; does not touch anything.
+    AskRestore(Box<SnapshotFfi>),
+    CancelRestore,
+    ConfirmRestore(String),
+    Restored(Result<Box<SnapshotRestoreFfi>, String>),
+    Verify,
+    Verified(Result<VerifyReportFfi, String>),
     Close,
 }
 
@@ -35,6 +58,11 @@ pub enum Outcome {
     None,
     Task(Task<Message>),
     Close,
+    /// A restore replaced the database, so the vault is locked and the screens
+    /// behind this one are showing rows that no longer exist.
+    Restored {
+        notice: String,
+    },
 }
 
 impl State {
@@ -44,6 +72,11 @@ impl State {
             enrolling: false,
             busy: false,
             error: None,
+            exported: None,
+            snapshots: Vec::new(),
+            restore_target: String::new(),
+            confirming: None,
+            verified: None,
         }
     }
 
@@ -51,9 +84,15 @@ impl State {
     /// as everything else so the facade is only touched from one place.
     pub fn load(session: &Session) -> Task<Message> {
         let facade = session.facade();
-        cosmic::task::future(async move {
-            Message::Loaded(off_thread(move || local::remembered_unlock(&facade)).await)
-        })
+        let snapshots = session.facade();
+        Task::batch([
+            cosmic::task::future(async move {
+                Message::Loaded(off_thread(move || local::remembered_unlock(&facade)).await)
+            }),
+            cosmic::task::future(async move {
+                Message::Snapshots(off_thread(move || local::snapshots(&snapshots)).await)
+            }),
+        ])
     }
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
@@ -136,6 +175,128 @@ impl State {
                 }));
             }
 
+            Message::Export => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                self.exported = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Exported(off_thread(move || local::export_backup(&facade)).await)
+                }));
+            }
+
+            Message::Exported(Ok(report)) => {
+                self.busy = false;
+                self.exported = Some(report);
+            }
+
+            Message::Exported(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
+            Message::Snapshot => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Snapshots(
+                        off_thread(move || {
+                            local::snapshot_now(&facade)?;
+                            local::snapshots(&facade)
+                        })
+                        .await,
+                    )
+                }));
+            }
+
+            Message::Snapshots(Ok(snapshots)) => {
+                self.busy = false;
+                self.restore_target = session.facade().snapshot_restore_target();
+                self.snapshots = snapshots;
+            }
+
+            Message::Snapshots(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
+            Message::AskRestore(snapshot) => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                self.error = None;
+                self.confirming = Some(*snapshot);
+            }
+
+            Message::CancelRestore => self.confirming = None,
+
+            Message::ConfirmRestore(path) => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                self.confirming = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Restored(
+                        off_thread(move || local::restore_snapshot(&facade, path))
+                            .await
+                            .map(Box::new),
+                    )
+                }));
+            }
+
+            Message::Restored(Ok(outcome)) => {
+                self.busy = false;
+                // The vault is locked and everything on screen behind this is
+                // stale, so the shell takes over rather than this screen trying
+                // to refresh itself.
+                let notice = if outcome.identity_replaced {
+                    "Restored. Unlock with the master password that was in use when \
+                     that snapshot was taken."
+                        .to_string()
+                } else {
+                    "Restored. Unlock to continue.".to_string()
+                };
+                return Outcome::Restored { notice };
+            }
+
+            Message::Restored(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
+            Message::Verify => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                self.verified = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Verified(off_thread(move || local::verify(&facade)).await)
+                }));
+            }
+
+            Message::Verified(Ok(report)) => {
+                self.busy = false;
+                self.verified = Some(Box::new(report));
+            }
+
+            Message::Verified(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
             Message::Close => return Outcome::Close,
         }
         Outcome::None
@@ -209,6 +370,142 @@ impl State {
                     .on_press(Message::UseKeystore),
             )
         };
+
+        column = column.push(widget::text::title3("Your data"));
+        let mut export = widget::button::standard(if self.busy {
+            "Exporting…"
+        } else {
+            "Export vault to a file"
+        });
+        if !self.busy {
+            export = export.on_press(Message::Export);
+        }
+        column = column.push(export);
+
+        if let Some(report) = self.exported.as_ref() {
+            column = column.push(widget::text::caption(format!(
+                "{} items written to {}",
+                report.items_count, report.path
+            )));
+        } else {
+            column = column.push(widget::text::caption(
+                "An unencrypted copy of every local vault. Keep it somewhere safe.",
+            ));
+        }
+
+        column = column.push(widget::text::title3("Snapshots"));
+        column = column.push(widget::text::caption(
+            "A copy of the vault database, taken once a day. Still encrypted, \
+             unlike the export above — good for going back, not for leaving.",
+        ));
+
+        let mut snapshot = widget::button::standard(if self.busy {
+            "Working…"
+        } else {
+            "Take a snapshot now"
+        });
+        if !self.busy {
+            snapshot = snapshot.on_press(Message::Snapshot);
+        }
+        column = column.push(snapshot);
+
+        if self.snapshots.is_empty() {
+            column = column.push(widget::text::caption("No snapshots yet."));
+        } else if let Some(confirming) = self.confirming.as_ref() {
+            // One question, stated in terms of what is lost rather than what is
+            // gained: the button is easy to reach and the change is not.
+            column = column.push(widget::text::body(format!(
+                "Restore the snapshot from {}? Everything added or changed since then \
+                 is removed from this device.",
+                confirming.created_at
+            )));
+            column = column.push(widget::text::caption(
+                "The vault as it is now is kept as a snapshot first, so this can be undone.",
+            ));
+            column = column.push(
+                widget::row::with_capacity(2)
+                    .push(
+                        widget::button::destructive("Restore")
+                            .on_press(Message::ConfirmRestore(confirming.path.clone())),
+                    )
+                    .push(widget::button::standard("Cancel").on_press(Message::CancelRestore))
+                    .spacing(spacing.space_xs),
+            );
+        } else {
+            for entry in self.snapshots.iter().take(5) {
+                let mut restore = widget::button::text("Restore");
+                if !self.busy {
+                    restore = restore.on_press(Message::AskRestore(Box::new(entry.clone())));
+                }
+                column = column.push(
+                    widget::row::with_capacity(2)
+                        .push(
+                            widget::text::caption(format!(
+                                "{} · {} KiB",
+                                entry.created_at,
+                                entry.size_bytes / 1024
+                            ))
+                            .width(Length::Fill),
+                        )
+                        .push(restore)
+                        .align_y(Alignment::Center),
+                );
+            }
+            // Restoring by hand still works, and is the way out if the app
+            // cannot start at all.
+            column = column.push(widget::text::caption(format!(
+                "Or, with Zann closed everywhere, copy a snapshot (and its \
+                 .identity.json, which holds the salt) over {}",
+                self.restore_target
+            )));
+        }
+
+        column = column.push(widget::text::title3("Integrity"));
+        let mut verify = widget::button::standard(if self.busy {
+            "Working…"
+        } else {
+            "Check every item"
+        });
+        if !self.busy {
+            verify = verify.on_press(Message::Verify);
+        }
+        column = column.push(verify);
+
+        match self.verified.as_ref() {
+            None => {
+                column = column.push(widget::text::caption(
+                    "Decrypts every item and compares its checksum, so \"probably fine\" \
+                     becomes a yes or a no.",
+                ));
+            }
+            Some(report) if report.problems.is_empty() && report.database_ok => {
+                column = column.push(widget::text::caption(format!(
+                    "All {} items in {} vault(s) are intact.",
+                    report.items_ok, report.vaults_checked
+                )));
+            }
+            Some(report) => {
+                column = column.push(widget::text::caption(format!(
+                    "{} of {} items readable · {} problem(s) found",
+                    report.items_ok,
+                    report.items_checked,
+                    report.problems.len()
+                )));
+                for problem in report.problems.iter().take(5) {
+                    column = column.push(widget::text::caption(format!(
+                        "{} — {}",
+                        problem.item_path.clone().unwrap_or_else(|| problem
+                            .vault_name
+                            .clone()
+                            .unwrap_or_else(|| "database".to_string())),
+                        problem.kind
+                    )));
+                }
+                column = column.push(widget::text::caption(
+                    "Restore from a snapshot below, or export what still reads.",
+                ));
+            }
+        }
 
         if let Some(error) = self.error.as_ref() {
             column = column.push(widget::text::caption(error.clone()));

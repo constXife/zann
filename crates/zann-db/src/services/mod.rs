@@ -188,7 +188,12 @@ impl<'a> LocalServices<'a> {
             .map_err(|err| ServiceError::new("pending_change_failed", err.to_string()))
     }
 
-    fn decrypt_vault_key(&self, vault: &LocalVault) -> ServiceResult<SecretKey> {
+    /// Unwrap a vault key with the master key held by this service.
+    ///
+    /// Public because verification in `zann-app` has to reach the same answer:
+    /// a second reading of `key_wrap_type` elsewhere is exactly the kind of
+    /// divergence ADR 0003 is about.
+    pub fn decrypt_vault_key(&self, vault: &LocalVault) -> ServiceResult<SecretKey> {
         if vault.key_wrap_type == KeyWrapType::RemoteServer {
             return Ok(SecretKey::from_bytes(*self.master_key.as_bytes()));
         }

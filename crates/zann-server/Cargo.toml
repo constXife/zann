@@ -53,6 +53,9 @@ tikv-jemalloc-sys = { version = "0.6", optional = true, features = ["profiling"]
 proptest = "1.5.0"
 tower = "0.5"
 zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"] }
+# The client workflow tests drive the real client against the real server, so
+# they depend on the shipped sync code rather than a copy of it.
+zann-client = { path = "../zann-client" }
 
 [features]
 postgres-tests = []

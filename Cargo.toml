@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/zann-app",
   "crates/zann-client",
   "crates/zann-crypto",
   "crates/zann-core",

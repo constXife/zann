@@ -146,69 +146,16 @@ impl<'a> LocalItemHistoryRepo<'a> {
         .map(|result| result.rows_affected())
     }
 
-    pub async fn replace_by_item(
-        &self,
-        storage_id: Uuid,
-        item_id: Uuid,
-        history: &[LocalItemHistory],
-    ) -> Result<(), sqlx_core::Error> {
-        let mut tx = self.pool.begin().await?;
-        query!(
-            r#"
-            DELETE FROM item_history
-            WHERE storage_id = ?1 AND item_id = ?2
-            "#,
-            storage_id,
-            item_id
-        )
-        .execute(&mut *tx)
-        .await?;
-
-        for entry in history {
-            query!(
-                r#"
-                INSERT INTO item_history (
-                    id,
-                    storage_id,
-                    vault_id,
-                    item_id,
-                    payload_enc,
-                    checksum,
-                    version,
-                    change_type,
-                    changed_by_email,
-                    changed_by_name,
-                    changed_by_device_id,
-                    changed_by_device_name,
-                    source,
-                    sync_status,
-                    created_at
-                )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-                "#,
-                entry.id,
-                entry.storage_id,
-                entry.vault_id,
-                entry.item_id,
-                &entry.payload_enc,
-                entry.checksum.clone(),
-                entry.version,
-                entry.change_type.as_i32(),
-                entry.changed_by_email.clone(),
-                entry.changed_by_name.clone(),
-                entry.changed_by_device_id,
-                entry.changed_by_device_name.clone(),
-                entry.source.as_i32(),
-                entry.sync_status.as_i32(),
-                entry.created_at
-            )
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        tx.commit().await
-    }
-
+    /// Fold `history` into what is stored, keeping the newest `keep` confirmed
+    /// versions.
+    ///
+    /// There is deliberately no `replace_by_item` beside this. Sync used to
+    /// wipe an item's history and write the server's tail in its place, which
+    /// destroyed the *pending* row for a local edit that had not been pushed
+    /// yet — the only copy of that version anywhere — and emptied the history
+    /// outright whenever a change arrived with no tail attached. A row is
+    /// matched by version and only overwritten while it is still pending, so
+    /// confirmation replaces the local guess instead of duplicating it.
     pub async fn merge_by_item(
         &self,
         storage_id: Uuid,

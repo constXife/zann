@@ -89,6 +89,113 @@ jobs:
       - name: Rust fmt
         run: cargo fmt --check
 
+  # The desktop backend is excluded from the workspace, so the root fmt, clippy
+  # and test jobs never see its 8.5k lines. This job is what covers them until
+  # ADR 0003's Ф1 brings the crate into the workspace proper.
+  layering:
+    needs: changes
+    if: >-
+      needs.changes.outputs.rust == 'true' ||
+      needs.changes.outputs.js == 'true' ||
+      needs.changes.outputs.cosmic == 'true' ||
+      needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Client layering guard
+        run: scripts/check-client-layering.sh
+
+  desktop-rust:
+    needs: changes
+    if: >-
+      needs.changes.outputs.rust == 'true' ||
+      needs.changes.outputs.js == 'true' ||
+      needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      # Tauri pulls in webkit and gtk; libudev is for zann-keystore's FIDO2 path.
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libayatana-appindicator3-dev \
+            libxkbcommon-dev \
+            libudev-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          components: rustfmt, clippy
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
+      - name: Rust fmt
+        working-directory: apps/desktop/src-tauri
+        run: cargo fmt --check
+      - name: Clippy
+        working-directory: apps/desktop/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        working-directory: apps/desktop/src-tauri
+        run: cargo test
+
+  # COSMIC has its own lockfile (51 git sources, which Nix vendoring depends on)
+  # and needs a newer toolchain than the workspace pins, so it cannot simply
+  # join the workspace — see apps/cosmic/README.md and ADR 0003.
+  #
+  # Shares the `cosmic` filter with cosmic-package, which deliberately leaves
+  # `crates/**` out because libcosmic with wgpu takes tens of minutes (#151).
+  # So this does not catch a core change breaking COSMIC either; that still
+  # surfaces on the next PR touching apps/cosmic. Widening the filter is a
+  # separate call about CI budget, not one to make in passing here.
+  cosmic:
+    needs: changes
+    if: needs.changes.outputs.cosmic == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libudev-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            wayland-protocols \
+            libexpat1-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgl1-mesa-dev
+      # libcosmic needs a newer rustc than rust-toolchain.toml pins for the
+      # workspace; apps/cosmic/rust-toolchain.toml overrides it for this tree.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - name: Check
+        working-directory: apps/cosmic
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests
+        working-directory: apps/cosmic
+        run: cargo test
+
   audit-surface:
     needs: changes
     if: needs.changes.outputs.audit_surface == 'true'
@@ -348,7 +455,12 @@ jobs:
 
   e2e-desktop:
     needs: [changes, server-image]
-    if: needs.changes.outputs.js == 'true' || needs.changes.outputs.ci == 'true'
+    # `rust` too: the desktop backend's logic now lives in crates/zann-app, so a
+    # change that breaks backup or sync no longer touches apps/desktop/** at all.
+    if: >-
+      needs.changes.outputs.js == 'true' ||
+      needs.changes.outputs.rust == 'true' ||
+      needs.changes.outputs.ci == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:

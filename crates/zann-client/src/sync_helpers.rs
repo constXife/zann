@@ -17,6 +17,11 @@ use crate::util::{parse_rfc3339, storage_name_from_url};
 use zann_core::crypto::{encrypt_blob, SecretKey};
 use zann_core::{ChangeType, StorageKind, SyncStatus, VaultEncryptionType, VaultKind};
 
+/// How many confirmed history versions to keep per item, matching the server's
+/// `ITEM_HISTORY_LIMIT`. Keeping more would be pointless — the server never
+/// sends a longer tail — and keeping fewer would drop versions the UI offers.
+const HISTORY_LIMIT: i64 = 5;
+
 fn append_sync_log(message: &str) {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -284,6 +289,7 @@ pub async fn apply_push_applied(
 pub async fn apply_pull_change(
     item_repo: &LocalItemRepo<'_>,
     history_repo: &LocalItemHistoryRepo<'_>,
+    vault_key: &SecretKey,
     storage_id: Uuid,
     vault_id: Uuid,
     change: &SyncPullChange,
@@ -303,53 +309,93 @@ pub async fn apply_pull_change(
             return Ok(false);
         }
     };
-    let deleted_at = match change.deleted_at.as_ref() {
-        Some(value) => parse_rfc3339(value),
-        None => None,
-    };
-
-    let payload_enc = match change.payload_enc.as_ref() {
-        Some(payload) => payload.clone(),
-        None => Vec::new(),
-    };
-    let checksum = if !change.checksum.is_empty() {
-        change.checksum.clone()
-    } else if payload_enc.is_empty() {
-        "".to_string()
-    } else {
-        payload_checksum(&payload_enc)
-    };
 
     let existing = item_repo
         .get_by_id(storage_id, item_id)
         .await
         .map_err(|err| err.to_string())?;
-    if let Some(mut existing) = existing {
-        if existing.version >= change.seq {
+    // Strictly newer, not newer-or-equal: a correction re-issued at the same
+    // seq has to be applied, and `>=` silently dropped it.
+    if let Some(local) = existing.as_ref() {
+        if local.version > change.seq {
             append_sync_log(&format!(
                 "[pull] skipped newer local version: storage_id={}, item_id={}, local_version={}, remote_version={}",
                 redact_uuid(storage_id),
                 redact_uuid(item_id),
-                existing.version,
+                local.version,
                 change.seq
             ));
             return Ok(false);
         }
-        existing.path = change.path.clone();
-        existing.name = change.name.clone();
-        existing.type_id = change.type_id.clone();
-        existing.payload_enc = payload_enc.clone();
-        existing.checksum = checksum.clone();
-        existing.version = change.seq;
-        existing.updated_at = updated_at;
-        existing.deleted_at = deleted_at;
-        existing.sync_status = if deleted_at.is_some() {
-            SyncStatus::Tombstone
-        } else {
-            SyncStatus::Synced
-        };
+    }
+
+    // Deletion arrives as an operation. The server sends no `deleted_at` on a
+    // pull change, so reading one meant deletions made on other devices never
+    // landed here at all.
+    if change.operation == ChangeType::Delete.as_i32() {
+        if let Some(mut local) = existing {
+            local.deleted_at = Some(updated_at);
+            local.sync_status = SyncStatus::Tombstone;
+            local.updated_at = updated_at;
+            local.version = change.seq;
+            item_repo
+                .update(&local)
+                .await
+                .map_err(|err| err.to_string())?;
+        }
+        apply_pull_history(history_repo, storage_id, vault_id, item_id, change).await?;
+        return Ok(true);
+    }
+
+    let payload_enc = match change.payload_enc.as_ref() {
+        Some(payload) => payload.clone(),
+        None => {
+            append_sync_log(&format!(
+                "[pull] missing payload_enc: storage_id={}, item_id={}",
+                redact_uuid(storage_id),
+                redact_uuid(item_id)
+            ));
+            return Ok(false);
+        }
+    };
+
+    // Verify what arrived rather than describe it. Recomputing the checksum
+    // from the received bytes makes any corruption self-consistent, which is
+    // the same as not checking at all.
+    let checksum = payload_checksum(&payload_enc);
+    if checksum != change.checksum {
+        append_sync_log(&format!(
+            "[pull] checksum mismatch: storage_id={}, item_id={}",
+            redact_uuid(storage_id),
+            redact_uuid(item_id)
+        ));
+        return Ok(false);
+    }
+
+    let key_fp = key_fingerprint(vault_key);
+    if decrypt_payload(vault_key, vault_id, item_id, &payload_enc).is_err() {
+        append_sync_log(&format!(
+            "[pull] decrypt failed: storage_id={}, item_id={}",
+            redact_uuid(storage_id),
+            redact_uuid(item_id)
+        ));
+        return Ok(false);
+    }
+
+    if let Some(mut local) = existing {
+        local.path = change.path.clone();
+        local.name = change.name.clone();
+        local.type_id = change.type_id.clone();
+        local.payload_enc = payload_enc;
+        local.checksum = change.checksum.clone();
+        // Which key this cache was written under, so a rotation can invalidate it.
+        local.cache_key_fp = Some(key_fp);
+        local.version = change.seq;
+        local.updated_at = updated_at;
+        local.deleted_at = None;
+        local.sync_status = SyncStatus::Synced;
         item_repo
-            .update(&existing)
+            .update(&local)
             .await
             .map_err(|err| err.to_string())?;
     } else {
@@ -360,17 +406,13 @@ pub async fn apply_pull_change(
             path: change.path.clone(),
             name: change.name.clone(),
             type_id: change.type_id.clone(),
-            payload_enc: payload_enc.clone(),
-            checksum: checksum.clone(),
-            cache_key_fp: None,
+            payload_enc,
+            checksum: change.checksum.clone(),
+            cache_key_fp: Some(key_fp),
             version: change.seq,
-            deleted_at,
+            deleted_at: None,
             updated_at,
-            sync_status: if deleted_at.is_some() {
-                SyncStatus::Tombstone
-            } else {
-                SyncStatus::Synced
-            },
+            sync_status: SyncStatus::Synced,
         };
         item_repo
             .create(&record)
@@ -378,6 +420,19 @@ pub async fn apply_pull_change(
             .map_err(|err| err.to_string())?;
     }
 
+    apply_pull_history(history_repo, storage_id, vault_id, item_id, change).await?;
+
+    Ok(true)
+}
+
+/// Server history rows for one item, mapped onto the local shape.
+async fn apply_pull_history(
+    history_repo: &LocalItemHistoryRepo<'_>,
+    storage_id: Uuid,
+    vault_id: Uuid,
+    item_id: Uuid,
+    change: &SyncPullChange,
+) -> Result<(), String> {
     let history_entries = change
         .history
         .iter()
@@ -400,18 +455,30 @@ pub async fn apply_pull_change(
         })
         .collect::<Vec<_>>();
 
-    apply_history_payloads(history_repo, storage_id, item_id, &history_entries).await?;
-
-    Ok(true)
+    apply_history_payloads(
+        "history",
+        history_repo,
+        storage_id,
+        item_id,
+        &history_entries,
+    )
+    .await
 }
 
+/// The shared-vault counterpart of [`apply_pull_change`].
+///
+/// The server holds the key for these vaults and sends the payload as plaintext
+/// JSON, so there is nothing to decrypt and nothing to check a checksum
+/// against: the `checksum` on the wire describes the server's ciphertext, which
+/// never reaches us. What we store is a local cache encrypted under the master
+/// key, described by its own checksum.
 pub async fn apply_shared_pull_change(
     item_repo: &LocalItemRepo<'_>,
     history_repo: &LocalItemHistoryRepo<'_>,
+    master_key: &SecretKey,
     storage_id: Uuid,
     vault_id: Uuid,
     change: &SyncSharedPullChange,
-    master_key: &SecretKey,
 ) -> Result<bool, String> {
     let item_id = Uuid::parse_str(&change.item_id).map_err(|err| err.to_string())?;
     // A timestamp we cannot read must not be stamped "now": that would make the
@@ -420,7 +487,7 @@ pub async fn apply_shared_pull_change(
         Some(value) => value,
         None => {
             append_sync_log(&format!(
-                "[pull] invalid updated_at: storage_id={}, item_id={}, value={}",
+                "[pull_shared] invalid updated_at: storage_id={}, item_id={}, value={}",
                 redact_uuid(storage_id),
                 redact_uuid(item_id),
                 change.updated_at
@@ -428,48 +495,81 @@ pub async fn apply_shared_pull_change(
             return Ok(false);
         }
     };
-    let deleted_at = match change.deleted_at.as_ref() {
-        Some(value) => parse_rfc3339(value),
-        None => None,
-    };
-
-    let payload = change.payload.clone();
-    let (payload_enc, checksum) = if let Some(payload) = payload.as_ref() {
-        encrypt_payload_for_cache(master_key, vault_id, item_id, payload)?
-    } else {
-        (Vec::new(), "".to_string())
-    };
 
     let existing = item_repo
         .get_by_id(storage_id, item_id)
         .await
         .map_err(|err| err.to_string())?;
-    if let Some(mut existing) = existing {
-        if existing.version >= change.seq {
+    // Strictly newer, not newer-or-equal. This matters more here than for a
+    // personal vault: the server's bootstrap path stamps every item with the
+    // vault's current seq, so `>=` dropped the whole vault on a second bootstrap.
+    if let Some(local) = existing.as_ref() {
+        if local.version > change.seq {
             append_sync_log(&format!(
                 "[pull_shared] skipped newer local version: storage_id={}, item_id={}, local_version={}, remote_version={}",
                 redact_uuid(storage_id),
                 redact_uuid(item_id),
-                existing.version,
+                local.version,
                 change.seq
             ));
             return Ok(false);
         }
-        existing.path = change.path.clone();
-        existing.name = change.name.clone();
-        existing.type_id = change.type_id.clone();
-        existing.payload_enc = payload_enc.clone();
-        existing.checksum = checksum.clone();
-        existing.version = change.seq;
-        existing.updated_at = updated_at;
-        existing.deleted_at = deleted_at;
-        existing.sync_status = if deleted_at.is_some() {
-            SyncStatus::Tombstone
-        } else {
-            SyncStatus::Synced
-        };
+    }
+
+    // Deletion arrives as an operation. The shared pull response has no
+    // `deleted_at` field at all, so reading one meant a deletion in a shared
+    // vault never landed here.
+    if change.operation == ChangeType::Delete.as_i32() {
+        if let Some(mut local) = existing {
+            local.deleted_at = Some(updated_at);
+            local.sync_status = SyncStatus::Tombstone;
+            local.updated_at = updated_at;
+            local.version = change.seq;
+            item_repo
+                .update(&local)
+                .await
+                .map_err(|err| err.to_string())?;
+        }
+        apply_shared_pull_history(
+            history_repo,
+            master_key,
+            storage_id,
+            vault_id,
+            item_id,
+            change,
+        )
+        .await?;
+        return Ok(true);
+    }
+
+    // An update carrying no payload is a malformed change, not an instruction
+    // to blank the item.
+    let Some(payload) = change.payload.as_ref() else {
+        append_sync_log(&format!(
+            "[pull_shared] missing payload: storage_id={}, item_id={}",
+            redact_uuid(storage_id),
+            redact_uuid(item_id)
+        ));
+        return Ok(false);
+    };
+    let (payload_enc, checksum) =
+        encrypt_payload_for_cache(master_key, vault_id, item_id, payload)?;
+    let key_fp = key_fingerprint(master_key);
+
+    if let Some(mut local) = existing {
+        local.path = change.path.clone();
+        local.name = change.name.clone();
+        local.type_id = change.type_id.clone();
+        local.payload_enc = payload_enc;
+        local.checksum = checksum;
+        // Which key this cache was written under, so a rotation can invalidate it.
+        local.cache_key_fp = Some(key_fp);
+        local.version = change.seq;
+        local.updated_at = updated_at;
+        local.deleted_at = None;
+        local.sync_status = SyncStatus::Synced;
         item_repo
-            .update(&existing)
+            .update(&local)
             .await
             .map_err(|err| err.to_string())?;
     } else {
@@ -480,17 +580,13 @@ pub async fn apply_shared_pull_change(
             path: change.path.clone(),
             name: change.name.clone(),
             type_id: change.type_id.clone(),
-            payload_enc: payload_enc.clone(),
-            checksum: checksum.clone(),
-            cache_key_fp: None,
+            payload_enc,
+            checksum,
+            cache_key_fp: Some(key_fp),
             version: change.seq,
-            deleted_at,
+            deleted_at: None,
             updated_at,
-            sync_status: if deleted_at.is_some() {
-                SyncStatus::Tombstone
-            } else {
-                SyncStatus::Synced
-            },
+            sync_status: SyncStatus::Synced,
         };
         item_repo
             .create(&record)
@@ -498,18 +594,46 @@ pub async fn apply_shared_pull_change(
             .map_err(|err| err.to_string())?;
     }
 
-    let history_entries = change
-        .history
-        .iter()
-        .map(|entry| LocalItemHistory {
+    apply_shared_pull_history(
+        history_repo,
+        master_key,
+        storage_id,
+        vault_id,
+        item_id,
+        change,
+    )
+    .await?;
+
+    Ok(true)
+}
+
+/// Server history rows for one shared item, re-encrypted for the local cache.
+///
+/// A row that cannot be encrypted fails the whole change rather than being
+/// stored with no bytes: an empty entry reads as a version that exists and shows
+/// nothing, which is worse than a sync error somebody can retry.
+async fn apply_shared_pull_history(
+    history_repo: &LocalItemHistoryRepo<'_>,
+    master_key: &SecretKey,
+    storage_id: Uuid,
+    vault_id: Uuid,
+    item_id: Uuid,
+    change: &SyncSharedPullChange,
+) -> Result<(), String> {
+    let mut history_entries = Vec::with_capacity(change.history.len());
+    for entry in &change.history {
+        let (payload_enc, checksum) =
+            encrypt_payload_for_cache(master_key, vault_id, item_id, &entry.payload)?;
+        history_entries.push(LocalItemHistory {
             id: Uuid::now_v7(),
             storage_id,
             vault_id,
             item_id,
-            payload_enc: encrypt_payload_for_cache(master_key, vault_id, item_id, &entry.payload)
-                .map(|(payload_enc, _)| payload_enc)
-                .unwrap_or_default(),
-            checksum: entry.checksum.clone(),
+            payload_enc,
+            // The server's checksum covers its own ciphertext; ours has to
+            // describe the bytes actually cached, or `verify` reports every
+            // shared item as corrupt.
+            checksum,
             version: entry.version,
             change_type: ChangeType::try_from(entry.change_type).unwrap_or(ChangeType::Update),
             changed_by_email: entry.changed_by_email.clone(),
@@ -519,58 +643,50 @@ pub async fn apply_shared_pull_change(
             source: HistorySource::Server,
             sync_status: HistorySyncStatus::Confirmed,
             created_at: parse_rfc3339(&entry.created_at).unwrap_or_else(Utc::now),
-        })
-        .collect::<Vec<_>>();
-
-    apply_shared_history_payloads(history_repo, storage_id, item_id, &history_entries).await?;
-
-    Ok(true)
-}
-
-async fn apply_history_payloads(
-    history_repo: &LocalItemHistoryRepo<'_>,
-    storage_id: Uuid,
-    item_id: Uuid,
-    history: &[LocalItemHistory],
-) -> Result<(), String> {
-    match history_repo
-        .replace_by_item(storage_id, item_id, history)
-        .await
-    {
-        Ok(()) => {
-            append_sync_log(&format!(
-                "[history] applied: storage_id={}, item_id={}, entries={}",
-                redact_uuid(storage_id),
-                redact_uuid(item_id),
-                history.len()
-            ));
-            Ok(())
-        }
-        Err(err) => {
-            append_sync_log(&format!(
-                "[history] apply failed: storage_id={}, item_id={}, error={}",
-                redact_uuid(storage_id),
-                redact_uuid(item_id),
-                err
-            ));
-            Err(err.to_string())
-        }
+        });
     }
+
+    apply_history_payloads(
+        "shared_history",
+        history_repo,
+        storage_id,
+        item_id,
+        &history_entries,
+    )
+    .await
 }
 
-async fn apply_shared_history_payloads(
+/// Fold the server's history tail into what is already stored.
+///
+/// A merge, not a replace. `replace_by_item` deletes every row for the item
+/// before writing the tail, which destroys two things the server cannot give
+/// back: a *pending* row for a local edit that has not been pushed yet — the
+/// only copy of that version anywhere — and, when a change arrives with no
+/// history at all, the entire stored history of the item.
+///
+/// `tag` only distinguishes the two vault kinds in the log.
+async fn apply_history_payloads(
+    tag: &str,
     history_repo: &LocalItemHistoryRepo<'_>,
     storage_id: Uuid,
     item_id: Uuid,
     history: &[LocalItemHistory],
 ) -> Result<(), String> {
+    if history.is_empty() {
+        append_sync_log(&format!(
+            "[{tag}] empty history: storage_id={}, item_id={}",
+            redact_uuid(storage_id),
+            redact_uuid(item_id)
+        ));
+        return Ok(());
+    }
     match history_repo
-        .replace_by_item(storage_id, item_id, history)
+        .merge_by_item(storage_id, item_id, history, HISTORY_LIMIT)
         .await
     {
         Ok(()) => {
             append_sync_log(&format!(
-                "[shared_history] applied: storage_id={}, item_id={}, entries={}",
+                "[{tag}] applied: storage_id={}, item_id={}, entries={}",
                 redact_uuid(storage_id),
                 redact_uuid(item_id),
                 history.len()
@@ -579,7 +695,7 @@ async fn apply_shared_history_payloads(
         }
         Err(err) => {
             append_sync_log(&format!(
-                "[shared_history] apply failed: storage_id={}, item_id={}, error={}",
+                "[{tag}] apply failed: storage_id={}, item_id={}, error={}",
                 redact_uuid(storage_id),
                 redact_uuid(item_id),
                 err

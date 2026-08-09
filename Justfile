@@ -44,7 +44,7 @@ desktop-build:
     cd apps/desktop && bun run tauri build
 
 desktop-e2e +args='':
-    @echo "E2E is temporarily disabled."
+    cd apps/desktop && bun run e2e {{args}}
 
 # COSMIC PoC (apps/cosmic): needs the `cosmic` dev shell, see apps/cosmic/README.md
 cosmic-run +args='':
