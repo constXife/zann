@@ -14,11 +14,20 @@ pub struct CliConfig {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+/// Mirrors what the other writers of `config.json` actually emit.
+///
+/// `zann-ffi` creates an identity before any account exists, so it writes
+/// `email` and `salt_fingerprint` as null. Requiring strings here made every
+/// CLI command fail to parse a config written by the desktop or COSMIC client
+/// with `invalid type: null, expected a string`. Until ADR 0003's Ф6 gives the
+/// file one owner, every reader has to be this tolerant.
 pub struct IdentityConfig {
-    pub email: String,
+    #[serde(default)]
+    pub email: Option<String>,
     pub kdf_salt: String,
     pub kdf_params: KdfParams,
-    pub salt_fingerprint: String,
+    #[serde(default)]
+    pub salt_fingerprint: Option<String>,
     #[serde(default)]
     pub first_seen_at: Option<String>,
 }
