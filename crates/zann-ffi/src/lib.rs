@@ -929,8 +929,11 @@ impl CoreFacade {
 
     pub fn remote_sync(&self, storage_id: Option<String>) -> CoreResult<()> {
         let master_key = self.master_key()?;
-        let root = client_root_path()?;
-        let state = ClientState::new(self.pool.clone(), root);
+        // `self.root` — not `$HOME/.zann`. They are the same only by luck: the
+        // root is derived from the database URL, so with ZANN_DB_URL pointing
+        // anywhere else login wrote its tokens to one directory while sync
+        // looked for them in another.
+        let state = ClientState::new(self.pool.clone(), self.root.clone());
         let response = self
             .runtime
             .block_on(zann_client::sync::remote_sync(
@@ -991,11 +994,6 @@ fn unlock_error(err: UnlockError) -> CoreError {
         UnlockError::NotRemembered => CoreError::InvalidArgument(err.kind().to_string()),
         other => CoreError::Service(format!("{}: {other}", other.kind())),
     }
-}
-
-fn client_root_path() -> CoreResult<PathBuf> {
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    Ok(PathBuf::from(home).join(".zann"))
 }
 
 fn map_counts(counts: ItemCounts) -> ItemCountsFfi {
