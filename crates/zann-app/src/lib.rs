@@ -15,5 +15,5 @@ pub use backup::{
     BackupCtx, BackupError, ExportReport, ImportOutcome, ImportReport, PlainBackupItem,
     PlainBackupStorage, PlainBackupVault,
 };
-pub use snapshot::{RetentionPolicy, Snapshot, SnapshotError};
+pub use snapshot::{RestoreOutcome, RetentionPolicy, Snapshot, SnapshotError};
 pub use verify::{VerifyError, VerifyProblem, VerifyReport};

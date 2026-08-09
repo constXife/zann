@@ -25,6 +25,10 @@ pub struct State {
     hidden: bool,
     busy: bool,
     error: Option<String>,
+    /// Something that happened before this screen appeared and the user needs
+    /// to know about — a snapshot restore, above all, which can change which
+    /// password opens the vault.
+    notice: Option<String>,
     /// Set after a server login: the storage to pull once the vault is open.
     sync_after: Option<String>,
 }
@@ -61,8 +65,16 @@ impl State {
             hidden: true,
             busy: false,
             error: None,
+            notice: None,
             sync_after,
         }
+    }
+
+    /// Carry a message onto the unlock screen from whatever sent the user back
+    /// to it.
+    pub fn with_notice(mut self, notice: String) -> Self {
+        self.notice = Some(notice);
+        self
     }
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
@@ -190,6 +202,10 @@ impl State {
             form = form.push(widget::text::caption(
                 "The vault will sync with the server right after this.",
             ));
+        }
+
+        if let Some(notice) = self.notice.as_ref() {
+            form = form.push(widget::text::body(notice.clone()));
         }
 
         if let Some(error) = self.error.as_ref() {

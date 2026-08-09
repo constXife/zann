@@ -244,6 +244,19 @@ pub struct SnapshotFfi {
     pub size_bytes: u64,
 }
 
+/// What a restore did. Both paths are shown to the user: the one that was put
+/// back, and the one holding what it displaced, which is how the restore is
+/// undone.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SnapshotRestoreFfi {
+    pub restored_from: String,
+    pub replaced_saved_to: String,
+    /// The snapshot brought its own KDF salt. The vault now opens with the
+    /// password that was in use when it was taken, and any remembered unlock has
+    /// been dropped.
+    pub identity_replaced: bool,
+}
+
 /// One fault found by [`CoreFacade::verify`].
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct VerifyProblemFfi {
@@ -312,19 +325,47 @@ pub struct RememberedUnlockFfi {
 #[derive(uniffi::Object)]
 pub struct CoreFacade {
     runtime: Runtime,
-    pool: SqlitePool,
+    /// Behind a lock because a snapshot restore replaces the database under it.
+    /// `SqlitePool` is a handle, so reads take a clone rather than hold the lock
+    /// across a query.
+    pool: Mutex<SqlitePool>,
+    /// Kept so the pool can be opened again after a restore.
+    db_url: String,
     storage_id: Mutex<Uuid>,
     vault_id: Mutex<Option<Uuid>>,
     master_key: Mutex<Option<Arc<SecretKey>>>,
-    identity: IdentityConfig,
+    /// The KDF salt in `config.json`, which a restore can also replace.
+    identity: Mutex<IdentityConfig>,
     /// The vault directory. The remembered unlock is persisted there in its own
     /// file, so every client on this machine sees the same enrolments.
     root: PathBuf,
 }
 
 impl CoreFacade {
-    fn services_with_key<'a>(&'a self, master_key: &'a SecretKey) -> LocalServices<'a> {
-        LocalServices::new(&self.pool, master_key)
+    fn pool(&self) -> SqlitePool {
+        self.pool.lock().expect("lock poisoned").clone()
+    }
+
+    fn identity(&self) -> IdentityConfig {
+        self.identity.lock().expect("lock poisoned").clone()
+    }
+
+    /// Connect again after the database file was replaced, and re-read what was
+    /// read from it at start-up.
+    fn reopen_pool(&self) -> CoreResult<()> {
+        let pool = self
+            .runtime
+            .block_on(connect_sqlite_with_max(&self.db_url, 5))
+            .map_err(|err| CoreError::Service(err.to_string()))?;
+        self.runtime
+            .block_on(migrate_local(&pool))
+            .map_err(|err| CoreError::Service(err.to_string()))?;
+        let storage_id = resolve_storage_id(&self.runtime, &pool)?;
+        *self.pool.lock().expect("lock poisoned") = pool;
+        *self.identity.lock().expect("lock poisoned") =
+            load_or_create_identity_config(&self.db_url)?;
+        *self.storage_id.lock().expect("lock poisoned") = storage_id;
+        Ok(())
     }
 
     fn master_key(&self) -> CoreResult<Arc<SecretKey>> {
@@ -337,7 +378,7 @@ impl CoreFacade {
 
     fn backup_ctx(&self) -> CoreResult<zann_app::BackupCtx> {
         Ok(zann_app::BackupCtx::new(
-            self.pool.clone(),
+            self.pool(),
             self.master_key()?,
             self.root.clone(),
         ))
@@ -368,21 +409,22 @@ impl CoreFacade {
     /// is the right one, so a key recovered from a stale wrapped copy fails here
     /// exactly like a wrong password.
     fn finish_unlock(&self, master_key: Arc<SecretKey>) -> CoreResult<VaultStatus> {
-        let repo = LocalVaultRepo::new(&self.pool);
+        let pool = self.pool();
+        let repo = LocalVaultRepo::new(&pool);
         let storage_id = self.storage_id();
         let vaults = self
             .runtime
             .block_on(repo.list_by_storage(storage_id))
             .map_err(|err| CoreError::Service(err.to_string()))?;
         let vault_id = if vaults.is_empty() {
-            let services = LocalServices::new(&self.pool, master_key.as_ref());
+            let services = LocalServices::new(&pool, master_key.as_ref());
             let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
             vault.id
         } else {
             let verify = vaults.first().expect("vaults not empty");
             vault_crypto::decrypt_vault_key(master_key.as_ref(), verify.id, &verify.vault_key_enc)
                 .map_err(|_| CoreError::InvalidArgument("invalid password".to_string()))?;
-            let item_repo = LocalItemRepo::new(&self.pool);
+            let item_repo = LocalItemRepo::new(&pool);
             let mut selected = vaults
                 .iter()
                 .find(|vault| vault.is_default)
@@ -414,7 +456,8 @@ impl CoreFacade {
     ) -> CoreResult<String> {
         let master_key = self.master_key()?;
         let vault_id = self.vault_id()?;
-        let services = self.services_with_key(master_key.as_ref());
+        let pool = self.pool();
+        let services = LocalServices::new(&pool, master_key.as_ref());
         let mut payload = EncryptedPayload::new("kv");
         payload.fields.insert(
             "key".to_string(),
@@ -450,7 +493,7 @@ impl CoreFacade {
     }
 
     pub fn unlock(&self, password: String) -> CoreResult<VaultStatus> {
-        let master_key = Arc::new(derive_master_key(&password, &self.identity)?);
+        let master_key = Arc::new(derive_master_key(&password, &self.identity())?);
         self.finish_unlock(master_key)
     }
 
@@ -566,8 +609,9 @@ impl CoreFacade {
     }
 
     pub fn list_vaults(&self) -> CoreResult<Vec<VaultSummaryFfi>> {
-        let repo = LocalVaultRepo::new(&self.pool);
-        let item_repo = LocalItemRepo::new(&self.pool);
+        let pool = self.pool();
+        let repo = LocalVaultRepo::new(&pool);
+        let item_repo = LocalItemRepo::new(&pool);
         let storage_id = self.storage_id();
         let vaults = self
             .runtime
@@ -590,12 +634,13 @@ impl CoreFacade {
     }
 
     pub fn set_current_vault(&self, id: String) -> CoreResult<VaultStatus> {
+        let pool = self.pool();
         if self.master_key.lock().expect("lock poisoned").is_none() {
             return Err(CoreError::Locked);
         }
         let vault_id = Uuid::parse_str(&id)
             .map_err(|_| CoreError::InvalidArgument("invalid vault id".to_string()))?;
-        let repo = LocalVaultRepo::new(&self.pool);
+        let repo = LocalVaultRepo::new(&pool);
         let vaults = self
             .runtime
             .block_on(repo.list_by_storage(self.storage_id()))
@@ -610,7 +655,8 @@ impl CoreFacade {
     pub fn items_list(&self, filter: ItemsFilter, page: Page) -> CoreResult<ItemPage> {
         let master_key = self.master_key()?;
         let vault_id = self.vault_id()?;
-        let services = self.services_with_key(master_key.as_ref());
+        let pool = self.pool();
+        let services = LocalServices::new(&pool, master_key.as_ref());
         let params = ItemListParams {
             query: filter.query,
             limit: Some(page.limit),
@@ -640,7 +686,8 @@ impl CoreFacade {
     pub fn item_get(&self, id: String) -> CoreResult<ItemDetail> {
         let master_key = self.master_key()?;
         let _vault_id = self.vault_id()?;
-        let services = self.services_with_key(master_key.as_ref());
+        let pool = self.pool();
+        let services = LocalServices::new(&pool, master_key.as_ref());
         let item_id = Uuid::parse_str(&id)
             .map_err(|_| CoreError::InvalidArgument("invalid item id".to_string()))?;
         let item = self.runtime_block_on(services.get_item(self.storage_id(), item_id))?;
@@ -658,7 +705,8 @@ impl CoreFacade {
     pub fn item_update(&self, id: String, update: ItemUpdate) -> CoreResult<ItemDetail> {
         let master_key = self.master_key()?;
         let _vault_id = self.vault_id()?;
-        let services = self.services_with_key(master_key.as_ref());
+        let pool = self.pool();
+        let services = LocalServices::new(&pool, master_key.as_ref());
         let item_id = Uuid::parse_str(&id)
             .map_err(|_| CoreError::InvalidArgument("invalid item id".to_string()))?;
         let payload: EncryptedPayload = serde_json::from_str(&update.payload_json)
@@ -739,7 +787,7 @@ impl CoreFacade {
         let master_key = self.master_key()?;
         let report = self
             .runtime
-            .block_on(zann_app::verify::run(&self.pool, master_key))?;
+            .block_on(zann_app::verify::run(&self.pool(), master_key))?;
         Ok(report.into())
     }
 
@@ -750,9 +798,11 @@ impl CoreFacade {
     /// demanding an unlock would suggest a protection that is not there.
     pub fn snapshot_create(&self, retention: Option<RetentionFfi>) -> CoreResult<SnapshotFfi> {
         let policy = retention.map(Into::into).unwrap_or_default();
-        let snapshot = self
-            .runtime
-            .block_on(zann_app::snapshot::create(&self.pool, &self.root, &policy))?;
+        let snapshot = self.runtime.block_on(zann_app::snapshot::create(
+            &self.pool(),
+            &self.root,
+            &policy,
+        ))?;
         Ok(snapshot.into())
     }
 
@@ -767,7 +817,10 @@ impl CoreFacade {
         let policy = retention.map(Into::into).unwrap_or_default();
         let max_age = std::time::Duration::from_secs(u64::from(max_age_hours) * 3600);
         let snapshot = self.runtime.block_on(zann_app::snapshot::create_if_due(
-            &self.pool, &self.root, max_age, &policy,
+            &self.pool(),
+            &self.root,
+            max_age,
+            &policy,
         ))?;
         Ok(snapshot.map(Into::into))
     }
@@ -780,18 +833,62 @@ impl CoreFacade {
             .collect())
     }
 
-    /// Where a snapshot has to be copied back to. Restoring is not done here:
-    /// the database is open, and swapping the file under a live pool is how a
-    /// working vault becomes a corrupt one. Clients show both paths and say to
-    /// close every client first.
+    /// Where a snapshot has to be copied back to, for a client that would
+    /// rather show the path than call [`Self::snapshot_restore`] — restoring by
+    /// hand with everything closed is still a valid procedure.
     pub fn snapshot_restore_target(&self) -> String {
         zann_app::snapshot::restore_target(&self.root)
             .display()
             .to_string()
     }
 
+    /// Put a snapshot back, without the user having to close anything or copy
+    /// files by hand.
+    ///
+    /// The vault is locked first and stays locked: the restored database may
+    /// have been written under a different master key, so the key in memory
+    /// cannot be assumed to still open it. Whoever calls this has to unlock
+    /// again afterwards, with the password that was in use when the snapshot was
+    /// taken.
+    ///
+    /// A remembered unlock is dropped when the salt came back with the snapshot
+    /// — the stored key was derived from the salt that has just been replaced,
+    /// so it would fail every unlock until someone thought to clear it.
+    pub fn snapshot_restore(&self, path: String) -> CoreResult<SnapshotRestoreFfi> {
+        let path = PathBuf::from(path);
+        // Lock before anything moves. If the restore fails halfway, a locked
+        // vault is recoverable; a key held over a database it does not match is
+        // a stream of decryption failures nobody can explain.
+        *self.master_key.lock().expect("lock poisoned") = None;
+        *self.vault_id.lock().expect("lock poisoned") = None;
+
+        let outcome =
+            self.runtime
+                .block_on(zann_app::snapshot::restore(self.pool(), &self.root, &path));
+
+        // Reopen whatever happened. A restore that failed part-way still closed
+        // the pool, and the file it left behind is the one that was already
+        // there — so the vault is fine and only this handle is dead. Returning
+        // the error without reopening would turn a recoverable failure into a
+        // facade that answers nothing until the app restarts.
+        let reopened = self.reopen_pool();
+        let outcome = outcome?;
+        reopened?;
+
+        if outcome.identity_replaced {
+            let _ = self.forget_remembered();
+        }
+
+        Ok(SnapshotRestoreFfi {
+            restored_from: outcome.restored_from.display().to_string(),
+            replaced_saved_to: outcome.replaced_saved_to.display().to_string(),
+            identity_replaced: outcome.identity_replaced,
+        })
+    }
+
     pub fn list_storages(&self) -> CoreResult<Vec<StorageSummaryFfi>> {
-        let repo = LocalStorageRepo::new(&self.pool);
+        let pool = self.pool();
+        let repo = LocalStorageRepo::new(&pool);
         let storages = self
             .runtime
             .block_on(repo.list())
@@ -812,9 +909,10 @@ impl CoreFacade {
     }
 
     pub fn set_current_storage(&self, id: String) -> CoreResult<()> {
+        let pool = self.pool();
         let storage_id = Uuid::parse_str(&id)
             .map_err(|_| CoreError::InvalidArgument("invalid storage id".to_string()))?;
-        let repo = LocalStorageRepo::new(&self.pool);
+        let repo = LocalStorageRepo::new(&pool);
         let storages = self
             .runtime
             .block_on(repo.list())
@@ -832,8 +930,9 @@ impl CoreFacade {
     }
 
     pub fn app_status(&self) -> CoreResult<AppStatusFfi> {
-        let storage_repo = LocalStorageRepo::new(&self.pool);
-        let vault_repo = LocalVaultRepo::new(&self.pool);
+        let pool = self.pool();
+        let storage_repo = LocalStorageRepo::new(&pool);
+        let vault_repo = LocalVaultRepo::new(&pool);
 
         let storages = self
             .runtime
@@ -870,6 +969,7 @@ impl CoreFacade {
     }
 
     pub fn initialize_master_password(&self, password: String) -> CoreResult<VaultStatus> {
+        let pool = self.pool();
         if password.len() < 8 {
             return Err(CoreError::InvalidArgument(
                 "password must be at least 8 characters".to_string(),
@@ -885,10 +985,10 @@ impl CoreFacade {
         }
 
         // Derive master key from password
-        let master_key = Arc::new(derive_master_key(&password, &self.identity)?);
+        let master_key = Arc::new(derive_master_key(&password, &self.identity())?);
 
         // Create local storage if none exists
-        let storage_repo = LocalStorageRepo::new(&self.pool);
+        let storage_repo = LocalStorageRepo::new(&pool);
         let storages = self
             .runtime
             .block_on(storage_repo.list())
@@ -916,7 +1016,7 @@ impl CoreFacade {
         };
 
         // Create the default vault
-        let services = LocalServices::new(&self.pool, master_key.as_ref());
+        let services = LocalServices::new(&pool, master_key.as_ref());
         let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
 
         // Store master key and vault id
@@ -933,7 +1033,7 @@ impl CoreFacade {
         // root is derived from the database URL, so with ZANN_DB_URL pointing
         // anywhere else login wrote its tokens to one directory while sync
         // looked for them in another.
-        let state = ClientState::new(self.pool.clone(), self.root.clone());
+        let state = ClientState::new(self.pool(), self.root.clone());
         let response = self
             .runtime
             .block_on(zann_client::sync::remote_sync(
@@ -966,14 +1066,16 @@ pub fn create_core(db_url: String) -> CoreResult<Arc<CoreFacade>> {
         .map_err(|err| CoreError::Service(err.to_string()))?;
     let identity = load_or_create_identity_config(&db_url)?;
     let storage_id = resolve_storage_id(&runtime, &pool)?;
+    let root = local_root_from_db_url(&db_url);
     Ok(Arc::new(CoreFacade {
         runtime,
-        pool,
+        pool: Mutex::new(pool),
+        db_url,
         storage_id: Mutex::new(storage_id),
         vault_id: Mutex::new(None),
         master_key: Mutex::new(None),
-        identity,
-        root: local_root_from_db_url(&db_url),
+        identity: Mutex::new(identity),
+        root,
     }))
 }
 

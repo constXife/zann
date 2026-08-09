@@ -172,10 +172,9 @@ fn retention_bounds_how_many_are_kept() {
         max_count: Some(1),
         max_age_days: None,
     });
+    // Two in the same second: the filename has a second's resolution, and the
+    // stamp moves forward to the next free slot rather than failing.
     core.snapshot_create(keep_one).expect("first snapshot");
-    // Same-second names collide by design, so wait out the one-second
-    // resolution rather than papering over it.
-    std::thread::sleep(std::time::Duration::from_millis(1100));
     core.snapshot_create(keep_one).expect("second snapshot");
 
     let listed = core.snapshot_list().expect("list");
@@ -192,5 +191,147 @@ fn the_restore_target_is_the_live_database() {
         core.snapshot_restore_target(),
         root.join("local.sqlite").display().to_string()
     );
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// The point of restoring in the app: the same facade keeps working afterwards.
+/// Copying the file by hand needs every client closed first, which is exactly
+/// the moment a user is least able to follow instructions.
+#[test]
+fn restoring_brings_back_the_snapshotted_items_without_reopening() {
+    let root = temp_root("restore");
+    let core = create_core(db_url(&root)).expect("create core");
+    let password = format!("pw-{}", Uuid::now_v7());
+    core.initialize_master_password(password.clone())
+        .expect("initialize master password");
+    core.debug_create_kv_item("secrets/keep".into(), "token".into(), "kept".into())
+        .expect("create item");
+
+    let snapshot = core.snapshot_create(None).expect("snapshot");
+
+    core.debug_create_kv_item("secrets/oops".into(), "token".into(), "mistake".into())
+        .expect("create the mistake");
+    let (filter, page) = all_items();
+    assert_eq!(core.items_list(filter, page).expect("list").items.len(), 2);
+
+    let outcome = core
+        .snapshot_restore(snapshot.path.clone())
+        .expect("restore");
+    assert_eq!(outcome.restored_from, snapshot.path);
+    assert!(
+        PathBuf::from(&outcome.replaced_saved_to).exists(),
+        "the state that was replaced was not kept"
+    );
+
+    // Restoring locks the vault: the copy may have been written under another
+    // key, so the one in memory cannot be assumed to fit.
+    let (filter, page) = all_items();
+    assert!(
+        core.items_list(filter, page).is_err(),
+        "the vault was left unlocked over a database it may not match"
+    );
+
+    core.unlock(password).expect("unlock after restore");
+    let (filter, page) = all_items();
+    let items = core.items_list(filter, page).expect("list after restore");
+    assert_eq!(items.items.len(), 1, "the restore did not take effect");
+    assert_eq!(items.items[0].path, "secrets/keep");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// Undoing a restore is a restore of what it displaced.
+#[test]
+fn a_restore_can_itself_be_undone() {
+    let root = temp_root("undo");
+    let core = create_core(db_url(&root)).expect("create core");
+    let password = format!("pw-{}", Uuid::now_v7());
+    core.initialize_master_password(password.clone())
+        .expect("initialize master password");
+    core.debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
+        .expect("create item");
+    let snapshot = core.snapshot_create(None).expect("snapshot");
+    core.debug_create_kv_item("secrets/two".into(), "token".into(), "second".into())
+        .expect("create the second item");
+
+    let outcome = core.snapshot_restore(snapshot.path).expect("restore");
+    core.unlock(password.clone()).expect("unlock after restore");
+    let (filter, page) = all_items();
+    assert_eq!(core.items_list(filter, page).expect("list").items.len(), 1);
+
+    core.snapshot_restore(outcome.replaced_saved_to)
+        .expect("restore the replaced state");
+    core.unlock(password).expect("unlock after undo");
+    let (filter, page) = all_items();
+    assert_eq!(
+        core.items_list(filter, page).expect("list").items.len(),
+        2,
+        "undoing the restore did not bring the newer state back"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// The salt saved beside a snapshot is read before the database moves, so a
+/// damaged one is refused rather than discovered after the swap — at which point
+/// the vault would be a database whose password nobody knows.
+#[test]
+fn a_damaged_salt_beside_a_snapshot_stops_the_restore() {
+    let root = temp_root("badsalt");
+    let core = create_core(db_url(&root)).expect("create core");
+    let password = format!("pw-{}", Uuid::now_v7());
+    core.initialize_master_password(password.clone())
+        .expect("initialize master password");
+    core.debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
+        .expect("create item");
+
+    let snapshot = core.snapshot_create(None).expect("snapshot");
+    let identity_path = snapshot
+        .identity_path
+        .as_ref()
+        .expect("a snapshot of an initialised vault carries its salt");
+    fs::write(identity_path, b"{ this is not json").expect("damage the salt");
+
+    core.snapshot_restore(snapshot.path)
+        .expect_err("a snapshot whose salt cannot be read must be refused");
+
+    // Nothing moved, and the facade still has a live connection.
+    core.unlock(password).expect("unlock after the refusal");
+    let (filter, page) = all_items();
+    assert_eq!(
+        core.items_list(filter, page).expect("list").items.len(),
+        1,
+        "a refused restore damaged the vault"
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+/// A path that is not a vault database must be refused before anything is
+/// replaced, and the vault must be usable afterwards.
+#[test]
+fn restoring_something_that_is_not_a_vault_is_refused() {
+    let root = temp_root("foreign");
+    let core = create_core(db_url(&root)).expect("create core");
+    let password = format!("pw-{}", Uuid::now_v7());
+    core.initialize_master_password(password.clone())
+        .expect("initialize master password");
+    core.debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
+        .expect("create item");
+
+    let junk = root.join("notes.txt");
+    fs::write(&junk, b"not a database").expect("write junk");
+
+    core.snapshot_restore(junk.display().to_string())
+        .expect_err("a file that is not a vault must be refused");
+
+    core.unlock(password).expect("unlock after the refusal");
+    let (filter, page) = all_items();
+    assert_eq!(
+        core.items_list(filter, page).expect("list").items.len(),
+        1,
+        "a refused restore damaged the vault"
+    );
+
     let _ = fs::remove_dir_all(&root);
 }

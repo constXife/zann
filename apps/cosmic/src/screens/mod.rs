@@ -14,17 +14,17 @@ use cosmic::iced::{Alignment, Length};
 use cosmic::prelude::*;
 use cosmic::{widget, Element};
 
-/// The two screens that accumulate state are boxed so that switching screens
-/// stays a pointer-sized move.
+/// The screens that accumulate state are boxed so that switching screens stays
+/// a pointer-sized move.
 pub enum Screen {
     Welcome,
     Connect(Box<connect::State>),
-    Master(master::State),
+    Master(Box<master::State>),
     Vault(Box<vault::State>),
     /// Reached from the vault and always returns to it, so the vault it came
     /// from is parked here rather than rebuilt from the database.
     Settings {
-        state: settings::State,
+        state: Box<settings::State>,
         vault: Box<vault::State>,
     },
 }

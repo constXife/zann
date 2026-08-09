@@ -6,7 +6,9 @@
 
 use cosmic::iced::{Alignment, Length, Task};
 use cosmic::{theme, widget, Element};
-use zann_ffi::{BackupExportReport, RememberedUnlockFfi, SnapshotFfi, VerifyReportFfi};
+use zann_ffi::{
+    BackupExportReport, RememberedUnlockFfi, SnapshotFfi, SnapshotRestoreFfi, VerifyReportFfi,
+};
 
 use crate::backend::local;
 use crate::backend::off_thread;
@@ -24,6 +26,10 @@ pub struct State {
     exported: Option<BackupExportReport>,
     snapshots: Vec<SnapshotFfi>,
     restore_target: String,
+    /// The snapshot a restore has been asked for but not yet confirmed.
+    /// Restoring throws away everything since it was taken, so it is never one
+    /// click away from a list of dates.
+    confirming: Option<SnapshotFfi>,
     verified: Option<Box<VerifyReportFfi>>,
 }
 
@@ -38,6 +44,11 @@ pub enum Message {
     Exported(Result<BackupExportReport, String>),
     Snapshot,
     Snapshots(Result<Vec<SnapshotFfi>, String>),
+    /// Ask for a restore. Shows the confirmation; does not touch anything.
+    AskRestore(Box<SnapshotFfi>),
+    CancelRestore,
+    ConfirmRestore(String),
+    Restored(Result<Box<SnapshotRestoreFfi>, String>),
     Verify,
     Verified(Result<VerifyReportFfi, String>),
     Close,
@@ -47,6 +58,11 @@ pub enum Outcome {
     None,
     Task(Task<Message>),
     Close,
+    /// A restore replaced the database, so the vault is locked and the screens
+    /// behind this one are showing rows that no longer exist.
+    Restored {
+        notice: String,
+    },
 }
 
 impl State {
@@ -59,6 +75,7 @@ impl State {
             exported: None,
             snapshots: Vec::new(),
             restore_target: String::new(),
+            confirming: None,
             verified: None,
         }
     }
@@ -210,6 +227,53 @@ impl State {
                 self.error = Some(err);
             }
 
+            Message::AskRestore(snapshot) => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                self.error = None;
+                self.confirming = Some(*snapshot);
+            }
+
+            Message::CancelRestore => self.confirming = None,
+
+            Message::ConfirmRestore(path) => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                self.confirming = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Restored(
+                        off_thread(move || local::restore_snapshot(&facade, path))
+                            .await
+                            .map(Box::new),
+                    )
+                }));
+            }
+
+            Message::Restored(Ok(outcome)) => {
+                self.busy = false;
+                // The vault is locked and everything on screen behind this is
+                // stale, so the shell takes over rather than this screen trying
+                // to refresh itself.
+                let notice = if outcome.identity_replaced {
+                    "Restored. Unlock with the master password that was in use when \
+                     that snapshot was taken."
+                        .to_string()
+                } else {
+                    "Restored. Unlock to continue.".to_string()
+                };
+                return Outcome::Restored { notice };
+            }
+
+            Message::Restored(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
             Message::Verify => {
                 if self.busy {
                     return Outcome::None;
@@ -347,19 +411,50 @@ impl State {
 
         if self.snapshots.is_empty() {
             column = column.push(widget::text::caption("No snapshots yet."));
+        } else if let Some(confirming) = self.confirming.as_ref() {
+            // One question, stated in terms of what is lost rather than what is
+            // gained: the button is easy to reach and the change is not.
+            column = column.push(widget::text::body(format!(
+                "Restore the snapshot from {}? Everything added or changed since then \
+                 is removed from this device.",
+                confirming.created_at
+            )));
+            column = column.push(widget::text::caption(
+                "The vault as it is now is kept as a snapshot first, so this can be undone.",
+            ));
+            column = column.push(
+                widget::row::with_capacity(2)
+                    .push(
+                        widget::button::destructive("Restore")
+                            .on_press(Message::ConfirmRestore(confirming.path.clone())),
+                    )
+                    .push(widget::button::standard("Cancel").on_press(Message::CancelRestore))
+                    .spacing(spacing.space_xs),
+            );
         } else {
             for entry in self.snapshots.iter().take(5) {
-                column = column.push(widget::text::caption(format!(
-                    "{} · {} KiB",
-                    entry.created_at,
-                    entry.size_bytes / 1024
-                )));
+                let mut restore = widget::button::text("Restore");
+                if !self.busy {
+                    restore = restore.on_press(Message::AskRestore(Box::new(entry.clone())));
+                }
+                column = column.push(
+                    widget::row::with_capacity(2)
+                        .push(
+                            widget::text::caption(format!(
+                                "{} · {} KiB",
+                                entry.created_at,
+                                entry.size_bytes / 1024
+                            ))
+                            .width(Length::Fill),
+                        )
+                        .push(restore)
+                        .align_y(Alignment::Center),
+                );
             }
-            // Restoring is a file copy with every client closed: swapping the
-            // database under a live pool is how a working vault becomes a
-            // broken one, so the app shows the paths rather than doing it.
+            // Restoring by hand still works, and is the way out if the app
+            // cannot start at all.
             column = column.push(widget::text::caption(format!(
-                "To restore: close Zann everywhere, then copy a snapshot (and its \
+                "Or, with Zann closed everywhere, copy a snapshot (and its \
                  .identity.json, which holds the salt) over {}",
                 self.restore_target
             )));
