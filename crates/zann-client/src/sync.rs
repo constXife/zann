@@ -402,10 +402,10 @@ pub async fn remote_sync(
                     if apply_shared_pull_change(
                         &item_repo,
                         &history_repo,
+                        master_key,
                         storage_uuid,
                         vault_id,
                         change,
-                        master_key,
                     )
                     .await
                     .unwrap_or(false)

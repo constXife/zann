@@ -250,8 +250,6 @@ pub struct SyncSharedPullChange {
     pub name: String,
     pub type_id: String,
     #[serde(default)]
-    pub deleted_at: Option<String>,
-    #[serde(default)]
     pub history: Vec<SyncSharedHistoryEntry>,
 }
 
@@ -269,12 +267,6 @@ pub struct SyncSharedPullResponse {
 pub struct SyncSharedPushRequest {
     pub vault_id: String,
     pub changes: Vec<SyncSharedPushChange>,
-}
-
-#[allow(dead_code)]
-#[derive(Deserialize)]
-pub struct SyncSharedPushResponse {
-    pub applied: Vec<SyncAppliedChange>,
 }
 
 #[allow(dead_code)]
