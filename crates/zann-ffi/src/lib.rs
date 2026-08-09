@@ -61,6 +61,34 @@ impl From<zann_app::Snapshot> for SnapshotFfi {
     }
 }
 
+impl From<zann_app::VerifyError> for CoreError {
+    fn from(err: zann_app::VerifyError) -> Self {
+        CoreError::Service(format!("{}: {}", err.kind, err.message))
+    }
+}
+
+impl From<zann_app::VerifyReport> for VerifyReportFfi {
+    fn from(report: zann_app::VerifyReport) -> Self {
+        Self {
+            database_ok: report.database_ok,
+            vaults_checked: report.vaults_checked,
+            vaults_skipped: report.vaults_skipped,
+            items_checked: report.items_checked,
+            items_ok: report.items_ok,
+            problems: report
+                .problems
+                .into_iter()
+                .map(|problem| VerifyProblemFfi {
+                    kind: problem.kind,
+                    vault_name: problem.vault_name,
+                    item_path: problem.item_path,
+                    detail: problem.detail,
+                })
+                .collect(),
+        }
+    }
+}
+
 impl From<RetentionFfi> for zann_app::RetentionPolicy {
     fn from(retention: RetentionFfi) -> Self {
         Self {
@@ -700,6 +728,19 @@ impl CoreFacade {
             vaults_count: report.vaults_count as u64,
             items_count: report.items_count as u64,
         })
+    }
+
+    /// Walk every vault and item this key can open, checking the database
+    /// structure, every stored checksum and every payload's decryption.
+    ///
+    /// Needs the key, unlike a snapshot: proving a payload is still readable
+    /// means reading it.
+    pub fn verify(&self) -> CoreResult<VerifyReportFfi> {
+        let master_key = self.master_key()?;
+        let report = self
+            .runtime
+            .block_on(zann_app::verify::run(&self.pool, master_key))?;
+        Ok(report.into())
     }
 
     /// Copy the vault database to `<root>/snapshots/`, then apply retention.

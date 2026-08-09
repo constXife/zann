@@ -29,5 +29,6 @@ zann-keystore = { path = "../zann-keystore" }
 zann-ui-core = { path = "../zann-ui-core" }
 
 [dev-dependencies]
+sqlx-core = { version = "0.8", default-features = false }
 serde_json = "1"
 tempfile = "3"

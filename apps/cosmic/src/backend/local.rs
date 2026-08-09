@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zann_ffi::{
     create_core, AppStatusFfi, BackupExportReport, CoreFacade, HardwareKeyFfi, ItemDetail,
-    ItemSummary, ItemsFilter, Page, RememberedUnlockFfi, SnapshotFfi,
+    ItemSummary, ItemsFilter, Page, RememberedUnlockFfi, SnapshotFfi, VerifyReportFfi,
 };
 use zann_ui_core::ItemCounts;
 
@@ -156,4 +156,9 @@ pub fn snapshot_now(facade: &CoreFacade) -> Result<SnapshotFfi, String> {
 /// Newest first.
 pub fn snapshots(facade: &CoreFacade) -> Result<Vec<SnapshotFfi>, String> {
     facade.snapshot_list().map_err(|err| err.to_string())
+}
+
+/// Walk every item and check it is still readable. Needs the vault unlocked.
+pub fn verify(facade: &CoreFacade) -> Result<VerifyReportFfi, String> {
+    facade.verify().map_err(|err| err.to_string())
 }

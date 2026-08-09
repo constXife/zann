@@ -6,7 +6,7 @@
 
 use cosmic::iced::{Alignment, Length, Task};
 use cosmic::{theme, widget, Element};
-use zann_ffi::{BackupExportReport, RememberedUnlockFfi, SnapshotFfi};
+use zann_ffi::{BackupExportReport, RememberedUnlockFfi, SnapshotFfi, VerifyReportFfi};
 
 use crate::backend::local;
 use crate::backend::off_thread;
@@ -24,6 +24,7 @@ pub struct State {
     exported: Option<BackupExportReport>,
     snapshots: Vec<SnapshotFfi>,
     restore_target: String,
+    verified: Option<Box<VerifyReportFfi>>,
 }
 
 #[derive(Clone, Debug)]
@@ -37,6 +38,8 @@ pub enum Message {
     Exported(Result<BackupExportReport, String>),
     Snapshot,
     Snapshots(Result<Vec<SnapshotFfi>, String>),
+    Verify,
+    Verified(Result<VerifyReportFfi, String>),
     Close,
 }
 
@@ -56,6 +59,7 @@ impl State {
             exported: None,
             snapshots: Vec::new(),
             restore_target: String::new(),
+            verified: None,
         }
     }
 
@@ -73,7 +77,6 @@ impl State {
             }),
         ])
     }
-
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
@@ -203,6 +206,29 @@ impl State {
             }
 
             Message::Snapshots(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
+            Message::Verify => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                self.verified = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Verified(off_thread(move || local::verify(&facade)).await)
+                }));
+            }
+
+            Message::Verified(Ok(report)) => {
+                self.busy = false;
+                self.verified = Some(Box::new(report));
+            }
+
+            Message::Verified(Err(err)) => {
                 self.busy = false;
                 self.error = Some(err);
             }
@@ -337,6 +363,53 @@ impl State {
                  .identity.json, which holds the salt) over {}",
                 self.restore_target
             )));
+        }
+
+        column = column.push(widget::text::title3("Integrity"));
+        let mut verify = widget::button::standard(if self.busy {
+            "Working…"
+        } else {
+            "Check every item"
+        });
+        if !self.busy {
+            verify = verify.on_press(Message::Verify);
+        }
+        column = column.push(verify);
+
+        match self.verified.as_ref() {
+            None => {
+                column = column.push(widget::text::caption(
+                    "Decrypts every item and compares its checksum, so \"probably fine\" \
+                     becomes a yes or a no.",
+                ));
+            }
+            Some(report) if report.problems.is_empty() && report.database_ok => {
+                column = column.push(widget::text::caption(format!(
+                    "All {} items in {} vault(s) are intact.",
+                    report.items_ok, report.vaults_checked
+                )));
+            }
+            Some(report) => {
+                column = column.push(widget::text::caption(format!(
+                    "{} of {} items readable · {} problem(s) found",
+                    report.items_ok,
+                    report.items_checked,
+                    report.problems.len()
+                )));
+                for problem in report.problems.iter().take(5) {
+                    column = column.push(widget::text::caption(format!(
+                        "{} — {}",
+                        problem.item_path.clone().unwrap_or_else(|| problem
+                            .vault_name
+                            .clone()
+                            .unwrap_or_else(|| "database".to_string())),
+                        problem.kind
+                    )));
+                }
+                column = column.push(widget::text::caption(
+                    "Restore from a snapshot below, or export what still reads.",
+                ));
+            }
         }
 
         if let Some(error) = self.error.as_ref() {
