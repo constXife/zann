@@ -51,10 +51,6 @@ jobs:
               - '.dockerignore'
               - 'compose.yaml'
               - 'compose.e2e.yaml'
-            cosmic:
-              - 'apps/cosmic/**'
-              - 'crates/**'
-              - 'flake.nix'
             js:
               - 'apps/desktop/**'
               - 'bun.lockb'
@@ -66,6 +62,14 @@ jobs:
               - 'crates/zann-server/src/domains/access_control/**'
               - 'crates/zann-server/src/infra/audit.rs'
               - 'crates/zann-keystore/**'
+            # Собирать пакет на каждое изменение в crates/** слишком дорого:
+            # libcosmic с wgpu строятся десятки минут. Поэтому фильтр только на
+            # то, что описывает саму упаковку. Плата за это — поломка cosmic
+            # правкой в crates/** всплывёт на следующем PR, который его трогает.
+            cosmic:
+              - 'apps/cosmic/**'
+              - 'flake.nix'
+              - 'flake.lock'
             ci:
               - '.github/workflows/**'
 
@@ -148,6 +152,12 @@ jobs:
   # COSMIC has its own lockfile (51 git sources, which Nix vendoring depends on)
   # and needs a newer toolchain than the workspace pins, so it cannot simply
   # join the workspace — see apps/cosmic/README.md and ADR 0003.
+  #
+  # Shares the `cosmic` filter with cosmic-package, which deliberately leaves
+  # `crates/**` out because libcosmic with wgpu takes tens of minutes (#151).
+  # So this does not catch a core change breaking COSMIC either; that still
+  # surfaces on the next PR touching apps/cosmic. Widening the filter is a
+  # separate call about CI budget, not one to make in passing here.
   cosmic:
     needs: changes
     if: needs.changes.outputs.cosmic == 'true' || needs.changes.outputs.ci == 'true'
@@ -364,6 +374,34 @@ jobs:
         uses: rustsec/audit-check@v2.0.0
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Упаковка COSMIC-клиента ломается тихо: ревизия libcosmic, его git-подмодули
+  # и доступность crates.io живут вне нашего кода, а обычные rust-джобы
+  # деривацию не трогают вообще.
+  cosmic-package:
+    needs: changes
+    if: needs.changes.outputs.cosmic == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      # Дёшево и ловит опечатки в выражении и пропавшие атрибуты.
+      - name: Evaluate the flake
+        run: nix flake check --no-build
+      # Сборка libcosmic не влезает в свободное место раннера рядом с
+      # предустановленными образами.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+          df -h /
+      - name: Build the package
+        run: nix build .#zann-cosmic --no-link --print-build-logs
 
   licenses:
     needs: changes
