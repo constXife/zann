@@ -42,6 +42,34 @@ impl From<zann_app::BackupError> for CoreError {
     }
 }
 
+impl From<zann_app::SnapshotError> for CoreError {
+    fn from(err: zann_app::SnapshotError) -> Self {
+        CoreError::Service(format!("{}: {}", err.kind, err.message))
+    }
+}
+
+impl From<zann_app::Snapshot> for SnapshotFfi {
+    fn from(snapshot: zann_app::Snapshot) -> Self {
+        Self {
+            path: snapshot.path.display().to_string(),
+            identity_path: snapshot
+                .identity_path
+                .map(|path| path.display().to_string()),
+            created_at: snapshot.created_at,
+            size_bytes: snapshot.size_bytes,
+        }
+    }
+}
+
+impl From<RetentionFfi> for zann_app::RetentionPolicy {
+    fn from(retention: RetentionFfi) -> Self {
+        Self {
+            max_count: retention.max_count.map(|count| count as usize),
+            max_age_days: retention.max_age_days,
+        }
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct VaultStatus {
     pub unlocked: bool,
@@ -171,6 +199,50 @@ pub struct BackupImportReport {
     pub skipped_missing_storage: u64,
     pub skipped_missing_vault: u64,
     pub skipped_deleted: u64,
+}
+
+/// A point-in-time copy of the vault database. Still encrypted — unlike the
+/// plaintext JSON an export produces — so it is only good for going back, not
+/// for leaving.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SnapshotFfi {
+    pub path: String,
+    /// The KDF salt this copy needs to be opened. A database copy without it
+    /// cannot be unlocked by any password, so a client offering to restore must
+    /// keep the two together.
+    pub identity_path: Option<String>,
+    /// RFC 3339.
+    pub created_at: String,
+    pub size_bytes: u64,
+}
+
+/// One fault found by [`CoreFacade::verify`].
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct VerifyProblemFfi {
+    /// `database`, `vault_key_unusable`, `checksum_mismatch` or
+    /// `decrypt_failed`. Stable identifier for the UI to translate; the detail
+    /// text is not.
+    pub kind: String,
+    pub vault_name: Option<String>,
+    pub item_path: Option<String>,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct VerifyReportFfi {
+    pub database_ok: bool,
+    pub vaults_checked: u64,
+    pub vaults_skipped: u64,
+    pub items_checked: u64,
+    pub items_ok: u64,
+    pub problems: Vec<VerifyProblemFfi>,
+}
+
+/// How many snapshots to keep. `None` on either field disables that limit.
+#[derive(Debug, Clone, Copy, uniffi::Record)]
+pub struct RetentionFfi {
+    pub max_count: Option<u32>,
+    pub max_age_days: Option<i64>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -628,6 +700,53 @@ impl CoreFacade {
             vaults_count: report.vaults_count as u64,
             items_count: report.items_count as u64,
         })
+    }
+
+    /// Copy the vault database to `<root>/snapshots/`, then apply retention.
+    ///
+    /// No master key is required, and deliberately so: this copies a file that
+    /// is already readable on disk and stays encrypted in the copy, so
+    /// demanding an unlock would suggest a protection that is not there.
+    pub fn snapshot_create(&self, retention: Option<RetentionFfi>) -> CoreResult<SnapshotFfi> {
+        let policy = retention.map(Into::into).unwrap_or_default();
+        let snapshot = self
+            .runtime
+            .block_on(zann_app::snapshot::create(&self.pool, &self.root, &policy))?;
+        Ok(snapshot.into())
+    }
+
+    /// Take one only if the newest has aged past `max_age_hours`. Returns
+    /// `None` when a recent enough snapshot already exists, so a client can call
+    /// this on every start without thinking about it.
+    pub fn snapshot_create_if_due(
+        &self,
+        max_age_hours: u32,
+        retention: Option<RetentionFfi>,
+    ) -> CoreResult<Option<SnapshotFfi>> {
+        let policy = retention.map(Into::into).unwrap_or_default();
+        let max_age = std::time::Duration::from_secs(u64::from(max_age_hours) * 3600);
+        let snapshot = self.runtime.block_on(zann_app::snapshot::create_if_due(
+            &self.pool, &self.root, max_age, &policy,
+        ))?;
+        Ok(snapshot.map(Into::into))
+    }
+
+    /// Newest first.
+    pub fn snapshot_list(&self) -> CoreResult<Vec<SnapshotFfi>> {
+        Ok(zann_app::snapshot::list(&self.root)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// Where a snapshot has to be copied back to. Restoring is not done here:
+    /// the database is open, and swapping the file under a live pool is how a
+    /// working vault becomes a corrupt one. Clients show both paths and say to
+    /// close every client first.
+    pub fn snapshot_restore_target(&self) -> String {
+        zann_app::snapshot::restore_target(&self.root)
+            .display()
+            .to_string()
     }
 
     pub fn list_storages(&self) -> CoreResult<Vec<StorageSummaryFfi>> {

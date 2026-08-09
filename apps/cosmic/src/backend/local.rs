@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use zann_ffi::{
     create_core, AppStatusFfi, BackupExportReport, CoreFacade, HardwareKeyFfi, ItemDetail,
-    ItemSummary, ItemsFilter, Page, RememberedUnlockFfi,
+    ItemSummary, ItemsFilter, Page, RememberedUnlockFfi, SnapshotFfi,
 };
 use zann_ui_core::ItemCounts;
 
@@ -12,6 +12,9 @@ use super::{default_db_url, local_root};
 
 /// How many items a single `items_list` call pages in.
 pub const PAGE_LIMIT: u32 = 200;
+
+/// How stale the newest snapshot may get before start-up takes another.
+const SNAPSHOT_MAX_AGE_HOURS: u32 = 24;
 
 pub type Facade = Arc<CoreFacade>;
 
@@ -34,6 +37,15 @@ pub fn open() -> Result<(Facade, AppStatusFfi), String> {
 /// already resolved the URL itself.
 pub fn open_at(db_url: String) -> Result<(Facade, AppStatusFfi), String> {
     let facade = create_core(db_url).map_err(|err| err.to_string())?;
+
+    // A daily copy of the database, taken before the user touches anything and
+    // without needing the key. Deliberately not fatal: failing to take a
+    // snapshot is a reason to tell someone later, never a reason to refuse to
+    // open the vault.
+    if let Err(err) = facade.snapshot_create_if_due(SNAPSHOT_MAX_AGE_HOURS, None) {
+        eprintln!("zann: could not take a snapshot: {err}");
+    }
+
     let status = facade.app_status().map_err(|err| err.to_string())?;
     Ok((facade, status))
 }
@@ -134,4 +146,14 @@ pub fn export_backup(facade: &CoreFacade) -> Result<BackupExportReport, String> 
     facade
         .backup_export_file(String::new())
         .map_err(|err| err.to_string())
+}
+
+/// Copy the database aside now, whatever the schedule says.
+pub fn snapshot_now(facade: &CoreFacade) -> Result<SnapshotFfi, String> {
+    facade.snapshot_create(None).map_err(|err| err.to_string())
+}
+
+/// Newest first.
+pub fn snapshots(facade: &CoreFacade) -> Result<Vec<SnapshotFfi>, String> {
+    facade.snapshot_list().map_err(|err| err.to_string())
 }

@@ -6,7 +6,7 @@
 
 use cosmic::iced::{Alignment, Length, Task};
 use cosmic::{theme, widget, Element};
-use zann_ffi::{BackupExportReport, RememberedUnlockFfi};
+use zann_ffi::{BackupExportReport, RememberedUnlockFfi, SnapshotFfi};
 
 use crate::backend::local;
 use crate::backend::off_thread;
@@ -22,6 +22,8 @@ pub struct State {
     /// Result of the last export, kept on screen so the path can be read off
     /// and the file found.
     exported: Option<BackupExportReport>,
+    snapshots: Vec<SnapshotFfi>,
+    restore_target: String,
 }
 
 #[derive(Clone, Debug)]
@@ -33,6 +35,8 @@ pub enum Message {
     Forget,
     Export,
     Exported(Result<BackupExportReport, String>),
+    Snapshot,
+    Snapshots(Result<Vec<SnapshotFfi>, String>),
     Close,
 }
 
@@ -50,6 +54,8 @@ impl State {
             busy: false,
             error: None,
             exported: None,
+            snapshots: Vec::new(),
+            restore_target: String::new(),
         }
     }
 
@@ -57,10 +63,17 @@ impl State {
     /// as everything else so the facade is only touched from one place.
     pub fn load(session: &Session) -> Task<Message> {
         let facade = session.facade();
-        cosmic::task::future(async move {
-            Message::Loaded(off_thread(move || local::remembered_unlock(&facade)).await)
-        })
+        let snapshots = session.facade();
+        Task::batch([
+            cosmic::task::future(async move {
+                Message::Loaded(off_thread(move || local::remembered_unlock(&facade)).await)
+            }),
+            cosmic::task::future(async move {
+                Message::Snapshots(off_thread(move || local::snapshots(&snapshots)).await)
+            }),
+        ])
     }
+
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
@@ -165,6 +178,35 @@ impl State {
                 self.error = Some(err);
             }
 
+            Message::Snapshot => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Snapshots(
+                        off_thread(move || {
+                            local::snapshot_now(&facade)?;
+                            local::snapshots(&facade)
+                        })
+                        .await,
+                    )
+                }));
+            }
+
+            Message::Snapshots(Ok(snapshots)) => {
+                self.busy = false;
+                self.restore_target = session.facade().snapshot_restore_target();
+                self.snapshots = snapshots;
+            }
+
+            Message::Snapshots(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
             Message::Close => return Outcome::Close,
         }
         Outcome::None
@@ -259,6 +301,42 @@ impl State {
             column = column.push(widget::text::caption(
                 "An unencrypted copy of every local vault. Keep it somewhere safe.",
             ));
+        }
+
+        column = column.push(widget::text::title3("Snapshots"));
+        column = column.push(widget::text::caption(
+            "A copy of the vault database, taken once a day. Still encrypted, \
+             unlike the export above — good for going back, not for leaving.",
+        ));
+
+        let mut snapshot = widget::button::standard(if self.busy {
+            "Working…"
+        } else {
+            "Take a snapshot now"
+        });
+        if !self.busy {
+            snapshot = snapshot.on_press(Message::Snapshot);
+        }
+        column = column.push(snapshot);
+
+        if self.snapshots.is_empty() {
+            column = column.push(widget::text::caption("No snapshots yet."));
+        } else {
+            for entry in self.snapshots.iter().take(5) {
+                column = column.push(widget::text::caption(format!(
+                    "{} · {} KiB",
+                    entry.created_at,
+                    entry.size_bytes / 1024
+                )));
+            }
+            // Restoring is a file copy with every client closed: swapping the
+            // database under a live pool is how a working vault becomes a
+            // broken one, so the app shows the paths rather than doing it.
+            column = column.push(widget::text::caption(format!(
+                "To restore: close Zann everywhere, then copy a snapshot (and its \
+                 .identity.json, which holds the salt) over {}",
+                self.restore_target
+            )));
         }
 
         if let Some(error) = self.error.as_ref() {

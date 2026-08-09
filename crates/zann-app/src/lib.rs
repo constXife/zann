@@ -4,12 +4,14 @@
 //! `$HOME`, no file dialogs. Callers hand in an open pool, an unlocked key, and
 //! the paths they have already resolved.
 //!
-//! Today this is backup only; ADR 0003 moves session, items, vaults, storage,
-//! history and sync orchestration here in later phases.
+//! Today this is backup and snapshots; ADR 0003 moves session, items, vaults,
+//! storage, history and sync orchestration here in later phases.
 
 pub mod backup;
+pub mod snapshot;
 
 pub use backup::{
     BackupCtx, BackupError, ExportReport, ImportOutcome, ImportReport, PlainBackupItem,
     PlainBackupStorage, PlainBackupVault,
 };
+pub use snapshot::{RetentionPolicy, Snapshot, SnapshotError};
