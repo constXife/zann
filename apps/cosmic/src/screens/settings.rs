@@ -6,7 +6,7 @@
 
 use cosmic::iced::{Alignment, Length, Task};
 use cosmic::{theme, widget, Element};
-use zann_ffi::RememberedUnlockFfi;
+use zann_ffi::{BackupExportReport, RememberedUnlockFfi};
 
 use crate::backend::local;
 use crate::backend::off_thread;
@@ -19,6 +19,9 @@ pub struct State {
     enrolling: bool,
     busy: bool,
     error: Option<String>,
+    /// Result of the last export, kept on screen so the path can be read off
+    /// and the file found.
+    exported: Option<BackupExportReport>,
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +31,8 @@ pub enum Message {
     Remove(String),
     UseKeystore,
     Forget,
+    Export,
+    Exported(Result<BackupExportReport, String>),
     Close,
 }
 
@@ -44,6 +49,7 @@ impl State {
             enrolling: false,
             busy: false,
             error: None,
+            exported: None,
         }
     }
 
@@ -136,6 +142,29 @@ impl State {
                 }));
             }
 
+            Message::Export => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                self.exported = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Exported(off_thread(move || local::export_backup(&facade)).await)
+                }));
+            }
+
+            Message::Exported(Ok(report)) => {
+                self.busy = false;
+                self.exported = Some(report);
+            }
+
+            Message::Exported(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
             Message::Close => return Outcome::Close,
         }
         Outcome::None
@@ -209,6 +238,28 @@ impl State {
                     .on_press(Message::UseKeystore),
             )
         };
+
+        column = column.push(widget::text::title3("Your data"));
+        let mut export = widget::button::standard(if self.busy {
+            "Exporting…"
+        } else {
+            "Export vault to a file"
+        });
+        if !self.busy {
+            export = export.on_press(Message::Export);
+        }
+        column = column.push(export);
+
+        if let Some(report) = self.exported.as_ref() {
+            column = column.push(widget::text::caption(format!(
+                "{} items written to {}",
+                report.items_count, report.path
+            )));
+        } else {
+            column = column.push(widget::text::caption(
+                "An unencrypted copy of every local vault. Keep it somewhere safe.",
+            ));
+        }
 
         if let Some(error) = self.error.as_ref() {
             column = column.push(widget::text::caption(error.clone()));

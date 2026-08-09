@@ -20,6 +20,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 chrono = "0.4"
 uniffi = "0.28"
 uuid = { version = "1", features = ["v7"] }
+zann-app = { path = "../zann-app" }
 zann-core = { path = "../zann-core", features = ["sqlite"] }
 zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", features = ["sqlite"] }

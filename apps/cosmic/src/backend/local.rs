@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use zann_ffi::{
-    create_core, AppStatusFfi, CoreFacade, HardwareKeyFfi, ItemDetail, ItemSummary, ItemsFilter,
-    Page, RememberedUnlockFfi,
+    create_core, AppStatusFfi, BackupExportReport, CoreFacade, HardwareKeyFfi, ItemDetail,
+    ItemSummary, ItemsFilter, Page, RememberedUnlockFfi,
 };
 use zann_ui_core::ItemCounts;
 
@@ -124,5 +124,14 @@ pub fn enroll_hardware_key(facade: &CoreFacade, label: String) -> Result<Hardwar
 pub fn remove_hardware_key(facade: &CoreFacade, credential_id: String) -> Result<(), String> {
     facade
         .remove_hardware_key(credential_id)
+        .map_err(|err| err.to_string())
+}
+
+/// Writes a plain backup of every local vault. The facade picks the path,
+/// because this client has no file picker of its own — see
+/// docs/adr/0002-client-strategy.md on why being able to leave comes first.
+pub fn export_backup(facade: &CoreFacade) -> Result<BackupExportReport, String> {
+    facade
+        .backup_export_file(String::new())
         .map_err(|err| err.to_string())
 }

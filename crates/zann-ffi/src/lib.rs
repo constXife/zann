@@ -31,6 +31,17 @@ pub enum CoreError {
 
 pub type CoreResult<T> = Result<T, CoreError>;
 
+/// `BackupError` already carries a stable `kind`; keep it rather than
+/// flattening everything into one string, so the UI can still translate.
+impl From<zann_app::BackupError> for CoreError {
+    fn from(err: zann_app::BackupError) -> Self {
+        match err.kind.as_str() {
+            "backup_failed" => CoreError::Service(err.message),
+            _ => CoreError::Service(format!("{}: {}", err.kind, err.message)),
+        }
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct VaultStatus {
     pub unlocked: bool,
@@ -137,18 +148,29 @@ pub struct ItemUpdate {
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct BackupImportOptions {
-    pub allow_legacy: bool,
+    /// Storage to import into. `None` — or the string `"local"` — means the
+    /// local-only storage. A remote storage is not supported here yet: that
+    /// path still needs the token and HTTP machinery that has not moved into
+    /// `zann-app`, and it reports `Unimplemented` rather than importing into
+    /// the wrong place.
+    pub target_storage_id: Option<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
-pub struct BackupExportOptions {
-    pub include_attachments: bool,
+pub struct BackupExportReport {
+    pub path: String,
+    pub storages_count: u64,
+    pub vaults_count: u64,
+    pub items_count: u64,
 }
 
-#[derive(Debug, Clone, Copy, uniffi::Record)]
-pub struct Progress {
-    pub done: u64,
-    pub total: u64,
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BackupImportReport {
+    pub imported_items: u64,
+    pub skipped_existing: u64,
+    pub skipped_missing_storage: u64,
+    pub skipped_missing_vault: u64,
+    pub skipped_deleted: u64,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -211,6 +233,14 @@ impl CoreFacade {
             .expect("lock poisoned")
             .clone()
             .ok_or(CoreError::Locked)
+    }
+
+    fn backup_ctx(&self) -> CoreResult<zann_app::BackupCtx> {
+        Ok(zann_app::BackupCtx::new(
+            self.pool.clone(),
+            self.master_key()?,
+            self.root.clone(),
+        ))
     }
 
     fn vault_id(&self) -> CoreResult<Uuid> {
@@ -545,20 +575,59 @@ impl CoreFacade {
         self.item_get(id)
     }
 
+    /// Import a plain backup. Pass an empty `path` and it fails rather than
+    /// guessing: unlike export there is no sensible default to fall back on.
     pub fn backup_import_file(
         &self,
-        _path: String,
-        _options: BackupImportOptions,
-    ) -> CoreResult<Progress> {
-        Err(CoreError::Unimplemented("backup_import_file".to_string()))
+        path: String,
+        options: BackupImportOptions,
+    ) -> CoreResult<BackupImportReport> {
+        let ctx = self.backup_ctx()?;
+        let path = path.trim();
+        if path.is_empty() {
+            return Err(CoreError::InvalidArgument(
+                "backup path is empty".to_string(),
+            ));
+        }
+        let outcome = self.runtime.block_on(zann_app::backup::plain_import(
+            &ctx,
+            PathBuf::from(path),
+            options.target_storage_id,
+        ))?;
+        match outcome {
+            zann_app::ImportOutcome::Done(report) => Ok(BackupImportReport {
+                imported_items: report.imported_items as u64,
+                skipped_existing: report.skipped_existing as u64,
+                skipped_missing_storage: report.skipped_missing_storage as u64,
+                skipped_missing_vault: report.skipped_missing_vault as u64,
+                skipped_deleted: report.skipped_deleted as u64,
+            }),
+            zann_app::ImportOutcome::NeedsRemote(_) => Err(CoreError::Unimplemented(
+                "backup import into a remote storage".to_string(),
+            )),
+        }
     }
 
-    pub fn backup_export_file(
-        &self,
-        _path: String,
-        _options: BackupExportOptions,
-    ) -> CoreResult<Progress> {
-        Err(CoreError::Unimplemented("backup_export_file".to_string()))
+    /// Export every local vault to a plain backup file. An empty `path` writes
+    /// to the vault directory's default location, which is what a client with
+    /// no file picker of its own wants.
+    pub fn backup_export_file(&self, path: String) -> CoreResult<BackupExportReport> {
+        let ctx = self.backup_ctx()?;
+        let path = path.trim();
+        let target = if path.is_empty() {
+            ctx.default_export_path()
+        } else {
+            PathBuf::from(path)
+        };
+        let report = self
+            .runtime
+            .block_on(zann_app::backup::plain_export(&ctx, target))?;
+        Ok(BackupExportReport {
+            path: report.path,
+            storages_count: report.storages_count as u64,
+            vaults_count: report.vaults_count as u64,
+            items_count: report.items_count as u64,
+        })
     }
 
     pub fn list_storages(&self) -> CoreResult<Vec<StorageSummaryFfi>> {

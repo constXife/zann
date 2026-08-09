@@ -1,0 +1,29 @@
+[package]
+name = "zann-app"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+# Headless application layer: the logic every client needs and no client should
+# own. No toolkit, no `$HOME`, no file dialogs — callers hand in the paths and
+# the unlocked key. See docs/adr/0003-shared-core-layering.md.
+
+[dependencies]
+anyhow = "1"
+chrono = { version = "0.4", features = ["serde"] }
+percent-encoding = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx-core = { version = "0.8", default-features = false }
+thiserror = "1"
+tokio = { version = "1", features = ["sync"] }
+url = "2"
+uuid = { version = "1", features = ["v7", "serde"] }
+
+zann-core = { path = "../zann-core", default-features = false, features = ["sqlite"] }
+zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
