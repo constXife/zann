@@ -139,6 +139,8 @@ jobs:
           components: rustfmt, clippy
       - name: Rust cache
         uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
       - name: Rust fmt
         working-directory: apps/desktop/src-tauri
         run: cargo fmt --check
