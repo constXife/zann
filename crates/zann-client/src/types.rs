@@ -222,13 +222,7 @@ pub struct SyncPullChange {
     pub name: String,
     pub type_id: String,
     #[serde(default)]
-    pub deleted_at: Option<String>,
-    #[serde(default)]
     pub history: Vec<SyncHistoryEntry>,
-    #[serde(default)]
-    pub shared_history: Vec<SyncSharedHistoryEntry>,
-    #[serde(default)]
-    pub share_cursor: Option<String>,
 }
 
 #[allow(dead_code)]

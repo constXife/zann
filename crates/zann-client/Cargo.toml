@@ -29,4 +29,6 @@ zann-db = { path = "../zann-db", features = ["sqlite"] }
 # default
 
 [dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+chrono = "0.4"
 tempfile = "3"

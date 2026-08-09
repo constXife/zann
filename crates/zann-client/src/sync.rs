@@ -238,7 +238,7 @@ pub async fn remote_sync(
             locked_vaults.push(vault.id.clone());
             continue;
         }
-        let _vault_key = if is_shared {
+        let vault_key = if is_shared {
             None
         } else {
             match decrypt_vault_key_with_master(master_key, &local_vault) {
@@ -444,9 +444,21 @@ pub async fn remote_sync(
                     .map_err(|err| err.to_string())?;
 
                 for change in &pull.changes {
-                    if apply_pull_change(&item_repo, &history_repo, storage_uuid, vault_id, change)
-                        .await
-                        .unwrap_or(false)
+                    // Always `Some` here: the non-shared branch above `continue`s
+                    // when the vault key cannot be unwrapped.
+                    let Some(vault_key) = vault_key.as_ref() else {
+                        continue;
+                    };
+                    if apply_pull_change(
+                        &item_repo,
+                        &history_repo,
+                        vault_key,
+                        storage_uuid,
+                        vault_id,
+                        change,
+                    )
+                    .await
+                    .unwrap_or(false)
                     {
                         applied_total += 1;
                     }
