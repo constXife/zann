@@ -26,6 +26,22 @@
       toolchainFor = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
       rustToolchain = toolchainFor pkgs;
 
+      # С 1.90 rustc на x86_64-unknown-linux-gnu линкует своим rust-lld, а не
+      # ld.bfd, так что база тут уже быстрая. mold всё равно обгоняет lld на
+      # больших бинарях (а тут webkit, Qt и толстый воркспейс), но выигрыш —
+      # десятки процентов на шаге линковки, а не разы на сборке целиком.
+      # gcc 15 понимает -fuse-ld=mold напрямую, clang в шелл тащить не нужно.
+      #
+      # Флаг ставится через env, а не через .cargo/config.toml: путь к линкеру
+      # тогда приходит из nix store, и шелл остаётся герметичным — вне
+      # `nix develop` сборка не ломается на отсутствующем mold.
+      #
+      # Переменная именно target-specific: RUSTFLAGS применился бы и к
+      # кросс-таргетам (tauri android/ios), где mold не работает.
+      moldEnv = {
+        CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
+      };
+
       # zann-cli ставится и на десктоп, и на aarch64-хосты, поэтому пакет
       # собирается под обе архитектуры. devShell остаётся x86_64-only —
       # он тянет Qt и WebKit, которые на aarch64 никому не нужны.
@@ -232,9 +248,12 @@
       );
 
       devShells.${system} = {
-        default = pkgs.mkShell {
+        default = pkgs.mkShell (moldEnv // {
           packages = with pkgs; [
             rustToolchain
+            mold
+            cargo-nextest
+            cargo-sweep
             k6
             pkg-config
             openssl
@@ -274,14 +293,16 @@
           OPENSSL_DIR = pkgs.openssl.dev;
           OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
           OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
-        };
+        });
 
         # apps/cosmic живёт вне воркспейса и тянет libcosmic, чей rust-version
         # опережает пин из rust-toolchain.toml. Отдельный шелл со свежим stable
         # не трогает сборку остального репозитория.
-        cosmic = pkgs.mkShell {
+        cosmic = pkgs.mkShell (moldEnv // {
           packages = with pkgs; [
             rust-bin.stable.latest.default
+            mold
+            cargo-nextest
             pkg-config
             openssl
             udev
@@ -306,7 +327,7 @@
           OPENSSL_DIR = pkgs.openssl.dev;
           OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
           OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
-        };
+        });
       };
     };
 }
