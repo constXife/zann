@@ -878,6 +878,16 @@ pub(crate) async fn apply_change(
             }));
         }
         Err(err) => {
+            if err.as_database_error().and_then(|error| error.constraint())
+                == Some("changes_generation_semantics")
+            {
+                return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
+                    item_id: change.item_id.to_string(),
+                    reason: "generation_conflict",
+                    server_seq: current_seq.unwrap_or(0),
+                    server_updated_at: now.to_rfc3339(),
+                }));
+            }
             tracing::error!(
                 event = "sync_push_change_insert_failed",
                 error = %err,

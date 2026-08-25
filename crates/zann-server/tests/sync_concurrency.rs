@@ -124,13 +124,31 @@ impl TestApp {
         let (status, json) = self.get_json("/v1/vaults", Some(token)).await;
         assert_eq!(status, StatusCode::OK, "vault list failed: {:?}", json);
         if let Some(vaults) = json.get("vaults").and_then(|value| value.as_array()) {
-            if let Some(vault) = vaults.iter().find(|vault| {
-                vault
-                    .get("kind")
-                    .and_then(|value| value.as_i64())
-                    .is_some_and(|value| value == i64::from(VaultKind::Personal.as_i32()))
-            }) {
-                return vault.clone();
+            if let Some(vault) = vaults
+                .iter()
+                .find(|vault| {
+                    vault
+                        .get("kind")
+                        .and_then(|value| value.as_i64())
+                        .is_some_and(|value| value == i64::from(VaultKind::Personal.as_i32()))
+                })
+                .cloned()
+            {
+                let vault_id = vault["id"].as_str().expect("vault id");
+                let (status, json) = self
+                    .send_json(
+                        Method::PUT,
+                        &format!("/v1/vaults/{vault_id}/key"),
+                        Some(token),
+                        serde_json::json!({ "vault_key_enc": [1, 2, 3] }),
+                    )
+                    .await;
+                assert_eq!(
+                    status,
+                    StatusCode::NO_CONTENT,
+                    "vault key update failed: {json:?}"
+                );
+                return vault;
             }
         }
 
@@ -204,7 +222,7 @@ async fn sync_push_is_atomic_on_error() {
                 "payload_enc": [1, 2, 3],
                 "checksum": payload_checksum(&[1_u8, 2, 3]),
                 "path": "dup/path",
-                "name": "Item A",
+                "name": "path",
                 "type_id": "login"
             },
             {
@@ -212,7 +230,7 @@ async fn sync_push_is_atomic_on_error() {
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [4, 5, 6],
                 "path": "dup/path",
-                "name": "Item B",
+                "name": "path",
                 "type_id": "login"
             }
         ]
@@ -300,7 +318,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
             "payload_enc": [9, 9, 9],
             "checksum": payload_checksum(&[9_u8, 9, 9]),
             "path": "race/path",
-            "name": "Race Item",
+            "name": "path",
             "type_id": "login"
         }]
     });

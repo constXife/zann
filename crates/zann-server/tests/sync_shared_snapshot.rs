@@ -21,6 +21,10 @@ use zann_db::PgPool;
 
 use client_workflow_support::{login_payload, TestApp};
 
+async fn initialize_personal_vault(app: &TestApp, token: &str, vault_id: Uuid) {
+    app.update_vault_key(token, vault_id, vec![1, 2, 3]).await;
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn personal_pull_honors_server_page_cap() {
@@ -29,6 +33,7 @@ async fn personal_pull_honors_server_page_cap() {
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    initialize_personal_vault(&app, token, vault_id).await;
 
     for index in 0..5 {
         let payload = format!("encrypted-{index}").into_bytes();
@@ -87,6 +92,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    initialize_personal_vault(&app, token, vault_id).await;
     let item_id = Uuid::now_v7();
     let payload = vec![1_u8, 2, 3, 4];
     let checksum = core_crypto::payload_checksum(&payload);
@@ -241,6 +247,7 @@ async fn personal_push_rolls_back_on_a_conflicting_history_generation() {
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    initialize_personal_vault(&app, token, vault_id).await;
     let item_id = Uuid::now_v7();
     let original_payload = vec![1_u8, 2, 3];
     let original_checksum = core_crypto::payload_checksum(&original_payload);
@@ -339,6 +346,7 @@ async fn sync_update_accepts_the_authoritative_snapshot_from_an_ordinary_create(
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    initialize_personal_vault(&app, token, vault_id).await;
     let original = vec![1_u8, 2, 3];
     let (status, created) = app
         .send_json(
@@ -699,6 +707,7 @@ async fn personal_pull_rejects_oversized_current_items_without_returning_payload
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    initialize_personal_vault(&app, token, vault_id).await;
     let initial_payload = vec![1_u8, 2, 3];
     let initial_checksum = core_crypto::payload_checksum(&initial_payload);
 
@@ -764,6 +773,7 @@ async fn personal_pull_rejects_oversized_history_without_returning_payloads() {
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    initialize_personal_vault(&app, token, vault_id).await;
     let initial_payload = vec![1_u8, 2, 3];
     let initial_checksum = core_crypto::payload_checksum(&initial_payload);
 
@@ -1811,7 +1821,7 @@ async fn migration_backfills_current_generations_and_future_version_writes() {
         SET path = 'mutated-without-version',
             name = 'mutated-without-version',
             payload_enc = $2,
-            checksum = 'mutated-without-version',
+            checksum = $4,
             updated_at = $3
         WHERE id = $1
         "#,
@@ -1819,6 +1829,7 @@ async fn migration_backfills_current_generations_and_future_version_writes() {
     .bind(create_item_id)
     .bind(vec![9_u8, 9, 9])
     .bind(now + ChronoDuration::minutes(3))
+    .bind(core_crypto::payload_checksum(&[9_u8, 9, 9]))
     .execute(&pool)
     .await
     .expect_err("sync-visible fields require a version advance");

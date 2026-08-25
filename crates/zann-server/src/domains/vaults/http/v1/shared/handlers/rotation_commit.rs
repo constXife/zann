@@ -150,7 +150,7 @@ pub(crate) async fn rotate_commit(
         }
     };
 
-    let sync_status: i32 = match row.try_get("sync_status") {
+    let sync_status: i16 = match row.try_get("sync_status") {
         Ok(value) => value,
         Err(err) => {
             tracing::error!(event = "rotation_commit_failed", error = %err, "DB error");
@@ -172,7 +172,7 @@ pub(crate) async fn rotate_commit(
                 .into_response();
         }
     };
-    if sync_status != SyncStatus::ACTIVE || deleted_at.is_some() {
+    if i32::from(sync_status) != SyncStatus::ACTIVE || deleted_at.is_some() {
         return StatusCode::NOT_FOUND.into_response();
     }
 

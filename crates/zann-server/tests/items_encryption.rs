@@ -264,7 +264,7 @@ async fn personal_vault_rejects_plaintext_payload() {
         "expected rejection: {:?}",
         json
     );
-    assert_eq!(json["error"], "payload_enc_required");
+    assert_eq!(json["error"], "plaintext_not_allowed");
 }
 
 #[tokio::test]

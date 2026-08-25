@@ -156,6 +156,7 @@ async fn tombstone_update_is_a_conflict_and_rolls_back_other_batch_writes() {
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    app.update_vault_key(token, vault_id, vec![1, 2, 3]).await;
     let deleted_item_id = Uuid::now_v7();
     let active_item_id = Uuid::now_v7();
     let deleted_create_seq =
@@ -243,6 +244,7 @@ async fn repeated_delete_is_read_only_and_restore_reopens_updates() {
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    app.update_vault_key(token, vault_id, vec![1, 2, 3]).await;
     let item_id = Uuid::now_v7();
     let create_seq = create_item(&app, token, vault_id, item_id, "delete-retry", 1).await;
     let attachment_id = Uuid::now_v7();
@@ -416,6 +418,7 @@ async fn concurrent_deletes_with_one_base_have_one_winner() {
     let registration = app.register(email, "password").await;
     let token = registration["access_token"].as_str().expect("token");
     let vault_id = app.personal_vault_id(email).await;
+    app.update_vault_key(token, vault_id, vec![1, 2, 3]).await;
     let item_id = Uuid::now_v7();
     let create_seq = create_item(&app, token, vault_id, item_id, "delete-race", 1).await;
     let request = || {

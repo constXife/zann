@@ -250,9 +250,10 @@ impl TestApp {
         path: &str,
         password: &str,
     ) -> serde_json::Value {
+        let name = path.rsplit('/').next().unwrap_or(path);
         let payload = json!({
             "path": path,
-            "name": path,
+            "name": name,
             "type_id": "login",
             "payload": {
                 "v": 1,
@@ -287,9 +288,10 @@ impl TestApp {
         path: &str,
         password: &str,
     ) {
+        let name = path.rsplit('/').next().unwrap_or(path);
         let payload = json!({
             "path": path,
-            "name": path,
+            "name": name,
             "type_id": "login",
             "payload": {
                 "v": 1,
@@ -521,7 +523,10 @@ async fn shared_list_supports_cursor_pagination() {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    let cursor = first["next_cursor"].as_str().expect("cursor").to_string();
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("cursor")
+        .replace('+', "%2B");
 
     let (status, second) = app
         .get_json(
@@ -603,7 +608,10 @@ async fn ordinary_item_summaries_are_explicitly_paginated() {
     assert_eq!(status, StatusCode::OK, "first page: {first:?}");
     assert_eq!(first["items"].as_array().map(Vec::len), Some(1));
     assert!(first["items"][0].get("payload").is_none());
-    let cursor = first["next_cursor"].as_str().expect("next cursor");
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("next cursor")
+        .replace('+', "%2B");
 
     let (status, second) = app
         .get_json(
