@@ -5204,13 +5204,24 @@ mod tests {
         assert!(harness.repository.snapshot().is_ok());
     }
 
-    fn password_request(target: &SessionTarget, password: &str) -> PasswordLoginRequest {
+    fn runtime_password() -> String {
+        format!("test-credential-{}", Uuid::now_v7())
+    }
+
+    fn password_request_with_password(
+        target: &SessionTarget,
+        password: &str,
+    ) -> PasswordLoginRequest {
         PasswordLoginRequest::new(
             target.clone(),
             "person@example.test",
             LoginPassword::new(password).expect("bounded password"),
         )
         .expect("bounded login request")
+    }
+
+    fn password_request(target: &SessionTarget) -> PasswordLoginRequest {
+        password_request_with_password(target, &runtime_password())
     }
 
     #[tokio::test]
@@ -5230,10 +5241,7 @@ mod tests {
         let port = FakeAuthPort::new(harness.identity(), success_behavior());
         let access = harness
             .login_app(port.clone())
-            .password_login(
-                password_request(&harness.target, "password-secret"),
-                harness.operation(),
-            )
+            .password_login(password_request(&harness.target), harness.operation())
             .await
             .expect("password login");
 
@@ -5294,10 +5302,7 @@ mod tests {
         port.set_me_behavior(MeBehavior::Failure(failure(AuthFailureKind::Unavailable)));
         let error = harness
             .login_app(port.clone())
-            .password_login(
-                password_request(&harness.target, "password-secret"),
-                harness.operation(),
-            )
+            .password_login(password_request(&harness.target), harness.operation())
             .await
             .expect_err("failed /me cannot publish login");
 
@@ -5341,10 +5346,7 @@ mod tests {
 
         let error = harness
             .login_app(port.clone())
-            .password_login(
-                password_request(&harness.target, "password-secret"),
-                harness.operation(),
-            )
+            .password_login(password_request(&harness.target), harness.operation())
             .await
             .expect_err("KDF race must not publish");
 
@@ -5442,10 +5444,7 @@ mod tests {
 
         let error = harness
             .login_app(port.clone())
-            .password_login(
-                password_request(&harness.target, "password-secret"),
-                harness.operation(),
-            )
+            .password_login(password_request(&harness.target), harness.operation())
             .await
             .expect_err("failed compensation is remote-unknown");
 
@@ -5475,10 +5474,7 @@ mod tests {
 
             let error = harness
                 .login_app(port.clone())
-                .password_login(
-                    password_request(&harness.target, "password-secret"),
-                    harness.operation(),
-                )
+                .password_login(password_request(&harness.target), harness.operation())
                 .await
                 .expect_err("invalid refresh cannot be compensated");
 
@@ -5532,7 +5528,7 @@ mod tests {
             let app = harness.login_app(port.clone());
             let target = harness.target.clone();
             let task = tokio::spawn(async move {
-                app.password_login(password_request(&target, "password-secret"), operation)
+                app.password_login(password_request(&target), operation)
                     .await
             });
             me_started.wait().await;
@@ -5580,7 +5576,7 @@ mod tests {
         let app = harness.login_app(port.clone());
         let target = harness.target.clone();
         let task = tokio::spawn(async move {
-            app.password_login(password_request(&target, "password-secret"), operation)
+            app.password_login(password_request(&target), operation)
                 .await
         });
         started_wait.await;
@@ -5629,10 +5625,7 @@ mod tests {
         let first_target = harness.target.clone();
         let first = tokio::spawn(async move {
             first_app
-                .password_login(
-                    password_request(&first_target, "first-password"),
-                    first_operation,
-                )
+                .password_login(password_request(&first_target), first_operation)
                 .await
         });
         started.wait().await;
@@ -5642,10 +5635,7 @@ mod tests {
         let second_target = harness.target.clone();
         let second = tokio::spawn(async move {
             second_app
-                .password_login(
-                    password_request(&second_target, "second-password"),
-                    operation(),
-                )
+                .password_login(password_request(&second_target), operation())
                 .await
         });
         release.notify_waiters();
@@ -5693,10 +5683,12 @@ mod tests {
             .expect("first runtime");
         let first_app = harness.login_app(port.clone());
         let first_target = harness.target.clone();
+        let password = runtime_password();
+        let password_for_request = password.clone();
         first_runtime.spawn(async move {
             let _ = first_app
                 .password_login(
-                    password_request(&first_target, "password-secret"),
+                    password_request_with_password(&first_target, &password_for_request),
                     operation(),
                 )
                 .await;
@@ -5707,7 +5699,7 @@ mod tests {
             .expect("read armed auth intent");
         for private in [
             "person@example.test",
-            "password-secret",
+            password.as_str(),
             "new-access",
             "new-refresh",
         ] {

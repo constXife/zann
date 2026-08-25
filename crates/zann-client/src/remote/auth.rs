@@ -867,6 +867,14 @@ mod network_tests {
     const PROXY_CHILD_MODE_ENV: &str = "ZANN_AUTH_PROXY_CHILD_MODE";
     const PROXY_CHILD_ORIGIN_ENV: &str = "ZANN_AUTH_PROXY_CHILD_ORIGIN";
 
+    fn runtime_password() -> String {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("test clock after epoch")
+            .as_nanos();
+        format!("test-credential-{nonce}")
+    }
+
     struct TestServer {
         endpoint: String,
         requests: Arc<AtomicUsize>,
@@ -1035,6 +1043,10 @@ mod network_tests {
         }
     }
 
+    fn generated_login_request() -> LoginRequest {
+        login_request(&runtime_password())
+    }
+
     #[tokio::test]
     async fn exactly_once_redirect_is_ambiguous_and_is_not_followed() {
         let server = spawn_server(
@@ -1048,9 +1060,7 @@ mod network_tests {
         );
         let transport = AuthHttpTransport::new(&server.endpoint).expect("build transport");
         let error = expect_auth_error(
-            transport
-                .password_login(&login_request("redirect-secret"))
-                .await,
+            transport.password_login(&generated_login_request()).await,
             "redirect must not be followed",
         );
         assert_eq!(error.kind(), AuthHttpErrorKind::AmbiguousOutcome);
@@ -1192,9 +1202,7 @@ mod network_tests {
         let server = spawn_server(response, Duration::ZERO, false);
         let transport = AuthHttpTransport::new(&server.endpoint).expect("build transport");
         let error = expect_auth_error(
-            transport
-                .password_login(&login_request("password-secret"))
-                .await,
+            transport.password_login(&generated_login_request()).await,
             "oversized password rejection must remain ambiguous",
         );
         assert_eq!(error.kind(), AuthHttpErrorKind::AmbiguousOutcome);
@@ -1356,9 +1364,7 @@ mod network_tests {
             AuthHttpTransport::with_timeout(&server.endpoint, Duration::from_millis(40))
                 .expect("build transport");
         let error = expect_auth_error(
-            transport
-                .password_login(&login_request("timeout-secret"))
-                .await,
+            transport.password_login(&generated_login_request()).await,
             "request must time out",
         );
         assert_eq!(error.kind(), AuthHttpErrorKind::AmbiguousOutcome);
@@ -1367,7 +1373,7 @@ mod network_tests {
 
     #[tokio::test]
     async fn errors_never_render_request_or_reflected_secrets() {
-        let password = "seeded-password-DO-NOT-LEAK";
+        let password = runtime_password();
         let body = format!(r#"{{"error":"{password}"}}"#);
         let server = spawn_server(
             response(
@@ -1380,12 +1386,12 @@ mod network_tests {
         );
         let transport = AuthHttpTransport::new(&server.endpoint).expect("build transport");
         let error = expect_auth_error(
-            transport.password_login(&login_request(password)).await,
+            transport.password_login(&login_request(&password)).await,
             "login must fail",
         );
         let display = format!("{error}");
         let debug = format!("{error:?}");
-        for secret in [password, "seeded-email@example.test"] {
+        for secret in [password.as_str(), "seeded-email@example.test"] {
             assert!(!display.contains(secret));
             assert!(!debug.contains(secret));
         }
