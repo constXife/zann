@@ -220,6 +220,19 @@ async fn readonly_member_cannot_push_sync() {
 
     let vault = app.personal_vault(token_a, "vault-ro").await;
     let vault_id = Uuid::parse_str(vault["id"].as_str().expect("vault id")).expect("uuid");
+    let (status, json) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{vault_id}/key"),
+            Some(token_a),
+            serde_json::json!({ "vault_key_enc": [1, 2, 3] }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NO_CONTENT,
+        "vault key update failed: {json:?}"
+    );
 
     let user_repo = UserRepo::new(&app.pool);
     let user_b_row = user_repo
@@ -243,6 +256,7 @@ async fn readonly_member_cannot_push_sync() {
         "changes": [{
             "item_id": Uuid::now_v7(),
             "operation": ChangeType::Update.as_i32(),
+            "base_seq": 1,
         }],
     });
 

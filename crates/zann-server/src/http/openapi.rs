@@ -1,5 +1,5 @@
 use aide::axum::{
-    routing::{delete, get, post, put},
+    routing::{delete, get, get_with, post, put},
     ApiRouter,
 };
 use aide::openapi::{Info, OpenApi};
@@ -7,23 +7,23 @@ use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::Json;
 use schemars::JsonSchema;
-use serde_json::json;
 use std::collections::HashMap;
 use uuid::Uuid;
 use zann_core::api::auth::{
     LoginRequest, LoginResponse, LogoutRequest, OidcConfigResponse, OidcLoginRequest,
-    PreloginResponse, RefreshRequest, RegisterRequest,
+    PreloginResponse, RefreshRequest, RegisterRequest, ServiceAccountLoginRequest,
+    ServiceAccountLoginResponse,
 };
+use zann_core::api::system::{SystemIdentity, SystemInfoResponse};
 use zann_core::api::vaults::{PersonalVaultStatusResponse, VaultListResponse};
 use zann_core::{
     AuthSource, CachePolicy, ChangeType, Identity, UserStatus, VaultEncryptionType, VaultKind,
 };
+use zann_crypto::EncryptedPayload;
 
 use crate::app::AppState;
 use crate::domains::access_control::http_admin::ReloadResponse;
-use crate::domains::auth::http::v1::types::{
-    PreloginQuery, ServiceAccountLoginRequest, ServiceAccountLoginResponse,
-};
+use crate::domains::auth::http::v1::types::PreloginQuery;
 use crate::domains::devices::http::v1::{DeviceListResponse, DeviceResponse, ListDevicesQuery};
 use crate::domains::groups::http::v1::{
     AddMemberRequest, CreateGroupRequest, GroupListResponse, GroupMemberResponse, GroupResponse,
@@ -42,7 +42,7 @@ use crate::domains::sync::http::v1::types::{
     SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncPushResponse, SyncSharedPullRequest,
     SyncSharedPullResponse, SyncSharedPushRequest,
 };
-use crate::domains::system::http::v1::{SecurityProfilesResponse, SystemInfoResponse};
+use crate::domains::system::http::v1::SecurityProfilesResponse;
 use crate::domains::users::http::v1::types::{
     ChangePasswordRequest, CreateUserRequest, ListUsersQuery, RecoveryKitResponse,
     ResetPasswordRequest, ResetPasswordResponse, UpdateMeRequest, UserListResponse, UserResponse,
@@ -84,7 +84,12 @@ fn doc_router() -> ApiRouter<AppState> {
         .api_route("/v1/auth/refresh", post(auth_refresh))
         .api_route("/v1/auth/logout", post(auth_logout))
         .api_route("/v1/auth/oidc/config", get(auth_oidc_config))
-        .api_route("/v1/system/info", get(system_info))
+        .api_route(
+            "/v1/system/info",
+            get_with(system_info, |operation| {
+                operation.response::<200, Json<SystemInfoResponse>>()
+            }),
+        )
         .api_route(
             "/v1/system/security-profiles",
             get(system_security_profiles),
@@ -292,10 +297,10 @@ async fn auth_oidc_config() -> (StatusCode, Json<OidcConfigResponse>) {
 
 async fn system_info() -> (StatusCode, Json<SystemInfoResponse>) {
     not_implemented(SystemInfoResponse {
-        version: "0.0.0",
+        version: "0.0.0".to_string(),
         build_commit: None,
         server_id: String::new(),
-        identity: crate::domains::system::http::v1::SystemIdentity {
+        identity: SystemIdentity {
             public_key: String::new(),
             timestamp: 0,
             signature: String::new(),
@@ -471,7 +476,7 @@ async fn shared_items_get(Path(_item_id): Path<String>) -> (StatusCode, Json<Sha
         type_id: String::new(),
         tags: None,
         favorite: false,
-        payload: json!({}),
+        payload: EncryptedPayload::new("login"),
         checksum: String::new(),
         version: 0,
         deleted_at: None,
@@ -511,7 +516,7 @@ async fn shared_rotate_candidate(
 ) -> (StatusCode, Json<RotationCandidateResponse>) {
     not_implemented(RotationCandidateResponse {
         state: String::new(),
-        candidate: String::new(),
+        candidate: Default::default(),
         expires_at: None,
         recover_until: None,
     })
@@ -567,14 +572,17 @@ async fn shared_history_get(
     not_implemented(SharedHistoryDetailResponse {
         version: 0,
         checksum: String::new(),
-        payload: json!({}),
+        payload: EncryptedPayload::new("login"),
         change_type: ChangeType::Update,
         created_at: String::new(),
     })
 }
 
 async fn items_list(Path(_vault_id): Path<String>) -> (StatusCode, Json<ItemsResponse>) {
-    not_implemented(ItemsResponse { items: Vec::new() })
+    not_implemented(ItemsResponse {
+        items: Vec::new(),
+        next_cursor: None,
+    })
 }
 
 async fn items_create(
@@ -590,7 +598,7 @@ async fn items_create(
         tags: None,
         favorite: false,
         payload_enc: None,
-        payload: Some(json!({})),
+        payload: Some(EncryptedPayload::new("login")),
         checksum: String::new(),
         version: 0,
         deleted_at: None,
@@ -610,7 +618,7 @@ async fn items_get(
         tags: None,
         favorite: false,
         payload_enc: None,
-        payload: Some(json!({})),
+        payload: Some(EncryptedPayload::new("login")),
         checksum: String::new(),
         version: 0,
         deleted_at: None,
@@ -631,7 +639,7 @@ async fn items_update(
         tags: None,
         favorite: false,
         payload_enc: None,
-        payload: Some(json!({})),
+        payload: Some(EncryptedPayload::new("login")),
         checksum: String::new(),
         version: 0,
         deleted_at: None,
@@ -659,7 +667,7 @@ async fn items_history_get(
         version: 0,
         checksum: String::new(),
         payload_enc: None,
-        payload: Some(json!({})),
+        payload: Some(EncryptedPayload::new("login")),
         change_type: ChangeType::Update,
         created_at: String::new(),
     })
@@ -677,7 +685,7 @@ async fn items_history_restore(
         tags: None,
         favorite: false,
         payload_enc: None,
-        payload: Some(json!({})),
+        payload: Some(EncryptedPayload::new("login")),
         checksum: String::new(),
         version: 0,
         deleted_at: None,
@@ -942,4 +950,37 @@ async fn users_reset_password(
     not_implemented(ResetPasswordResponse {
         password: String::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::build_openapi;
+
+    #[test]
+    fn generated_system_info_response_uses_the_canonical_numeric_schema() {
+        let api = serde_json::to_value(build_openapi()).expect("serialize generated OpenAPI");
+        assert_eq!(
+            api.pointer(
+                "/paths/~1v1~1system~1info/get/responses/200/content/application~1json/schema/$ref",
+            ),
+            Some(&json!("#/components/schemas/SystemInfoResponse"))
+        );
+
+        let schema = api
+            .pointer("/components/schemas/SystemInfoResponse")
+            .expect("canonical system info schema");
+        let required = schema
+            .get("required")
+            .and_then(serde_json::Value::as_array)
+            .expect("system info required fields");
+        for field in ["version", "server_id", "identity"] {
+            assert!(required.contains(&json!(field)), "missing required {field}");
+        }
+        assert_eq!(
+            schema.pointer("/properties/auth_methods/items/type"),
+            Some(&json!("integer"))
+        );
+    }
 }

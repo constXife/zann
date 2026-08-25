@@ -3,13 +3,13 @@
 use std::sync::Arc;
 
 use zann_ffi::{
-    create_core, AppStatusFfi, BackupExportReport, CoreFacade, HardwareKeyFfi, ItemDetail,
-    ItemSummary, ItemsFilter, Page, RememberedUnlockFfi, SnapshotFfi, SnapshotRestoreFfi,
-    VerifyReportFfi,
+    create_core_at_file_location, AppStatusFfi, BackupExportReport, CoreFacade, HardwareKeyFfi,
+    ItemDetail, ItemSummary, ItemsFilter, Page, RememberedUnlockFfi, SnapshotFfi,
+    SnapshotRestoreFfi, VerifyReportFfi,
 };
 use zann_ui_core::ItemCounts;
 
-use super::{default_db_url, local_root};
+use super::DatabaseLocation;
 
 /// How many items a single `items_list` call pages in.
 pub const PAGE_LIMIT: u32 = 200;
@@ -28,16 +28,10 @@ pub struct ItemsPage {
     pub counts: ItemCounts,
 }
 
-/// Opens the local database and reports what the app should show first.
-pub fn open() -> Result<(Facade, AppStatusFfi), String> {
-    let _ = std::fs::create_dir_all(local_root());
-    open_at(default_db_url())
-}
-
-/// [`open`] against an explicit database, for tests and for anything that has
-/// already resolved the URL itself.
-pub fn open_at(db_url: String) -> Result<(Facade, AppStatusFfi), String> {
-    let facade = create_core(db_url).map_err(|err| err.to_string())?;
+/// Opens an explicitly resolved database and reports what the app should show first.
+pub fn open_at(location: &DatabaseLocation) -> Result<(Facade, AppStatusFfi), String> {
+    std::fs::create_dir_all(location.client_root()).map_err(|err| err.to_string())?;
+    let facade = open_core(location)?;
 
     // A daily copy of the database, taken before the user touches anything and
     // without needing the key. Deliberately not fatal: failing to take a
@@ -52,9 +46,13 @@ pub fn open_at(db_url: String) -> Result<(Facade, AppStatusFfi), String> {
 }
 
 /// Connecting to a server rewrites the identity config, so the facade has to be
-/// rebuilt from it afterwards.
-pub fn reopen() -> Result<Facade, String> {
-    create_core(default_db_url()).map_err(|err| err.to_string())
+/// rebuilt from the same explicitly resolved database afterwards.
+pub fn reopen_at(location: &DatabaseLocation) -> Result<Facade, String> {
+    open_core(location)
+}
+
+fn open_core(location: &DatabaseLocation) -> Result<Facade, String> {
+    create_core_at_file_location(location.file_location()).map_err(|err| err.to_string())
 }
 
 pub fn initialize_master_password(facade: &CoreFacade, password: String) -> Result<(), String> {

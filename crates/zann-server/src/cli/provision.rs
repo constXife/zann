@@ -4,10 +4,13 @@ use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use serde::Serialize;
 use sqlx_core::types::Json as SqlxJson;
+use std::convert::Infallible;
+use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use uuid::Uuid;
 use zann_core::{
     CachePolicy, Change, ChangeOp, ChangeType, Device, Item, ItemHistory, ServiceAccount,
@@ -22,10 +25,12 @@ use zann_db::repo::{
     VaultMemberRepo, VaultRepo,
 };
 use zann_db::PgPool;
+use zeroize::Zeroizing;
 
 use crate::cli::tokens::{SERVICE_ACCOUNT_PREFIX, SERVICE_ACCOUNT_PREFIX_LEN, SYSTEM_OWNER_EMAIL};
 use crate::domains::auth::core::passwords;
 use crate::domains::auth::helpers::build_device;
+use crate::domains::items::contract::next_item_version;
 use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
 use crate::settings;
 
@@ -67,7 +72,7 @@ pub struct SetFieldArgs {
     #[arg(long, help = "Field key")]
     pub key: String,
     #[arg(long, help = "Field value")]
-    pub value: String,
+    pub value: ProvisionSecret,
     #[arg(long, value_enum, default_value = "text", help = "Field kind")]
     pub kind: ProvisionFieldKind,
     #[arg(
@@ -76,6 +81,29 @@ pub struct SetFieldArgs {
         help = "Item type for newly created items"
     )]
     pub type_id: String,
+}
+
+#[derive(Clone)]
+pub struct ProvisionSecret(Zeroizing<String>);
+
+impl ProvisionSecret {
+    fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Debug for ProvisionSecret {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("ProvisionSecret(<redacted>)")
+    }
+}
+
+impl FromStr for ProvisionSecret {
+    type Err = Infallible;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(Self(Zeroizing::new(value.to_string())))
+    }
 }
 
 #[derive(Debug, Clone, Args)]
@@ -254,7 +282,7 @@ async fn set_field_command(
 
     let field = FieldValue {
         kind: args.kind.into(),
-        value: args.value.clone(),
+        value: args.value.as_str().to_string(),
         meta: None,
     };
 
@@ -273,13 +301,15 @@ async fn set_field_command(
         }
 
         let mut payload = decrypt_payload(settings, &vault, item.id, &item.payload_enc)?;
-        let before =
-            serde_json::to_vec(&payload).map_err(|err| format!("payload_encode_failed: {err}"))?;
+        let before = Zeroizing::new(
+            serde_json::to_vec(&payload).map_err(|err| format!("payload_encode_failed: {err}"))?,
+        );
         payload.type_id = item.type_id.clone();
         payload.fields.insert(key.to_string(), field);
-        let after =
-            serde_json::to_vec(&payload).map_err(|err| format!("payload_encode_failed: {err}"))?;
-        if before == after {
+        let after = Zeroizing::new(
+            serde_json::to_vec(&payload).map_err(|err| format!("payload_encode_failed: {err}"))?,
+        );
+        if before.as_slice() == after.as_slice() {
             current_status = "unchanged";
             item
         } else {
@@ -298,31 +328,13 @@ async fn set_field_command(
                 changed_by_device_name: Some(provision_device.name.clone()),
                 created_at: Utc::now(),
             };
-            if let Err(err) = history_repo.create(&history).await {
-                tracing::error!(event = "provision_item_history_create_failed", error = %err, item_id = %item.id);
-            }
-
             let payload_enc = encrypt_payload(settings, &vault, item.id, &payload)?;
             item.payload_enc = payload_enc;
             item.checksum = core_crypto::payload_checksum(&item.payload_enc);
-            item.version += 1;
+            item.version =
+                next_item_version(item.version).map_err(|_| "invalid_version".to_string())?;
             item.device_id = provision_device.id;
             item.updated_at = Utc::now();
-            let affected = item_repo
-                .update(&item)
-                .await
-                .map_err(db_error("item_update_failed"))?;
-            if affected == 0 {
-                return Err("version_conflict".to_string());
-            }
-
-            if let Err(err) = history_repo
-                .prune_by_item(item.id, ITEM_HISTORY_LIMIT)
-                .await
-            {
-                tracing::error!(event = "provision_item_history_prune_failed", error = %err, item_id = %item.id);
-            }
-
             let change = Change {
                 seq: 0,
                 vault_id: vault.id,
@@ -332,9 +344,40 @@ async fn set_field_command(
                 device_id: provision_device.id,
                 created_at: item.updated_at,
             };
-            if let Err(err) = change_repo.create(&change).await {
-                tracing::error!(event = "provision_item_change_create_failed", error = %err, item_id = %item.id);
+            let mut tx = db
+                .begin()
+                .await
+                .map_err(db_error("item_update_begin_failed"))?;
+            let locked = item_repo
+                .get_by_id_for_update_in(&mut tx, item.id)
+                .await
+                .map_err(db_error("item_update_lock_failed"))?
+                .ok_or_else(|| "item_not_found".to_string())?;
+            if locked.vault_id != vault.id || locked.row_version != item.row_version {
+                return Err("version_conflict".to_string());
             }
+            history_repo
+                .create_in(&mut tx, &history)
+                .await
+                .map_err(db_error("item_history_create_failed"))?;
+            history_repo
+                .prune_by_item_in(&mut tx, item.id, ITEM_HISTORY_LIMIT)
+                .await
+                .map_err(db_error("item_history_prune_failed"))?;
+            let affected = item_repo
+                .update_in(&mut tx, &item)
+                .await
+                .map_err(db_error("item_update_failed"))?;
+            if affected != 1 {
+                return Err("version_conflict".to_string());
+            }
+            change_repo
+                .create_in(&mut tx, &change)
+                .await
+                .map_err(db_error("item_change_create_failed"))?;
+            tx.commit()
+                .await
+                .map_err(db_error("item_update_commit_failed"))?;
 
             current_status = "updated";
             item
@@ -367,11 +410,6 @@ async fn set_field_command(
         };
         let mut item = item;
         item.checksum = core_crypto::payload_checksum(&item.payload_enc);
-        item_repo
-            .create(&item)
-            .await
-            .map_err(db_error("item_create_failed"))?;
-
         let history = ItemHistory {
             id: Uuid::now_v7(),
             item_id,
@@ -387,10 +425,6 @@ async fn set_field_command(
             changed_by_device_name: Some(provision_device.name.clone()),
             created_at: now,
         };
-        if let Err(err) = history_repo.create(&history).await {
-            tracing::error!(event = "provision_item_history_create_failed", error = %err, item_id = %item.id);
-        }
-
         let change = Change {
             seq: 0,
             vault_id: vault.id,
@@ -400,9 +434,29 @@ async fn set_field_command(
             device_id: provision_device.id,
             created_at: now,
         };
-        if let Err(err) = change_repo.create(&change).await {
-            tracing::error!(event = "provision_item_change_create_failed", error = %err, item_id = %item.id);
-        }
+        let mut tx = db
+            .begin()
+            .await
+            .map_err(db_error("item_create_begin_failed"))?;
+        item_repo
+            .create_in(&mut tx, &item)
+            .await
+            .map_err(db_error("item_create_failed"))?;
+        history_repo
+            .create_in(&mut tx, &history)
+            .await
+            .map_err(db_error("item_history_create_failed"))?;
+        history_repo
+            .prune_by_item_in(&mut tx, item.id, ITEM_HISTORY_LIMIT)
+            .await
+            .map_err(db_error("item_history_prune_failed"))?;
+        change_repo
+            .create_in(&mut tx, &change)
+            .await
+            .map_err(db_error("item_change_create_failed"))?;
+        tx.commit()
+            .await
+            .map_err(db_error("item_create_commit_failed"))?;
 
         item
     };
@@ -886,12 +940,14 @@ fn parse_ttl(value: &str) -> Result<chrono::Duration, String> {
 fn generate_service_account_token(
     settings: &settings::Settings,
 ) -> Result<ProvisionedToken, String> {
-    let token_suffix: String = thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(32)
-        .map(char::from)
-        .collect();
-    let token = format!("{SERVICE_ACCOUNT_PREFIX}{token_suffix}");
+    let token_suffix = Zeroizing::new(
+        thread_rng()
+            .sample_iter(&Alphanumeric)
+            .take(32)
+            .map(char::from)
+            .collect::<String>(),
+    );
+    let token = Zeroizing::new(format!("{SERVICE_ACCOUNT_PREFIX}{}", token_suffix.as_str()));
     let token_prefix = token
         .chars()
         .take(SERVICE_ACCOUNT_PREFIX_LEN)
@@ -953,9 +1009,10 @@ fn decrypt_payload(
         .ok_or_else(|| "server_master_key_missing".to_string())?;
     let vault_key = core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
         .map_err(|err| format!("vault_key_decrypt_failed: {err}"))?;
-    let payload_bytes =
+    let payload_bytes = Zeroizing::new(
         core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item_id, payload_enc)
-            .map_err(|err| format!("payload_decrypt_failed: {err}"))?;
+            .map_err(|err| format!("payload_decrypt_failed: {err}"))?,
+    );
     EncryptedPayload::from_bytes(&payload_bytes)
         .map_err(|err| format!("payload_decode_failed: {err}"))
 }
@@ -972,9 +1029,11 @@ fn encrypt_payload(
         .ok_or_else(|| "server_master_key_missing".to_string())?;
     let vault_key = core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
         .map_err(|err| format!("vault_key_decrypt_failed: {err}"))?;
-    let payload_bytes = payload
-        .to_bytes()
-        .map_err(|err| format!("payload_encode_failed: {err}"))?;
+    let payload_bytes = Zeroizing::new(
+        payload
+            .to_bytes()
+            .map_err(|err| format!("payload_encode_failed: {err}"))?,
+    );
     core_crypto::encrypt_payload_bytes(&vault_key, vault.id, item_id, &payload_bytes)
         .map_err(|err| format!("payload_encrypt_failed: {err}"))
 }
@@ -1042,11 +1101,21 @@ struct NormalizedPrefix {
     scope: String,
 }
 
-#[derive(Debug, Clone)]
 struct ProvisionedToken {
-    token: String,
+    token: Zeroizing<String>,
     token_hash: String,
     token_prefix: String,
+}
+
+impl fmt::Debug for ProvisionedToken {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ProvisionedToken")
+            .field("token", &"<redacted>")
+            .field("token_hash", &"<redacted>")
+            .field("token_prefix", &self.token_prefix)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -1094,7 +1163,8 @@ impl StagedSecretFile {
 mod tests {
     use super::{
         ensure_shared_server_vault, normalize_prefix, parse_ops, parse_ttl, stage_secret_file,
-        update_history_version, write_secret_file,
+        update_history_version, write_secret_file, ProvisionFieldKind, ProvisionSecret,
+        SetFieldArgs,
     };
     use chrono::Utc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1130,6 +1200,23 @@ mod tests {
         let prefix = normalize_prefix("/rlyeh/yogg/grafana/").expect("prefix");
         assert_eq!(prefix.canonical, "/rlyeh/yogg/grafana");
         assert_eq!(prefix.scope, "rlyeh::yogg::grafana");
+    }
+
+    #[test]
+    fn set_field_args_debug_redacts_plaintext_value() {
+        let args = SetFieldArgs {
+            vault: "vault".to_string(),
+            path: "path".to_string(),
+            key: "password".to_string(),
+            value: "sentinel-provision-secret"
+                .parse::<ProvisionSecret>()
+                .expect("infallible secret parse"),
+            kind: ProvisionFieldKind::Password,
+            type_id: "secret".to_string(),
+        };
+        let rendered = format!("{args:?}");
+        assert!(!rendered.contains("sentinel-provision-secret"));
+        assert!(rendered.contains("<redacted>"));
     }
 
     #[test]

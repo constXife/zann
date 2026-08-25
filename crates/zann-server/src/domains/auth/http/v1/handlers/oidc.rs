@@ -1,16 +1,14 @@
+use crate::app::AppState;
+use crate::domains::auth::service::{self, AuthRequestContext};
+use crate::infra::request_context::user_agent;
+use crate::infra::request_context::{client_ip, request_id};
 use axum::{
     extract::{ConnectInfo, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     Json,
 };
-use zann_core::api::auth::{OidcConfigResponse, OidcLoginRequest};
-
-use super::super::types::ErrorResponse;
-use crate::app::AppState;
-use crate::domains::auth::service::{self, AuthRequestContext};
-use crate::infra::request_context::user_agent;
-use crate::infra::request_context::{client_ip, request_id};
+use zann_core::api::auth::{ApiErrorResponse, OidcConfigResponse, OidcLoginRequest};
 
 pub(crate) async fn login_oidc(
     State(state): State<AppState>,
@@ -36,9 +34,7 @@ pub(crate) async fn oidc_config(State(state): State<AppState>) -> axum::response
     if !oidc.enabled {
         return (
             StatusCode::NOT_FOUND,
-            Json(ErrorResponse {
-                error: "oidc_disabled",
-            }),
+            Json(ApiErrorResponse::new("oidc_disabled")),
         )
             .into_response();
     }

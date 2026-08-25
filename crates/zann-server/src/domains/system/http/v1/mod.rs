@@ -8,32 +8,12 @@ use sha2::{Digest, Sha256};
 use sqlx_core::query::query;
 use sqlx_postgres::Postgres;
 use std::collections::HashMap;
+use zann_core::api::system::{SystemIdentity, SystemInfoResponse};
 use zann_core::{AuthMethod, SecurityProfile, UserStatus};
 
 use crate::app::AppState;
 use crate::config::AuthMode;
 use crate::runtime;
-
-#[derive(Serialize, JsonSchema)]
-pub(crate) struct SystemInfoResponse {
-    pub(crate) version: &'static str,
-    pub(crate) build_commit: Option<&'static str>,
-    pub(crate) server_id: String,
-    pub(crate) identity: SystemIdentity,
-    pub(crate) server_name: Option<String>,
-    pub(crate) server_fingerprint: String,
-    pub(crate) auth_methods: Vec<AuthMethod>,
-    pub(crate) personal_vaults_enabled: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) internal_users_present: Option<bool>,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub(crate) struct SystemIdentity {
-    pub(crate) public_key: String,
-    pub(crate) timestamp: i64,
-    pub(crate) signature: String,
-}
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -93,8 +73,8 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
     (
         StatusCode::OK,
         Json(SystemInfoResponse {
-            version,
-            build_commit,
+            version: version.to_string(),
+            build_commit: build_commit.map(str::to_string),
             server_id,
             identity: SystemIdentity {
                 public_key,
@@ -103,7 +83,7 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
             },
             server_name: state.config.server.name.clone(),
             server_fingerprint: fingerprint,
-            auth_methods,
+            auth_methods: auth_methods.into_iter().map(AuthMethod::as_i32).collect(),
             personal_vaults_enabled: state.config.server.personal_vaults_enabled,
             internal_users_present,
         }),

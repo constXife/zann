@@ -1,0 +1,29 @@
+{
+  "current_context": "cli",
+  "contexts": {
+    "cli": {
+      "addr": "https://cli.example.test",
+      "needs_salt_update": false,
+      "server_fingerprint": "sha256:cli-server",
+      "tokens": {
+        "manual": {
+          "access_expires_at": "2030-01-02T03:04:05Z"
+        }
+      },
+      "current_token": "manual",
+      "vault": "vault-cli"
+    }
+  },
+  "identity": {
+    "email": "cli@example.test",
+    "kdf_salt": "Y2xpLWZpeHR1cmUtc2FsdA==",
+    "kdf_params": {
+      "algorithm": "argon2id",
+      "iterations": 3,
+      "memory_kb": 65536,
+      "parallelism": 4
+    },
+    "salt_fingerprint": "sha256:cli-salt",
+    "first_seen_at": "2026-01-02T03:04:05Z"
+  }
+}

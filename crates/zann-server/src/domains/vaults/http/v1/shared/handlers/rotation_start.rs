@@ -1,7 +1,7 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
 use chrono::Utc;
 use uuid::Uuid;
-use zann_core::{FieldKind, Identity};
+use zann_core::{FieldKind, Identity, SyncStatus};
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{ItemRepo, VaultRepo};
 
@@ -42,6 +42,9 @@ pub(crate) async fn rotate_start(
                 .into_response();
         }
     };
+    if item.sync_status != SyncStatus::Active || item.deleted_at.is_some() {
+        return StatusCode::NOT_FOUND.into_response();
+    }
 
     let vault_repo = VaultRepo::new(&state.db);
     let Some(vault) = vault_repo.get_by_id(item.vault_id).await.ok().flatten() else {
@@ -178,7 +181,7 @@ pub(crate) async fn rotate_start(
                 .into_response();
         }
     };
-    let candidate_enc = match encrypt_rotation_candidate(smk, &vault, item.id, &candidate) {
+    let candidate_enc = match encrypt_rotation_candidate(smk, &vault, item.id, candidate.as_str()) {
         Ok(value) => value,
         Err(_) => {
             return (
@@ -207,6 +210,8 @@ pub(crate) async fn rotate_start(
             rotation_aborted_reason = NULL
         WHERE id = $7
           AND rotation_state IS NULL
+          AND sync_status = $8
+          AND deleted_at IS NULL
         "#,
     )
     .bind(ROTATION_STATE_ROTATING)
@@ -216,6 +221,7 @@ pub(crate) async fn rotate_start(
     .bind(expires_at)
     .bind(recover_until)
     .bind(item.id)
+    .bind(SyncStatus::ACTIVE)
     .execute(&state.db)
     .await;
     match result {

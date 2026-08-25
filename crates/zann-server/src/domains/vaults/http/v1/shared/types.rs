@@ -1,7 +1,10 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
+use std::fmt;
 use zann_core::ChangeType;
+use zann_crypto::EncryptedPayload;
+use zeroize::Zeroizing;
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct ErrorResponse {
@@ -23,7 +26,8 @@ pub(crate) struct SharedItemResponse {
     pub(crate) type_id: String,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) favorite: bool,
-    pub(crate) payload: JsonValue,
+    #[schemars(with = "JsonValue")]
+    pub(crate) payload: EncryptedPayload,
     pub(crate) checksum: String,
     pub(crate) version: i64,
     pub(crate) deleted_at: Option<String>,
@@ -65,7 +69,8 @@ pub(crate) struct ItemHistoryListResponse {
 pub(crate) struct ItemHistoryDetailResponse {
     pub(crate) version: i64,
     pub(crate) checksum: String,
-    pub(crate) payload: JsonValue,
+    #[schemars(with = "JsonValue")]
+    pub(crate) payload: EncryptedPayload,
     pub(crate) change_type: ChangeType,
     pub(crate) created_at: String,
 }
@@ -79,7 +84,8 @@ pub(crate) struct CreateSharedItemRequest {
     pub(crate) tags: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) favorite: Option<bool>,
-    pub(crate) payload: JsonValue,
+    #[schemars(with = "JsonValue")]
+    pub(crate) payload: EncryptedPayload,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -92,7 +98,8 @@ pub(crate) struct UpdateSharedItemRequest {
     pub(crate) tags: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) favorite: Option<bool>,
-    pub(crate) payload: JsonValue,
+    #[schemars(with = "JsonValue")]
+    pub(crate) payload: EncryptedPayload,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -122,13 +129,79 @@ pub(crate) struct RotationStatusResponse {
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct RotationCandidateResponse {
     pub(crate) state: String,
-    pub(crate) candidate: String,
+    pub(crate) candidate: RotationCandidate,
     pub(crate) expires_at: Option<String>,
     pub(crate) recover_until: Option<String>,
+}
+
+/// Plaintext rotation candidates are response-scoped secrets. Debug output is
+/// always redacted and the backing allocation is wiped when the response (or
+/// an early-return temporary) is dropped.
+pub(crate) struct RotationCandidate(Zeroizing<String>);
+
+impl Default for RotationCandidate {
+    fn default() -> Self {
+        Self::new(String::new())
+    }
+}
+
+impl RotationCandidate {
+    pub(super) fn new(value: String) -> Self {
+        Self(Zeroizing::new(value))
+    }
+
+    pub(super) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+
+    pub(super) fn into_string(mut self) -> String {
+        std::mem::take(&mut *self.0)
+    }
+}
+
+impl fmt::Debug for RotationCandidate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RotationCandidate(<redacted>)")
+    }
+}
+
+impl Serialize for RotationCandidate {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl JsonSchema for RotationCandidate {
+    fn schema_name() -> String {
+        "RotationCandidate".to_string()
+    }
+
+    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        String::json_schema(generator)
+    }
 }
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct RotationCommitResponse {
     pub(crate) status: &'static str,
     pub(crate) version: i64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RotationCandidate;
+
+    #[test]
+    fn rotation_candidate_debug_is_redacted_while_wire_value_is_preserved() {
+        let candidate = RotationCandidate::new("candidate-secret".to_string());
+        let debug = format!("{candidate:?}");
+        assert!(!debug.contains("candidate-secret"));
+        assert_eq!(
+            serde_json::to_string(&candidate).expect("serialize candidate"),
+            "\"candidate-secret\""
+        );
+    }
 }

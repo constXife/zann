@@ -63,11 +63,13 @@ impl<'a> VaultsService for LocalServices<'a> {
         let vault = LocalVault {
             id: vault_id,
             storage_id,
+            slug: LocalVault::local_slug(vault_id),
             name: name.to_string(),
             kind,
             is_default,
             vault_key_enc: payload,
             key_wrap_type: crate::local::KeyWrapType::Master,
+            cache_key_fp: None,
             last_synced_at: None,
         };
         repo.create(&vault)
@@ -85,20 +87,32 @@ impl<'a> VaultsService for LocalServices<'a> {
     async fn ensure_default_local_personal(&self) -> ServiceResult<VaultSummary> {
         let repo = LocalVaultRepo::new(self.pool);
         let storage_id = Uuid::nil();
-        if let Some(existing) = repo
-            .get_by_name(storage_id, "Personal (Local)")
+        let vault_key = SecretKey::generate();
+        let vault_id = Uuid::now_v7();
+        let payload = core_crypto::encrypt_vault_key(self.master_key, vault_id, &vault_key)
+            .map_err(|err| ServiceError::new("vault_key_encrypt_failed", err.to_string()))?;
+        let candidate = LocalVault {
+            id: vault_id,
+            storage_id,
+            slug: LocalVault::local_slug(vault_id),
+            name: "Personal (Local)".to_string(),
+            kind: VaultKind::Personal,
+            is_default: true,
+            vault_key_enc: payload,
+            key_wrap_type: crate::local::KeyWrapType::Master,
+            cache_key_fp: None,
+            last_synced_at: None,
+        };
+        let vault = repo
+            .ensure_default_local_personal(&candidate)
             .await
-            .map_err(|err| ServiceError::new("vault_lookup_failed", err.to_string()))?
-        {
-            return Ok(VaultSummary {
-                id: existing.id,
-                storage_id: existing.storage_id,
-                name: existing.name,
-                kind: existing.kind,
-                is_default: existing.is_default,
-            });
-        }
-        self.create_vault(storage_id, "Personal (Local)", VaultKind::Personal, true)
-            .await
+            .map_err(|err| ServiceError::new("vault_ensure_default_failed", err.to_string()))?;
+        Ok(VaultSummary {
+            id: vault.id,
+            storage_id: vault.storage_id,
+            name: vault.name,
+            kind: vault.kind,
+            is_default: vault.is_default,
+        })
     }
 }

@@ -224,7 +224,7 @@ async fn payload_too_large_is_rejected() {
             "item_id": Uuid::now_v7(),
             "operation": ChangeType::Create.as_i32(),
             "payload_enc": payload_enc,
-            "checksum": "checksum",
+            "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3]),
             "path": "dos/path",
             "name": "DOS",
             "type_id": "login"
@@ -246,13 +246,22 @@ async fn invalid_item_is_rejected() {
     let token = user["access_token"].as_str().expect("token");
     let vault = app.personal_vault(token, "vault-invalid").await;
     let vault_id = Uuid::parse_str(vault["id"].as_str().expect("vault id")).expect("uuid");
+    let (status, response) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{vault_id}/key"),
+            Some(token),
+            serde_json::json!({ "vault_key_enc": [1, 2, 3] }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "key init: {response:?}");
     let payload = serde_json::json!({
         "vault_id": vault_id,
         "changes": [{
             "item_id": Uuid::now_v7(),
             "operation": ChangeType::Create.as_i32(),
             "payload_enc": [1, 2, 3],
-            "checksum": "checksum",
+            "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3]),
             "path": "",
             "name": "Invalid",
             "type_id": "login"

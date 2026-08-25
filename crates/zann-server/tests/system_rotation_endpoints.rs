@@ -214,8 +214,16 @@ async fn system_endpoints_return_expected_shapes() {
 
     let (status, info) = app.get_json("/v1/system/info", None).await;
     assert_eq!(status, StatusCode::OK, "system info failed: {:?}", info);
-    assert!(info["version"].as_str().is_some());
-    assert!(info["server_fingerprint"].as_str().is_some());
+    let parsed: zann_core::api::system::SystemInfoResponse =
+        serde_json::from_value(info.clone()).expect("canonical system info response");
+    assert!(!parsed.version.is_empty());
+    assert!(!parsed.server_id.is_empty());
+    assert!(!parsed.identity.public_key.is_empty());
+    assert!(!parsed.identity.signature.is_empty());
+    assert!(!parsed.server_fingerprint.is_empty());
+    assert!(info["auth_methods"]
+        .as_array()
+        .is_some_and(|methods| methods.iter().all(serde_json::Value::is_i64)));
 
     let (status, profiles) = app.get_json("/v1/system/security-profiles", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -283,6 +291,83 @@ async fn shared_rotation_flow() {
         .await;
     assert_eq!(status, StatusCode::OK, "commit failed: {:?}", commit);
     assert_eq!(commit["status"], "committed");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn shared_rotation_rejects_tombstones_before_start_and_after_lock_creation() {
+    let app = TestApp::new_with_smk().await;
+    app.register("rotate-tombstone@example.com", "password-1")
+        .await;
+    let token = app
+        .login("rotate-tombstone@example.com", "password-1")
+        .await;
+
+    let vault = app.create_shared_vault(&token, "rotate-tombstone").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+
+    let deleted_before_start = app
+        .create_shared_item(&token, vault_id, "rotation/deleted-before-start")
+        .await;
+    let deleted_before_start_id = deleted_before_start["id"].as_str().expect("item id");
+    let (status, body) = app
+        .send_json(
+            Method::DELETE,
+            &format!("/v1/shared/items/{deleted_before_start_id}"),
+            Some(&token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "delete failed: {body:?}");
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/shared/items/{deleted_before_start_id}/rotate/start"),
+            Some(&token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "start exposed tombstone: {body:?}"
+    );
+
+    let deleted_before_commit = app
+        .create_shared_item(&token, vault_id, "rotation/deleted-before-commit")
+        .await;
+    let deleted_before_commit_id = deleted_before_commit["id"].as_str().expect("item id");
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/shared/items/{deleted_before_commit_id}/rotate/start"),
+            Some(&token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "start failed: {body:?}");
+    let (status, body) = app
+        .send_json(
+            Method::DELETE,
+            &format!("/v1/shared/items/{deleted_before_commit_id}"),
+            Some(&token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "delete failed: {body:?}");
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/shared/items/{deleted_before_commit_id}/rotate/commit"),
+            Some(&token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "commit rotated tombstone: {body:?}"
+    );
 }
 
 #[tokio::test]
@@ -405,11 +490,7 @@ async fn shared_rotation_commit_rejects_null_payload_enc() {
         .execute(&pool)
         .await
         .expect("drop not null");
-    sqlx_core::query::query::<Postgres>("UPDATE items SET payload_enc = NULL WHERE id = $1")
-        .bind(item_uuid)
-        .execute(&pool)
-        .await
-        .expect("null payload");
+    set_payload_without_generation(&pool, item_uuid, None).await;
 
     let (status, error) = app
         .send_json(
@@ -422,14 +503,38 @@ async fn shared_rotation_commit_rejects_null_payload_enc() {
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(error["error"], "db_error");
 
-    sqlx_core::query::query::<Postgres>("UPDATE items SET payload_enc = $2 WHERE id = $1")
-        .bind(item_uuid)
-        .bind(payload_enc)
-        .execute(&pool)
-        .await
-        .expect("restore payload");
+    set_payload_without_generation(&pool, item_uuid, Some(payload_enc)).await;
     sqlx_core::query::query::<Postgres>("ALTER TABLE items ALTER COLUMN payload_enc SET NOT NULL")
         .execute(&pool)
         .await
         .expect("restore not null");
+}
+
+async fn set_payload_without_generation(
+    pool: &zann_db::PgPool,
+    item_id: Uuid,
+    payload_enc: Option<Vec<u8>>,
+) {
+    // This corruption fixture intentionally creates a state that production
+    // rejects. Keep the trigger disable scoped to one rollback-safe transaction.
+    let mut tx = pool.begin().await.expect("begin corruption fixture");
+    sqlx_core::query::query::<Postgres>(
+        "ALTER TABLE items DISABLE TRIGGER ensure_current_item_change_generation",
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("disable item generation trigger");
+    sqlx_core::query::query::<Postgres>("UPDATE items SET payload_enc = $2 WHERE id = $1")
+        .bind(item_id)
+        .bind(payload_enc)
+        .execute(&mut *tx)
+        .await
+        .expect("overwrite payload");
+    sqlx_core::query::query::<Postgres>(
+        "ALTER TABLE items ENABLE TRIGGER ensure_current_item_change_generation",
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("enable item generation trigger");
+    tx.commit().await.expect("commit corruption fixture");
 }

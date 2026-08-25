@@ -39,6 +39,7 @@ Just (optional):
 - Fast tests: `just fast-test` (same as `cargo test`)
 - Full tests: `just full-test` (fast tests + Postgres integration tests)
 - Default test: `just test` (same as `just fast-test`)
+- Architecture boundaries: `just architecture-check`
 - Desktop build: `just desktop-build` (Tauri build)
 - Desktop e2e: `just desktop-e2e` (Webdriver-based)
 - DB tests require Podman and `compose.test.yaml`.
@@ -100,6 +101,18 @@ Allowed.
 - CI enforces Rust license policy via `deny.toml`.
 - Do not commit secrets (use `config.example.yaml`).
 
+## Client architecture boundaries
+
+Shared client capabilities have one canonical owner; CLI, Tauri and COSMIC
+remain platform adapters. The ownership map, allowed dependency direction and
+temporary-exception policy live in `docs/architecture/capabilities.md`; the
+machine-readable baseline lives in `config/architecture-boundaries.json`.
+
+Run `just architecture-check` after changing a client manifest, shared client
+crate, config/path handling, protocol route or interface adapter. New boundary
+exceptions must be narrow, documented with an owner and removal milestone, and
+must not be used to hide a second implementation of shared behaviour.
+
 ## Audit-surface plan (draft)
 
 Goal: isolate security-critical code (audit-surface) so we can trust the core
@@ -127,6 +140,25 @@ Overkill for this repo (for now):
 Audit-surface (current targets):
 - `crates/zann-crypto/**`
 - `crates/zann-core/src/auth.rs`
+- `crates/zann-core/src/api/auth.rs`
+- `crates/zann-client/src/config.rs`
+- `crates/zann-client/src/config/locking.rs`
+- `crates/zann-client/src/config/v2.rs`
+- `crates/zann-client/src/credentials.rs`
+- `crates/zann-client/src/identity.rs`
+- `crates/zann-client/src/probe.rs`
+- `crates/zann-client/src/remote.rs`
+- `crates/zann-client/src/remote/auth.rs`
+- `crates/zann-client/src/remote/trust.rs`
+- `crates/zann-client/src/session.rs`
+- `crates/zann-client/src/app.rs` (DB-free authenticated application facade and sync-store factory port)
+- `crates/zann-client/src/sync/**` (sync owner, secret-bearing key models and persistence ports)
+- `crates/zann-client/tests/config_v2.rs`
+- `crates/zann-client/src/oidc.rs` (browser PKCE and loopback callback owner)
+- `crates/zann-client-sqlite/**` (production SQLite sync adapter)
+- `crates/zann-db/src/local/{bounded_read,item_repo,pending_change_repo,storage_repo,sync_cursor_repo,sync_repo,vault_repo}.rs`
+- `crates/zann-db/migrations/0002_sync_cursor_last_seq.sql`
+- `crates/zann-db/tests/{local_sqlite_path,local_sync_transactions,local_vault_migration}.rs`
 - `crates/zann-server/src/domains/auth/core/**`
 - `crates/zann-server/src/domains/access_control/**`
 - `crates/zann-keystore/**`

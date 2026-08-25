@@ -14,6 +14,7 @@ fn http_requires_insecure_flag() {
         .env_remove("ZANN_TOKEN")
         .env_remove("ZANN_TOKEN_FILE")
         .env_remove("ZANN_SERVER_FINGERPRINT")
+        .env_remove("ZANN_SERVICE_TOKEN")
         .args(["server", "info", "http://example.com"])
         .assert()
         .failure()

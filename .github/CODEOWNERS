@@ -1,7 +1,37 @@
 # Audit-surface owners
 /crates/zann-crypto/ @constXife
 /crates/zann-core/src/auth.rs @constXife
+/crates/zann-core/src/api/auth.rs @constXife
 /crates/zann-server/src/domains/auth/core/ @constXife
 /crates/zann-server/src/domains/access_control/ @constXife
 /crates/zann-server/src/infra/audit.rs @constXife
 /crates/zann-keystore/ @constXife
+/crates/zann-client-sqlite/ @constXife
+/crates/zann-client/src/app.rs @constXife
+/crates/zann-client/src/sync/ @constXife
+/crates/zann-db/src/lib.rs @constXife
+/crates/zann-db/src/local/bounded_read.rs @constXife
+/crates/zann-db/src/local/item_repo.rs @constXife
+/crates/zann-db/src/local/mod.rs @constXife
+/crates/zann-db/src/local/pending_change_repo.rs @constXife
+/crates/zann-db/src/local/storage_repo.rs @constXife
+/crates/zann-db/src/local/sync_cursor_repo.rs @constXife
+/crates/zann-db/src/local/sync_repo.rs @constXife
+/crates/zann-db/src/local/vault_repo.rs @constXife
+/crates/zann-db/migrations/0002_sync_cursor_last_seq.sql @constXife
+/crates/zann-db/tests/local_sqlite_path.rs @constXife
+/crates/zann-db/tests/local_sync_transactions.rs @constXife
+/crates/zann-db/tests/local_vault_migration.rs @constXife
+/tests/fixtures/crypto/ @constXife
+/docs/audit-surface.md @constXife
+
+# Shared client architecture and its enforcement
+/crates/zann-client/ @constXife
+/crates/zann-client-sqlite/ @constXife
+/crates/zann-ffi/ @constXife
+/crates/zann-ui-core/ @constXife
+/tests/fixtures/client-config/ @constXife
+/docs/architecture/ @constXife
+/docs/adr/0001-shared-client-core.md @constXife
+/config/architecture-boundaries.json @constXife
+/scripts/check-client-architecture.sh @constXife

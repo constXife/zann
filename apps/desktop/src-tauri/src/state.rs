@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use zann_core::crypto::SecretKey;
 use zann_core::SecurityProfileRegistry;
-use zann_db::{connect_sqlite_with_max, migrate_local, SqlitePool};
+use zann_db::{connect_sqlite_file_with_max, migrate_local, SqliteFileLocation, SqlitePool};
 
 use crate::constants::{LOCAL_DB_FILENAME, SECURITY_PROFILES_YAML};
 use crate::types::{DesktopSettings, OidcConfigResponse, OidcDiscovery, SystemInfoResponse};
@@ -128,10 +128,15 @@ pub fn local_db_path(root: &Path) -> PathBuf {
 
 pub fn build_state() -> Result<AppState, anyhow::Error> {
     let root = local_root_path()?;
-    std::fs::create_dir_all(&root)?;
+    build_state_at_root(root)
+}
+
+fn build_state_at_root(root: PathBuf) -> Result<AppState, anyhow::Error> {
     let db_path = local_db_path(&root);
-    let db_url = format!("sqlite://{}", db_path.display());
-    let pool = tauri::async_runtime::block_on(connect_sqlite_with_max(&db_url, 5))?;
+    let location = SqliteFileLocation::from_path(&db_path)?;
+    let root = location.root().to_path_buf();
+    std::fs::create_dir_all(&root)?;
+    let pool = tauri::async_runtime::block_on(connect_sqlite_file_with_max(&location, 5))?;
     tauri::async_runtime::block_on(migrate_local(&pool))?;
     let security_profiles = SecurityProfileRegistry::from_yaml(SECURITY_PROFILES_YAML)?;
     Ok(AppState {
@@ -142,4 +147,39 @@ pub fn build_state() -> Result<AppState, anyhow::Error> {
         security_profiles,
         pending_logins: Mutex::new(HashMap::new()),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_state_opens_literal_filesystem_path() {
+        let root =
+            std::env::temp_dir().join(format!("zann-desktop-path-{} # ? %", uuid::Uuid::now_v7()));
+        let db_path = local_db_path(&root);
+
+        let state = build_state_at_root(root.clone()).expect("build desktop state");
+
+        assert_eq!(state.root, root);
+        assert!(
+            db_path.exists(),
+            "SQLite must create the exact path, including URI delimiters"
+        );
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn production_state_does_not_stringify_paths_into_sqlite_uris() {
+        let source = include_str!("state.rs");
+        for forbidden in [
+            ["format!(\"sqlite", "://"].concat(),
+            ["connect_sqlite_", "path_with_max"].concat(),
+            ["connect_sqlite_", "with_max"].concat(),
+        ] {
+            assert!(!source.contains(&forbidden));
+        }
+        assert!(source.contains("connect_sqlite_file_with_max"));
+    }
 }

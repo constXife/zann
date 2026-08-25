@@ -141,11 +141,7 @@ pub(crate) fn update_pending_login_for_fingerprint(
     new_fingerprint: &str,
     result: &PendingLoginResult,
 ) -> Result<Option<String>, String> {
-    let context_name = result
-        .info
-        .server_id
-        .as_deref()
-        .and_then(|server_id| context_name_for_server_id(state, server_id))
+    let context_name = context_name_for_server_id(state, &result.info.server_id)
         .unwrap_or_else(|| context_name_from_url(server_url));
     let Some(existing) = fingerprint_change_for_context(state, &context_name, new_fingerprint)
     else {
@@ -250,16 +246,15 @@ pub(crate) async fn apply_login_context(
     let storage_id_string = {
         let context_name = context_name_from_url(server_url);
         let server_id = result.info.server_id.clone();
-        let migrated_storage_id = server_id.as_deref().and_then(|server_id| {
-            migrate_context_for_server_id(&mut config, &context_name, server_id)
-        });
+        let migrated_storage_id =
+            migrate_context_for_server_id(&mut config, &context_name, &server_id);
 
         let context = ensure_context(&mut config, &context_name, server_url);
         if context.storage_id.is_none() {
             context.storage_id = migrated_storage_id.or_else(|| existing_storage_id.clone());
         }
         context.addr = server_url.to_string();
-        context.server_id = server_id;
+        context.server_id = Some(server_id);
         context.server_fingerprint = Some(result.info.server_fingerprint.clone());
         context.tokens.insert(
             token_name.clone(),

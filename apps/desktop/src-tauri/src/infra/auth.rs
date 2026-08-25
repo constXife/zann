@@ -1,4 +1,5 @@
 use chrono::{Duration as ChronoDuration, Utc};
+use zann_core::api::auth::{LoginResponse, RefreshRequest};
 
 use crate::constants::REFRESH_SKEW_SECONDS;
 use crate::state::CliConfig;
@@ -41,7 +42,9 @@ pub async fn ensure_access_token_for_context(
         .ok_or_else(|| "refresh token missing".to_string())?;
 
     let url = format!("{}/v1/auth/refresh", addr.trim_end_matches('/'));
-    let payload = serde_json::json!({ "refresh_token": refresh });
+    let payload = RefreshRequest {
+        refresh_token: refresh,
+    };
     let response = client
         .post(url)
         .json(&payload)
@@ -61,21 +64,23 @@ pub async fn ensure_access_token_for_context(
         }
         return Err(format!("refresh failed: {status} {body}"));
     }
-    #[derive(serde::Deserialize)]
-    struct AuthResponse {
-        access_token: String,
-        refresh_token: Option<String>,
-        expires_in: u64,
-    }
-    let auth: AuthResponse = response.json().await.map_err(|err| err.to_string())?;
-    let new_expires = (Utc::now() + ChronoDuration::seconds(auth.expires_in as i64)).to_rfc3339();
+    let auth: LoginResponse = response
+        .json()
+        .await
+        .map_err(|err| format!("invalid refresh response: {err}"))?;
+    let LoginResponse {
+        access_token,
+        refresh_token,
+        expires_in,
+    } = auth;
+    let new_expires = (Utc::now() + ChronoDuration::seconds(expires_in as i64)).to_rfc3339();
 
     if let Some(ctx) = config.contexts.get_mut(context_name) {
         if let Some(entry) = ctx.tokens.get_mut(token_name) {
-            entry.access_token = auth.access_token.clone();
-            entry.refresh_token = auth.refresh_token.clone().or(entry.refresh_token.clone());
+            entry.access_token = access_token.clone();
+            entry.refresh_token = Some(refresh_token);
             entry.access_expires_at = Some(new_expires);
         }
     }
-    Ok(auth.access_token)
+    Ok(access_token)
 }

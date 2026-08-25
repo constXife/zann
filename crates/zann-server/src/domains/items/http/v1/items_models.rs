@@ -2,6 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use zann_core::{ChangeType, FieldsChanged};
+use zann_crypto::EncryptedPayload;
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct ErrorResponse {
@@ -19,7 +20,8 @@ pub(crate) struct CreateItemRequest {
     #[serde(default)]
     pub(crate) payload_enc: Option<Vec<u8>>,
     #[serde(default)]
-    pub(crate) payload: Option<JsonValue>,
+    #[schemars(with = "Option<JsonValue>")]
+    pub(crate) payload: Option<EncryptedPayload>,
     #[serde(default)]
     pub(crate) checksum: Option<String>,
     #[serde(default)]
@@ -43,7 +45,8 @@ pub(crate) struct UpdateItemRequest {
     #[serde(default)]
     pub(crate) payload_enc: Option<Vec<u8>>,
     #[serde(default)]
-    pub(crate) payload: Option<JsonValue>,
+    #[schemars(with = "Option<JsonValue>")]
+    pub(crate) payload: Option<EncryptedPayload>,
     #[serde(default)]
     pub(crate) checksum: Option<String>,
     #[serde(default)]
@@ -71,12 +74,17 @@ pub(crate) struct ItemSummary {
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct ItemsResponse {
     pub(crate) items: Vec<ItemSummary>,
+    pub(crate) next_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub(crate) struct ItemsListQuery {
     #[serde(default)]
     pub(crate) prefix: Option<String>,
+    #[serde(default)]
+    pub(crate) limit: Option<i64>,
+    #[serde(default)]
+    pub(crate) cursor: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -91,7 +99,8 @@ pub(crate) struct ItemResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) payload_enc: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) payload: Option<JsonValue>,
+    #[schemars(with = "Option<JsonValue>")]
+    pub(crate) payload: Option<EncryptedPayload>,
     pub(crate) checksum: String,
     pub(crate) version: i64,
     pub(crate) deleted_at: Option<String>,
@@ -125,7 +134,8 @@ pub(crate) struct ItemHistoryDetailResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) payload_enc: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) payload: Option<JsonValue>,
+    #[schemars(with = "Option<JsonValue>")]
+    pub(crate) payload: Option<EncryptedPayload>,
     pub(crate) change_type: ChangeType,
     pub(crate) created_at: String,
 }

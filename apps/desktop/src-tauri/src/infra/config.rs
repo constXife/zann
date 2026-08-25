@@ -91,6 +91,11 @@ mod tests {
     use super::*;
     use zann_keystore::{HardwareKeyEntry, UnlockSource};
 
+    const CONFIG_FIXTURES: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../tests/fixtures/client-config/v1"
+    );
+
     fn scratch(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("zann-cfg-{}-{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -110,6 +115,21 @@ mod tests {
             }],
             wrapped_master_key: None,
         }
+    }
+
+    fn install_config_fixture(root: &Path, name: &str) {
+        save_config(root, &CliConfig::default()).expect("seed config path");
+        std::fs::copy(Path::new(CONFIG_FIXTURES).join(name), config_path(root))
+            .expect("install config fixture");
+    }
+
+    fn config_path(root: &Path) -> std::path::PathBuf {
+        let mut files = std::fs::read_dir(root)
+            .expect("read config root")
+            .map(|entry| entry.expect("read config entry").path());
+        let path = files.next().expect("config writer created a file");
+        assert!(files.next().is_none(), "config root has one file");
+        path
     }
 
     #[test]
@@ -160,5 +180,76 @@ mod tests {
         assert!(written.contains("remember_unlock"));
         // ...and it is in the file the other clients read.
         assert_eq!(RememberedUnlock::load(&root).expect("shared"), enrolled());
+    }
+
+    #[test]
+    fn legacy_cli_keyring_config_is_not_readable_by_desktop() {
+        let root = scratch("cli-keyring");
+        install_config_fixture(&root, "cli-keyring.json");
+
+        let error = match load_config(&root) {
+            Ok(_) => panic!("CLI token metadata has no access_token"),
+            Err(error) => error,
+        };
+
+        assert!(error.to_string().contains("access_token"));
+    }
+
+    #[test]
+    fn characterizes_empty_and_malformed_config_results() {
+        let empty_root = scratch("empty-config");
+        install_config_fixture(&empty_root, "empty.json");
+        let empty = load_config(&empty_root).expect("empty config uses defaults");
+        assert!(empty.current_context.is_none());
+        assert!(empty.contexts.is_empty());
+        assert!(empty.identity.is_none());
+
+        let malformed_root = scratch("malformed-config");
+        install_config_fixture(&malformed_root, "malformed.json");
+        assert!(load_config(&malformed_root).is_err());
+    }
+
+    #[test]
+    fn nullable_local_identity_is_readable_by_desktop() {
+        let root = scratch("nullable-identity");
+        install_config_fixture(&root, "local-identity-nullable.json");
+
+        let config = load_config(&root).expect("load nullable local identity");
+        let identity = config.identity.expect("identity");
+
+        assert!(identity.email.is_none());
+        assert!(identity.salt_fingerprint.is_none());
+    }
+
+    #[test]
+    fn desktop_writer_keeps_owned_fields_but_drops_future_fields() {
+        let root = scratch("desktop-projection");
+        install_config_fixture(&root, "desktop-plaintext-future.json");
+        let config = load_config(&root).expect("load desktop fixture");
+
+        save_config(&root, &config).expect("rewrite desktop fixture");
+
+        let written: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(config_path(&root)).expect("read rewritten config"),
+        )
+        .expect("parse rewritten config");
+        assert_eq!(written["storage"]["backup_retention_days"], 30);
+        assert_eq!(
+            written["contexts"]["desktop"]["storage_id"],
+            "018f0000-0000-7000-8000-000000000001"
+        );
+        assert_eq!(
+            written["contexts"]["desktop"]["tokens"]["session"]["access_token"],
+            "fixture-access-token"
+        );
+        assert!(written.get("future_top_level").is_none());
+        assert!(written["contexts"]["desktop"]
+            .get("future_context")
+            .is_none());
+        assert!(written["contexts"]["desktop"].get("vault").is_none());
+        assert!(written["contexts"]["desktop"]["tokens"]["session"]
+            .get("future_token")
+            .is_none());
+        assert!(written["identity"].get("future_identity").is_none());
     }
 }

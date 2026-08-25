@@ -1,7 +1,8 @@
 use proptest::prelude::*;
 
-use super::helpers::{decode_cursor, encode_cursor, normalize_path_and_name};
+use super::helpers::{decode_cursor, encode_cursor};
 use super::types::ErrorResponse;
+use crate::domains::items::contract::{canonical_update_location, ItemContractError};
 
 proptest! {
     #[test]
@@ -24,15 +25,17 @@ fn decode_cursor_invalid_rejected() {
 }
 
 #[test]
-fn normalize_path_and_name_replaces_basename() {
-    let (path, name) = normalize_path_and_name("apps/one", None, Some("two"));
+fn canonical_location_replaces_basename() {
+    let (path, name) =
+        canonical_update_location("apps/one", None, Some("two")).expect("valid rename");
     assert_eq!(path, "apps/two");
     assert_eq!(name, "two");
 }
 
 #[test]
-fn normalize_path_and_name_uses_basename_from_path_like_name() {
-    let (path, name) = normalize_path_and_name("apps/one", None, Some("foo/bar"));
-    assert_eq!(path, "apps/bar");
-    assert_eq!(name, "bar");
+fn canonical_location_rejects_a_path_disguised_as_a_name() {
+    assert_eq!(
+        canonical_update_location("apps/one", None, Some("foo/bar")),
+        Err(ItemContractError::InvalidName)
+    );
 }

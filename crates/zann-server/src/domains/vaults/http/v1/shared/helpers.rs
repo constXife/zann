@@ -6,7 +6,9 @@ use zann_core::{Identity, Vault, VaultEncryptionType, VaultKind};
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{DeviceRepo, ServiceAccountRepo, UserRepo};
+use zeroize::Zeroizing;
 
+use super::types::RotationCandidate;
 use super::{ROTATION_STATE_ROTATING, ROTATION_STATE_STALE};
 use crate::app::AppState;
 use crate::domains::access_control::http::{parse_scope, ScopeRule, ScopeTarget};
@@ -149,16 +151,20 @@ pub(super) fn decrypt_rotation_candidate(
     vault: &Vault,
     item_id: Uuid,
     candidate_enc: &[u8],
-) -> Result<String, &'static str> {
+) -> Result<RotationCandidate, &'static str> {
     let vault_key = core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
         .map_err(|err| err.as_code())?;
-    let bytes =
+    let bytes = Zeroizing::new(
         core_crypto::decrypt_rotation_candidate(&vault_key, vault.id, item_id, candidate_enc)
-            .map_err(|err| err.as_code())?;
-    String::from_utf8(bytes).map_err(|_| "candidate_invalid")
+            .map_err(|err| err.as_code())?,
+    );
+    let candidate = std::str::from_utf8(bytes.as_slice())
+        .map_err(|_| "candidate_invalid")?
+        .to_owned();
+    Ok(RotationCandidate::new(candidate))
 }
 
-pub(super) fn generate_password(policy: Option<&str>) -> Result<String, &'static str> {
+pub(super) fn generate_password(policy: Option<&str>) -> Result<RotationCandidate, &'static str> {
     let policy = policy.unwrap_or("default");
     let mut rng = rand::thread_rng();
     match policy {
@@ -168,11 +174,11 @@ pub(super) fn generate_password(policy: Option<&str>) -> Result<String, &'static
             let lower = b"abcdefghijkmnopqrstuvwxyz";
             let digits = b"23456789";
             let symbols = b"!@#$%^&*_-+=?";
-            let mut chars = Vec::with_capacity(length);
-            chars.push(*upper.choose(&mut rng).ok_or("invalid_policy")? as char);
-            chars.push(*lower.choose(&mut rng).ok_or("invalid_policy")? as char);
-            chars.push(*digits.choose(&mut rng).ok_or("invalid_policy")? as char);
-            chars.push(*symbols.choose(&mut rng).ok_or("invalid_policy")? as char);
+            let mut chars = Zeroizing::new(Vec::with_capacity(length));
+            chars.push(*upper.choose(&mut rng).ok_or("invalid_policy")?);
+            chars.push(*lower.choose(&mut rng).ok_or("invalid_policy")?);
+            chars.push(*digits.choose(&mut rng).ok_or("invalid_policy")?);
+            chars.push(*symbols.choose(&mut rng).ok_or("invalid_policy")?);
             let mut all =
                 Vec::with_capacity(upper.len() + lower.len() + digits.len() + symbols.len());
             all.extend_from_slice(upper);
@@ -180,20 +186,26 @@ pub(super) fn generate_password(policy: Option<&str>) -> Result<String, &'static
             all.extend_from_slice(digits);
             all.extend_from_slice(symbols);
             for _ in chars.len()..length {
-                chars.push(*all.choose(&mut rng).ok_or("invalid_policy")? as char);
+                chars.push(*all.choose(&mut rng).ok_or("invalid_policy")?);
             }
-            chars.shuffle(&mut rng);
-            Ok(chars.into_iter().collect())
+            chars.as_mut_slice().shuffle(&mut rng);
+            let candidate = std::str::from_utf8(chars.as_slice())
+                .map_err(|_| "candidate_invalid")?
+                .to_owned();
+            Ok(RotationCandidate::new(candidate))
         }
         "alnum" => {
             let length = 24;
             let charset = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-            let mut chars = Vec::with_capacity(length);
+            let mut chars = Zeroizing::new(Vec::with_capacity(length));
             for _ in 0..length {
-                let ch = *charset.choose(&mut rng).ok_or("invalid_policy")? as char;
+                let ch = *charset.choose(&mut rng).ok_or("invalid_policy")?;
                 chars.push(ch);
             }
-            Ok(chars.into_iter().collect())
+            let candidate = std::str::from_utf8(chars.as_slice())
+                .map_err(|_| "candidate_invalid")?
+                .to_owned();
+            Ok(RotationCandidate::new(candidate))
         }
         _ => Err("invalid_policy"),
     }
@@ -209,27 +221,6 @@ pub(super) fn prefix_match(prefix: Option<&str>, path: &str) -> bool {
     };
     let path = normalize_path(path);
     path == prefix || path.starts_with(&format!("{}/", prefix))
-}
-
-pub(super) fn parse_cursor(cursor: &str) -> Option<(DateTime<Utc>, Uuid)> {
-    let (ts, id) = cursor.split_once('|')?;
-    let ts = DateTime::parse_from_rfc3339(ts).ok()?.with_timezone(&Utc);
-    let id = Uuid::parse_str(id).ok()?;
-    Some((ts, id))
-}
-
-pub(super) fn encode_cursor(item: &zann_core::Item) -> String {
-    format!("{}|{}", item.updated_at.to_rfc3339(), item.id)
-}
-
-pub(super) fn cursor_allows(
-    cursor: Option<&(DateTime<Utc>, Uuid)>,
-    item: &zann_core::Item,
-) -> bool {
-    let Some((cursor_ts, cursor_id)) = cursor else {
-        return true;
-    };
-    item.updated_at < *cursor_ts || (item.updated_at == *cursor_ts && item.id < *cursor_id)
 }
 
 pub(super) async fn service_account_scopes(

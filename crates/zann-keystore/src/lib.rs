@@ -1,9 +1,16 @@
-//! Storage for the device wrapping key (DWK).
+//! OS-managed secret storage and remembered-unlock support.
 //!
-//! The DWK decrypts the locally remembered master key, so it must never be
-//! written to application files: it belongs in an OS-managed secret store.
+//! [`SecretStore`] is the generic service/account boundary. Its physical
+//! keyring namespace is deliberately disjoint from historical entries.
+//! [`LegacySecretSource`] is the read-only compatibility boundary for those
+//! entries, while the older [`Keystore`] API remains the compatibility adapter
+//! for the device wrapping key (DWK) stored under the stable `zann` / `dwk`
+//! identifiers.
+
+use std::fmt;
 
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KeystoreStatus {
@@ -45,10 +52,114 @@ pub enum KeystoreError {
     NotFound,
     #[error("no keystore backend on this platform")]
     Unsupported,
+    #[error("invalid OS secret store namespace")]
+    InvalidNamespace,
+    #[error("secret exceeds OS credential store limit of {maximum_bytes} bytes")]
+    SecretTooLarge { maximum_bytes: usize },
     #[error("keystore unavailable: {message}")]
     Internal { message: String },
 }
 
+/// An owned secret value whose allocation is erased when dropped.
+///
+/// It deliberately does not implement `Clone`, serialization, or expose its
+/// contents through `Debug`.
+pub struct SecretValue(Zeroizing<String>);
+
+/// Maximum UTF-8 byte length for the public service namespace.
+pub const SECRET_STORE_SERVICE_MAX_BYTES: usize = 128;
+/// Maximum UTF-8 byte length for a secret account identifier.
+pub const SECRET_STORE_ACCOUNT_MAX_BYTES: usize = 1024;
+
+impl SecretValue {
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(Zeroizing::new(value.into()))
+    }
+
+    /// Borrow the secret for the duration of a backend operation.
+    #[must_use]
+    pub fn expose_secret(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Debug for SecretValue {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("SecretValue([REDACTED])")
+    }
+}
+
+/// Validate the common injective service/account namespace shared by secret
+/// stores.
+///
+/// Services are non-empty ASCII identifiers containing only letters, digits,
+/// `_`, or `-`. This stable logical grammar is independent of each backend's
+/// physical mapping. Accounts are non-empty, bounded UTF-8 strings; they may
+/// contain dots but never NUL. Individual backends may impose tighter limits through
+/// [`SecretStore::validate_namespace`].
+pub fn validate_secret_store_namespace(service: &str, account: &str) -> Result<(), KeystoreError> {
+    let valid_service = !service.is_empty()
+        && service.len() <= SECRET_STORE_SERVICE_MAX_BYTES
+        && service
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'));
+    let valid_account = !account.is_empty()
+        && account.len() <= SECRET_STORE_ACCOUNT_MAX_BYTES
+        && !account.as_bytes().contains(&0);
+    if !valid_service || !valid_account {
+        return Err(KeystoreError::InvalidNamespace);
+    }
+    Ok(())
+}
+
+/// Untyped access to an OS-managed secret store.
+///
+/// `service` and `account` are caller-owned namespaces, not credential types,
+/// and must satisfy [`validate_secret_store_namespace`]. Implementations must
+/// call [`validate_namespace`](Self::validate_namespace) before backend access,
+/// replace an existing value on [`put`](Self::put), return `Ok(None)` for a
+/// missing value, and make [`delete`](Self::delete) idempotent.
+pub trait SecretStore: Send + Sync {
+    /// Validate a namespace against the common contract and backend-specific
+    /// limits before starting a multi-secret write.
+    fn validate_namespace(&self, service: &str, account: &str) -> Result<(), KeystoreError> {
+        validate_secret_store_namespace(service, account)
+    }
+
+    /// Validate a value against backend-specific limits before starting a
+    /// multi-secret write. Custom stores accept every value by default.
+    fn validate(&self, _secret: &SecretValue) -> Result<(), KeystoreError> {
+        Ok(())
+    }
+
+    fn put(&self, service: &str, account: &str, secret: SecretValue) -> Result<(), KeystoreError>;
+
+    fn get(&self, service: &str, account: &str) -> Result<Option<SecretValue>, KeystoreError>;
+
+    fn delete(&self, service: &str, account: &str) -> Result<(), KeystoreError>;
+}
+
+/// Read-only access to an entry written with keyring-rs' historical
+/// `service` / `account` mapping.
+///
+/// This compatibility boundary is intentionally separate from [`SecretStore`]:
+/// generic callers cannot write or delete a legacy CLI credential or the
+/// device wrapping key by choosing the same logical tuple.
+pub trait LegacySecretSource: Send + Sync {
+    /// Validate a legacy namespace without reading the OS store.
+    fn validate_legacy_namespace(&self, service: &str, account: &str) -> Result<(), KeystoreError> {
+        validate_secret_store_namespace(service, account)
+    }
+
+    fn get_legacy(
+        &self,
+        service: &str,
+        account: &str,
+    ) -> Result<Option<SecretValue>, KeystoreError>;
+}
+
+/// Compatibility API for the device wrapping key.
 pub trait Keystore: Send + Sync {
     fn status(&self) -> KeystoreStatus;
     fn store_dwk(&self, dwk: &[u8]) -> Result<(), KeystoreError>;
@@ -56,29 +167,81 @@ pub trait Keystore: Send + Sync {
     fn delete_dwk(&self) -> Result<(), KeystoreError>;
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(feature = "fido", any(target_os = "linux", target_os = "macos")))]
 pub mod fido;
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(all(
+    feature = "secret-store",
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 mod keyring_store;
+#[cfg(feature = "remembered")]
 pub mod remembered;
 mod unsupported;
 
+#[cfg(feature = "remembered")]
 pub use remembered::{HardwareKeyEntry, RememberedUnlock, UnlockError, UnlockSource};
 
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-pub use keyring_store::KeyringKeystore;
+#[cfg(all(
+    feature = "secret-store",
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
+pub use keyring_store::{KeyringKeystore, KeyringLegacySecretSource, KeyringSecretStore};
 pub use unsupported::UnsupportedKeystore;
 
-const SERVICE: &str = "zann";
-const ACCOUNT: &str = "dwk";
+const DWK_SERVICE: &str = "zann";
+const DWK_ACCOUNT: &str = "dwk";
+
+/// Select the generic OS secret-store backend for the current platform.
+#[must_use]
+pub fn default_secret_store() -> Box<dyn SecretStore> {
+    #[cfg(all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    ))]
+    {
+        Box::new(KeyringSecretStore::new())
+    }
+    #[cfg(not(all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    )))]
+    {
+        Box::new(UnsupportedKeystore)
+    }
+}
+
+/// Select the read-only historical keyring adapter for the current platform.
+#[must_use]
+pub fn default_legacy_secret_source() -> Box<dyn LegacySecretSource> {
+    #[cfg(all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    ))]
+    {
+        Box::new(KeyringLegacySecretSource::new())
+    }
+    #[cfg(not(all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    )))]
+    {
+        Box::new(UnsupportedKeystore)
+    }
+}
 
 #[must_use]
 pub fn default_keystore() -> Box<dyn Keystore> {
-    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    #[cfg(all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    ))]
     {
-        Box::new(KeyringKeystore::new(SERVICE, ACCOUNT))
+        Box::new(KeyringKeystore::new(DWK_SERVICE, DWK_ACCOUNT))
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    #[cfg(not(all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    )))]
     {
         Box::new(UnsupportedKeystore)
     }
@@ -101,26 +264,19 @@ mod tests {
             keystore.load_dwk(),
             Err(KeystoreError::Unsupported)
         ));
+        assert!(matches!(
+            SecretStore::get(&keystore, "service", "account"),
+            Err(KeystoreError::Unsupported)
+        ));
+        assert!(matches!(
+            LegacySecretSource::get_legacy(&keystore, "service", "account"),
+            Err(KeystoreError::Unsupported)
+        ));
     }
 
-    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     #[test]
-    fn keyring_backend_round_trips_the_dwk() {
-        // Runs against keyring's in-memory store so the test does not depend on
-        // a Secret Service / Keychain being present.
-        keyring::set_default_credential_builder(keyring::mock::default_credential_builder());
-
-        let keystore = KeyringKeystore::new("zann-test", "dwk");
-        assert!(keystore.status().supported);
-        assert_eq!(keystore.load_dwk().unwrap(), None);
-
-        let dwk = [7u8; 32];
-        keystore.store_dwk(&dwk).unwrap();
-        assert_eq!(keystore.load_dwk().unwrap(), Some(dwk.to_vec()));
-
-        keystore.delete_dwk().unwrap();
-        assert_eq!(keystore.load_dwk().unwrap(), None);
-        // Deleting a key that is already gone is not an error.
-        keystore.delete_dwk().unwrap();
+    fn dwk_namespace_is_stable() {
+        assert_eq!(DWK_SERVICE, "zann");
+        assert_eq!(DWK_ACCOUNT, "dwk");
     }
 }

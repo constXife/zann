@@ -7,6 +7,7 @@ mod support;
 
 use tokio::sync::Semaphore;
 use zann_core::{CachePolicy, ChangeType, VaultKind};
+use zann_crypto::vault_crypto::payload_checksum;
 use zann_server::app::{build_router, AppState};
 use zann_server::config::{AuthMode, InternalRegistration, ServerConfig};
 use zann_server::domains::access_control::policies::{PolicyRule, PolicySet};
@@ -123,13 +124,31 @@ impl TestApp {
         let (status, json) = self.get_json("/v1/vaults", Some(token)).await;
         assert_eq!(status, StatusCode::OK, "vault list failed: {:?}", json);
         if let Some(vaults) = json.get("vaults").and_then(|value| value.as_array()) {
-            if let Some(vault) = vaults.iter().find(|vault| {
-                vault
-                    .get("kind")
-                    .and_then(|value| value.as_i64())
-                    .is_some_and(|value| value == i64::from(VaultKind::Personal.as_i32()))
-            }) {
-                return vault.clone();
+            if let Some(vault) = vaults
+                .iter()
+                .find(|vault| {
+                    vault
+                        .get("kind")
+                        .and_then(|value| value.as_i64())
+                        .is_some_and(|value| value == i64::from(VaultKind::Personal.as_i32()))
+                })
+                .cloned()
+            {
+                let vault_id = vault["id"].as_str().expect("vault id");
+                let (status, json) = self
+                    .send_json(
+                        Method::PUT,
+                        &format!("/v1/vaults/{vault_id}/key"),
+                        Some(token),
+                        serde_json::json!({ "vault_key_enc": [1, 2, 3] }),
+                    )
+                    .await;
+                assert_eq!(
+                    status,
+                    StatusCode::NO_CONTENT,
+                    "vault key update failed: {json:?}"
+                );
+                return vault;
             }
         }
 
@@ -201,9 +220,9 @@ async fn sync_push_is_atomic_on_error() {
                 "item_id": Uuid::now_v7(),
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [1, 2, 3],
-                "checksum": "checksum-1",
+                "checksum": payload_checksum(&[1_u8, 2, 3]),
                 "path": "dup/path",
-                "name": "Item A",
+                "name": "path",
                 "type_id": "login"
             },
             {
@@ -211,7 +230,7 @@ async fn sync_push_is_atomic_on_error() {
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [4, 5, 6],
                 "path": "dup/path",
-                "name": "Item B",
+                "name": "path",
                 "type_id": "login"
             }
         ]
@@ -249,7 +268,7 @@ async fn sync_push_conflict_is_atomic() {
                 "item_id": Uuid::now_v7(),
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [1, 2, 3],
-                "checksum": "checksum-1",
+                "checksum": payload_checksum(&[1_u8, 2, 3]),
                 "path": "dup/path",
                 "type_id": "login"
             },
@@ -257,7 +276,7 @@ async fn sync_push_conflict_is_atomic() {
                 "item_id": Uuid::now_v7(),
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [4, 5, 6],
-                "checksum": "checksum-2",
+                "checksum": payload_checksum(&[4_u8, 5, 6]),
                 "path": "dup/path",
                 "type_id": "login"
             }
@@ -297,9 +316,9 @@ async fn concurrent_updates_resolve_with_single_conflict() {
             "item_id": item_id,
             "operation": ChangeType::Create.as_i32(),
             "payload_enc": [9, 9, 9],
-            "checksum": "checksum-create",
+            "checksum": payload_checksum(&[9_u8, 9, 9]),
             "path": "race/path",
-            "name": "Race Item",
+            "name": "path",
             "type_id": "login"
         }]
     });
@@ -317,7 +336,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
             "item_id": item_id,
             "operation": ChangeType::Update.as_i32(),
             "payload_enc": [8],
-            "checksum": "checksum-warmup",
+            "checksum": payload_checksum(&[8_u8]),
             "base_seq": base_seq
         }]
     });
@@ -335,7 +354,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
             "item_id": item_id,
             "operation": ChangeType::Update.as_i32(),
             "payload_enc": [1],
-            "checksum": "checksum-one",
+            "checksum": payload_checksum(&[1_u8]),
             "base_seq": current_seq
         }]
     });
@@ -345,8 +364,8 @@ async fn concurrent_updates_resolve_with_single_conflict() {
             "item_id": item_id,
             "operation": ChangeType::Update.as_i32(),
             "payload_enc": [2],
-            "checksum": "checksum-two",
-            "base_seq": base_seq
+            "checksum": payload_checksum(&[2_u8]),
+            "base_seq": current_seq
         }]
     });
 
@@ -390,4 +409,62 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         .map(|c| c.len())
         .unwrap_or(0);
     assert_eq!(conflicts_one + conflicts_two, 1);
+    let applied_one = json_one["applied"].as_array().map(Vec::len).unwrap_or(0);
+    let applied_two = json_two["applied"].as_array().map(Vec::len).unwrap_or(0);
+    assert_eq!(applied_one + applied_two, 1);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn concurrent_creates_for_one_path_resolve_without_a_server_error() {
+    let app = TestApp::new().await;
+    let user = app.register("create-race@example.com", "password-1").await;
+    let token = user["access_token"].as_str().expect("token");
+    let vault = app.personal_vault(token, "vault-create-race").await;
+    let vault_id = Uuid::parse_str(vault["id"].as_str().expect("vault id")).expect("uuid");
+
+    let make_payload = |item_id, byte| {
+        serde_json::json!({
+            "vault_id": vault_id,
+            "changes": [{
+                "item_id": item_id,
+                "operation": ChangeType::Create.as_i32(),
+                "payload_enc": [byte],
+                "checksum": payload_checksum(&[byte]),
+                "path": "race/same-path",
+                "name": "same-path",
+                "type_id": "login"
+            }]
+        })
+    };
+    let first = tokio::spawn(send_json_with_app(
+        app.app.clone(),
+        Method::POST,
+        "/v1/sync/push".to_string(),
+        Some(token.to_string()),
+        make_payload(Uuid::now_v7(), 1),
+    ));
+    let second = tokio::spawn(send_json_with_app(
+        app.app.clone(),
+        Method::POST,
+        "/v1/sync/push".to_string(),
+        Some(token.to_string()),
+        make_payload(Uuid::now_v7(), 2),
+    ));
+    let (first_status, first_body) = first.await.expect("first create");
+    let (second_status, second_body) = second.await.expect("second create");
+    assert_eq!(first_status, StatusCode::OK, "first: {first_body:?}");
+    assert_eq!(second_status, StatusCode::OK, "second: {second_body:?}");
+    let applied = first_body["applied"].as_array().map(Vec::len).unwrap_or(0)
+        + second_body["applied"].as_array().map(Vec::len).unwrap_or(0);
+    let conflicts = first_body["conflicts"]
+        .as_array()
+        .map(Vec::len)
+        .unwrap_or(0)
+        + second_body["conflicts"]
+            .as_array()
+            .map(Vec::len)
+            .unwrap_or(0);
+    assert_eq!(applied, 1);
+    assert_eq!(conflicts, 1);
 }

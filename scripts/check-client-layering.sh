@@ -43,9 +43,6 @@ allow_imports=(
 
 # Files byte-identical to one under crates/. Ф2 deletes all three.
 allow_copies=(
-  apps/desktop/src-tauri/src/util.rs
-  apps/desktop/src-tauri/src/infra/http.rs
-  apps/desktop/src-tauri/src/infra/identity.rs
 )
 
 in_list() {

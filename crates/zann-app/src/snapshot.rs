@@ -674,14 +674,14 @@ mod tests {
         zann_db::local::LocalStorageRepo::new(pool)
             .upsert(&zann_db::local::LocalStorage {
                 id: Uuid::now_v7(),
-                kind: zann_core::StorageKind::LocalOnly,
+                kind: zann_core::StorageKind::Remote,
                 name: name.to_string(),
-                server_url: None,
-                server_name: None,
-                server_fingerprint: None,
-                account_subject: None,
+                server_url: Some(format!("https://{name}.snapshot.test")),
+                server_name: Some(format!("Snapshot {name}")),
+                server_fingerprint: Some(format!("snapshot-fingerprint-{name}")),
+                account_subject: Some(format!("snapshot-account-{name}")),
                 personal_vaults_enabled: true,
-                auth_method: None,
+                auth_method: Some(zann_core::AuthMethod::Password),
             })
             .await
             .expect("add storage");

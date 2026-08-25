@@ -215,7 +215,7 @@ pub(crate) async fn trust_fingerprint(
     let context = ensure_context(&mut config, &context_name, &pending.server_url);
     context.server_fingerprint = Some(new_fp);
     if let Some(result) = pending.pending_result.as_ref() {
-        context.server_id = result.info.server_id.clone();
+        context.server_id = Some(result.info.server_id.clone());
     }
     save_config(&state.root, &config).map_err(|err| err.to_string())?;
     let mut guard = state.pending_logins.lock().map_err(|err| err.to_string())?;

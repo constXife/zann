@@ -12,10 +12,46 @@ use zann_crypto::secrets::EncryptedPayload;
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{ItemRepo, VaultRepo};
 use zann_db::PgPool;
+use zeroize::Zeroizing;
 
 use crate::settings;
 
 const EXPORT_VERSION: u32 = 1;
+const MAX_ALL_SHARED_EXPORT_VAULTS: usize = 64;
+const ALL_SHARED_EXPORT_LOOKAHEAD: i64 = 65;
+const MAX_SHARED_EXPORT_ITEMS: usize = 120;
+const MAX_SHARED_EXPORT_SOURCE_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Default)]
+struct ExportBudget {
+    items: usize,
+    source_bytes: usize,
+}
+
+impl ExportBudget {
+    fn reserve(&mut self, items: i64, source_bytes: i64) -> Result<usize, String> {
+        let items = usize::try_from(items).map_err(|_| "export_budget_invalid".to_string())?;
+        let source_bytes =
+            usize::try_from(source_bytes).map_err(|_| "export_budget_invalid".to_string())?;
+        let next_items = self
+            .items
+            .checked_add(items)
+            .ok_or_else(|| "export_item_limit_exceeded".to_string())?;
+        if next_items > MAX_SHARED_EXPORT_ITEMS {
+            return Err("export_item_limit_exceeded".to_string());
+        }
+        let next_source_bytes = self
+            .source_bytes
+            .checked_add(source_bytes)
+            .ok_or_else(|| "export_size_limit_exceeded".to_string())?;
+        if next_source_bytes > MAX_SHARED_EXPORT_SOURCE_BYTES {
+            return Err("export_size_limit_exceeded".to_string());
+        }
+        self.items = next_items;
+        self.source_bytes = next_source_bytes;
+        Ok(items)
+    }
+}
 
 #[derive(Debug, Clone, Args)]
 pub struct ExportArgs {
@@ -96,12 +132,41 @@ pub(crate) async fn run(
     }
 
     let item_repo = ItemRepo::new(db);
-    let mut export_vaults = Vec::with_capacity(vaults.len());
+    let mut tx = db
+        .begin()
+        .await
+        .map_err(db_error("export_snapshot_begin_failed"))?;
+    sqlx_core::query::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
+        .execute(&mut *tx)
+        .await
+        .map_err(db_error("export_snapshot_config_failed"))?;
+
+    // Prove the full aggregate allocation budget before fetching or decrypting
+    // even the first payload. The later bounded reads use this same snapshot.
+    let mut budget = ExportBudget::default();
+    let mut vault_budgets = Vec::with_capacity(vaults.len());
     for vault in vaults {
+        let (item_count, source_bytes) = item_repo
+            .export_budget_by_vault_in(&mut tx, vault.id, args.include_deleted)
+            .await
+            .map_err(db_error("export_budget_lookup_failed"))?;
+        let item_count = budget.reserve(item_count, source_bytes)?;
+        vault_budgets.push((vault, item_count));
+    }
+
+    let mut export_vaults = Vec::with_capacity(vault_budgets.len());
+    for (vault, expected_item_count) in vault_budgets {
+        let lookahead = expected_item_count
+            .checked_add(1)
+            .and_then(|value| i64::try_from(value).ok())
+            .ok_or_else(|| "export_item_limit_exceeded".to_string())?;
         let mut items = item_repo
-            .list_by_vault(vault.id, args.include_deleted)
+            .list_by_vault_bounded_in(&mut tx, vault.id, args.include_deleted, lookahead)
             .await
             .map_err(db_error("export_items_lookup_failed"))?;
+        if items.len() != expected_item_count {
+            return Err("export_snapshot_inconsistent".to_string());
+        }
         items.sort_by(|left, right| {
             left.path
                 .cmp(&right.path)
@@ -135,6 +200,9 @@ pub(crate) async fn run(
             items: export_items,
         });
     }
+    tx.commit()
+        .await
+        .map_err(db_error("export_snapshot_commit_failed"))?;
 
     let output = SharedExportOutput {
         version: EXPORT_VERSION,
@@ -143,13 +211,15 @@ pub(crate) async fn run(
         plaintext: true,
         vaults: export_vaults,
     };
-    let json = serde_json::to_string_pretty(&output)
-        .map_err(|err| format!("export_encode_failed: {err}"))?;
+    let json = Zeroizing::new(
+        serde_json::to_string_pretty(&output)
+            .map_err(|err| format!("export_encode_failed: {err}"))?,
+    );
 
     match args.out.as_deref() {
         Some(path) => write_private_json_file(path, &json),
         None => {
-            println!("{json}");
+            println!("{}", json.as_str());
             Ok(())
         }
     }
@@ -172,10 +242,12 @@ async fn resolve_vaults(db: &PgPool, args: &ExportArgs) -> Result<Vec<Vault>, St
 
     if args.all_shared {
         let mut vaults = repo
-            .list_all()
+            .list_shared_server_bounded(ALL_SHARED_EXPORT_LOOKAHEAD)
             .await
             .map_err(db_error("export_vault_lookup_failed"))?;
-        vaults.retain(is_shared_server_vault);
+        if vaults.len() > MAX_ALL_SHARED_EXPORT_VAULTS {
+            return Err("export_vault_limit_exceeded".to_string());
+        }
         vaults.sort_by(|left, right| {
             left.slug
                 .cmp(&right.slug)
@@ -237,9 +309,10 @@ fn decrypt_payload(
         .ok_or_else(|| "server_master_key_missing".to_string())?;
     let vault_key = core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
         .map_err(|err| format!("vault_key_decrypt_failed: {err}"))?;
-    let payload_bytes =
+    let payload_bytes = Zeroizing::new(
         core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item.id, &item.payload_enc)
-            .map_err(|err| format!("payload_decrypt_failed: {err}"))?;
+            .map_err(|err| format!("payload_decrypt_failed: {err}"))?,
+    );
     EncryptedPayload::from_bytes(&payload_bytes)
         .map_err(|err| format!("payload_decode_failed: {err}"))
 }
@@ -305,5 +378,38 @@ mod tests {
             i_understand_plaintext: true,
         };
         validate_selection(&args).expect("all_shared should be valid");
+    }
+
+    #[test]
+    fn export_budget_accepts_exact_boundaries() {
+        let mut budget = ExportBudget::default();
+        assert_eq!(
+            budget
+                .reserve(
+                    MAX_SHARED_EXPORT_ITEMS as i64,
+                    MAX_SHARED_EXPORT_SOURCE_BYTES as i64,
+                )
+                .expect("exact boundary"),
+            MAX_SHARED_EXPORT_ITEMS
+        );
+    }
+
+    #[test]
+    fn export_budget_rejects_item_and_size_lookahead() {
+        let mut item_budget = ExportBudget::default();
+        assert_eq!(
+            item_budget
+                .reserve(MAX_SHARED_EXPORT_ITEMS as i64 + 1, 0)
+                .expect_err("item lookahead must fail"),
+            "export_item_limit_exceeded"
+        );
+
+        let mut size_budget = ExportBudget::default();
+        assert_eq!(
+            size_budget
+                .reserve(1, MAX_SHARED_EXPORT_SOURCE_BYTES as i64 + 1)
+                .expect_err("size lookahead must fail"),
+            "export_size_limit_exceeded"
+        );
     }
 }

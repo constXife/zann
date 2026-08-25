@@ -3,7 +3,7 @@ use axum::http::{Method, Request, StatusCode};
 use serde_json::json;
 use tower::ServiceExt;
 use tracing_subscriber::EnvFilter;
-use zann_core::{CachePolicy, VaultKind};
+use zann_core::{CachePolicy, VaultEncryptionType, VaultKind};
 use zann_crypto::crypto::SecretKey;
 
 mod support;
@@ -250,9 +250,10 @@ impl TestApp {
         path: &str,
         password: &str,
     ) -> serde_json::Value {
+        let name = path.rsplit('/').next().unwrap_or(path);
         let payload = json!({
             "path": path,
-            "name": path,
+            "name": name,
             "type_id": "login",
             "payload": {
                 "v": 1,
@@ -287,9 +288,10 @@ impl TestApp {
         path: &str,
         password: &str,
     ) {
+        let name = path.rsplit('/').next().unwrap_or(path);
         let payload = json!({
             "path": path,
-            "name": path,
+            "name": name,
             "type_id": "login",
             "payload": {
                 "v": 1,
@@ -521,7 +523,10 @@ async fn shared_list_supports_cursor_pagination() {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    let cursor = first["next_cursor"].as_str().expect("cursor").to_string();
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("cursor")
+        .replace('+', "%2B");
 
     let (status, second) = app
         .get_json(
@@ -535,6 +540,97 @@ async fn shared_list_supports_cursor_pagination() {
     assert_eq!(status, StatusCode::OK);
     let items = second["items"].as_array().expect("items array");
     assert_eq!(items.len(), 1);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn shared_list_rejects_malformed_cursor_and_caps_payload_pages() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("shared-list-bounds@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+    let vault = app.create_shared_vault(token, "shared-list-bounds").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    for index in 0..5 {
+        app.create_item(
+            token,
+            vault_id,
+            &format!("bounded/item-{index}"),
+            "password",
+        )
+        .await;
+    }
+
+    let (status, body) = app
+        .get_json(
+            &format!("/v1/shared/items?vault_id={vault_id}&limit=500"),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "bounded list failed: {body:?}");
+    assert_eq!(body["items"].as_array().map(Vec::len), Some(4));
+    assert!(body["next_cursor"].is_string());
+
+    let (status, body) = app
+        .get_json(
+            &format!("/v1/shared/items?vault_id={vault_id}&cursor=malformed"),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "cursor body: {body:?}");
+    assert_eq!(body["error"], "invalid_cursor");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn ordinary_item_summaries_are_explicitly_paginated() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("ordinary-list-page@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+    let vault = app.create_shared_vault(token, "ordinary-list-page").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    for index in 0..3 {
+        app.create_item(
+            token,
+            vault_id,
+            &format!("ordinary/item-{index}"),
+            "password",
+        )
+        .await;
+    }
+
+    let (status, first) = app
+        .get_json(&format!("/v1/vaults/{vault_id}/items?limit=1"), Some(token))
+        .await;
+    assert_eq!(status, StatusCode::OK, "first page: {first:?}");
+    assert_eq!(first["items"].as_array().map(Vec::len), Some(1));
+    assert!(first["items"][0].get("payload").is_none());
+    let cursor = first["next_cursor"]
+        .as_str()
+        .expect("next cursor")
+        .replace('+', "%2B");
+
+    let (status, second) = app
+        .get_json(
+            &format!("/v1/vaults/{vault_id}/items?limit=1&cursor={cursor}"),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "second page: {second:?}");
+    assert_eq!(second["items"].as_array().map(Vec::len), Some(1));
+    assert_ne!(first["items"][0]["id"], second["items"][0]["id"]);
+
+    let (status, body) = app
+        .get_json(
+            &format!("/v1/vaults/{vault_id}/items?cursor=malformed"),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "cursor body: {body:?}");
+    assert_eq!(body["error"], "invalid_cursor");
 }
 
 #[tokio::test]
@@ -572,6 +668,126 @@ async fn service_account_token_allows_shared_access() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "shared list failed: {:?}", items);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn service_account_catalog_is_complete_or_fails_closed_at_lookahead() {
+    let app = TestApp::new_with_smk().await;
+    let email = "catalog-bound@example.com";
+    let user = app.register(email, "password").await;
+    let _token = user["access_token"].as_str().expect("token");
+    let service_account = app
+        .create_service_account(email, vec!["pattern:*:read".to_string()])
+        .await;
+    let sa_token = service_account["token"].as_str().expect("sa token");
+    let created_at = chrono::Utc::now();
+    let mut expected_ids = Vec::new();
+
+    for index in 0..199 {
+        let id = uuid::Uuid::now_v7();
+        expected_ids.push(id.to_string());
+        let vault_key_enc = if index == 0 {
+            vec![7_u8; 65_536]
+        } else {
+            vec![7_u8]
+        };
+        sqlx_core::query::query::<sqlx_postgres::Postgres>(
+            r#"
+            INSERT INTO vaults (
+                id, slug, name, kind, encryption_type, vault_key_enc,
+                cache_policy, tags, row_version, created_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, $9)
+            "#,
+        )
+        .bind(id)
+        .bind(format!("catalog-{index:03}"))
+        .bind(format!("Catalog {index:03}"))
+        .bind(VaultKind::Shared.as_i32())
+        .bind(VaultEncryptionType::Server.as_i32())
+        .bind(vault_key_enc)
+        .bind(CachePolicy::Full.as_i32())
+        .bind(sqlx_core::types::Json(Vec::<String>::new()))
+        .bind(created_at)
+        .execute(&app.pool)
+        .await
+        .expect("insert catalog vault");
+    }
+
+    expected_ids.sort_unstable();
+    let (status, body) = app.get_json("/v1/vaults", Some(sa_token)).await;
+    assert_eq!(status, StatusCode::OK, "catalog body: {body:?}");
+    let actual_ids = body["vaults"]
+        .as_array()
+        .expect("vault array")
+        .iter()
+        .map(|vault| vault["id"].as_str().expect("vault id").to_string())
+        .collect::<Vec<_>>();
+    assert_eq!(actual_ids, expected_ids, "stable created_at/id ordering");
+
+    sqlx_core::query::query::<sqlx_postgres::Postgres>(
+        r#"
+        INSERT INTO vaults (
+            id, slug, name, kind, encryption_type, vault_key_enc,
+            cache_policy, tags, row_version, created_at
+        )
+        VALUES ($1, 'catalog-199', 'Catalog 199', $2, $3, $4, $5, $6, 1, $7)
+        "#,
+    )
+    .bind(uuid::Uuid::now_v7())
+    .bind(VaultKind::Shared.as_i32())
+    .bind(VaultEncryptionType::Server.as_i32())
+    .bind(vec![7_u8])
+    .bind(CachePolicy::Full.as_i32())
+    .bind(sqlx_core::types::Json(Vec::<String>::new()))
+    .bind(created_at)
+    .execute(&app.pool)
+    .await
+    .expect("insert lookahead vault");
+
+    let (status, body) = app.get_json("/v1/vaults", Some(sa_token)).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(body["error"], "catalog_too_large");
+    assert!(
+        body.get("vaults").is_none(),
+        "must not return a partial catalog"
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn vault_create_rejects_noncanonical_or_oversized_catalog_metadata() {
+    let app = TestApp::new_with_smk().await;
+    let user = app.register("vault-contract@example.com", "password").await;
+    let token = user["access_token"].as_str().expect("token");
+
+    for (slug, name, error) in [
+        ("x".repeat(129), "Name".to_string(), "invalid_slug"),
+        ("bad slug".to_string(), "Name".to_string(), "invalid_slug"),
+        ("valid-slug".to_string(), "x".repeat(201), "invalid_name"),
+        (
+            "valid-slug".to_string(),
+            " Name".to_string(),
+            "invalid_name",
+        ),
+    ] {
+        let (status, body) = app
+            .send_json(
+                Method::POST,
+                "/v1/vaults",
+                Some(token),
+                json!({
+                    "slug": slug,
+                    "name": name,
+                    "kind": VaultKind::Shared.as_i32(),
+                    "cache_policy": CachePolicy::Full.as_i32(),
+                }),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "body: {body:?}");
+        assert_eq!(body["error"], error);
+    }
 }
 
 #[tokio::test]
@@ -767,10 +983,10 @@ async fn service_account_access_token_can_manage_shared_items_without_device_id(
             json!({
                 "vault_id": vault_id,
                 "path": "allowed/one",
-                "type_id": "secret",
+                "type_id": "database",
                 "payload": {
                     "v": 1,
-                    "typeId": "secret",
+                    "typeId": "database",
                     "fields": {
                         "database_url": { "kind": "text", "value": "postgres://one" }
                     }
@@ -794,7 +1010,7 @@ async fn service_account_access_token_can_manage_shared_items_without_device_id(
             json!({
                 "payload": {
                     "v": 1,
-                    "typeId": "secret",
+                    "typeId": "database",
                     "fields": {
                         "database_url": { "kind": "text", "value": "postgres://two" }
                     }
@@ -828,6 +1044,29 @@ async fn service_account_access_token_can_manage_shared_items_without_device_id(
         deleted
     );
     assert!(deleted.is_null());
+
+    let (status, direct_detail) = app
+        .get_json(
+            &format!("/v1/vaults/{}/items/{}", vault_id, item_id),
+            Some(access_token),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "direct current-item GET exposed tombstone payload: {:?}",
+        direct_detail
+    );
+
+    let (status, shared_detail) = app
+        .get_json(&format!("/v1/shared/items/{}", item_id), Some(access_token))
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "shared current-item GET exposed tombstone payload: {:?}",
+        shared_detail
+    );
 }
 
 #[tokio::test]
@@ -864,17 +1103,17 @@ async fn secret_created_via_secrets_endpoint_is_visible_via_shared_items_api() {
     assert_eq!(status, StatusCode::OK, "shared list failed: {:?}", list);
     let items = list["items"].as_array().expect("items array");
     assert_eq!(items.len(), 1, "expected exactly one shared item");
-    assert_eq!(items[0]["path"], "/alpha/one");
-    assert_eq!(items[0]["payload"]["value"], "pw-1");
-    assert_eq!(items[0]["payload"]["policy"], "default");
+    assert_eq!(items[0]["path"], "alpha/one");
+    assert_eq!(items[0]["payload"]["fields"]["value"]["value"], "pw-1");
+    assert_eq!(items[0]["payload"]["fields"]["policy"]["value"], "default");
 
     let item_id = items[0]["id"].as_str().expect("item id");
     let (status, detail) = app
         .get_json(&format!("/v1/shared/items/{}", item_id), Some(token))
         .await;
     assert_eq!(status, StatusCode::OK, "shared detail failed: {:?}", detail);
-    assert_eq!(detail["path"], "/alpha/one");
-    assert_eq!(detail["payload"]["value"], "pw-1");
+    assert_eq!(detail["path"], "alpha/one");
+    assert_eq!(detail["payload"]["fields"]["value"]["value"], "pw-1");
 }
 
 #[tokio::test]

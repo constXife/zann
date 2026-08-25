@@ -1,12 +1,15 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
 use uuid::Uuid;
 use zann_core::{Change, ChangeOp, ChangeType, Identity, Item, ItemHistory, SyncStatus, Vault};
 use zann_crypto::vault_crypto as core_crypto;
+use zann_crypto::{EncryptedPayload, FieldKind, FieldValue};
 use zann_db::repo::{
     ChangeRepo, DeviceRepo, ItemHistoryRepo, ItemRepo, ServiceAccountRepo, UserRepo, VaultRepo,
 };
+use zeroize::Zeroize;
 
 use crate::app::AppState;
 use crate::domains::access_control::http::{
@@ -15,7 +18,10 @@ use crate::domains::access_control::http::{
 use crate::domains::access_control::policies::PolicyDecision;
 use crate::domains::auth::helpers::build_device;
 use crate::domains::errors::ServiceError;
-use crate::domains::items::service::basename_from_path;
+use crate::domains::items::contract::{
+    canonical_create_location, next_item_version, validate_typed_payload, ItemContractError,
+};
+use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
 use crate::domains::secrets::policies::{generate_secret, PasswordPolicy};
 use crate::infra::metrics;
 
@@ -24,7 +30,12 @@ pub type SecretError = ServiceError;
 const SERVICE_ACCOUNT_DEVICE_NAME: &str = "Service Account";
 const SERVICE_ACCOUNT_DEVICE_FINGERPRINT: &str = "service-account";
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) const SECRET_TYPE_ID: &str = "secret";
+const SECRET_VALUE_FIELD: &str = "value";
+const SECRET_POLICY_FIELD: &str = "policy";
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecretPayload {
     pub value: String,
     pub policy: String,
@@ -32,7 +43,91 @@ pub struct SecretPayload {
     pub meta: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Clone)]
+impl fmt::Debug for SecretPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecretPayload")
+            .field("value", &"<redacted>")
+            .field("policy", &"<redacted>")
+            .field(
+                "meta_count",
+                &self.meta.as_ref().map(HashMap::len).unwrap_or(0),
+            )
+            .finish()
+    }
+}
+
+impl Drop for SecretPayload {
+    fn drop(&mut self) {
+        wipe_string(&mut self.value);
+        wipe_string(&mut self.policy);
+        wipe_string_map(&mut self.meta);
+    }
+}
+
+impl SecretPayload {
+    fn into_parts(mut self) -> (String, String, Option<HashMap<String, String>>) {
+        (
+            std::mem::take(&mut self.value),
+            std::mem::take(&mut self.policy),
+            self.meta.take(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SecretPayloadDecodeError {
+    InvalidPayload,
+    PayloadTooLarge,
+}
+
+impl SecretPayloadDecodeError {
+    pub(crate) const fn code(self) -> &'static str {
+        match self {
+            Self::InvalidPayload => "invalid_secret_payload",
+            Self::PayloadTooLarge => "secret_payload_too_large",
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacySecretPayload {
+    value: String,
+    policy: String,
+    #[serde(default)]
+    meta: Option<HashMap<String, String>>,
+}
+
+impl fmt::Debug for LegacySecretPayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("LegacySecretPayload(<redacted>)")
+    }
+}
+
+impl Drop for LegacySecretPayload {
+    fn drop(&mut self) {
+        wipe_string(&mut self.value);
+        wipe_string(&mut self.policy);
+        wipe_string_map(&mut self.meta);
+    }
+}
+
+fn wipe_string(value: &mut String) {
+    let mut bytes = std::mem::take(value).into_bytes();
+    bytes.zeroize();
+}
+
+fn wipe_string_map(value: &mut Option<HashMap<String, String>>) {
+    if let Some(map) = value.as_mut() {
+        for (mut key, mut value) in map.drain() {
+            wipe_string(&mut key);
+            wipe_string(&mut value);
+        }
+    }
+}
+
+#[derive(Clone)]
 pub struct SecretRecord {
     pub path: String,
     pub vault_id: String,
@@ -40,6 +135,70 @@ pub struct SecretRecord {
     pub policy: String,
     pub meta: Option<HashMap<String, String>>,
     pub version: i64,
+}
+
+impl fmt::Debug for SecretRecord {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecretRecord")
+            .field("path", &self.path)
+            .field("vault_id", &self.vault_id)
+            .field("value", &"<redacted>")
+            .field("policy", &"<redacted>")
+            .field(
+                "meta_count",
+                &self.meta.as_ref().map(HashMap::len).unwrap_or(0),
+            )
+            .field("version", &self.version)
+            .finish()
+    }
+}
+
+impl Drop for SecretRecord {
+    fn drop(&mut self) {
+        wipe_string(&mut self.value);
+        wipe_string(&mut self.policy);
+        wipe_string_map(&mut self.meta);
+    }
+}
+
+impl SecretRecord {
+    pub(crate) fn into_parts(
+        mut self,
+    ) -> (
+        String,
+        String,
+        String,
+        String,
+        Option<HashMap<String, String>>,
+        i64,
+    ) {
+        (
+            std::mem::take(&mut self.path),
+            std::mem::take(&mut self.vault_id),
+            std::mem::take(&mut self.value),
+            std::mem::take(&mut self.policy),
+            self.meta.take(),
+            self.version,
+        )
+    }
+}
+
+fn secret_record(
+    path: String,
+    vault_id: Uuid,
+    payload: SecretPayload,
+    version: i64,
+) -> SecretRecord {
+    let (value, policy, meta) = payload.into_parts();
+    SecretRecord {
+        path,
+        vault_id: vault_id.to_string(),
+        value,
+        policy,
+        meta,
+        version,
+    }
 }
 
 struct ActorSnapshot {
@@ -82,7 +241,7 @@ pub async fn get_secret(
         }
     };
 
-    if item.type_id != "secret" || item.sync_status != SyncStatus::Active {
+    if item.type_id != SECRET_TYPE_ID || item.sync_status != SyncStatus::Active {
         return Err(SecretError::NotFound);
     }
 
@@ -95,14 +254,12 @@ pub async fn get_secret(
     tokio::spawn(async move {
         usage_tracker.record_read(item_id, user_id, device_id).await;
     });
-    Ok(SecretRecord {
-        path: item.path,
-        vault_id: vault.id.to_string(),
-        value: payload.value,
-        policy: payload.policy,
-        meta: payload.meta,
-        version: item.version,
-    })
+    Ok(secret_record(
+        external_secret_path(&item.path),
+        vault.id,
+        payload,
+        item.version,
+    ))
 }
 
 pub async fn ensure_secret(
@@ -134,25 +291,23 @@ pub async fn ensure_secret(
         .get_by_vault_path(vault.id, &normalized_path)
         .await
     {
-        if item.type_id != "secret" || item.sync_status != SyncStatus::Active {
+        if item.type_id != SECRET_TYPE_ID || item.sync_status != SyncStatus::Active {
             return Err(SecretError::Conflict("path_in_use"));
         }
-        let payload = decrypt_secret_payload(state, &vault, &item)?;
+        let mut payload = decrypt_secret_payload(state, &vault, &item)?;
         let requested_policy = resolve_policy_name(state, policy_name);
         if payload.policy != requested_policy {
             return Err(SecretError::PolicyMismatch {
-                existing: payload.policy,
+                existing: std::mem::take(&mut payload.policy),
                 requested: requested_policy,
             });
         }
-        let record = SecretRecord {
-            path: item.path,
-            vault_id: vault.id.to_string(),
-            value: payload.value,
-            policy: payload.policy,
-            meta: payload.meta,
-            version: item.version,
-        };
+        let record = secret_record(
+            external_secret_path(&item.path),
+            vault.id,
+            payload,
+            item.version,
+        );
         return Ok((record, false));
     }
 
@@ -174,7 +329,7 @@ pub async fn ensure_secret(
         vault_id: vault.id,
         path: normalized_path.clone(),
         name: basename_from_path(&normalized_path),
-        type_id: "secret".to_string(),
+        type_id: SECRET_TYPE_ID.to_string(),
         tags: None,
         favorite: false,
         payload_enc,
@@ -190,77 +345,47 @@ pub async fn ensure_secret(
         updated_at: now,
     };
 
-    let created = match item_repo.create(&item).await {
+    let created = match create_secret_aggregate(state, identity, &item).await {
         Ok(()) => true,
         Err(err) => {
             tracing::warn!(event = "secret_create_conflict", error = %err);
+            if !err
+                .as_database_error()
+                .is_some_and(|database_error| database_error.is_unique_violation())
+            {
+                return Err(SecretError::DbError);
+            }
             let existing = item_repo
                 .get_by_vault_path(vault.id, &normalized_path)
                 .await
                 .map_err(|_| SecretError::DbError)?;
             if let Some(existing) = existing {
-                if existing.type_id != "secret" || existing.sync_status != SyncStatus::Active {
+                if existing.type_id != SECRET_TYPE_ID || existing.sync_status != SyncStatus::Active
+                {
                     return Err(SecretError::Conflict("path_in_use"));
                 }
-                let payload = decrypt_secret_payload(state, &vault, &existing)?;
+                let mut payload = decrypt_secret_payload(state, &vault, &existing)?;
                 let requested_policy = resolve_policy_name(state, Some(policy_name.as_str()));
                 if payload.policy != requested_policy {
                     return Err(SecretError::PolicyMismatch {
-                        existing: payload.policy,
+                        existing: std::mem::take(&mut payload.policy),
                         requested: requested_policy,
                     });
                 }
-                let record = SecretRecord {
-                    path: existing.path,
-                    vault_id: vault.id.to_string(),
-                    value: payload.value,
-                    policy: payload.policy,
-                    meta: payload.meta,
-                    version: existing.version,
-                };
+                let record = secret_record(
+                    external_secret_path(&existing.path),
+                    vault.id,
+                    payload,
+                    existing.version,
+                );
                 return Ok((record, false));
             }
             return Err(SecretError::DbError);
         }
     };
 
-    let history_repo = ItemHistoryRepo::new(&state.db);
-    let actor = actor_snapshot(state, identity, identity.device_id).await;
-    let history = ItemHistory {
-        id: Uuid::now_v7(),
-        item_id: item.id,
-        payload_enc: item.payload_enc.clone(),
-        checksum: item.checksum.clone(),
-        version: item.version,
-        change_type: ChangeType::Create,
-        fields_changed: None,
-        changed_by_user_id: identity.user_id,
-        changed_by_email: actor.email,
-        changed_by_name: actor.name,
-        changed_by_device_id: identity.device_id,
-        changed_by_device_name: actor.device_name,
-        created_at: now,
-    };
-    if let Err(err) = history_repo.create(&history).await {
-        tracing::warn!(event = "secret_history_create_failed", error = %err);
-    }
-
-    let change_repo = ChangeRepo::new(&state.db);
-    let change = Change {
-        seq: 0,
-        vault_id: vault.id,
-        item_id: item.id,
-        op: ChangeOp::Create,
-        version: item.version,
-        device_id,
-        created_at: now,
-    };
-    if let Err(err) = change_repo.create(&change).await {
-        tracing::warn!(event = "secret_change_create_failed", error = %err);
-    }
-
     let record = SecretRecord {
-        path: item.path,
+        path: external_secret_path(&item.path),
         vault_id: vault.id.to_string(),
         value,
         policy: policy_name,
@@ -302,7 +427,7 @@ pub async fn set_secret(
         .map_err(|_| SecretError::DbError)?;
 
     if let Some(mut item) = existing {
-        if item.type_id != "secret" || item.sync_status != SyncStatus::Active {
+        if item.type_id != SECRET_TYPE_ID || item.sync_status != SyncStatus::Active {
             return Err(SecretError::Conflict("path_in_use"));
         }
 
@@ -325,75 +450,39 @@ pub async fn set_secret(
             && payload.policy == existing_payload.policy
             && payload.meta == existing_payload.meta
         {
-            let record = SecretRecord {
-                path: item.path,
-                vault_id: vault.id.to_string(),
-                value: payload.value,
-                policy: payload.policy,
-                meta: payload.meta,
-                version: item.version,
-            };
+            let record = secret_record(
+                external_secret_path(&item.path),
+                vault.id,
+                payload,
+                item.version,
+            );
             return Ok((record, false));
         }
 
-        let history_repo = ItemHistoryRepo::new(&state.db);
-        let actor = actor_snapshot(state, identity, identity.device_id).await;
-        let history = ItemHistory {
-            id: Uuid::now_v7(),
-            item_id: item.id,
-            payload_enc: item.payload_enc.clone(),
-            checksum: item.checksum.clone(),
-            version: item.version,
-            change_type: ChangeType::Update,
-            fields_changed: None,
-            changed_by_user_id: identity.user_id,
-            changed_by_email: actor.email,
-            changed_by_name: actor.name,
-            changed_by_device_id: identity.device_id,
-            changed_by_device_name: actor.device_name,
-            created_at: Utc::now(),
-        };
-        if let Err(err) = history_repo.create(&history).await {
-            tracing::warn!(event = "secret_history_create_failed", error = %err);
-        }
-
+        let expected_row_version = item.row_version;
         let (payload_enc, checksum) = encrypt_secret_payload(state, &vault, item.id, &payload)?;
         item.payload_enc = payload_enc;
         item.checksum = checksum;
-        item.version = item.version.saturating_add(1);
+        item.version = next_item_version(item.version)
+            .map_err(|_| SecretError::Conflict("invalid_version"))?;
         item.device_id = device_id;
         item.updated_at = Utc::now();
 
-        let Ok(affected) = item_repo.update(&item).await else {
-            tracing::error!(event = "secret_set_failed", "DB error");
-            return Err(SecretError::DbError);
-        };
-        if affected == 0 {
-            return Err(SecretError::Conflict("row_version_conflict"));
-        }
+        update_secret_aggregate(
+            state,
+            identity,
+            expected_row_version,
+            &item,
+            ChangeType::Update,
+        )
+        .await?;
 
-        let change_repo = ChangeRepo::new(&state.db);
-        let change = Change {
-            seq: 0,
-            vault_id: vault.id,
-            item_id: item.id,
-            op: ChangeOp::Update,
-            version: item.version,
-            device_id,
-            created_at: item.updated_at,
-        };
-        if let Err(err) = change_repo.create(&change).await {
-            tracing::warn!(event = "secret_change_create_failed", error = %err);
-        }
-
-        let record = SecretRecord {
-            path: item.path,
-            vault_id: vault.id.to_string(),
-            value: payload.value,
-            policy: payload.policy,
-            meta: payload.meta,
-            version: item.version,
-        };
+        let record = secret_record(
+            external_secret_path(&item.path),
+            vault.id,
+            payload,
+            item.version,
+        );
         return Ok((record, false));
     }
 
@@ -414,7 +503,7 @@ pub async fn set_secret(
         vault_id: vault.id,
         path: normalized_path.clone(),
         name: basename_from_path(&normalized_path),
-        type_id: "secret".to_string(),
+        type_id: SECRET_TYPE_ID.to_string(),
         tags: None,
         favorite: false,
         payload_enc,
@@ -430,70 +519,25 @@ pub async fn set_secret(
         updated_at: now,
     };
 
-    match item_repo.create(&item).await {
+    match create_secret_aggregate(state, identity, &item).await {
         Ok(()) => {}
         Err(err) => {
             tracing::warn!(event = "secret_set_conflict", error = %err);
-            let existing = item_repo
-                .get_by_vault_path(vault.id, &normalized_path)
-                .await
-                .map_err(|_| SecretError::DbError)?;
-            if let Some(existing) = existing {
-                if existing.type_id != "secret" || existing.sync_status != SyncStatus::Active {
-                    return Err(SecretError::Conflict("path_in_use"));
-                }
-                let payload = decrypt_secret_payload(state, &vault, &existing)?;
-                let record = SecretRecord {
-                    path: existing.path,
-                    vault_id: vault.id.to_string(),
-                    value: payload.value,
-                    policy: payload.policy,
-                    meta: payload.meta,
-                    version: existing.version,
-                };
-                return Ok((record, false));
+            if err
+                .as_database_error()
+                .is_some_and(|database_error| database_error.is_unique_violation())
+            {
+                // A concurrent SET may carry a different value/policy/meta.
+                // The randomized ciphertext cannot prove exact idempotency, so
+                // never echo the winner as though this request was applied.
+                return Err(SecretError::Conflict("concurrent_create"));
             }
             return Err(SecretError::DbError);
         }
     }
 
-    let history_repo = ItemHistoryRepo::new(&state.db);
-    let actor = actor_snapshot(state, identity, identity.device_id).await;
-    let history = ItemHistory {
-        id: Uuid::now_v7(),
-        item_id: item.id,
-        payload_enc: item.payload_enc.clone(),
-        checksum: item.checksum.clone(),
-        version: item.version,
-        change_type: ChangeType::Create,
-        fields_changed: None,
-        changed_by_user_id: identity.user_id,
-        changed_by_email: actor.email,
-        changed_by_name: actor.name,
-        changed_by_device_id: identity.device_id,
-        changed_by_device_name: actor.device_name,
-        created_at: now,
-    };
-    if let Err(err) = history_repo.create(&history).await {
-        tracing::warn!(event = "secret_history_create_failed", error = %err);
-    }
-
-    let change_repo = ChangeRepo::new(&state.db);
-    let change = Change {
-        seq: 0,
-        vault_id: vault.id,
-        item_id: item.id,
-        op: ChangeOp::Create,
-        version: item.version,
-        device_id,
-        created_at: now,
-    };
-    if let Err(err) = change_repo.create(&change).await {
-        tracing::warn!(event = "secret_change_create_failed", error = %err);
-    }
-
     let record = SecretRecord {
-        path: item.path,
+        path: external_secret_path(&item.path),
         vault_id: vault.id.to_string(),
         value: value.to_string(),
         policy,
@@ -540,7 +584,7 @@ pub async fn rotate_secret(
         }
     };
 
-    if item.type_id != "secret" || item.sync_status != SyncStatus::Active {
+    if item.type_id != SECRET_TYPE_ID || item.sync_status != SyncStatus::Active {
         return Err(SecretError::NotFound);
     }
 
@@ -555,58 +599,26 @@ pub async fn rotate_secret(
 
     let (payload_enc, checksum) = encrypt_secret_payload(state, &vault, item.id, &payload)?;
     let previous_version = item.version;
-
-    let history_repo = ItemHistoryRepo::new(&state.db);
-    let actor = actor_snapshot(state, identity, identity.device_id).await;
-    let history = ItemHistory {
-        id: Uuid::now_v7(),
-        item_id: item.id,
-        payload_enc: item.payload_enc.clone(),
-        checksum: item.checksum.clone(),
-        version: item.version,
-        change_type: ChangeType::Update,
-        fields_changed: None,
-        changed_by_user_id: identity.user_id,
-        changed_by_email: actor.email,
-        changed_by_name: actor.name,
-        changed_by_device_id: identity.device_id,
-        changed_by_device_name: actor.device_name,
-        created_at: Utc::now(),
-    };
-    if let Err(err) = history_repo.create(&history).await {
-        tracing::warn!(event = "secret_history_create_failed", error = %err);
-    }
+    let expected_row_version = item.row_version;
 
     item.payload_enc = payload_enc;
     item.checksum = checksum;
-    item.version = item.version.saturating_add(1);
+    item.version =
+        next_item_version(item.version).map_err(|_| SecretError::Conflict("invalid_version"))?;
     item.device_id = device_id;
     item.updated_at = Utc::now();
 
-    let Ok(affected) = item_repo.update(&item).await else {
-        tracing::error!(event = "secret_rotate_failed", "DB error");
-        return Err(SecretError::DbError);
-    };
-    if affected == 0 {
-        return Err(SecretError::Conflict("row_version_conflict"));
-    }
-
-    let change_repo = ChangeRepo::new(&state.db);
-    let change = Change {
-        seq: 0,
-        vault_id: vault.id,
-        item_id: item.id,
-        op: ChangeOp::Update,
-        version: item.version,
-        device_id,
-        created_at: item.updated_at,
-    };
-    if let Err(err) = change_repo.create(&change).await {
-        tracing::warn!(event = "secret_change_create_failed", error = %err);
-    }
+    update_secret_aggregate(
+        state,
+        identity,
+        expected_row_version,
+        &item,
+        ChangeType::Update,
+    )
+    .await?;
 
     let record = SecretRecord {
-        path: item.path,
+        path: external_secret_path(&item.path),
         vault_id: vault.id.to_string(),
         value,
         policy: policy_name,
@@ -616,12 +628,150 @@ pub async fn rotate_secret(
     Ok((record, previous_version))
 }
 
-fn normalize_secret_path(path: &str) -> Result<String, SecretError> {
-    let trimmed = path.trim().trim_matches('/');
-    if trimmed.is_empty() {
-        return Err(SecretError::BadRequest("invalid_path"));
+async fn create_secret_aggregate(
+    state: &AppState,
+    identity: &Identity,
+    item: &Item,
+) -> Result<(), sqlx_core::Error> {
+    let actor = actor_snapshot(state, identity, Some(item.device_id)).await;
+    let history = ItemHistory {
+        id: Uuid::now_v7(),
+        item_id: item.id,
+        payload_enc: item.payload_enc.clone(),
+        checksum: item.checksum.clone(),
+        version: item.version,
+        change_type: ChangeType::Create,
+        fields_changed: None,
+        changed_by_user_id: identity.user_id,
+        changed_by_email: actor.email,
+        changed_by_name: actor.name,
+        changed_by_device_id: Some(item.device_id),
+        changed_by_device_name: actor.device_name,
+        created_at: item.updated_at,
+    };
+    let change = Change {
+        seq: 0,
+        vault_id: item.vault_id,
+        item_id: item.id,
+        op: ChangeOp::Create,
+        version: item.version,
+        device_id: item.device_id,
+        created_at: item.updated_at,
+    };
+    let item_repo = ItemRepo::new(&state.db);
+    let history_repo = ItemHistoryRepo::new(&state.db);
+    let change_repo = ChangeRepo::new(&state.db);
+    let mut tx = state.db.begin().await?;
+    item_repo.create_in(&mut tx, item).await?;
+    history_repo.create_in(&mut tx, &history).await?;
+    history_repo
+        .prune_by_item_in(&mut tx, item.id, ITEM_HISTORY_LIMIT)
+        .await?;
+    change_repo.create_in(&mut tx, &change).await?;
+    tx.commit().await
+}
+
+async fn update_secret_aggregate(
+    state: &AppState,
+    identity: &Identity,
+    expected_row_version: i64,
+    item: &Item,
+    change_type: ChangeType,
+) -> Result<(), SecretError> {
+    let actor = actor_snapshot(state, identity, Some(item.device_id)).await;
+    let item_repo = ItemRepo::new(&state.db);
+    let history_repo = ItemHistoryRepo::new(&state.db);
+    let change_repo = ChangeRepo::new(&state.db);
+    let mut tx = state.db.begin().await.map_err(|err| {
+        tracing::error!(event = "secret_mutation_failed", error = %err, "DB error");
+        SecretError::DbError
+    })?;
+    let locked = item_repo
+        .get_by_id_for_update_in(&mut tx, item.id)
+        .await
+        .map_err(|err| {
+            tracing::error!(event = "secret_mutation_failed", error = %err, "DB error");
+            SecretError::DbError
+        })?
+        .ok_or(SecretError::NotFound)?;
+    if locked.vault_id != item.vault_id || locked.row_version != expected_row_version {
+        return Err(SecretError::Conflict("row_version_conflict"));
     }
-    Ok(format!("/{trimmed}"))
+    if locked.type_id != SECRET_TYPE_ID || locked.sync_status != SyncStatus::Active {
+        return Err(SecretError::NotFound);
+    }
+    let expected_version =
+        next_item_version(locked.version).map_err(|_| SecretError::Conflict("invalid_version"))?;
+    if item.version != expected_version {
+        return Err(SecretError::Conflict("row_version_conflict"));
+    }
+    let history = ItemHistory {
+        id: Uuid::now_v7(),
+        item_id: locked.id,
+        payload_enc: locked.payload_enc,
+        checksum: locked.checksum,
+        version: locked.version,
+        change_type,
+        fields_changed: None,
+        changed_by_user_id: identity.user_id,
+        changed_by_email: actor.email,
+        changed_by_name: actor.name,
+        changed_by_device_id: Some(item.device_id),
+        changed_by_device_name: actor.device_name,
+        created_at: item.updated_at,
+    };
+    history_repo
+        .create_in(&mut tx, &history)
+        .await
+        .map_err(|err| {
+            tracing::error!(event = "secret_history_create_failed", error = %err);
+            SecretError::DbError
+        })?;
+    history_repo
+        .prune_by_item_in(&mut tx, item.id, ITEM_HISTORY_LIMIT)
+        .await
+        .map_err(|err| {
+            tracing::error!(event = "secret_history_prune_failed", error = %err);
+            SecretError::DbError
+        })?;
+    let affected = item_repo.update_in(&mut tx, item).await.map_err(|err| {
+        tracing::error!(event = "secret_mutation_failed", error = %err, "DB error");
+        SecretError::DbError
+    })?;
+    if affected != 1 {
+        return Err(SecretError::Conflict("row_version_conflict"));
+    }
+    let change = Change {
+        seq: 0,
+        vault_id: item.vault_id,
+        item_id: item.id,
+        op: ChangeOp::Update,
+        version: item.version,
+        device_id: item.device_id,
+        created_at: item.updated_at,
+    };
+    change_repo
+        .create_in(&mut tx, &change)
+        .await
+        .map_err(|err| {
+            tracing::error!(event = "secret_change_create_failed", error = %err);
+            SecretError::DbError
+        })?;
+    tx.commit().await.map_err(|err| {
+        tracing::error!(event = "secret_mutation_commit_failed", error = %err);
+        SecretError::DbError
+    })
+}
+
+fn normalize_secret_path(path: &str) -> Result<String, SecretError> {
+    let storage_path = path.strip_prefix('/').unwrap_or(path);
+    canonical_create_location(storage_path, None)
+        .map(|(path, _)| path)
+        .map_err(|error| SecretError::BadRequest(error.code()))
+}
+
+fn external_secret_path(storage_path: &str) -> String {
+    format!("/{storage_path}")
 }
 
 fn normalize_meta(meta: Option<HashMap<String, String>>) -> Option<HashMap<String, String>> {
@@ -748,6 +898,135 @@ fn ensure_server_encryption(state: &AppState, vault: &Vault) -> Result<(), Secre
     Ok(())
 }
 
+/// Converts the secrets API representation into the single canonical typed wire shape.
+///
+/// Secret typed payloads contain exactly `value` (password) and `policy` (text) fields.
+/// The API `meta` map occupies `extra`; field-level metadata is deliberately unsupported
+/// so that a payload has only one interpretation across the secrets and items APIs.
+pub(crate) fn secret_payload_to_typed(payload: &SecretPayload) -> EncryptedPayload {
+    let mut typed = EncryptedPayload::new(SECRET_TYPE_ID);
+    typed.fields.insert(
+        SECRET_VALUE_FIELD.to_string(),
+        FieldValue {
+            kind: FieldKind::Password,
+            value: payload.value.clone(),
+            meta: None,
+        },
+    );
+    typed.fields.insert(
+        SECRET_POLICY_FIELD.to_string(),
+        FieldValue {
+            kind: FieldKind::Text,
+            value: payload.policy.clone(),
+            meta: None,
+        },
+    );
+    typed.extra = payload.meta.clone();
+    typed
+}
+
+/// Converts a strictly canonical typed secret payload to the secrets API representation.
+pub(crate) fn secret_payload_from_typed(
+    mut payload: EncryptedPayload,
+) -> Result<SecretPayload, SecretPayloadDecodeError> {
+    validate_secret_typed_payload(&payload)?;
+
+    let mut value = payload
+        .fields
+        .remove(SECRET_VALUE_FIELD)
+        .ok_or(SecretPayloadDecodeError::InvalidPayload)?;
+    let mut policy = payload
+        .fields
+        .remove(SECRET_POLICY_FIELD)
+        .ok_or(SecretPayloadDecodeError::InvalidPayload)?;
+    Ok(SecretPayload {
+        value: std::mem::take(&mut value.value),
+        policy: std::mem::take(&mut policy.value),
+        meta: payload.extra.take(),
+    })
+}
+
+/// Decodes current typed ciphertext and the legacy `{value, policy, meta}` encoding.
+///
+/// The return value is always canonical typed data. Legacy data is never written again:
+/// the warning below inventories records awaiting lazy remediation, and the next secrets
+/// mutation rewrites the item in the typed format. The fallback model is intentionally
+/// strict (`deny_unknown_fields`) so hybrid or ambiguous encodings fail closed.
+pub(crate) fn decode_secret_payload_bytes(
+    mut bytes: Vec<u8>,
+) -> Result<EncryptedPayload, SecretPayloadDecodeError> {
+    let result = decode_secret_payload_slice(&bytes);
+    bytes.zeroize();
+    result
+}
+
+fn decode_secret_payload_slice(bytes: &[u8]) -> Result<EncryptedPayload, SecretPayloadDecodeError> {
+    if let Ok(payload) = EncryptedPayload::from_bytes(bytes) {
+        validate_secret_typed_payload(&payload)?;
+        return Ok(payload);
+    }
+
+    let mut legacy = serde_json::from_slice::<LegacySecretPayload>(bytes)
+        .map_err(|_| SecretPayloadDecodeError::InvalidPayload)?;
+    let mut payload = EncryptedPayload::new(SECRET_TYPE_ID);
+    payload.fields.insert(
+        SECRET_VALUE_FIELD.to_string(),
+        FieldValue {
+            kind: FieldKind::Password,
+            value: std::mem::take(&mut legacy.value),
+            meta: None,
+        },
+    );
+    payload.fields.insert(
+        SECRET_POLICY_FIELD.to_string(),
+        FieldValue {
+            kind: FieldKind::Text,
+            value: std::mem::take(&mut legacy.policy),
+            meta: None,
+        },
+    );
+    payload.extra = legacy.meta.take();
+    validate_secret_typed_payload(&payload)?;
+    tracing::warn!(
+        event = "legacy_secret_payload_decoded",
+        remediation = "rewrite_on_next_secret_write",
+        "Legacy secret payload accepted for lazy remediation"
+    );
+    Ok(payload)
+}
+
+pub(crate) fn validate_secret_typed_payload(
+    payload: &EncryptedPayload,
+) -> Result<(), SecretPayloadDecodeError> {
+    validate_typed_payload(payload, SECRET_TYPE_ID).map_err(map_item_contract_error)?;
+    if payload.fields.len() != 2 {
+        return Err(SecretPayloadDecodeError::InvalidPayload);
+    }
+    let value = payload
+        .fields
+        .get(SECRET_VALUE_FIELD)
+        .ok_or(SecretPayloadDecodeError::InvalidPayload)?;
+    let policy = payload
+        .fields
+        .get(SECRET_POLICY_FIELD)
+        .ok_or(SecretPayloadDecodeError::InvalidPayload)?;
+    if value.kind != FieldKind::Password
+        || value.meta.is_some()
+        || policy.kind != FieldKind::Text
+        || policy.meta.is_some()
+    {
+        return Err(SecretPayloadDecodeError::InvalidPayload);
+    }
+    Ok(())
+}
+
+fn map_item_contract_error(error: ItemContractError) -> SecretPayloadDecodeError {
+    match error {
+        ItemContractError::PayloadTooLarge => SecretPayloadDecodeError::PayloadTooLarge,
+        _ => SecretPayloadDecodeError::InvalidPayload,
+    }
+}
+
 fn decrypt_secret_payload(
     state: &AppState,
     vault: &Vault,
@@ -767,17 +1046,20 @@ fn decrypt_secret_payload(
                 tracing::error!(event = "secret_decrypt_failed", error = %err);
                 SecretError::Internal("payload_decrypt_failed")
             })?;
-    let payload = {
-        let _span = tracing::debug_span!(
-            "serialize_json",
-            op = "secret_payload_decode",
-            bytes_len = bytes.len()
-        )
-        .entered();
-        serde_json::from_slice::<SecretPayload>(&bytes)
-            .map_err(|_| SecretError::Internal("decode_failed"))?
+    let bytes_len = bytes.len();
+    let typed = {
+        let _span = tracing::debug_span!("serialize_json", op = "secret_payload_decode", bytes_len)
+            .entered();
+        decode_secret_payload_bytes(bytes)
     };
-    Ok(payload)
+    let typed = typed.map_err(|error| {
+        tracing::error!(event = "secret_decrypt_failed", reason = error.code());
+        SecretError::Internal("decode_failed")
+    })?;
+    secret_payload_from_typed(typed).map_err(|error| {
+        tracing::error!(event = "secret_decrypt_failed", reason = error.code());
+        SecretError::Internal("decode_failed")
+    })
 }
 
 fn encrypt_secret_payload(
@@ -794,17 +1076,23 @@ fn encrypt_secret_payload(
             tracing::error!(event = "secret_encrypt_failed", error = %err);
             SecretError::Internal("vault_key_decrypt_failed")
         })?;
-    let payload_bytes = {
-        let _span = tracing::debug_span!("serialize_json", op = "secret_payload_encode").entered();
-        serde_json::to_vec(payload).map_err(|_| SecretError::Internal("payload_encode_failed"))?
-    };
+    let typed = secret_payload_to_typed(payload);
+    validate_secret_typed_payload(&typed).map_err(|error| {
+        tracing::warn!(event = "secret_encrypt_rejected", reason = error.code());
+        match error {
+            SecretPayloadDecodeError::PayloadTooLarge => {
+                SecretError::BadRequest("secret_payload_too_large")
+            }
+            SecretPayloadDecodeError::InvalidPayload => {
+                SecretError::Internal("payload_encode_failed")
+            }
+        }
+    })?;
     let payload_enc =
-        core_crypto::encrypt_payload_bytes(&vault_key, vault.id, item_id, &payload_bytes).map_err(
-            |err| {
-                tracing::error!(event = "secret_encrypt_failed", error = %err);
-                SecretError::Internal("payload_encrypt_failed")
-            },
-        )?;
+        core_crypto::encrypt_payload(&vault_key, vault.id, item_id, &typed).map_err(|err| {
+            tracing::error!(event = "secret_encrypt_failed", error = %err);
+            SecretError::Internal("payload_encrypt_failed")
+        })?;
     let checksum = core_crypto::payload_checksum(&payload_enc);
     Ok((payload_enc, checksum))
 }
@@ -974,4 +1262,213 @@ fn matches_pattern(pattern: &str, value: &str) -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use zann_crypto::FieldMeta;
+
+    fn sample_secret() -> SecretPayload {
+        SecretPayload {
+            value: "sentinel-value".to_string(),
+            policy: "sentinel-policy".to_string(),
+            meta: Some(HashMap::from([
+                ("owner".to_string(), "sentinel-owner".to_string()),
+                ("purpose".to_string(), "sentinel-purpose".to_string()),
+            ])),
+        }
+    }
+
+    #[test]
+    fn secret_payload_roundtrips_through_exact_typed_shape() {
+        let secret = sample_secret();
+        let typed = secret_payload_to_typed(&secret);
+
+        assert_eq!(typed.v, 1);
+        assert_eq!(typed.type_id, SECRET_TYPE_ID);
+        assert_eq!(typed.fields.len(), 2);
+        let value = typed.fields.get(SECRET_VALUE_FIELD).expect("value field");
+        assert_eq!(value.kind, FieldKind::Password);
+        assert_eq!(value.value, secret.value);
+        assert!(value.meta.is_none());
+        let policy = typed.fields.get(SECRET_POLICY_FIELD).expect("policy field");
+        assert_eq!(policy.kind, FieldKind::Text);
+        assert_eq!(policy.value, secret.policy);
+        assert!(policy.meta.is_none());
+        assert_eq!(typed.extra, secret.meta);
+
+        let decoded = secret_payload_from_typed(typed).expect("canonical typed payload");
+        assert_eq!(decoded.value, secret.value);
+        assert_eq!(decoded.policy, secret.policy);
+        assert_eq!(decoded.meta, secret.meta);
+    }
+
+    #[test]
+    fn legacy_decode_returns_canonical_typed_payload() {
+        let legacy = br#"{
+            "value": "sentinel-value",
+            "policy": "sentinel-policy",
+            "meta": {"owner": "sentinel-owner"}
+        }"#;
+
+        let typed = decode_secret_payload_bytes(legacy.to_vec()).expect("legacy payload");
+        let decoded = secret_payload_from_typed(typed).expect("canonical legacy conversion");
+        assert_eq!(decoded.value, "sentinel-value");
+        assert_eq!(decoded.policy, "sentinel-policy");
+        assert_eq!(
+            decoded.meta,
+            Some(HashMap::from([(
+                "owner".to_string(),
+                "sentinel-owner".to_string()
+            )]))
+        );
+    }
+
+    #[test]
+    fn typed_secret_decode_rejects_extra_missing_or_ambiguous_fields() {
+        let canonical = secret_payload_to_typed(&sample_secret());
+
+        let mut extra_field = canonical.clone();
+        extra_field.fields.insert(
+            "password".to_string(),
+            FieldValue {
+                kind: FieldKind::Password,
+                value: "ambiguous".to_string(),
+                meta: None,
+            },
+        );
+        assert!(matches!(
+            decode_secret_payload_bytes(extra_field.to_bytes().expect("serialize")),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
+
+        let mut missing_field = canonical.clone();
+        missing_field.fields.remove(SECRET_POLICY_FIELD);
+        assert!(matches!(
+            decode_secret_payload_bytes(missing_field.to_bytes().expect("serialize")),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
+
+        let hybrid = br#"{
+            "v": 1,
+            "typeId": "secret",
+            "fields": {},
+            "value": "ambiguous",
+            "policy": "ambiguous"
+        }"#;
+        assert!(matches!(
+            decode_secret_payload_bytes(hybrid.to_vec()),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
+
+        let unknown_typed_member = br#"{
+            "v": 1,
+            "typeId": "secret",
+            "fields": {},
+            "sentinel-unknown": "sentinel-value"
+        }"#;
+        assert!(matches!(
+            decode_secret_payload_bytes(unknown_typed_member.to_vec()),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
+    }
+
+    #[test]
+    fn typed_secret_decode_rejects_wrong_kinds_field_meta_type_and_version() {
+        let canonical = secret_payload_to_typed(&sample_secret());
+
+        let mut wrong_kind = canonical.clone();
+        wrong_kind
+            .fields
+            .get_mut(SECRET_VALUE_FIELD)
+            .expect("value field")
+            .kind = FieldKind::Text;
+        assert!(matches!(
+            secret_payload_from_typed(wrong_kind),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
+
+        let mut field_meta = canonical.clone();
+        field_meta
+            .fields
+            .get_mut(SECRET_POLICY_FIELD)
+            .expect("policy field")
+            .meta = Some(FieldMeta::default());
+        assert!(matches!(
+            secret_payload_from_typed(field_meta),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
+
+        let mut wrong_type = canonical.clone();
+        wrong_type.type_id = "login".to_string();
+        assert!(matches!(
+            secret_payload_from_typed(wrong_type),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
+
+        let mut wrong_version = canonical;
+        wrong_version.v = 2;
+        assert!(matches!(
+            secret_payload_from_typed(wrong_version),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
+    }
+
+    #[test]
+    fn typed_secret_decode_applies_plaintext_size_limit() {
+        let oversized = SecretPayload {
+            value: "x".repeat(300_000),
+            policy: "default".to_string(),
+            meta: None,
+        };
+        assert!(matches!(
+            secret_payload_from_typed(secret_payload_to_typed(&oversized)),
+            Err(SecretPayloadDecodeError::PayloadTooLarge)
+        ));
+    }
+
+    #[test]
+    fn secret_debug_output_is_redacted() {
+        let secret = sample_secret();
+        let rendered = format!("{secret:?}");
+        for sentinel in [
+            "sentinel-value",
+            "sentinel-policy",
+            "sentinel-owner",
+            "sentinel-purpose",
+        ] {
+            assert!(!rendered.contains(sentinel));
+        }
+
+        let legacy = LegacySecretPayload {
+            value: "sentinel-value".to_string(),
+            policy: "sentinel-policy".to_string(),
+            meta: None,
+        };
+        let rendered = format!("{legacy:?}");
+        assert!(!rendered.contains("sentinel-value"));
+        assert!(!rendered.contains("sentinel-policy"));
+
+        let record = SecretRecord {
+            path: "folder/secret".to_string(),
+            vault_id: Uuid::nil().to_string(),
+            value: "sentinel-value".to_string(),
+            policy: "sentinel-policy".to_string(),
+            meta: Some(HashMap::from([(
+                "sentinel-owner".to_string(),
+                "sentinel-purpose".to_string(),
+            )])),
+            version: 1,
+        };
+        let rendered = format!("{record:?}");
+        for sentinel in [
+            "sentinel-value",
+            "sentinel-policy",
+            "sentinel-owner",
+            "sentinel-purpose",
+        ] {
+            assert!(!rendered.contains(sentinel));
+        }
+    }
 }

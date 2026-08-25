@@ -1,24 +1,19 @@
-pub mod constants;
-pub mod types;
-pub mod util;
-
+#[cfg(feature = "app")]
+pub mod app;
+#[cfg(feature = "config")]
 pub mod config;
-pub mod http;
-pub mod identity;
-pub mod remote;
-
-pub mod crypto;
-pub mod state;
-pub mod tokens;
-
-pub mod auth;
-pub mod auth_oidc;
-pub mod auth_password;
-
+#[cfg(feature = "os-credentials")]
+pub mod credentials;
+#[cfg(feature = "remote")]
+#[allow(dead_code)]
+mod identity;
+#[cfg(feature = "app")]
+pub mod oidc;
+#[cfg(feature = "remote")]
+pub mod probe;
+#[cfg(feature = "remote")]
+mod remote;
+#[cfg(feature = "session")]
+pub mod session;
+#[cfg(feature = "sync")]
 pub mod sync;
-pub mod sync_helpers;
-
-pub use state::{
-    CliConfig, CliContext, ClientState, IdentityConfig, PendingLogin, PendingLoginResult,
-    TokenEntry,
-};

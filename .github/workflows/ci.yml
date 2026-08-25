@@ -18,6 +18,8 @@ jobs:
       docker: ${{ steps.filter.outputs.docker }}
       js: ${{ steps.filter.outputs.js }}
       audit_surface: ${{ steps.filter.outputs.audit_surface }}
+      client_architecture: ${{ steps.filter.outputs.client_architecture }}
+      shared_clients: ${{ steps.filter.outputs.shared_clients }}
       cosmic: ${{ steps.filter.outputs.cosmic }}
       ci: ${{ steps.filter.outputs.ci }}
     steps:
@@ -36,6 +38,7 @@ jobs:
               - '.github/ISSUE_TEMPLATE/**'
             rust:
               - 'crates/**'
+              - 'tests/fixtures/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'deny.toml'
@@ -57,21 +60,93 @@ jobs:
               - 'apps/desktop/bun.lock'
             audit_surface:
               - 'crates/zann-crypto/**'
+              - 'tests/fixtures/crypto/**'
               - 'crates/zann-core/src/auth.rs'
+              - 'crates/zann-core/src/api/auth.rs'
+              - 'crates/zann-client/src/config.rs'
+              - 'crates/zann-client/src/config/locking.rs'
+              - 'crates/zann-client/src/config/v2.rs'
+              - 'crates/zann-client/src/credentials.rs'
+              - 'crates/zann-client/src/identity.rs'
+              - 'crates/zann-client/src/probe.rs'
+              - 'crates/zann-client/src/remote.rs'
+              - 'crates/zann-client/src/remote/auth.rs'
+              - 'crates/zann-client/src/remote/trust.rs'
+              - 'crates/zann-client/src/session.rs'
+              - 'crates/zann-client/src/app.rs'
+              - 'crates/zann-client/src/sync/**'
+              - 'crates/zann-client/tests/config_v2.rs'
+              - 'crates/zann-client-sqlite/**'
+              - 'crates/zann-db/src/lib.rs'
+              - 'crates/zann-db/src/local/bounded_read.rs'
+              - 'crates/zann-db/src/local/item_repo.rs'
+              - 'crates/zann-db/src/local/mod.rs'
+              - 'crates/zann-db/src/local/pending_change_repo.rs'
+              - 'crates/zann-db/src/local/storage_repo.rs'
+              - 'crates/zann-db/src/local/sync_cursor_repo.rs'
+              - 'crates/zann-db/src/local/sync_repo.rs'
+              - 'crates/zann-db/src/local/vault_repo.rs'
+              - 'crates/zann-db/migrations/0002_sync_cursor_last_seq.sql'
+              - 'crates/zann-db/tests/local_sqlite_path.rs'
+              - 'crates/zann-db/tests/local_sync_transactions.rs'
+              - 'crates/zann-db/tests/local_vault_migration.rs'
               - 'crates/zann-server/src/domains/auth/core/**'
               - 'crates/zann-server/src/domains/access_control/**'
               - 'crates/zann-server/src/infra/audit.rs'
               - 'crates/zann-keystore/**'
-            # Собирать пакет на каждое изменение в crates/** слишком дорого:
-            # libcosmic с wgpu строятся десятки минут. Поэтому фильтр только на
-            # то, что описывает саму упаковку. Плата за это — поломка cosmic
-            # правкой в crates/** всплывёт на следующем PR, который его трогает.
+            # The architecture guard is intentionally cheap. Run it whenever a
+            # client shell, a shared capability, or their dependency manifests
+            # change so ownership rules cannot silently drift.
+            client_architecture:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/**/Cargo.toml'
+              - 'crates/zann-client/**'
+              - 'crates/zann-client-sqlite/**'
+              - 'crates/zann-cli/**'
+              - 'crates/zann-core/**'
+              - 'crates/zann-crypto/**'
+              - 'crates/zann-db/**'
+              - 'crates/zann-ffi/**'
+              - 'crates/zann-keystore/**'
+              - 'crates/zann-ui-core/**'
+              - 'apps/desktop/src-tauri/**'
+              - 'apps/cosmic/**'
+              - 'schemas/**'
+              - 'tests/fixtures/**'
+              - 'docs/architecture/**'
+              - 'docs/adr/0001-shared-client-core.md'
+              - '.github/CODEOWNERS'
+              - 'CONTRIBUTING.md'
+              - 'Justfile'
+              - 'config/architecture-boundaries.json'
+              - 'scripts/check-client-architecture.sh'
+            # Shared client changes must be exercised against both excluded
+            # app crates. Tauri and COSMIC run headless Rust tests; the costly
+            # Nix package build remains selective.
+            shared_clients:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'crates/zann-client/**'
+              - 'crates/zann-client-sqlite/**'
+              - 'crates/zann-core/**'
+              - 'crates/zann-crypto/**'
+              - 'crates/zann-db/**'
+              - 'crates/zann-ffi/**'
+              - 'crates/zann-keystore/**'
+              - 'crates/zann-ui-core/**'
+              - 'schemas/**'
+              - 'tests/fixtures/**'
+            # Полная Nix-сборка libcosmic с wgpu занимает десятки минут,
+            # поэтому здесь только исходники и упаковка COSMIC. Совместимость
+            # с crates/** закрывает headless job cosmic-rust-consumer.
             cosmic:
               - 'apps/cosmic/**'
               - 'flake.nix'
               - 'flake.lock'
             ci:
               - '.github/workflows/**'
+              - '.github/actions/**'
 
   fmt:
     needs: changes
@@ -219,8 +294,176 @@ jobs:
         run: scripts/check-audit-surface-deps.sh
       - name: Clippy (audit-surface)
         run: cargo clippy -p zann-crypto -p zann-core -p zann-server -p zann-keystore --all-targets -- -D warnings
+      - name: Clippy (client security core)
+        run: cargo clippy -p zann-client --no-default-features --features remote,os-credentials --all-targets --locked -- -D warnings
+      - name: Clippy (authenticated session surface)
+        run: cargo clippy -p zann-client --no-default-features --features session --all-targets --locked -- -D warnings
+      - name: Clippy (DB-free sync surface)
+        run: cargo clippy -p zann-client --no-default-features --features sync --all-targets --locked -- -D warnings
+      - name: Clippy (DB-free application facade)
+        run: cargo clippy -p zann-client --no-default-features --features app --all-targets --locked -- -D warnings
+      - name: Clippy (pull-only SQLite sync adapter)
+        run: cargo clippy -p zann-client-sqlite --all-targets --locked -- -D warnings
+      - name: Clippy (SQLite persistence seams)
+        run: cargo clippy -p zann-db --no-default-features --features sqlite --all-targets --locked -- -D warnings
       - name: Tests (audit-surface)
         run: cargo test -p zann-crypto
+      - name: Tests (pull-only SQLite sync adapter)
+        run: cargo test -p zann-client-sqlite --locked
+      - name: Tests (SQLite sync and path seams)
+        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration
+
+  client-architecture:
+    needs: changes
+    if: needs.changes.outputs.client_architecture == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+      - name: Install architecture tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep libudev-dev
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+      - name: Client architecture guard
+        run: scripts/check-client-architecture.sh
+      - name: Check remote-only client surface
+        run: cargo check -p zann-client --no-default-features --features remote --locked
+      - name: Test config-only client surface
+        run: cargo test -p zann-client --no-default-features --features config --locked
+      - name: Lint config-only client surface
+        run: cargo clippy -p zann-client --no-default-features --features config --all-targets --locked -- -D warnings
+      - name: Check CLI-facing client surface
+        run: cargo check -p zann-client --no-default-features --features remote,config --locked
+      - name: Check authenticated session surface
+        run: cargo check -p zann-client --no-default-features --features session --locked
+      - name: Test authenticated session surface
+        run: cargo test -p zann-client --no-default-features --features session --lib --locked
+      - name: Check DB-free sync surface
+        run: cargo check -p zann-client --no-default-features --features sync --locked
+      - name: Test DB-free sync surface
+        run: cargo test -p zann-client --no-default-features --features sync --lib --locked
+      - name: Lint DB-free sync surface
+        run: cargo clippy -p zann-client --no-default-features --features sync --all-targets --locked -- -D warnings
+      - name: Test DB-free application facade
+        run: cargo test -p zann-client --no-default-features --features app --lib --locked
+      - name: Lint DB-free application facade
+        run: cargo clippy -p zann-client --no-default-features --features app --all-targets --locked -- -D warnings
+      - name: Test pull-only SQLite sync adapter
+        run: cargo test -p zann-client-sqlite --locked
+      - name: Lint pull-only SQLite sync adapter
+        run: cargo clippy -p zann-client-sqlite --all-targets --locked -- -D warnings
+      - name: Test canonical client/FFI feature-unification regression
+        run: cargo test -p zann-ffi --test client_surface_coexistence --locked
+      - name: Test OS credential adapter surface
+        run: cargo test -p zann-client --no-default-features --features os-credentials --locked
+      - name: Test thin OS secret-store surface
+        run: cargo test -p zann-keystore --no-default-features --features secret-store --all-targets --locked
+
+  client-locking-portability:
+    needs: changes
+    if: needs.changes.outputs.client_architecture == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+      - name: Test portable client process locks
+        run: cargo test -p zann-client --no-default-features --features auth-lock --lib config::locking::tests --locked
+
+  # Tauri is outside the root workspace, so root tests cannot catch shared API
+  # or compatibility changes in its Rust adapter.
+  desktop-rust-consumer:
+    needs: changes
+    if: needs.changes.outputs.shared_clients == 'true' || needs.changes.outputs.js == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libayatana-appindicator3-dev \
+            libxkbcommon-dev \
+            libssl-dev \
+            libudev-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
+      # tauri-build validates frontendDist even though cargo check does not
+      # bundle or execute the frontend.
+      - name: Prepare frontend directory
+        run: mkdir -p apps/desktop/dist
+      - name: Test Tauri Rust consumer
+        run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --locked
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
+  # This runs the headless COSMIC library/adapters and flow tests without
+  # building the full Nix package derivation.
+  cosmic-rust-consumer:
+    needs: changes
+    if: needs.changes.outputs.shared_clients == 'true' || needs.changes.outputs.cosmic == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      # Override the repository's 1.92 rust-toolchain for libcosmic's newer MSRV.
+      RUSTUP_TOOLCHAIN: stable
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      CARGO_INCREMENTAL: "0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libssl-dev \
+            libudev-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libexpat1-dev \
+            libfontconfig1-dev \
+            libfreetype6-dev \
+            libgl1-mesa-dev \
+            libvulkan-dev
+      # libcosmic's MSRV is newer than the workspace pin.
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+        with:
+          use-sccache: "true"
+      - name: Test COSMIC Rust consumer
+        run: cargo test --manifest-path apps/cosmic/Cargo.toml --lib --tests --locked
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
 
   test:
     needs: changes

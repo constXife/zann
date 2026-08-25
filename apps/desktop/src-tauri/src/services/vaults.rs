@@ -330,7 +330,7 @@ async fn create_remote_vault(
     };
     let payload = VaultCreatePayload {
         id: Some(client_vault_id.to_string()),
-        slug,
+        slug: slug.clone(),
         name: name.to_string(),
         kind: kind.as_i32(),
         cache_policy: cache_policy.as_i32(),
@@ -372,11 +372,13 @@ async fn create_remote_vault(
     let record = LocalVault {
         id: vault_id,
         storage_id: storage_uuid,
+        slug,
         name: created.name.clone(),
         kind,
         is_default: false,
         vault_key_enc: vault_key_enc_local,
         key_wrap_type: wrap_type,
+        cache_key_fp: None,
         last_synced_at: None,
     };
     let _ = vault_repo.create(&record).await;

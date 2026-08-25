@@ -1,4 +1,3 @@
-use argon2::{Algorithm, Argon2, Params, Version};
 use base64::Engine;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -143,11 +142,13 @@ async fn verify_remote_master_password(
         let local_vault = LocalVault {
             id: vault_id,
             storage_id: Uuid::nil(),
+            slug: vault.slug.clone(),
             name: vault.name.clone(),
             kind,
             is_default: false,
             vault_key_enc: vault.vault_key_enc.clone(),
             key_wrap_type: KeyWrapType::RemoteStrict,
+            cache_key_fp: None,
             last_synced_at: None,
         };
         if decrypt_vault_key_with_master(master_key, &local_vault).is_err() {
@@ -260,7 +261,8 @@ pub async fn initialize_master_password(
         .identity
         .ok_or_else(|| "identity not initialized".to_string())?;
     log_master_key_context("initialize", &password, &identity);
-    let master_key = derive_master_key(&password, &identity).map_err(|err| err.to_string())?;
+    let master_key =
+        crate::crypto::derive_master_key(&password, &identity).map_err(|err| err.to_string())?;
     if let Err((kind, message)) = verify_remote_master_password(&state, &master_key).await {
         return Ok(ApiResponse::err(&kind, &message));
     }
@@ -332,6 +334,8 @@ fn keystore_error(err: &KeystoreError) -> (String, String) {
         KeystoreError::Cancelled => "keystore_cancelled",
         KeystoreError::NotFound => "keystore_not_found",
         KeystoreError::Unsupported => "keystore_unsupported",
+        KeystoreError::InvalidNamespace => "keystore_invalid_namespace",
+        KeystoreError::SecretTooLarge { .. } => "keystore_secret_too_large",
         KeystoreError::Internal { .. } => "keystore_unavailable",
     };
     (kind.to_string(), err.to_string())
@@ -407,31 +411,6 @@ pub async fn session_unlock_with_biometrics(
     *state.master_key.write().await = Some(std::sync::Arc::clone(&master_key));
     handle_master_key_change(&app, &state, master_key.as_ref()).await?;
     Ok(ApiResponse::ok(()))
-}
-
-fn derive_master_key(
-    password: &str,
-    identity: &crate::state::IdentityConfig,
-) -> Result<SecretKey, anyhow::Error> {
-    if identity.kdf_params.algorithm != "argon2id" {
-        anyhow::bail!("unsupported kdf algorithm");
-    }
-    let salt = base64::engine::general_purpose::STANDARD
-        .decode(&identity.kdf_salt)
-        .map_err(|_| anyhow::anyhow!("invalid kdf salt"))?;
-    let params = Params::new(
-        identity.kdf_params.memory_kb,
-        identity.kdf_params.iterations,
-        identity.kdf_params.parallelism,
-        Some(32),
-    )
-    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut key = [0u8; 32];
-    argon2
-        .hash_password_into(password.as_bytes(), &salt, &mut key)
-        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-    Ok(SecretKey::from_bytes(key))
 }
 
 pub async fn session_rebind_biometrics(
@@ -592,7 +571,8 @@ pub async fn unlock(
         .identity
         .ok_or_else(|| "identity not initialized".to_string())?;
     log_master_key_context("unlock", &password, &identity);
-    let master_key = derive_master_key(&password, &identity).map_err(|err| err.to_string())?;
+    let master_key =
+        crate::crypto::derive_master_key(&password, &identity).map_err(|err| err.to_string())?;
     let master_key = std::sync::Arc::new(master_key);
     *state.master_key.write().await = Some(std::sync::Arc::clone(&master_key));
     handle_master_key_change(&app, &state, master_key.as_ref()).await?;
@@ -671,6 +651,39 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
     use zann_keystore::{KeystoreStatus, KeystoreStatusReason, RememberedUnlock};
+
+    #[test]
+    fn canonical_master_key_kdf_matches_golden_vector() {
+        let fixture: serde_json::Value = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../../tests/fixtures/crypto/v1_local_vault.json"
+        )))
+        .expect("parse crypto fixture");
+        let kdf = &fixture["kdf"];
+        let params = &kdf["params"];
+        let identity = crate::state::IdentityConfig {
+            kdf_salt: kdf["salt_base64"].as_str().expect("salt").to_string(),
+            kdf_params: zann_core::api::auth::KdfParams {
+                algorithm: params["algorithm"].as_str().expect("algorithm").to_string(),
+                iterations: u32::try_from(params["iterations"].as_u64().expect("iterations"))
+                    .expect("iterations fit u32"),
+                memory_kb: u32::try_from(params["memory_kb"].as_u64().expect("memory_kb"))
+                    .expect("memory_kb fits u32"),
+                parallelism: u32::try_from(params["parallelism"].as_u64().expect("parallelism"))
+                    .expect("parallelism fits u32"),
+            },
+            salt_fingerprint: None,
+            first_seen_at: None,
+            email: None,
+        };
+
+        let password = kdf["password"].as_str().expect("password");
+        let key = crate::crypto::derive_master_key(password, &identity)
+            .expect("derive canonical master key");
+        let expected = kdf["expected_key_hex"].as_str().expect("expected key");
+
+        assert_eq!(data_encoding::HEXLOWER.encode(key.as_bytes()), expected);
+    }
 
     struct FakeKeystore {
         stored: Mutex<Option<Vec<u8>>>,

@@ -1,4 +1,5 @@
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 use crate::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
 use crate::EncryptedPayload;
@@ -84,8 +85,9 @@ pub fn decrypt_vault_key(
     let blob =
         EncryptedBlob::from_bytes(vault_key_enc).map_err(|_| VaultCryptoError::InvalidBlob)?;
     let aad = vault_key_aad(vault_id);
-    let key_bytes =
-        decrypt_blob(master_key, &blob, &aad).map_err(|_| VaultCryptoError::DecryptFailed)?;
+    let key_bytes = Zeroizing::new(
+        decrypt_blob(master_key, &blob, &aad).map_err(|_| VaultCryptoError::DecryptFailed)?,
+    );
     if key_bytes.len() != 32 {
         return Err(VaultCryptoError::InvalidKeyLength);
     }
@@ -172,9 +174,11 @@ pub fn encrypt_payload(
     item_id: Uuid,
     payload: &EncryptedPayload,
 ) -> Result<Vec<u8>, VaultCryptoError> {
-    let payload_bytes = payload
-        .to_bytes()
-        .map_err(|_| VaultCryptoError::InvalidPayload)?;
+    let payload_bytes = Zeroizing::new(
+        payload
+            .to_bytes()
+            .map_err(|_| VaultCryptoError::InvalidPayload)?,
+    );
     encrypt_payload_bytes(vault_key, vault_id, item_id, &payload_bytes)
 }
 
@@ -189,11 +193,27 @@ pub fn decrypt_payload(
     item_id: Uuid,
     payload_enc: &[u8],
 ) -> Result<EncryptedPayload, VaultCryptoError> {
-    let payload_bytes = decrypt_payload_bytes(vault_key, vault_id, item_id, payload_enc)?;
+    let payload_bytes = Zeroizing::new(decrypt_payload_bytes(
+        vault_key,
+        vault_id,
+        item_id,
+        payload_enc,
+    )?);
     EncryptedPayload::from_bytes(&payload_bytes).map_err(|_| VaultCryptoError::InvalidPayload)
 }
 
 #[must_use]
 pub fn payload_checksum(payload_enc: &[u8]) -> String {
     blake3::hash(payload_enc).to_hex().to_string()
+}
+
+/// Stable identifier for the key that produced a local cache ciphertext.
+///
+/// This intentionally preserves the existing twelve-hex-character storage
+/// format. It is a compare-and-swap provenance marker, not a replacement for
+/// authenticated encryption or a cryptographic key identifier.
+#[must_use]
+pub fn cache_key_fingerprint(key: &SecretKey) -> String {
+    let hex = blake3::hash(key.as_bytes()).to_hex().to_string();
+    hex[..12].to_string()
 }

@@ -79,11 +79,13 @@ impl LocalClient {
         let vault = LocalVault {
             id: vault_id,
             storage_id: self.storage_id,
+            slug: format!("personal_{}", vault_id.simple()),
             name: "Personal Vault".to_string(),
             kind: VaultKind::Personal,
             is_default: false,
             vault_key_enc,
             key_wrap_type: KeyWrapType::RemoteStrict,
+            cache_key_fp: None,
             last_synced_at: None,
         };
         let repo = LocalVaultRepo::new(&self.pool);
@@ -94,11 +96,13 @@ impl LocalClient {
         let vault = LocalVault {
             id: vault_id,
             storage_id: self.storage_id,
+            slug: format!("shared_{}", vault_id.simple()),
             name: "Shared Vault".to_string(),
             kind: VaultKind::Shared,
             is_default: false,
             vault_key_enc,
             key_wrap_type: KeyWrapType::RemoteServer,
+            cache_key_fp: None,
             last_synced_at: None,
         };
         let repo = LocalVaultRepo::new(&self.pool);

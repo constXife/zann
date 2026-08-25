@@ -1,5 +1,3 @@
-use argon2::{Algorithm, Argon2, Params, Version};
-use base64::Engine;
 use uuid::Uuid;
 use zann_core::crypto::{decrypt_blob, EncryptedBlob, SecretKey};
 
@@ -52,23 +50,8 @@ pub fn derive_master_key(
     password: &str,
     identity: &crate::state::IdentityConfig,
 ) -> Result<SecretKey, anyhow::Error> {
-    if identity.kdf_params.algorithm != "argon2id" {
-        anyhow::bail!("unsupported kdf algorithm");
-    }
-    let salt = base64::engine::general_purpose::STANDARD
-        .decode(&identity.kdf_salt)
-        .map_err(|_| anyhow::anyhow!("invalid kdf salt"))?;
-    let params = Params::new(
-        identity.kdf_params.memory_kb,
-        identity.kdf_params.iterations,
-        identity.kdf_params.parallelism,
-        Some(32),
-    )
-    .map_err(|err| anyhow::anyhow!(err.to_string()))?;
-    let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
-    let mut key = [0u8; 32];
-    argon2
-        .hash_password_into(password.as_bytes(), &salt, &mut key)
-        .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+    let params = identity.kdf_params.to_crypto_params();
+    let key = zann_core::passwords::derive_auth_hash(password, &identity.kdf_salt, &params)
+        .map_err(anyhow::Error::msg)?;
     Ok(SecretKey::from_bytes(key))
 }

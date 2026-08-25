@@ -17,12 +17,13 @@ async fn create_item(
     vault_id: Uuid,
     password: &str,
 ) -> serde_json::Value {
+    let payload_enc = password.as_bytes();
     let payload = json!({
         "path": "login",
         "name": "login",
         "type_id": "login",
-        "payload_enc": password.as_bytes(),
-        "checksum": format!("checksum-{}", password)
+        "payload_enc": payload_enc,
+        "checksum": zann_crypto::payload_checksum(payload_enc)
     });
     let (status, json) = app
         .send_json(
@@ -42,12 +43,13 @@ async fn create_item(
 }
 
 async fn update_item(app: &TestApp, token: &str, vault_id: Uuid, item_id: &str, password: &str) {
+    let payload_enc = password.as_bytes();
     let payload = json!({
         "path": "login",
         "name": "login",
         "type_id": "login",
-        "payload_enc": password.as_bytes(),
-        "checksum": format!("checksum-{}", password)
+        "payload_enc": payload_enc,
+        "checksum": zann_crypto::payload_checksum(payload_enc)
     });
     let (status, json) = app
         .send_json(
@@ -297,6 +299,14 @@ async fn personal_sync_includes_history_tail() {
     let vault_id = app
         .personal_vault_id("personal-sync-history@example.com")
         .await;
+    let master_key = SecretKey::generate();
+    let vault_key = SecretKey::generate();
+    app.update_vault_key(
+        token,
+        vault_id,
+        encrypt_vault_key(&master_key, vault_id, &vault_key),
+    )
+    .await;
 
     let item = create_item(&app, token, vault_id, "pw-1").await;
     let item_id = item["id"].as_str().expect("item id").to_string();

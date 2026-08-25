@@ -15,19 +15,32 @@ pub(super) async fn list_items(
     axum::extract::Path(vault_id): axum::extract::Path<String>,
     Query(query): Query<ItemsListQuery>,
 ) -> impl IntoResponse {
-    let items =
-        match service::list_items(&state, &identity, &vault_id, query.prefix.as_deref()).await {
-            Ok(items) => items,
-            Err(error) => return map_items_error(error),
-        };
+    let page = match service::list_items(
+        &state,
+        &identity,
+        &vault_id,
+        query.prefix.as_deref(),
+        query.limit,
+        query.cursor.as_deref(),
+    )
+    .await
+    {
+        Ok(page) => page,
+        Err(error) => return map_items_error(error),
+    };
 
-    let items = items.into_iter().map(item_summary).collect::<Vec<_>>();
+    let next_cursor = if page.has_more {
+        page.items.last().map(service::encode_item_list_cursor)
+    } else {
+        None
+    };
+    let items = page.items.into_iter().map(item_summary).collect::<Vec<_>>();
     tracing::info!(
         event = "items_listed",
         count = items.len(),
         "Item list returned"
     );
-    Json(ItemsResponse { items }).into_response()
+    Json(ItemsResponse { items, next_cursor }).into_response()
 }
 
 #[tracing::instrument(skip(state, identity), fields(vault_id = %vault_id))]

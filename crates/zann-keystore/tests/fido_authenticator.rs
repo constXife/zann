@@ -9,7 +9,7 @@
 //! cargo test -p zann-keystore --test fido_authenticator -- --ignored
 //! ```
 
-#![cfg(any(target_os = "linux", target_os = "macos"))]
+#![cfg(all(feature = "fido", any(target_os = "linux", target_os = "macos")))]
 
 use zann_keystore::fido;
 

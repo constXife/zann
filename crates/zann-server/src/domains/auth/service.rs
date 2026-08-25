@@ -2,13 +2,13 @@ use base64::Engine;
 use chrono::Utc;
 use sqlx_core::query::query;
 use sqlx_postgres::Postgres;
-use std::collections::HashSet;
 use uuid::Uuid;
 use zann_core::api::auth::{
     LoginRequest, LoginResponse, LogoutRequest, OidcLoginRequest, PreloginResponse, RefreshRequest,
-    RegisterRequest,
+    RegisterRequest, ServiceAccountLoginRequest, ServiceAccountLoginResponse,
+    ServiceAccountVaultKey,
 };
-use zann_core::{Session, User, UserStatus, VaultEncryptionType, VaultKind};
+use zann_core::{Session, User, UserStatus};
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{
     DeviceRepo, ServiceAccountRepo, ServiceAccountSessionRepo, SessionRepo, UserRepo, VaultRepo,
@@ -16,7 +16,6 @@ use zann_db::repo::{
 
 use crate::app::AppState;
 use crate::config::{AuthMode, InternalRegistration};
-use crate::domains::access_control::http::scopes_allow_vault;
 use crate::domains::auth::core::identity::identity_from_oidc;
 use crate::domains::auth::core::oidc::validate_oidc_jwt;
 use crate::domains::auth::core::passwords::{
@@ -32,12 +31,10 @@ use crate::domains::errors::ServiceError;
 use crate::infra::db::apply_tx_isolation;
 use crate::infra::metrics;
 
-use super::http::v1::types::{
-    ServiceAccountLoginRequest, ServiceAccountLoginResponse, ServiceAccountVaultKey,
-};
-
 const SERVICE_ACCOUNT_PREFIX: &str = "zann_sa_";
 const SERVICE_ACCOUNT_PREFIX_LEN: usize = 12;
+const MAX_SERVICE_ACCOUNT_VAULT_KEYS: usize = 64;
+const SERVICE_ACCOUNT_VAULT_KEY_LOOKAHEAD: i64 = 65;
 
 pub struct AuthRequestContext {
     pub client_ip: Option<String>,
@@ -1226,25 +1223,18 @@ async fn service_account_vault_keys(
         return Err("smk_missing");
     };
     let vault_repo = VaultRepo::new(&state.db);
-    let mut keys = Vec::new();
-    let mut seen = HashSet::new();
-
-    let vaults = vault_repo.list_all().await.map_err(|_| "db_error")?;
+    let filter = crate::domains::vaults::service::service_account_catalog_filter(&account.scopes.0);
+    let vaults = vault_repo
+        .list_service_account_key_material(&filter, SERVICE_ACCOUNT_VAULT_KEY_LOOKAHEAD)
+        .await
+        .map_err(|_| "db_error")?;
+    if vaults.len() > MAX_SERVICE_ACCOUNT_VAULT_KEYS {
+        return Err("catalog_too_large");
+    }
+    let mut keys = Vec::with_capacity(vaults.len());
     for vault in vaults {
-        if vault.kind != VaultKind::Shared {
-            continue;
-        }
-        if vault.encryption_type != VaultEncryptionType::Server {
-            continue;
-        }
-        if !scopes_allow_vault(&account.scopes.0, &vault) {
-            continue;
-        }
-        if !seen.insert(vault.id) {
-            continue;
-        }
-
-        let key = core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
+        let vault_key_enc = vault.vault_key_enc.ok_or("invalid_vault_key")?;
+        let key = core_crypto::decrypt_vault_key(smk, vault.id, &vault_key_enc)
             .map_err(|err| err.as_code())?;
         let key_b64 = base64::engine::general_purpose::STANDARD.encode(key.as_bytes());
         keys.push(ServiceAccountVaultKey {

@@ -8,7 +8,10 @@
 //! cargo test -p zann-keystore --test os_keystore -- --ignored
 //! ```
 
-#![cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#![cfg(all(
+    feature = "secret-store",
+    any(target_os = "macos", target_os = "windows", target_os = "linux")
+))]
 
 use zann_keystore::{KeyringKeystore, Keystore};
 

@@ -22,6 +22,10 @@ audit:
 check: fmt clippy
     cargo test
 
+# Validate client-layer ownership, dependency direction and temporary exceptions.
+architecture-check:
+    ./scripts/check-client-architecture.sh
+
 fast-test:
     cargo test
 
