@@ -583,6 +583,7 @@ pub struct SessionAccess {
     source: AccessSource,
     completion: OperationCompletion,
     cleanup_deferred: bool,
+    #[cfg_attr(not(feature = "sync"), allow(dead_code))]
     authorized_target_generation: Arc<AuthorizedTargetGeneration>,
     #[allow(dead_code)] // Consumed only by crate-owned authenticated transports.
     access_secret: CredentialSecret,
@@ -650,6 +651,7 @@ impl SessionAccess {
         self.cleanup_deferred
     }
 
+    #[cfg_attr(not(feature = "sync"), allow(dead_code))]
     pub(crate) fn authorized_target_generation(&self) -> Arc<AuthorizedTargetGeneration> {
         Arc::clone(&self.authorized_target_generation)
     }
