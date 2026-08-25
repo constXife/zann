@@ -364,7 +364,11 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM vaults
-        WHERE octet_length(vault_key_enc) NOT BETWEEN 1 AND 65536
+        WHERE octet_length(vault_key_enc) > 65536
+           OR (
+                octet_length(vault_key_enc) = 0
+                AND NOT (kind = 1 AND encryption_type = 1)
+           )
     ) THEN
         RAISE EXCEPTION USING
             ERRCODE = '23514',
@@ -566,7 +570,14 @@ ALTER TABLE vaults
             AND name !~ '[[:space:]]$'
         ),
     ADD CONSTRAINT vaults_key_bounds
-        CHECK (octet_length(vault_key_enc) BETWEEN 1 AND 65536),
+        CHECK (
+            octet_length(vault_key_enc) BETWEEN 1 AND 65536
+            OR (
+                octet_length(vault_key_enc) = 0
+                AND kind = 1
+                AND encryption_type = 1
+            )
+        ),
     ADD CONSTRAINT vaults_tags_storage_bounds
         CHECK (octet_length(tags::text) <= 65536);
 
