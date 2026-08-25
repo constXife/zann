@@ -138,6 +138,12 @@ pub async fn reset_db(pool: &PgPool) {
         .execute(pool)
         .await
         .expect("truncate tables");
+    sqlx_core::query::query::<Postgres>(
+        "INSERT INTO changes_commit_clock (singleton, last_seq) VALUES (TRUE, 0)",
+    )
+    .execute(pool)
+    .await
+    .expect("reset change commit clock");
 }
 
 pub async fn setup_db() -> PgPool {
