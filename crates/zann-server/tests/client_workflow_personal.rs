@@ -299,6 +299,14 @@ async fn personal_sync_includes_history_tail() {
     let vault_id = app
         .personal_vault_id("personal-sync-history@example.com")
         .await;
+    let master_key = SecretKey::generate();
+    let vault_key = SecretKey::generate();
+    app.update_vault_key(
+        token,
+        vault_id,
+        encrypt_vault_key(&master_key, vault_id, &vault_key),
+    )
+    .await;
 
     let item = create_item(&app, token, vault_id, "pw-1").await;
     let item_id = item["id"].as_str().expect("item id").to_string();
