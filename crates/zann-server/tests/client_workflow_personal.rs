@@ -17,12 +17,13 @@ async fn create_item(
     vault_id: Uuid,
     password: &str,
 ) -> serde_json::Value {
+    let payload_enc = password.as_bytes();
     let payload = json!({
         "path": "login",
         "name": "login",
         "type_id": "login",
-        "payload_enc": password.as_bytes(),
-        "checksum": format!("checksum-{}", password)
+        "payload_enc": payload_enc,
+        "checksum": zann_crypto::payload_checksum(payload_enc)
     });
     let (status, json) = app
         .send_json(
@@ -42,12 +43,13 @@ async fn create_item(
 }
 
 async fn update_item(app: &TestApp, token: &str, vault_id: Uuid, item_id: &str, password: &str) {
+    let payload_enc = password.as_bytes();
     let payload = json!({
         "path": "login",
         "name": "login",
         "type_id": "login",
-        "payload_enc": password.as_bytes(),
-        "checksum": format!("checksum-{}", password)
+        "payload_enc": payload_enc,
+        "checksum": zann_crypto::payload_checksum(payload_enc)
     });
     let (status, json) = app
         .send_json(
