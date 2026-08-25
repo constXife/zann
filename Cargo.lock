@@ -1336,27 +1336,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dirs"
-version = "5.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44c45a9d03d6676652bcb5e724c7e988de1acad23a711b5217ab9cbecbec2225"
-dependencies = [
- "dirs-sys",
-]
-
-[[package]]
-name = "dirs-sys"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "520f05a5cbd335fae5a99ff7a6ab8627577660ee5cfd6a94a6a929b52ff0321c"
-dependencies = [
- "libc",
- "option-ext",
- "redox_users",
- "windows-sys 0.48.0",
-]
-
-[[package]]
 name = "dispatch2"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1462,15 +1441,6 @@ dependencies = [
  "sec1",
  "subtle",
  "zeroize",
-]
-
-[[package]]
-name = "encoding_rs"
-version = "0.8.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
-dependencies = [
- "cfg-if",
 ]
 
 [[package]]
@@ -2178,7 +2148,6 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
- "webpki-roots",
 ]
 
 [[package]]
@@ -3321,12 +3290,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "option-ext"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
-
-[[package]]
 name = "ordered-stream"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4011,17 +3974,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "redox_users"
-version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba009ff324d1fc1b900bd1fdb31564febe58a8ccc8a6fdbb93b543d33b13ca43"
-dependencies = [
- "getrandom 0.2.16",
- "libredox",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "regex"
 version = "1.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4058,11 +4010,9 @@ checksum = "3b4c14b2d9afca6a60277086b0cc6a6ae0b568f6f7916c943a8cdc79f8be240f"
 dependencies = [
  "base64",
  "bytes",
- "encoding_rs",
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -4072,7 +4022,6 @@ dependencies = [
  "hyper-util",
  "js-sys",
  "log",
- "mime",
  "native-tls",
  "percent-encoding",
  "pin-project-lite",
@@ -4094,7 +4043,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "webpki-roots",
 ]
 
 [[package]]
@@ -6008,15 +5956,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "webpki-roots"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2878ef029c47c6e8cf779119f20fcf52bde7ad42a731b2a304bc221df17571e"
-dependencies = [
- "rustls-pki-types",
-]
-
-[[package]]
 name = "weedle2"
 version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6500,23 +6439,39 @@ dependencies = [
 name = "zann-client"
 version = "0.1.0"
 dependencies = [
- "anyhow",
- "argon2",
  "base64",
- "blake3",
  "chrono",
  "data-encoding",
- "dirs",
  "ed25519-dalek",
  "rand 0.8.7",
  "reqwest 0.12.26",
+ "same-file",
  "serde",
  "serde_json",
  "sha2",
  "tempfile",
+ "thiserror 1.0.69",
  "tokio",
+ "url",
  "uuid",
  "zann-core",
+ "zann-crypto",
+ "zann-keystore",
+ "zeroize",
+]
+
+[[package]]
+name = "zann-client-sqlite"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "zann-client",
+ "zann-core",
+ "zann-crypto",
  "zann-db",
 ]
 
@@ -6565,6 +6520,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "chrono",
+ "same-file",
  "serde_json",
  "sqlx-core",
  "sqlx-macros",
@@ -6582,7 +6538,6 @@ dependencies = [
 name = "zann-ffi"
 version = "0.1.0"
 dependencies = [
- "argon2",
  "base64",
  "chrono",
  "serde",
@@ -6595,6 +6550,7 @@ dependencies = [
  "uuid",
  "zann-app",
  "zann-client",
+ "zann-client-sqlite",
  "zann-core",
  "zann-crypto",
  "zann-db",
@@ -6606,7 +6562,6 @@ dependencies = [
 name = "zann-keystore"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "base64",
  "blake3",
  "ctap-hid-fido2",
@@ -6616,6 +6571,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "zann-crypto",
+ "zeroize",
 ]
 
 [[package]]
@@ -6623,7 +6579,6 @@ name = "zann-server"
 version = "0.1.0"
 dependencies = [
  "aide",
- "argon2",
  "axum",
  "axum-prometheus",
  "base64",
@@ -6664,10 +6619,10 @@ dependencies = [
  "tracing-opentelemetry",
  "tracing-subscriber",
  "uuid",
- "zann-client",
  "zann-core",
  "zann-crypto",
  "zann-db",
+ "zeroize",
 ]
 
 [[package]]

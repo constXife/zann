@@ -122,11 +122,13 @@ pub(crate) async fn ensure_local_vaults(
         let record = LocalVault {
             id: vault_id,
             storage_id: storage_uuid,
+            slug: vault.slug.clone(),
             name: vault.name.clone(),
             kind,
             is_default: false,
             vault_key_enc: vault.vault_key_enc.clone(),
             key_wrap_type,
+            cache_key_fp: None,
             last_synced_at: None,
         };
         let _ = vault_repo.create(&record).await;

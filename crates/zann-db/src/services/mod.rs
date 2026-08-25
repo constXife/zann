@@ -28,8 +28,7 @@ const ITEM_HISTORY_LIMIT: i64 = 5;
 
 impl<'a> LocalServices<'a> {
     fn key_fingerprint(key: &SecretKey) -> String {
-        let hex = blake3::hash(key.as_bytes()).to_hex().to_string();
-        hex.get(0..12).unwrap_or(&hex).to_string()
+        core_crypto::cache_key_fingerprint(key)
     }
 
     fn item_debug(_args: std::fmt::Arguments<'_>) {}

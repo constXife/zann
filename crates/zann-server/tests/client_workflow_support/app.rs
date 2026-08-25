@@ -23,7 +23,7 @@ use crate::support;
 pub struct TestApp {
     _guard: support::TestGuard,
     pub(super) app: axum::Router,
-    pub(super) pool: zann_db::PgPool,
+    pub(crate) pool: zann_db::PgPool,
 }
 
 impl TestApp {

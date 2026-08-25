@@ -330,11 +330,13 @@ pub async fn apple_import(
                         let local_vault = LocalVault {
                             id: vault_id,
                             storage_id: storage.id,
+                            slug: detail.slug.clone(),
                             name: detail.name.clone(),
                             kind,
                             is_default: false,
                             vault_key_enc: detail.vault_key_enc.clone(),
                             key_wrap_type,
+                            cache_key_fp: None,
                             last_synced_at: None,
                         };
                         vault_repo
@@ -784,11 +786,13 @@ async fn plain_import_remote(
             let local_vault = LocalVault {
                 id: vault_id,
                 storage_id: storage.id,
+                slug: detail.slug.clone(),
                 name: detail.name.clone(),
                 kind,
                 is_default: false,
                 vault_key_enc: detail.vault_key_enc.clone(),
                 key_wrap_type,
+                cache_key_fp: None,
                 last_synced_at: None,
             };
             vault_repo

@@ -649,11 +649,13 @@ pub async fn plain_import(
             let local_vault = LocalVault {
                 id: vault_id_to_use,
                 storage_id: target_storage_id,
+                slug: LocalVault::local_slug(vault_id_to_use),
                 name: name.clone(),
                 kind: vault_kind,
                 is_default: vault.is_default,
                 vault_key_enc: vault_key_enc.clone(),
                 key_wrap_type: KeyWrapType::Master,
+                cache_key_fp: None,
                 last_synced_at: None,
             };
             match vault_repo.create(&local_vault).await {

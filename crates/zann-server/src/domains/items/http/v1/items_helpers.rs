@@ -1,11 +1,11 @@
 use zann_core::{Item, Vault, VaultEncryptionType};
 
 use crate::app::AppState;
-use crate::domains::items::service::{self, ItemsError};
+use crate::domains::items::service::{self, ItemListEntry, ItemsError};
 
 use super::items_models::{ItemResponse, ItemSummary};
 
-pub(super) fn item_summary(item: Item) -> ItemSummary {
+pub(super) fn item_summary(item: ItemListEntry) -> ItemSummary {
     ItemSummary {
         id: item.id.to_string(),
         path: item.path,
@@ -26,7 +26,13 @@ pub(super) fn item_response(
     item: Item,
 ) -> Result<ItemResponse, ItemsError> {
     let (payload_enc, payload) = if vault.encryption_type == VaultEncryptionType::Server {
-        let payload = service::decrypt_payload_json(state, vault, item.id, &item.payload_enc)?;
+        let payload = service::decrypt_typed_payload(
+            state,
+            vault,
+            item.id,
+            &item.payload_enc,
+            &item.type_id,
+        )?;
         (None, Some(payload))
     } else {
         (Some(item.payload_enc), None)

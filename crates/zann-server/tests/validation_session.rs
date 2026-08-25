@@ -224,7 +224,7 @@ async fn payload_too_large_is_rejected() {
             "item_id": Uuid::now_v7(),
             "operation": ChangeType::Create.as_i32(),
             "payload_enc": payload_enc,
-            "checksum": "checksum",
+            "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3]),
             "path": "dos/path",
             "name": "DOS",
             "type_id": "login"
@@ -252,7 +252,7 @@ async fn invalid_item_is_rejected() {
             "item_id": Uuid::now_v7(),
             "operation": ChangeType::Create.as_i32(),
             "payload_enc": [1, 2, 3],
-            "checksum": "checksum",
+            "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3]),
             "path": "",
             "name": "Invalid",
             "type_id": "login"

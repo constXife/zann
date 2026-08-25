@@ -4,23 +4,41 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT"
 
+[features]
+default = ["full"]
+# The complete device-unlock surface used by the existing desktop and FFI
+# consumers. Keep this as the default for backwards compatibility.
+full = ["remembered"]
+# Generic OS credential storage plus the legacy DWK compatibility adapter.
+# This deliberately excludes remembered-unlock and raw-HID/FIDO support.
+secret-store = ["dep:base64", "dep:keyring"]
+fido = ["dep:blake3", "dep:ctap-hid-fido2"]
+remembered = [
+  "secret-store",
+  "fido",
+  "dep:rand",
+  "dep:serde_json",
+  "dep:zann-crypto",
+]
+
 [dependencies]
-anyhow = "1"
-base64 = "0.22"
-blake3 = "1"
-rand = "0.8"
+base64 = { version = "0.22", optional = true }
+blake3 = { version = "1", optional = true }
+rand = { version = "0.8", optional = true }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", optional = true }
 thiserror = "1"
-zann-crypto = { path = "../zann-crypto" }
+zeroize = "1"
+zann-crypto = { path = "../zann-crypto", optional = true }
 
 # FIDO2 over raw HID. Linux and macOS only: on Windows a non-elevated process
 # cannot reach the device this way and has to go through webauthn.dll.
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
-ctap-hid-fido2 = "3.5"
+ctap-hid-fido2 = { version = "3.5", optional = true }
 
 [target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
-keyring = "2"
+keyring = { version = "2", optional = true }
 
 [dev-dependencies]
 rand = "0.8"
+serde_json = "1"

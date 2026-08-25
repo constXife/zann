@@ -88,8 +88,8 @@
           # И пример seed_demo_vault, и tests/flows.rs создают записи через
           # debug_create_kv_item, который в zann-ffi объявлен под
           # #[cfg(debug_assertions)] и в release не существует. Поэтому пакет
-          # собирает только бинарь и не гоняет тесты — их место в
-          # `just cosmic-test`, где сборка идёт в debug.
+          # собирает только бинарь и не гоняет тесты — их место в debug CI и
+          # `just cosmic-test`.
           cargoBuildFlags = [ "--bin" "zann-cosmic" ];
           doCheck = false;
 

@@ -15,6 +15,7 @@ sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 uuid = { version = "1", features = ["v7"] }
 serde_json = "1"
+same-file = { version = "1", optional = true }
 tracing = "0.1"
 url = "2"
 zann-core = { path = "../zann-core", default-features = false }
@@ -23,5 +24,5 @@ zann-crypto = { path = "../zann-crypto" }
 [features]
 default = []
 postgres = ["dep:sqlx-postgres", "zann-core/postgres"]
-sqlite = ["dep:sqlx-sqlite", "zann-core/sqlite"]
+sqlite = ["dep:same-file", "dep:sqlx-sqlite", "zann-core/sqlite"]
 postgres-tests = []

@@ -17,6 +17,7 @@ fn base_cmd(home: &Path) -> Command {
         "ZANN_TOKEN",
         "ZANN_TOKEN_FILE",
         "ZANN_SERVER_FINGERPRINT",
+        "ZANN_SERVICE_TOKEN",
     ] {
         cmd.env_remove(name);
     }
@@ -43,15 +44,31 @@ fn legacy_secret_payload(value: &str) -> serde_json::Value {
     })
 }
 
+fn system_info_body(server_fingerprint: &str) -> serde_json::Value {
+    json!({
+        "version": "1.0.0",
+        "build_commit": null,
+        "server_id": "server-id",
+        "identity": {
+            "public_key": "public-key",
+            "timestamp": 1_700_000_000,
+            "signature": "signature"
+        },
+        "server_name": "Test server",
+        "server_fingerprint": server_fingerprint,
+        "auth_methods": [1, 99],
+        "personal_vaults_enabled": true,
+        "internal_users_present": true,
+        "future_metadata": {"accepted": true}
+    })
+}
+
 #[test]
 fn server_info_command_fetches_info() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
 
-    let info_body = json!({
-        "server_fingerprint": "sha256:test",
-        "auth_methods": []
-    });
+    let info_body = system_info_body("sha256:test");
     server
         .mock("GET", "/v1/system/info")
         .with_status(200)
@@ -62,7 +79,9 @@ fn server_info_command_fetches_info() {
         .args(["--addr", &server.url(), "--insecure", "server", "info"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("server_fingerprint"));
+        .stdout(predicate::str::contains("server_fingerprint"))
+        .stdout(predicate::str::contains("\"version\": \"1.0.0\""))
+        .stdout(predicate::str::contains("99"));
 }
 
 #[test]
@@ -662,10 +681,7 @@ fn run_command_passes_secret_to_process() {
     let mut server = Server::new();
     let item_id = "00000000-0000-0000-0000-000000000001";
 
-    let info_body = json!({
-        "server_fingerprint": "sha256:run",
-        "auth_methods": []
-    });
+    let info_body = system_info_body("sha256:run");
     server
         .mock("GET", "/v1/system/info")
         .with_status(200)
@@ -673,8 +689,11 @@ fn run_command_passes_secret_to_process() {
         .create();
 
     let auth_body = json!({
+        "service_account_id": "service-1",
+        "owner_user_id": "owner-1",
         "access_token": "access-1",
-        "expires_in": 3600
+        "expires_in": 3600,
+        "vault_keys": []
     });
     server
         .mock("POST", "/v1/auth/service-account")

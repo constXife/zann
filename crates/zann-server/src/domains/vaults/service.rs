@@ -5,12 +5,15 @@ use zann_core::api::vaults::VaultSummary;
 use zann_core::{CachePolicy, Identity, Vault, VaultEncryptionType, VaultKind};
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::vault_crypto as core_crypto;
-use zann_db::repo::{VaultMemberRepo, VaultRepo};
+use zann_db::repo::{VaultCatalogScopeFilter, VaultMemberRepo, VaultRepo};
 
 use crate::app::AppState;
-use crate::domains::access_control::http::{find_vault, vault_role_allows, VaultScope};
+use crate::domains::access_control::http::{
+    find_vault, parse_scope, vault_role_allows, ScopeTarget, VaultScope,
+};
 use crate::domains::access_control::policies::PolicyDecision;
 use crate::domains::errors::ServiceError;
+use crate::domains::vaults::contract::validate_vault_metadata;
 use crate::infra::metrics;
 
 pub type VaultServiceError = ServiceError;
@@ -34,6 +37,54 @@ pub struct CreateVaultCommand {
 pub struct UpdateVaultKeyCommand {
     pub vault_id: String,
     pub vault_key_enc: Vec<u8>,
+}
+
+pub(crate) fn service_account_catalog_filter(scopes: &[String]) -> VaultCatalogScopeFilter {
+    let mut filter = VaultCatalogScopeFilter::default();
+    for scope in scopes {
+        let Some(rule) = parse_scope(scope) else {
+            continue;
+        };
+        if rule.permission != "read" {
+            continue;
+        }
+        match rule.target {
+            ScopeTarget::Vault(value) => {
+                if let Ok(id) = Uuid::parse_str(&value) {
+                    filter.vault_ids.push(id);
+                }
+                filter.vault_slugs.push(value);
+            }
+            ScopeTarget::Tag(value) => filter.tags.push(value),
+            ScopeTarget::Pattern(value) => {
+                filter.slug_patterns.push(scope_pattern_to_like(&value));
+            }
+        }
+    }
+    filter.vault_ids.sort_unstable();
+    filter.vault_ids.dedup();
+    filter.vault_slugs.sort_unstable();
+    filter.vault_slugs.dedup();
+    filter.tags.sort_unstable();
+    filter.tags.dedup();
+    filter.slug_patterns.sort_unstable();
+    filter.slug_patterns.dedup();
+    filter
+}
+
+fn scope_pattern_to_like(pattern: &str) -> String {
+    let mut like = String::with_capacity(pattern.len());
+    for character in pattern.chars() {
+        match character {
+            '*' => like.push('%'),
+            '%' | '_' | '\\' => {
+                like.push('\\');
+                like.push(character);
+            }
+            _ => like.push(character),
+        }
+    }
+    like
 }
 
 pub async fn list_vault_summaries(
@@ -98,14 +149,10 @@ pub async fn create_vault(
         return Err(VaultServiceError::ForbiddenNoBody);
     }
 
-    let slug = cmd.slug.trim();
-    let name = cmd.name.trim();
-    if slug.is_empty() {
-        return Err(VaultServiceError::BadRequest("invalid_slug"));
-    }
-    if name.is_empty() {
-        return Err(VaultServiceError::BadRequest("invalid_name"));
-    }
+    validate_vault_metadata(&cmd.slug, &cmd.name)
+        .map_err(|error| VaultServiceError::BadRequest(error.code()))?;
+    let slug = cmd.slug.as_str();
+    let name = cmd.name.as_str();
 
     let kind = cmd.kind;
     let cache_policy = cmd.cache_policy;
@@ -273,6 +320,12 @@ pub async fn update_vault_key(
     identity: &Identity,
     cmd: UpdateVaultKeyCommand,
 ) -> Result<(), VaultServiceError> {
+    if cmd.vault_key_enc.is_empty() {
+        return Err(VaultServiceError::BadRequest("vault_key_missing"));
+    }
+    if cmd.vault_key_enc.len() > 64 * 1_024 {
+        return Err(VaultServiceError::PayloadTooLarge("vault_key_too_large"));
+    }
     if identity.service_account_id.is_some() {
         return Err(VaultServiceError::ForbiddenNoBody);
     }
@@ -327,6 +380,9 @@ pub async fn update_vault_key(
             "vault_key_update_not_allowed",
         ));
     }
+    if !vault.vault_key_enc.is_empty() {
+        return Err(VaultServiceError::Conflict("vault_key_already_initialized"));
+    }
 
     let key_checksum = blake3::hash(&cmd.vault_key_enc).to_hex().to_string();
     let Ok(affected) = repo.update_key_by_id(vault.id, &cmd.vault_key_enc).await else {
@@ -334,7 +390,7 @@ pub async fn update_vault_key(
         return Err(VaultServiceError::DbError);
     };
     if affected == 0 {
-        return Err(VaultServiceError::NotFound);
+        return Err(VaultServiceError::Conflict("vault_key_already_initialized"));
     }
 
     tracing::info!(
@@ -419,4 +475,24 @@ pub async fn delete_vault(
 
     tracing::info!(event = "vault_deleted", vault_id = %vault.id, "Vault deleted");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn service_account_filter_preserves_scope_selector_semantics() {
+        let filter = service_account_catalog_filter(&[
+            "3f8c64a4-9642-4f17-a719-71dd594e4f71:read".to_string(),
+            "exact:read".to_string(),
+            "tag:prod:read".to_string(),
+            "pattern:prod_*\\blue%:read".to_string(),
+            "ignored:write".to_string(),
+        ]);
+        assert_eq!(filter.vault_ids.len(), 1);
+        assert_eq!(filter.vault_slugs.len(), 2);
+        assert_eq!(filter.tags, ["prod"]);
+        assert_eq!(filter.slug_patterns, [r"prod\_%\\blue\%"]);
+    }
 }

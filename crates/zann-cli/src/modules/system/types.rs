@@ -1,7 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use zann_core::api::auth::KdfParams;
-use zann_core::AuthMethod;
+
+#[allow(dead_code)]
+pub(crate) type SystemIdentity = zann_core::api::system::SystemIdentity;
+pub(crate) type SystemInfoResponse = zann_core::api::system::SystemInfoResponse;
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct CliConfig {
@@ -50,28 +53,6 @@ pub struct CliContext {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct TokenEntry {
     pub access_expires_at: Option<String>,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct SystemInfoResponse {
-    pub server_fingerprint: String,
-    #[serde(default)]
-    pub server_id: Option<String>,
-    #[serde(default)]
-    pub identity: Option<SystemIdentity>,
-    #[serde(default)]
-    pub server_name: Option<String>,
-    #[serde(default)]
-    pub personal_vaults_enabled: Option<bool>,
-    #[serde(default)]
-    pub auth_methods: Vec<AuthMethod>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct SystemIdentity {
-    pub public_key: String,
-    pub timestamp: i64,
-    pub signature: String,
 }
 
 pub struct CommandContext<'a> {

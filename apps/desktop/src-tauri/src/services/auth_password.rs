@@ -1,6 +1,7 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tauri::State;
 use uuid::Uuid;
+use zann_core::api::auth::{ApiErrorResponse, LoginRequest, LoginResponse, RegisterRequest};
 
 use crate::constants::TOKEN_SESSION;
 use crate::infra::remote::{fetch_prelogin, fetch_system_info};
@@ -74,50 +75,10 @@ fn password_fingerprint_changed(
     }
 }
 
-#[derive(Serialize)]
-struct InternalLoginRequest {
-    email: String,
-    password: String,
-    device_name: Option<String>,
-    device_platform: Option<String>,
-    device_fingerprint: Option<String>,
-    device_os: Option<String>,
-    device_os_version: Option<String>,
-    device_app_version: Option<String>,
-}
-
-#[derive(Serialize)]
-struct InternalRegisterRequest {
-    email: String,
-    password: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    full_name: Option<String>,
-    device_name: Option<String>,
-    device_platform: Option<String>,
-    device_fingerprint: Option<String>,
-    device_os: Option<String>,
-    device_os_version: Option<String>,
-    device_app_version: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    invite_token: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct InternalLoginResponse {
-    access_token: String,
-    refresh_token: String,
-    expires_in: u64,
-}
-
 async fn parse_server_error(response: reqwest::Response) -> (String, String) {
-    #[derive(serde::Deserialize)]
-    struct ErrorResponse {
-        error: String,
-    }
-
     let status = response.status();
     let body = response.text().await.unwrap_or_default();
-    if let Ok(parsed) = serde_json::from_str::<ErrorResponse>(&body) {
+    if let Ok(parsed) = serde_json::from_str::<ApiErrorResponse>(&body) {
         return (parsed.error.clone(), parsed.error);
     }
     (format!("http_{}", status.as_u16()), body)
@@ -147,7 +108,7 @@ pub(crate) async fn password_login(
     }
 
     let client = reqwest::Client::new();
-    let payload = InternalLoginRequest {
+    let payload = LoginRequest {
         email: email.clone(),
         password,
         device_name: Some("desktop".to_string()),
@@ -168,7 +129,7 @@ pub(crate) async fn password_login(
         let (kind, message) = parse_server_error(response).await;
         return Ok(ApiResponse::err(&kind, &message));
     }
-    let auth: InternalLoginResponse = response.json().await.map_err(|err| err.to_string())?;
+    let auth: LoginResponse = response.json().await.map_err(|err| err.to_string())?;
 
     let info = fetch_system_info(&client, &server_url).await?;
     let prelogin = fetch_prelogin(&client, &server_url, &email).await?;
@@ -183,11 +144,8 @@ pub(crate) async fn password_login(
     };
 
     let context_name = context_name_from_url(&server_url);
-    let fingerprint_context = info
-        .server_id
-        .as_deref()
-        .and_then(|server_id| context_name_for_server_id(state, server_id))
-        .unwrap_or_else(|| context_name.clone());
+    let fingerprint_context =
+        context_name_for_server_id(state, &info.server_id).unwrap_or_else(|| context_name.clone());
     if let Some(existing) =
         fingerprint_change_for_context(state, &fingerprint_context, &info.server_fingerprint)
     {
@@ -248,7 +206,7 @@ pub(crate) async fn password_register(
     }
 
     let client = reqwest::Client::new();
-    let payload = InternalRegisterRequest {
+    let payload = RegisterRequest {
         email: email.clone(),
         password,
         full_name: full_name.and_then(|value| {
@@ -278,7 +236,7 @@ pub(crate) async fn password_register(
         let (kind, message) = parse_server_error(response).await;
         return Ok(ApiResponse::err(&kind, &message));
     }
-    let auth: InternalLoginResponse = response.json().await.map_err(|err| err.to_string())?;
+    let auth: LoginResponse = response.json().await.map_err(|err| err.to_string())?;
 
     let info = fetch_system_info(&client, &server_url).await?;
     let prelogin = fetch_prelogin(&client, &server_url, &email).await?;
@@ -293,11 +251,8 @@ pub(crate) async fn password_register(
     };
 
     let context_name = context_name_from_url(&server_url);
-    let fingerprint_context = info
-        .server_id
-        .as_deref()
-        .and_then(|server_id| context_name_for_server_id(state, server_id))
-        .unwrap_or_else(|| context_name.clone());
+    let fingerprint_context =
+        context_name_for_server_id(state, &info.server_id).unwrap_or_else(|| context_name.clone());
     if let Some(existing) =
         fingerprint_change_for_context(state, &fingerprint_context, &info.server_fingerprint)
     {

@@ -374,7 +374,11 @@ pub async fn remote_sync(
                     let _ = pending_repo.delete_by_ids(&conflict_pending_ids).await;
                 }
             }
-            cursor_value = Some(push_resp.new_cursor.clone());
+            // The push cursor is only a server-head hint. It cannot prove
+            // that this client observed every concurrently committed change,
+            // so only a successfully applied pull page may advance the local
+            // pull cursor.
+            let _server_head_hint = &push_resp.new_cursor;
         }
 
         loop {

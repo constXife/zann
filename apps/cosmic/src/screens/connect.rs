@@ -45,6 +45,7 @@ pub enum Message {
     OpenAuthUrl,
     CopyAuthUrl,
     TrustFingerprint,
+    FingerprintTrusted(Result<(), String>),
     Outcome(Result<LoginOutcome, String>),
     Poll,
     Cancel,
@@ -224,16 +225,18 @@ impl State {
                 self.busy = true;
                 self.error = None;
                 return Outcome::Task(cosmic::task::future(async move {
-                    Message::Outcome(
-                        off_thread(move || {
-                            remote
-                                .trust_fingerprint(login_id)
-                                .map(|()| LoginOutcome::Pending)
-                        })
-                        .await,
+                    Message::FingerprintTrusted(
+                        off_thread(move || remote.trust_fingerprint(login_id)).await,
                     )
                 }));
             }
+
+            Message::FingerprintTrusted(Ok(())) => {
+                self.busy = true;
+                return Outcome::Task(cosmic::task::message(Message::Probe));
+            }
+
+            Message::FingerprintTrusted(Err(err)) => self.fail(err),
 
             Message::Outcome(Ok(outcome)) => return self.apply_outcome(outcome),
 
@@ -280,14 +283,20 @@ impl State {
     /// Moves on once the server has told us what it supports; a server with a
     /// single method skips the picker.
     fn apply_probe(&mut self, probe: ServerProbe) {
+        let fingerprint_changed = probe.fingerprint_changed.clone();
         self.register = probe.register;
         self.server_name = probe.server_name;
         self.methods = probe.methods;
         self.busy = false;
-        self.stage = match self.methods.as_slice() {
-            [Method::Password] => Stage::Password,
-            [Method::Oidc] => Stage::Oidc,
-            _ => Stage::Method,
+        self.stage = if let Some((old, new)) = fingerprint_changed {
+            self.login_id = "connection".to_string();
+            Stage::Fingerprint { old, new }
+        } else {
+            match self.methods.as_slice() {
+                [Method::Password] => Stage::Password,
+                [Method::Oidc] => Stage::Oidc,
+                _ => Stage::Method,
+            }
         };
     }
 

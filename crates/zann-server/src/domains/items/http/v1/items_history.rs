@@ -56,11 +56,12 @@ pub(super) async fn get_item_version(
         };
 
     let (payload_enc, payload) = if response.vault.encryption_type == VaultEncryptionType::Server {
-        match service::decrypt_payload_json(
+        match service::decrypt_typed_payload(
             &state,
             &response.vault,
             item_id,
             &response.history.payload_enc,
+            &response.item_type_id,
         ) {
             Ok(payload) => (None, Some(payload)),
             Err(error) => return map_items_error(error),

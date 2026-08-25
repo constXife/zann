@@ -1,6 +1,6 @@
 #![cfg(feature = "postgres")]
 
-use chrono::Utc;
+use chrono::{Timelike, Utc};
 use sqlx_core::pool::PoolOptions;
 use sqlx_core::types::Json as SqlxJson;
 use sqlx_postgres::{PgConnectOptions, Postgres};
@@ -476,16 +476,18 @@ async fn vault_and_item_repos_workflow() {
     item_repo.create(&item).await.expect("create item");
 
     let list_items = item_repo
-        .list_by_vault(vault.id, false)
+        .list_by_vault_bounded(vault.id, false, 10)
         .await
-        .expect("list_by_vault");
+        .expect("list_by_vault_bounded");
     assert_eq!(list_items.len(), 1);
 
     let mut updated_item = item.clone();
     updated_item.version = 2;
     updated_item.payload_enc = vec![8, 8, 8];
     updated_item.checksum = "checksum-updated".to_string();
-    updated_item.updated_at = Utc::now();
+    updated_item.updated_at = Utc::now()
+        .with_nanosecond(123_456_789)
+        .expect("valid sub-microsecond timestamp");
     let updated = item_repo.update(&updated_item).await.expect("update item");
     assert_eq!(updated, 1);
 
@@ -499,6 +501,10 @@ async fn vault_and_item_repos_workflow() {
         created_at: updated_item.updated_at,
     };
     change_repo.create(&change).await.expect("create change");
+    change_repo
+        .create(&change)
+        .await
+        .expect("sub-microsecond exact retry must be idempotent");
 
     let last_seq = change_repo
         .last_seq_for_vault(vault.id)

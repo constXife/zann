@@ -20,6 +20,7 @@ pub use crate::security_profile::*;
 pub use crate::services::*;
 pub use zann_crypto::crypto;
 pub use zann_crypto::crypto::*;
+pub use zann_crypto::passwords;
 pub use zann_crypto::secrets;
 pub use zann_crypto::secrets::*;
 pub use zann_crypto::vault_crypto;

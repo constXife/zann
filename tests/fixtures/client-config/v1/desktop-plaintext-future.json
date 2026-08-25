@@ -1,0 +1,46 @@
+{
+  "current_context": "desktop",
+  "contexts": {
+    "desktop": {
+      "addr": "https://desktop.example.test",
+      "needs_salt_update": true,
+      "server_id": "server-desktop",
+      "server_fingerprint": "sha256:desktop-server",
+      "expected_master_key_fp": "sha256:desktop-master",
+      "tokens": {
+        "session": {
+          "access_token": "fixture-access-token",
+          "refresh_token": "fixture-refresh-token",
+          "access_expires_at": "2031-02-03T04:05:06Z",
+          "service_account_token": "fixture-service-token",
+          "future_token": "token-sentinel"
+        }
+      },
+      "current_token": "session",
+      "storage_id": "018f0000-0000-7000-8000-000000000001",
+      "vault": "vault-cli-only",
+      "future_context": "context-sentinel"
+    }
+  },
+  "identity": {
+    "kdf_salt": "ZGVza3RvcC1maXh0dXJlLXNhbHQ=",
+    "kdf_params": {
+      "algorithm": "argon2id",
+      "iterations": 3,
+      "memory_kb": 65536,
+      "parallelism": 4
+    },
+    "salt_fingerprint": "sha256:desktop-salt",
+    "first_seen_at": "2026-02-03T04:05:06Z",
+    "email": "desktop@example.test",
+    "future_identity": "identity-sentinel"
+  },
+  "storage": {
+    "backup_dir": "/fixture/backups",
+    "backup_retention_days": 30,
+    "backup_max_count": 12
+  },
+  "future_top_level": {
+    "marker": "top-level-sentinel"
+  }
+}

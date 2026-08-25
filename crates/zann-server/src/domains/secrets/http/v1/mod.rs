@@ -8,12 +8,20 @@ use axum::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt;
+use std::io::Write;
 use std::time::Instant;
 use zann_core::Identity;
+use zeroize::Zeroize;
 
 use crate::app::AppState;
+use crate::domains::items::contract::MAX_PLAINTEXT_PAYLOAD_BYTES;
 use crate::domains::secrets::service::{self, SecretError, SecretRecord};
 use crate::infra::{audit, metrics};
+
+const MAX_BATCH_SECRETS: usize = 64;
+const MAX_BATCH_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+const MAX_BATCH_ENSURE_RESULT_OVERHEAD_BYTES: usize = 8 * 1024;
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct ErrorResponse {
@@ -28,7 +36,7 @@ pub(crate) struct PolicyMismatchDetails {
     existing_policy: String,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub(crate) struct SecretRequest {
     path: String,
     #[serde(default)]
@@ -37,7 +45,7 @@ pub(crate) struct SecretRequest {
     meta: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+#[derive(Deserialize, JsonSchema)]
 pub(crate) struct SecretSetRequest {
     value: String,
     #[serde(default)]
@@ -46,7 +54,31 @@ pub(crate) struct SecretSetRequest {
     meta: Option<HashMap<String, String>>,
 }
 
-#[derive(Debug, Deserialize, JsonSchema)]
+impl fmt::Debug for SecretSetRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecretSetRequest")
+            .field("value", &"<redacted>")
+            .field("policy", &"<redacted>")
+            .field(
+                "meta_count",
+                &self.meta.as_ref().map(HashMap::len).unwrap_or(0),
+            )
+            .finish()
+    }
+}
+
+impl Drop for SecretSetRequest {
+    fn drop(&mut self) {
+        wipe_string(&mut self.value);
+        if let Some(policy) = self.policy.as_mut() {
+            wipe_string(policy);
+        }
+        wipe_string_map(&mut self.meta);
+    }
+}
+
+#[derive(Deserialize, Serialize, JsonSchema)]
 pub(crate) struct BatchEnsureRequest {
     secrets: Vec<SecretRequest>,
 }
@@ -56,7 +88,7 @@ pub(crate) struct BatchGetRequest {
     paths: Vec<String>,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Serialize, JsonSchema)]
 pub(crate) struct SecretResponse {
     pub(crate) path: String,
     pub(crate) vault_id: String,
@@ -71,6 +103,33 @@ pub(crate) struct SecretResponse {
     pub(crate) created: Option<bool>,
 }
 
+impl fmt::Debug for SecretResponse {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SecretResponse")
+            .field("path", &self.path)
+            .field("vault_id", &self.vault_id)
+            .field("value", &"<redacted>")
+            .field("policy", &"<redacted>")
+            .field(
+                "meta_count",
+                &self.meta.as_ref().map(HashMap::len).unwrap_or(0),
+            )
+            .field("version", &self.version)
+            .field("previous_version", &self.previous_version)
+            .field("created", &self.created)
+            .finish()
+    }
+}
+
+impl Drop for SecretResponse {
+    fn drop(&mut self) {
+        wipe_string(&mut self.value);
+        wipe_string(&mut self.policy);
+        wipe_string_map(&mut self.meta);
+    }
+}
+
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct BatchResult {
     path: String,
@@ -79,6 +138,20 @@ pub(crate) struct BatchResult {
     secret: Option<SecretResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<ErrorResponse>,
+}
+
+fn wipe_string(value: &mut String) {
+    let mut bytes = std::mem::take(value).into_bytes();
+    bytes.zeroize();
+}
+
+fn wipe_string_map(value: &mut Option<HashMap<String, String>>) {
+    if let Some(map) = value.as_mut() {
+        for (mut key, mut value) in map.drain() {
+            wipe_string(&mut key);
+            wipe_string(&mut value);
+        }
+    }
 }
 
 pub fn router() -> Router<AppState> {
@@ -257,6 +330,9 @@ async fn batch_ensure(
     Path(vault_id): Path<String>,
     Json(payload): Json<BatchEnsureRequest>,
 ) -> impl IntoResponse {
+    if !validate_batch_ensure_preflight(&payload) {
+        return batch_payload_too_large();
+    }
     let mut results = Vec::with_capacity(payload.secrets.len());
     for secret in payload.secrets {
         let path = secret.path;
@@ -321,7 +397,11 @@ async fn batch_get(
     Path(vault_id): Path<String>,
     Json(payload): Json<BatchGetRequest>,
 ) -> impl IntoResponse {
+    if !validate_batch_count(payload.paths.len()) {
+        return batch_payload_too_large();
+    }
     let mut results = Vec::with_capacity(payload.paths.len());
+    let mut response_bytes = 0_usize;
     for path in payload.paths {
         let audit_path = path.clone();
         let start = Instant::now();
@@ -350,9 +430,91 @@ async fn batch_get(
                 }
             }
         };
+        if !reserve_batch_response_bytes(&mut response_bytes, &result) {
+            return batch_payload_too_large();
+        }
         results.push(result);
     }
     (StatusCode::OK, Json(results)).into_response()
+}
+
+fn validate_batch_count(count: usize) -> bool {
+    count <= MAX_BATCH_SECRETS
+}
+
+/// Proves an aggregate response bound before `batch_ensure` can perform its
+/// first write. Every successful secret payload is contract-bounded; the
+/// additional allowance covers the path, vault ID and batch response envelope.
+fn validate_batch_ensure_preflight(payload: &BatchEnsureRequest) -> bool {
+    let count = payload.secrets.len();
+    if !validate_batch_count(count) {
+        return false;
+    }
+
+    let per_result =
+        match MAX_PLAINTEXT_PAYLOAD_BYTES.checked_add(MAX_BATCH_ENSURE_RESULT_OVERHEAD_BYTES) {
+            Some(value) => value,
+            None => return false,
+        };
+    let response_bound = match count
+        .checked_mul(per_result)
+        .and_then(|value| value.checked_add(count.saturating_sub(1)))
+        .and_then(|value| value.checked_add(2))
+    {
+        Some(value) => value,
+        None => return false,
+    };
+    if response_bound > MAX_BATCH_RESPONSE_BYTES {
+        return false;
+    }
+
+    let mut writer = CountingWriter { written: 0 };
+    serde_json::to_writer(&mut writer, payload).is_ok()
+        && writer.written <= MAX_BATCH_RESPONSE_BYTES
+}
+
+fn batch_payload_too_large() -> axum::response::Response {
+    (
+        StatusCode::PAYLOAD_TOO_LARGE,
+        Json(ErrorResponse {
+            error: "batch_too_large",
+            details: None,
+        }),
+    )
+        .into_response()
+}
+
+fn reserve_batch_response_bytes<T: Serialize>(used: &mut usize, value: &T) -> bool {
+    let mut writer = CountingWriter { written: 0 };
+    if serde_json::to_writer(&mut writer, value).is_err() {
+        return false;
+    }
+    let Some(total) = used.checked_add(writer.written) else {
+        return false;
+    };
+    if total > MAX_BATCH_RESPONSE_BYTES {
+        return false;
+    }
+    *used = total;
+    true
+}
+
+struct CountingWriter {
+    written: usize,
+}
+
+impl Write for CountingWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.written = self
+            .written
+            .checked_add(bytes.len())
+            .ok_or_else(|| std::io::Error::other("batch response size overflow"))?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 fn secret_response(
@@ -360,13 +522,14 @@ fn secret_response(
     previous_version: Option<i64>,
     created: Option<bool>,
 ) -> SecretResponse {
+    let (path, vault_id, value, policy, meta, version) = record.into_parts();
     SecretResponse {
-        path: record.path,
-        vault_id: record.vault_id,
-        value: record.value,
-        policy: record.policy,
-        meta: record.meta,
-        version: record.version,
+        path,
+        vault_id,
+        value,
+        policy,
+        meta,
+        version,
         previous_version,
         created,
     }
@@ -576,5 +739,82 @@ fn error_label(error: &SecretError) -> &'static str {
         SecretError::InvalidCredentials => "invalid_credentials",
         SecretError::Kdf => "kdf_error",
         SecretError::DeviceRequired => "device_required",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_http_debug_output_is_redacted() {
+        let request = SecretSetRequest {
+            value: "sentinel-value".to_string(),
+            policy: Some("sentinel-policy".to_string()),
+            meta: Some(HashMap::from([(
+                "sentinel-key".to_string(),
+                "sentinel-meta".to_string(),
+            )])),
+        };
+        let response = SecretResponse {
+            path: "/folder/secret".to_string(),
+            vault_id: "vault".to_string(),
+            value: "sentinel-value".to_string(),
+            policy: "sentinel-policy".to_string(),
+            meta: Some(HashMap::from([(
+                "sentinel-key".to_string(),
+                "sentinel-meta".to_string(),
+            )])),
+            version: 1,
+            previous_version: None,
+            created: Some(true),
+        };
+        for rendered in [format!("{request:?}"), format!("{response:?}")] {
+            for sentinel in [
+                "sentinel-value",
+                "sentinel-policy",
+                "sentinel-key",
+                "sentinel-meta",
+            ] {
+                assert!(!rendered.contains(sentinel));
+            }
+        }
+    }
+
+    #[test]
+    fn batch_count_is_rejected_before_work_above_the_boundary() {
+        assert!(validate_batch_count(MAX_BATCH_SECRETS));
+        assert!(!validate_batch_count(MAX_BATCH_SECRETS + 1));
+    }
+
+    #[test]
+    fn batch_response_budget_counts_encoded_bytes_without_buffering() {
+        let result = BatchResult {
+            path: "/secret".to_string(),
+            status: "ok".to_string(),
+            secret: None,
+            error: None,
+        };
+        let mut used = MAX_BATCH_RESPONSE_BYTES - 1;
+        assert!(!reserve_batch_response_bytes(&mut used, &result));
+        assert_eq!(used, MAX_BATCH_RESPONSE_BYTES - 1);
+    }
+
+    #[test]
+    fn batch_ensure_late_overflow_is_rejected_by_preflight() {
+        let max_safe = MAX_BATCH_RESPONSE_BYTES
+            / (MAX_PLAINTEXT_PAYLOAD_BYTES + MAX_BATCH_ENSURE_RESULT_OVERHEAD_BYTES);
+        assert!(max_safe < MAX_BATCH_SECRETS);
+
+        let secrets = (0..=max_safe)
+            .map(|index| SecretRequest {
+                path: format!("secret-{index}"),
+                policy: None,
+                meta: None,
+            })
+            .collect();
+        assert!(!validate_batch_ensure_preflight(&BatchEnsureRequest {
+            secrets,
+        }));
     }
 }

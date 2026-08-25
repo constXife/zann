@@ -8,7 +8,6 @@ license = "MIT"
 axum = "0.7"
 axum-prometheus = "0.7"
 aide = { version = "0.13", features = ["axum"] }
-argon2 = "0.5"
 base64 = "0.22"
 data-encoding = "2.6"
 chrono = "0.4"
@@ -45,6 +44,7 @@ uuid = { version = "1", features = ["v7"] }
 zann-core = { path = "../zann-core", default-features = false, features = ["postgres"] }
 zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", default-features = false, features = ["postgres"] }
+zeroize = "1.7"
 tikv-jemalloc-ctl = { version = "0.6", optional = true, features = ["stats"] }
 tikv-jemallocator = { version = "0.6", optional = true, features = ["profiling"] }
 tikv-jemalloc-sys = { version = "0.6", optional = true, features = ["profiling"] }
@@ -53,9 +53,6 @@ tikv-jemalloc-sys = { version = "0.6", optional = true, features = ["profiling"]
 proptest = "1.5.0"
 tower = "0.5"
 zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"] }
-# The client workflow tests drive the real client against the real server, so
-# they depend on the shipped sync code rather than a copy of it.
-zann-client = { path = "../zann-client" }
 
 [features]
 postgres-tests = []

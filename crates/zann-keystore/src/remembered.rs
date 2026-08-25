@@ -88,6 +88,8 @@ impl UnlockError {
                 KeystoreError::Cancelled => "keystore_cancelled",
                 KeystoreError::NotFound => "keystore_not_found",
                 KeystoreError::Unsupported => "keystore_unsupported",
+                KeystoreError::InvalidNamespace => "keystore_invalid_namespace",
+                KeystoreError::SecretTooLarge { .. } => "keystore_secret_too_large",
                 KeystoreError::Internal { .. } => "keystore_unavailable",
             },
             #[cfg(any(target_os = "linux", target_os = "macos"))]

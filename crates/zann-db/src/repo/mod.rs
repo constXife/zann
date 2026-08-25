@@ -42,4 +42,6 @@ pub use groups::{GroupMemberRepo, GroupRepo, OidcGroupMappingRepo};
 pub use items::{AttachmentRepo, ItemHistoryRepo, ItemRepo, ItemUsageRepo};
 pub use sessions::SessionRepo;
 pub use users::{OidcIdentityRepo, UserRepo};
-pub use vaults::{VaultMemberRepo, VaultRepo};
+pub use vaults::{
+    VaultCatalogEntry, VaultCatalogScopeFilter, VaultKeyMaterialEntry, VaultMemberRepo, VaultRepo,
+};

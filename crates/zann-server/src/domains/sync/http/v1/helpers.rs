@@ -1,9 +1,7 @@
 use base64::Engine;
 use chrono::{DateTime, Utc};
-use serde_json::Value as JsonValue;
-use sqlx_core::from_row::FromRow;
 use sqlx_core::row::Row;
-use sqlx_postgres::{PgConnection, PgRow};
+use sqlx_postgres::PgConnection;
 use uuid::Uuid;
 use zann_core::Identity;
 
@@ -11,7 +9,7 @@ use crate::app::AppState;
 use crate::domains::access_control::http::{vault_role_allows, VaultScope};
 use crate::domains::access_control::policies::PolicyDecision;
 
-use super::types::{ErrorResponse, SyncCursor, SyncPullRow};
+use super::types::{ErrorResponse, SyncCursor};
 
 pub(super) async fn find_path_conflict(
     conn: &mut PgConnection,
@@ -40,23 +38,6 @@ pub(super) async fn find_path_conflict(
             .ok()
             .map(|value| value.to_rfc3339())
     }))
-}
-
-impl FromRow<'_, PgRow> for SyncPullRow {
-    fn from_row(row: &PgRow) -> Result<Self, sqlx_core::Error> {
-        let op: i16 = row.try_get("op")?;
-        Ok(Self {
-            seq: row.try_get("seq")?,
-            op: i32::from(op),
-            item_id: row.try_get("item_id")?,
-            path: row.try_get("path")?,
-            name: row.try_get("name")?,
-            type_id: row.try_get("type_id")?,
-            payload_enc: row.try_get("payload_enc")?,
-            checksum: row.try_get("checksum")?,
-            updated_at: row.try_get("updated_at")?,
-        })
-    }
 }
 
 pub(super) async fn prune_item_history(
@@ -114,54 +95,6 @@ pub(crate) fn encode_cursor(seq: i64) -> String {
     let payload = SyncCursor { seq };
     let bytes = serde_json::to_vec(&payload).unwrap_or_else(|_| b"{}".to_vec());
     base64::engine::general_purpose::STANDARD.encode(bytes)
-}
-
-pub(super) fn basename_from_path(path: &str) -> String {
-    path.trim_matches('/')
-        .split('/')
-        .rfind(|part| !part.is_empty())
-        .unwrap_or(path)
-        .to_string()
-}
-
-pub(super) fn replace_basename(path: &str, name: &str) -> String {
-    let trimmed = path.trim_matches('/');
-    if trimmed.is_empty() {
-        return name.to_string();
-    }
-    let mut parts: Vec<&str> = trimmed.split('/').collect();
-    if let Some(last) = parts.last_mut() {
-        *last = name;
-    }
-    parts.join("/")
-}
-
-pub(super) fn normalize_path_and_name(
-    current_path: &str,
-    new_path: Option<&str>,
-    new_name: Option<&str>,
-) -> (String, String) {
-    let mut path = new_path
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| current_path.to_string());
-    if let Some(name) = new_name.map(str::trim).filter(|value| !value.is_empty()) {
-        let clean = if name.contains('/') {
-            basename_from_path(name)
-        } else {
-            name.to_string()
-        };
-        path = replace_basename(&path, &clean);
-    }
-    let name = basename_from_path(&path);
-    (path, name)
-}
-
-pub(crate) fn parse_plaintext_payload(payload: &JsonValue) -> Result<Vec<u8>, ErrorResponse> {
-    serde_json::to_vec(payload).map_err(|_| ErrorResponse {
-        error: "invalid_payload",
-    })
 }
 
 pub(crate) async fn can_push(state: &AppState, identity: &Identity, vault_id: Uuid) -> bool {

@@ -1,12 +1,10 @@
 use reqwest::header::AUTHORIZATION;
 use serde::Deserialize;
+use zann_core::api::auth::{LoginResponse, OidcConfigResponse, OidcLoginRequest};
 
 use crate::infra::http::fetch_json;
 use crate::infra::identity::{verify_system_identity, IdentityError};
-use crate::types::{
-    OidcConfigResponse, OidcDiscovery, OidcExchangeResponse, SystemInfoResponse,
-    TokenErrorResponse, TokenResponse,
-};
+use crate::types::{OidcDiscovery, SystemInfoResponse, TokenErrorResponse, TokenResponse};
 
 pub async fn exchange_authorization_code(
     client: &reqwest::Client,
@@ -67,9 +65,11 @@ pub async fn exchange_oidc_for_session(
     client: &reqwest::Client,
     server_url: &str,
     oidc_token: &str,
-) -> Result<OidcExchangeResponse, String> {
+) -> Result<LoginResponse, String> {
     let url = format!("{}/v1/auth/login/oidc", server_url.trim_end_matches('/'));
-    let body = serde_json::json!({ "token": oidc_token });
+    let body = OidcLoginRequest {
+        token: oidc_token.to_string(),
+    };
 
     let response = client
         .post(&url)
@@ -85,7 +85,7 @@ pub async fn exchange_oidc_for_session(
     }
 
     response
-        .json::<OidcExchangeResponse>()
+        .json::<LoginResponse>()
         .await
         .map_err(|e| e.to_string())
 }
@@ -104,7 +104,6 @@ pub async fn fetch_system_info(
 
 fn format_identity_error(err: IdentityError) -> String {
     match err {
-        IdentityError::Missing => "server_identity_missing".to_string(),
         IdentityError::InvalidId
         | IdentityError::InvalidKey
         | IdentityError::InvalidSignatureBytes => "server_identity_invalid".to_string(),

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 use zann_core::ChangeType;
+use zann_crypto::EncryptedPayload;
 
 #[derive(Debug, Serialize, JsonSchema)]
 pub(crate) struct ErrorResponse {
@@ -63,7 +64,8 @@ pub(crate) struct SyncSharedPullChange {
     pub(crate) operation: ChangeType,
     pub(crate) seq: i64,
     pub(crate) updated_at: String,
-    pub(crate) payload: Option<JsonValue>,
+    #[schemars(with = "Option<JsonValue>")]
+    pub(crate) payload: Option<EncryptedPayload>,
     pub(crate) checksum: String,
     pub(crate) path: String,
     pub(crate) name: String,
@@ -91,7 +93,8 @@ pub(crate) struct SyncSharedHistoryEntry {
     pub(crate) changed_by_name: Option<String>,
     pub(crate) changed_by_email: String,
     pub(crate) created_at: String,
-    pub(crate) payload: JsonValue,
+    #[schemars(with = "JsonValue")]
+    pub(crate) payload: EncryptedPayload,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -124,7 +127,8 @@ pub(crate) struct SyncSharedPushChange {
     pub(crate) item_id: Uuid,
     pub(crate) operation: ChangeType,
     #[serde(default)]
-    pub(crate) payload: Option<JsonValue>,
+    #[schemars(with = "Option<JsonValue>")]
+    pub(crate) payload: Option<EncryptedPayload>,
     #[serde(default)]
     pub(crate) path: Option<String>,
     #[serde(default)]
@@ -140,6 +144,8 @@ pub(crate) struct SyncPushResponse {
     pub(crate) applied: Vec<String>,
     pub(crate) applied_changes: Vec<SyncAppliedChange>,
     pub(crate) conflicts: Vec<SyncPushConflict>,
+    /// Deprecated, non-advancing compatibility field. Push does not prove that
+    /// the caller observed intervening pull changes, so the server emits zero.
     pub(crate) new_cursor: String,
 }
 
@@ -157,18 +163,6 @@ pub(crate) struct SyncPushConflict {
     pub(crate) reason: &'static str,
     pub(crate) server_seq: i64,
     pub(crate) server_updated_at: String,
-}
-
-pub(crate) struct SyncPullRow {
-    pub(crate) seq: i64,
-    pub(crate) op: i32,
-    pub(crate) item_id: Uuid,
-    pub(crate) path: String,
-    pub(crate) name: String,
-    pub(crate) type_id: String,
-    pub(crate) payload_enc: Vec<u8>,
-    pub(crate) checksum: String,
-    pub(crate) updated_at: DateTime<Utc>,
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]

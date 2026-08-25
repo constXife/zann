@@ -44,11 +44,13 @@ async fn setup_local() -> (SqlitePool, Uuid, Uuid, SecretKey) {
     let vault = LocalVault {
         id: vault_id,
         storage_id,
+        slug: "shared-vault".to_string(),
         name: "Shared Vault".to_string(),
         kind: VaultKind::Shared,
         is_default: false,
         vault_key_enc: Vec::new(),
         key_wrap_type: zann_db::local::KeyWrapType::RemoteServer,
+        cache_key_fp: None,
         last_synced_at: None,
     };
     let vault_repo = LocalVaultRepo::new(&pool);

@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
-use zann_client::state::ClientState;
+use zann_client::app::{AppClient, ClientId, ClientPaths, SessionClient, SessionOperation};
+use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
+use zann_client_sqlite::SqliteSyncStoreFactory;
 use zann_core::{ItemCounts, ItemListParams, ItemsService, VaultsService};
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::secrets::{FieldKind, FieldValue};
@@ -14,7 +16,8 @@ use zann_crypto::vault_crypto;
 use zann_crypto::EncryptedPayload;
 use zann_db::local::{LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVaultRepo};
 use zann_db::services::LocalServices;
-use zann_db::{connect_sqlite_with_max, migrate_local, SqlitePool};
+pub use zann_db::SqliteFileLocation;
+use zann_db::{connect_sqlite_file_with_max, migrate_local, SqlitePool};
 use zann_keystore::{default_keystore, RememberedUnlock, UnlockError, UnlockSource};
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -329,8 +332,8 @@ pub struct CoreFacade {
     /// `SqlitePool` is a handle, so reads take a clone rather than hold the lock
     /// across a query.
     pool: Mutex<SqlitePool>,
-    /// Kept so the pool can be opened again after a restore.
-    db_url: String,
+    /// Kept as an exact native path so the pool can be opened again after a restore.
+    database_path: PathBuf,
     storage_id: Mutex<Uuid>,
     vault_id: Mutex<Option<Uuid>>,
     master_key: Mutex<Option<Arc<SecretKey>>>,
@@ -353,17 +356,18 @@ impl CoreFacade {
     /// Connect again after the database file was replaced, and re-read what was
     /// read from it at start-up.
     fn reopen_pool(&self) -> CoreResult<()> {
+        let location = SqliteFileLocation::from_path(&self.database_path)
+            .map_err(|err| CoreError::Service(err.to_string()))?;
         let pool = self
             .runtime
-            .block_on(connect_sqlite_with_max(&self.db_url, 5))
+            .block_on(connect_sqlite_file_with_max(&location, 5))
             .map_err(|err| CoreError::Service(err.to_string()))?;
         self.runtime
             .block_on(migrate_local(&pool))
             .map_err(|err| CoreError::Service(err.to_string()))?;
         let storage_id = resolve_storage_id(&self.runtime, &pool)?;
         *self.pool.lock().expect("lock poisoned") = pool;
-        *self.identity.lock().expect("lock poisoned") =
-            load_or_create_identity_config(&self.db_url)?;
+        *self.identity.lock().expect("lock poisoned") = load_or_create_identity_config(&self.root)?;
         *self.storage_id.lock().expect("lock poisoned") = storage_id;
         Ok(())
     }
@@ -1029,48 +1033,76 @@ impl CoreFacade {
 
     pub fn remote_sync(&self, storage_id: Option<String>) -> CoreResult<()> {
         let master_key = self.master_key()?;
-        // `self.root` — not `$HOME/.zann`. They are the same only by luck: the
-        // root is derived from the database URL, so with ZANN_DB_URL pointing
-        // anywhere else login wrote its tokens to one directory while sync
-        // looked for them in another.
-        let state = ClientState::new(self.pool(), self.root.clone());
-        let response = self
-            .runtime
-            .block_on(zann_client::sync::remote_sync(
-                storage_id,
-                &state,
-                master_key.as_ref(),
-            ))
-            .map_err(CoreError::Service)?;
-        if response.ok {
-            Ok(())
-        } else {
-            let message = response
-                .error
-                .as_ref()
-                .map(|err| err.message.clone())
-                .unwrap_or_else(|| "remote sync failed".to_string());
-            Err(CoreError::Service(message))
-        }
+        let credentials = Arc::new(OsCredentialStore::system_default());
+        let factory = Arc::new(
+            SqliteSyncStoreFactory::new(&self.database_path)
+                .map_err(|error| CoreError::Service(error.to_string()))?,
+        );
+        let client_id =
+            ClientId::new("desktop").map_err(|error| CoreError::Service(error.to_string()))?;
+        let client = AppClient::new(
+            ClientPaths::new(&self.root),
+            credentials,
+            SessionClient::new(client_id),
+            factory,
+        );
+        client
+            .initialize(&OsLegacyCredentialSource::system_default())
+            .map_err(|error| CoreError::Service(error.to_string()))?;
+        let target = client
+            .configured_target(storage_id.as_deref())
+            .map_err(|error| CoreError::Service(error.to_string()))?;
+        let operation = SessionOperation::new(
+            std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
+        )
+        .0;
+        let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
+        self.runtime
+            .block_on(client.sync(target, operation_key, operation))
+            .map(|_| ())
+            .map_err(|error| CoreError::Service(error.to_string()))
     }
 }
 
 #[uniffi::export]
 pub fn create_core(db_url: String) -> CoreResult<Arc<CoreFacade>> {
+    let location = SqliteFileLocation::from_uri(&db_url)
+        .map_err(|err| CoreError::InvalidArgument(err.to_string()))?;
+    create_core_at_location(location)
+}
+
+/// Opens an exact filesystem path without interpreting URI delimiters.
+///
+/// This is deliberately Rust-only: UniFFI's public compatibility surface takes
+/// a SQLite URI in [`create_core`], while native composition roots already own
+/// a [`Path`] and must not stringify it into a URI.
+pub fn create_core_at_path(db_path: &Path) -> CoreResult<Arc<CoreFacade>> {
+    let location = SqliteFileLocation::from_path(db_path)
+        .map_err(|err| CoreError::InvalidArgument(err.to_string()))?;
+    create_core_at_location(location)
+}
+
+/// Opens a location already parsed and resolved by the native composition root.
+pub fn create_core_at_file_location(location: &SqliteFileLocation) -> CoreResult<Arc<CoreFacade>> {
+    create_core_at_location(location.clone())
+}
+
+fn create_core_at_location(location: SqliteFileLocation) -> CoreResult<Arc<CoreFacade>> {
     let runtime = Runtime::new().map_err(|err| CoreError::InvalidArgument(err.to_string()))?;
+    let root = location.root().to_path_buf();
+    let database_path = location.path().to_path_buf();
     let pool = runtime
-        .block_on(connect_sqlite_with_max(&db_url, 5))
+        .block_on(connect_sqlite_file_with_max(&location, 5))
         .map_err(|err| CoreError::Service(err.to_string()))?;
     runtime
         .block_on(migrate_local(&pool))
         .map_err(|err| CoreError::Service(err.to_string()))?;
-    let identity = load_or_create_identity_config(&db_url)?;
+    let identity = load_or_create_identity_config(&root)?;
     let storage_id = resolve_storage_id(&runtime, &pool)?;
-    let root = local_root_from_db_url(&db_url);
     Ok(Arc::new(CoreFacade {
         runtime,
         pool: Mutex::new(pool),
-        db_url,
+        database_path,
         storage_id: Mutex::new(storage_id),
         vault_id: Mutex::new(None),
         master_key: Mutex::new(None),
@@ -1127,8 +1159,7 @@ struct IdentityConfig {
     email: Option<String>,
 }
 
-fn load_or_create_identity_config(db_url: &str) -> CoreResult<IdentityConfig> {
-    let root = local_root_from_db_url(db_url);
+fn load_or_create_identity_config(root: &Path) -> CoreResult<IdentityConfig> {
     let path = root.join("config.json");
     let mut config = match std::fs::read_to_string(&path) {
         Ok(contents) => serde_json::from_str::<Value>(&contents).map_err(|err| {
@@ -1151,7 +1182,7 @@ fn load_or_create_identity_config(db_url: &str) -> CoreResult<IdentityConfig> {
         return Ok(identity);
     }
 
-    std::fs::create_dir_all(&root).map_err(|err| CoreError::Service(err.to_string()))?;
+    std::fs::create_dir_all(root).map_err(|err| CoreError::Service(err.to_string()))?;
     let salt = SecretKey::generate();
     let salt_b64 = base64::engine::general_purpose::STANDARD.encode(salt.as_bytes());
     let identity = IdentityConfig {
@@ -1175,25 +1206,8 @@ fn load_or_create_identity_config(db_url: &str) -> CoreResult<IdentityConfig> {
 }
 
 fn derive_master_key(password: &str, identity: &IdentityConfig) -> CoreResult<SecretKey> {
-    if identity.kdf_params.algorithm != "argon2id" {
-        return Err(CoreError::InvalidArgument(
-            "unsupported kdf algorithm".to_string(),
-        ));
-    }
-    let salt = base64::engine::general_purpose::STANDARD
-        .decode(&identity.kdf_salt)
-        .map_err(|_| CoreError::InvalidArgument("invalid kdf salt".to_string()))?;
-    let params = argon2::Params::new(
-        identity.kdf_params.memory_kb,
-        identity.kdf_params.iterations,
-        identity.kdf_params.parallelism,
-        Some(32),
-    )
-    .map_err(|err| CoreError::InvalidArgument(err.to_string()))?;
-    let argon2 = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
-    let mut key = [0u8; 32];
-    argon2
-        .hash_password_into(password.as_bytes(), &salt, &mut key)
+    let params = identity.kdf_params.to_crypto_params();
+    let key = zann_core::passwords::derive_auth_hash(password, &identity.kdf_salt, &params)
         .map_err(|err| CoreError::InvalidArgument(err.to_string()))?;
     Ok(SecretKey::from_bytes(key))
 }
@@ -1205,18 +1219,6 @@ fn default_local_kdf_params() -> zann_core::api::auth::KdfParams {
         memory_kb: 65536,
         parallelism: 4,
     }
-}
-
-fn local_root_from_db_url(db_url: &str) -> PathBuf {
-    if let Some(path) = db_url.strip_prefix("sqlite://") {
-        if let Some(parent) = Path::new(path).parent() {
-            return parent.to_path_buf();
-        }
-    }
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".zann")
 }
 
 fn resolve_storage_id(runtime: &Runtime, pool: &SqlitePool) -> CoreResult<Uuid> {
@@ -1257,6 +1259,171 @@ fn resolve_storage_id(runtime: &Runtime, pool: &SqlitePool) -> CoreResult<Uuid> 
     }
 
     Ok(selected.0)
+}
+
+#[cfg(test)]
+mod compatibility_tests {
+    use serde::Deserialize;
+    use tempfile::TempDir;
+
+    use super::*;
+
+    const FIXTURE_JSON: &str = include_str!("../../../tests/fixtures/crypto/v1_local_vault.json");
+
+    #[derive(Deserialize)]
+    struct Fixture {
+        synthetic_only: bool,
+        kdf: KdfFixture,
+    }
+
+    #[derive(Deserialize)]
+    struct KdfFixture {
+        password: String,
+        salt_base64: String,
+        params: KdfParamsFixture,
+        expected_key_hex: String,
+    }
+
+    #[derive(Deserialize)]
+    struct KdfParamsFixture {
+        algorithm: String,
+        iterations: u32,
+        memory_kb: u32,
+        parallelism: u32,
+    }
+
+    fn decode_hex(value: &str) -> Vec<u8> {
+        assert_eq!(value.len() % 2, 0, "fixture hex must have pairs");
+        value
+            .as_bytes()
+            .chunks_exact(2)
+            .map(|pair| {
+                let pair = std::str::from_utf8(pair).expect("fixture hex must be UTF-8");
+                u8::from_str_radix(pair, 16).expect("valid fixture hex")
+            })
+            .collect()
+    }
+
+    #[test]
+    fn canonical_master_key_kdf_matches_golden_vector() {
+        let fixture: Fixture = serde_json::from_str(FIXTURE_JSON).expect("valid crypto fixture");
+        assert!(fixture.synthetic_only);
+        let identity = IdentityConfig {
+            kdf_salt: fixture.kdf.salt_base64,
+            kdf_params: zann_core::api::auth::KdfParams {
+                algorithm: fixture.kdf.params.algorithm,
+                iterations: fixture.kdf.params.iterations,
+                memory_kb: fixture.kdf.params.memory_kb,
+                parallelism: fixture.kdf.params.parallelism,
+            },
+            salt_fingerprint: None,
+            first_seen_at: None,
+            email: None,
+        };
+
+        let key = derive_master_key(&fixture.kdf.password, &identity).expect("derive master key");
+        assert_eq!(
+            key.as_bytes().as_slice(),
+            decode_hex(&fixture.kdf.expected_key_hex)
+        );
+    }
+
+    #[test]
+    fn client_state_uses_the_explicit_database_root() {
+        let temp = TempDir::new().expect("tempdir");
+        let root = temp.path().join("custom-client-root");
+        std::fs::create_dir_all(&root).expect("create client root");
+        let db_path = root.join("local.sqlite");
+        let core = create_core_at_path(&db_path).expect("create core");
+
+        assert_eq!(core.root, root);
+    }
+
+    #[test]
+    fn filesystem_path_keeps_sqlite_uri_delimiters_literal() {
+        let temp = TempDir::new().expect("tempdir");
+        let root = temp.path().join("literal # ? % root");
+        std::fs::create_dir_all(&root).expect("create client root");
+        let db_path = root.join("local # ? %.sqlite");
+
+        let core = create_core_at_path(&db_path).expect("create core at exact path");
+
+        assert_eq!(core.root, root);
+        assert!(db_path.exists(), "SQLite must create the exact path");
+        assert!(
+            core.root.join(["config", ".json"].concat()).exists(),
+            "identity config must remain adjacent to the exact database path"
+        );
+    }
+
+    #[test]
+    fn percent_encoded_legacy_uri_keeps_database_and_client_root_together() {
+        let temp = TempDir::new().expect("tempdir");
+        let root = temp.path().join("encoded root");
+        std::fs::create_dir_all(&root).expect("create encoded root");
+        let db_path = root.join("local # ? %.sqlite");
+        let encoded = db_path
+            .to_str()
+            .expect("UTF-8 test path")
+            .replace('%', "%25")
+            .replace(' ', "%20")
+            .replace('#', "%23")
+            .replace('?', "%3F");
+        let uri = format!("sqlite:{encoded}?mode=rwc&cache=private");
+
+        let core = create_core(uri).expect("create core from encoded durable URI");
+
+        assert_eq!(core.root, root);
+        assert!(
+            db_path.exists(),
+            "URI and config root must name one database"
+        );
+        assert!(root.join(["config", ".json"].concat()).exists());
+    }
+
+    #[test]
+    fn ffi_legacy_uri_rejects_non_durable_database() {
+        for uri in [
+            "sqlite::memory:",
+            "sqlite://?mode=memory",
+            "sqlite://:memory:",
+            "sqlite:",
+        ] {
+            assert!(
+                matches!(
+                    create_core(uri.to_string()),
+                    Err(CoreError::InvalidArgument(_))
+                ),
+                "{uri} must fail closed"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_entry_point_rejects_ambiguous_raw_paths() {
+        let error = match create_core("relative # ? %.sqlite".to_string()) {
+            Ok(_) => panic!("legacy public entry point must accept URIs only"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, CoreError::InvalidArgument(_)));
+    }
+
+    #[test]
+    fn production_ffi_does_not_stringify_paths_into_sqlite_uris() {
+        let source = include_str!("lib.rs");
+        for forbidden in [
+            ["format!(\"sqlite", "://"].concat(),
+            ["connect_sqlite_", "path_with_max"].concat(),
+            ["connect_sqlite_", "with_max"].concat(),
+            ["SqliteConnectOptions::", "from_str"].concat(),
+            ["strip_prefix(\"sqlite", "://\")"].concat(),
+        ] {
+            assert!(
+                !source.contains(&forbidden),
+                "FFI must delegate parsing and resolution to SqliteFileLocation"
+            );
+        }
+    }
 }
 
 uniffi::setup_scaffolding!("zann_ffi");

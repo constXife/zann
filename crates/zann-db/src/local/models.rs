@@ -79,19 +79,29 @@ fn parse_uuid(row: &SqliteRow, column: &str) -> Result<Uuid, sqlx_core::Error> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LocalVault {
     pub id: Uuid,
     pub storage_id: Uuid,
+    pub slug: String,
     pub name: String,
     pub kind: VaultKind,
     pub is_default: bool,
     pub vault_key_enc: Vec<u8>,
     pub key_wrap_type: KeyWrapType,
+    pub cache_key_fp: Option<String>,
     pub last_synced_at: Option<i64>,
 }
 
-#[derive(Debug, Clone)]
+impl LocalVault {
+    /// Returns the deterministic identity assigned to vaults that predate or
+    /// do not originate from a remote server catalog.
+    pub fn local_slug(id: Uuid) -> String {
+        format!("local::{}", id.simple())
+    }
+}
+
+#[derive(Clone)]
 pub struct LocalItem {
     pub id: Uuid,
     pub storage_id: Uuid,
@@ -108,7 +118,7 @@ pub struct LocalItem {
     pub sync_status: SyncStatus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LocalSyncCursor {
     pub storage_id: Uuid,
     pub vault_id: Uuid,
@@ -116,7 +126,16 @@ pub struct LocalSyncCursor {
     pub last_sync_at: Option<DateTime<Utc>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+pub struct LocalSyncCheckpoint {
+    pub storage_id: Uuid,
+    pub vault_id: Uuid,
+    pub cursor: Option<String>,
+    pub last_seq: Option<i64>,
+    pub last_sync_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone)]
 pub struct LocalPendingChange {
     pub id: Uuid,
     pub storage_id: Uuid,
@@ -132,7 +151,7 @@ pub struct LocalPendingChange {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LocalStorage {
     pub id: Uuid,
     pub kind: StorageKind,
@@ -145,7 +164,7 @@ pub struct LocalStorage {
     pub auth_method: Option<AuthMethod>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LocalItemHistory {
     pub id: Uuid,
     pub storage_id: Uuid,
@@ -164,6 +183,157 @@ pub struct LocalItemHistory {
     pub created_at: DateTime<Utc>,
 }
 
+impl std::fmt::Debug for LocalVault {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalVault")
+            .field("id", &self.id)
+            .field("storage_id", &self.storage_id)
+            .field("slug", &"<redacted>")
+            .field("name", &"<redacted>")
+            .field("kind", &self.kind)
+            .field("is_default", &self.is_default)
+            .field("vault_key_enc_bytes", &self.vault_key_enc.len())
+            .field("key_wrap_type", &self.key_wrap_type)
+            .field(
+                "cache_key_fp",
+                &self.cache_key_fp.as_ref().map(|_| "<redacted>"),
+            )
+            .field("last_synced_at", &self.last_synced_at)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for LocalItem {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalItem")
+            .field("id", &self.id)
+            .field("storage_id", &self.storage_id)
+            .field("vault_id", &self.vault_id)
+            .field("path", &"<redacted>")
+            .field("name", &"<redacted>")
+            .field("type_id", &self.type_id)
+            .field("payload_enc_bytes", &self.payload_enc.len())
+            .field("checksum", &"<redacted>")
+            .field(
+                "cache_key_fp",
+                &self.cache_key_fp.as_ref().map(|_| "<redacted>"),
+            )
+            .field("version", &self.version)
+            .field("deleted", &self.deleted_at.is_some())
+            .field("updated_at", &self.updated_at)
+            .field("sync_status", &self.sync_status)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for LocalSyncCursor {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalSyncCursor")
+            .field("storage_id", &self.storage_id)
+            .field("vault_id", &self.vault_id)
+            .field("cursor_bytes", &self.cursor.as_ref().map(String::len))
+            .field("last_sync_at", &self.last_sync_at)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for LocalSyncCheckpoint {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalSyncCheckpoint")
+            .field("storage_id", &self.storage_id)
+            .field("vault_id", &self.vault_id)
+            .field("cursor_bytes", &self.cursor.as_ref().map(String::len))
+            .field("last_seq", &self.last_seq)
+            .field("last_sync_at", &self.last_sync_at)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for LocalPendingChange {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalPendingChange")
+            .field("id", &self.id)
+            .field("storage_id", &self.storage_id)
+            .field("vault_id", &self.vault_id)
+            .field("item_id", &self.item_id)
+            .field("operation", &self.operation)
+            .field(
+                "payload_enc_bytes",
+                &self.payload_enc.as_ref().map(Vec::len),
+            )
+            .field("checksum", &self.checksum.as_ref().map(|_| "<redacted>"))
+            .field("path", &self.path.as_ref().map(|_| "<redacted>"))
+            .field("name", &self.name.as_ref().map(|_| "<redacted>"))
+            .field("type_id", &self.type_id)
+            .field("base_seq", &self.base_seq)
+            .field("created_at", &self.created_at)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for LocalStorage {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalStorage")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("name", &"<redacted>")
+            .field(
+                "server_url",
+                &self.server_url.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "server_name",
+                &self.server_name.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "server_fingerprint",
+                &self.server_fingerprint.as_ref().map(|_| "<redacted>"),
+            )
+            .field(
+                "account_subject",
+                &self.account_subject.as_ref().map(|_| "<redacted>"),
+            )
+            .field("personal_vaults_enabled", &self.personal_vaults_enabled)
+            .field("auth_method", &self.auth_method)
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for LocalItemHistory {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LocalItemHistory")
+            .field("id", &self.id)
+            .field("storage_id", &self.storage_id)
+            .field("vault_id", &self.vault_id)
+            .field("item_id", &self.item_id)
+            .field("payload_enc_bytes", &self.payload_enc.len())
+            .field("checksum", &"<redacted>")
+            .field("version", &self.version)
+            .field("change_type", &self.change_type)
+            .field("changed_by_email", &"<redacted>")
+            .field(
+                "changed_by_name",
+                &self.changed_by_name.as_ref().map(|_| "<redacted>"),
+            )
+            .field("changed_by_device_id", &self.changed_by_device_id)
+            .field(
+                "changed_by_device_name",
+                &self.changed_by_device_name.as_ref().map(|_| "<redacted>"),
+            )
+            .field("source", &self.source)
+            .field("sync_status", &self.sync_status)
+            .field("created_at", &self.created_at)
+            .finish()
+    }
+}
+
 impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalVault {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
         let kind: i32 = row.try_get("kind")?;
@@ -171,6 +341,7 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalVault {
         Ok(Self {
             id: parse_uuid(row, "id")?,
             storage_id: parse_uuid(row, "storage_id")?,
+            slug: row.try_get("slug")?,
             name: row.try_get("name")?,
             kind: VaultKind::try_from(kind)
                 .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
@@ -178,6 +349,7 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalVault {
             vault_key_enc: row.try_get("vault_key_enc")?,
             key_wrap_type: KeyWrapType::try_from(key_wrap_type)
                 .map_err(|err| sqlx_core::Error::Decode(Box::new(err)))?,
+            cache_key_fp: row.try_get("cache_key_fp")?,
             last_synced_at: row.try_get("last_synced_at")?,
         })
     }
@@ -235,6 +407,18 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalSyncCursor {
             storage_id: parse_uuid(row, "storage_id")?,
             vault_id: parse_uuid(row, "vault_id")?,
             cursor: row.try_get("cursor")?,
+            last_sync_at: row.try_get("last_sync_at")?,
+        })
+    }
+}
+
+impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalSyncCheckpoint {
+    fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
+        Ok(Self {
+            storage_id: parse_uuid(row, "storage_id")?,
+            vault_id: parse_uuid(row, "vault_id")?,
+            cursor: row.try_get("cursor")?,
+            last_seq: row.try_get("last_seq")?,
             last_sync_at: row.try_get("last_sync_at")?,
         })
     }

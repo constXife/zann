@@ -1,6 +1,7 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{Method, Request, StatusCode};
 use serde_json::json;
+use sqlx_core::row::Row;
 use tower::ServiceExt;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -282,7 +283,7 @@ impl TestApp {
                     "name": "File Secret",
                     "type_id": "file_secret",
                     "payload_enc": [1, 2, 3, 4, 5],
-                    "checksum": "abc123"
+                    "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3, 4, 5])
                 }),
             )
             .await;
@@ -608,7 +609,7 @@ async fn file_upload_rejects_large_payload() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
-async fn file_upload_is_idempotent_by_file_id() {
+async fn file_upload_rejects_unverifiable_file_id_reuse() {
     let app = TestApp::new_with_smk().await;
     let user = app
         .register("shared_idempotent_files@example.com", "password")
@@ -623,23 +624,129 @@ async fn file_upload_is_idempotent_by_file_id() {
     let item = app.create_shared_file_item(token, vault_id, &file_id).await;
     let item_id = item["id"].as_str().expect("item id");
 
-    let bytes = b"idempotent-file".to_vec();
-    for _ in 0..2 {
-        let (status, response_bytes) = app
-            .send_bytes(
-                Method::POST,
-                &format!(
-                    "/v1/vaults/{}/items/{}/file?representation=plain&file_id={}",
-                    vault_id, item_id, file_id
-                ),
-                Some(token),
-                bytes.clone(),
-            )
-            .await;
-        assert_eq!(status, StatusCode::OK, "upload failed");
-        let response_json: serde_json::Value =
-            serde_json::from_slice(&response_bytes).expect("upload json");
-        assert_eq!(response_json["file_id"], file_id);
-        assert_eq!(response_json["upload_state"], "ready");
-    }
+    let uri = format!(
+        "/v1/vaults/{}/items/{}/file?representation=plain&file_id={}",
+        vault_id, item_id, file_id
+    );
+    let (status, response_bytes) = app
+        .send_bytes(Method::POST, &uri, Some(token), b"idempotent-file".to_vec())
+        .await;
+    assert_eq!(status, StatusCode::OK, "first upload failed");
+    let response_json: serde_json::Value =
+        serde_json::from_slice(&response_bytes).expect("upload json");
+    assert_eq!(response_json["file_id"], file_id);
+    assert_eq!(response_json["upload_state"], "ready");
+
+    let (status, response_bytes) = app
+        .send_bytes(Method::POST, &uri, Some(token), b"idempotent-file".to_vec())
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let response_json: serde_json::Value =
+        serde_json::from_slice(&response_bytes).expect("reuse error json");
+    assert_eq!(response_json["error"], "upload_state_invalid");
+
+    let file_uuid = Uuid::parse_str(&file_id).expect("file uuid");
+    let count_row =
+        sqlx_core::query::query("SELECT COUNT(*)::bigint AS count FROM attachments WHERE id = $1")
+            .bind(file_uuid)
+            .fetch_one(&app.pool)
+            .await
+            .expect("attachment count");
+    assert_eq!(count_row.try_get::<i64, _>("count").expect("count"), 1);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn delete_and_restore_move_attachment_state_atomically() {
+    let app = TestApp::new_with_smk().await;
+    let user = app
+        .register("attachment_tombstone@example.com", "password")
+        .await;
+    let token = user["access_token"].as_str().expect("token");
+    let vault = app
+        .create_shared_vault(token, "attachment-tombstone-vault")
+        .await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    let file_id = Uuid::now_v7().to_string();
+    let item = app.create_shared_file_item(token, vault_id, &file_id).await;
+    let item_id = item["id"].as_str().expect("item id");
+    let item_uuid = Uuid::parse_str(item_id).expect("item uuid");
+    let file_uuid = Uuid::parse_str(&file_id).expect("file uuid");
+
+    let (status, _) = app
+        .send_bytes(
+            Method::POST,
+            &format!(
+                "/v1/vaults/{}/items/{}/file?representation=plain&file_id={}",
+                vault_id, item_id, file_id
+            ),
+            Some(token),
+            b"atomic-attachment".to_vec(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "upload failed");
+    let ready_row = sqlx_core::query::query("SELECT version FROM items WHERE id = $1")
+        .bind(item_uuid)
+        .fetch_one(&app.pool)
+        .await
+        .expect("ready item");
+    let ready_version: i64 = ready_row.try_get("version").expect("ready version");
+
+    let (status, _) = app
+        .send_json(
+            Method::DELETE,
+            &format!("/v1/vaults/{}/items/{}", vault_id, item_id),
+            Some(token),
+            serde_json::Value::Null,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "delete failed");
+
+    let deleted_row = sqlx_core::query::query(
+        "SELECT deleted_at FROM attachments WHERE id = $1 AND item_id = $2",
+    )
+    .bind(file_uuid)
+    .bind(item_uuid)
+    .fetch_one(&app.pool)
+    .await
+    .expect("attachment row");
+    assert!(deleted_row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("deleted_at")
+        .expect("deleted_at")
+        .is_some());
+    let (status, _) = app
+        .get_bytes(
+            &format!(
+                "/v1/vaults/{}/items/{}/file?representation=plain",
+                vault_id, item_id
+            ),
+            Some(token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "tombstone leaked file");
+
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            &format!(
+                "/v1/vaults/{}/items/{}/versions/{}/restore",
+                vault_id, item_id, ready_version
+            ),
+            Some(token),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "restore failed: {body:?}");
+    let restored_row = sqlx_core::query::query(
+        "SELECT deleted_at FROM attachments WHERE id = $1 AND item_id = $2",
+    )
+    .bind(file_uuid)
+    .bind(item_uuid)
+    .fetch_one(&app.pool)
+    .await
+    .expect("restored attachment row");
+    assert!(restored_row
+        .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("deleted_at")
+        .expect("deleted_at")
+        .is_none());
 }

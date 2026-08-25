@@ -1,4 +1,3 @@
-use super::super::types::ServiceAccountLoginRequest;
 use crate::app::AppState;
 use crate::domains::auth::service::{self, AuthRequestContext};
 use crate::infra::request_context::{client_ip, request_id, user_agent};
@@ -8,6 +7,7 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use zann_core::api::auth::ServiceAccountLoginRequest;
 
 pub(crate) async fn login_service_account(
     State(state): State<AppState>,

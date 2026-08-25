@@ -7,7 +7,7 @@ use zann_core::{
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::vault_crypto as core_crypto;
 
-use crate::local::MetadataRepo;
+use crate::local::{LocalVault, MetadataRepo};
 
 use super::LocalServices;
 
@@ -84,6 +84,8 @@ impl<'a> AppService for LocalServices<'a> {
             SELECT id
             FROM local_vaults
             WHERE storage_id = ?1 AND name = 'Personal (Local)'
+            ORDER BY slug
+            LIMIT 1
             "#,
         )
         .bind(storage_id)
@@ -101,18 +103,21 @@ impl<'a> AppService for LocalServices<'a> {
                 INSERT INTO local_vaults (
                     id,
                     storage_id,
+                    slug,
                     name,
                     kind,
                     is_default,
                     vault_key_enc,
                     key_wrap_type,
+                    cache_key_fp,
                     last_synced_at
                 )
-                VALUES (?1, ?2, 'Personal (Local)', 1, 1, ?3, 1, NULL)
+                VALUES (?1, ?2, ?3, 'Personal (Local)', 1, 1, ?4, 1, NULL, NULL)
                 "#,
             )
             .bind(vault_id)
             .bind(storage_id)
+            .bind(LocalVault::local_slug(vault_id))
             .bind(payload)
             .execute(&mut *tx)
             .await

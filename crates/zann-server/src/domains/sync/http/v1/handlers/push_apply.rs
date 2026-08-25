@@ -4,11 +4,14 @@ use sqlx_core::row::Row;
 use sqlx_postgres::PgConnection;
 use uuid::Uuid;
 
-use super::super::helpers::{
-    actor_snapshot, find_path_conflict, normalize_path_and_name, prune_item_history,
-};
+use super::super::helpers::{actor_snapshot, find_path_conflict, prune_item_history};
 use super::super::types::{SyncAppliedChange, SyncPushChange, SyncPushConflict};
 use super::super::ITEM_HISTORY_LIMIT;
+use crate::domains::items::contract::{
+    canonical_create_location, canonical_type_id, canonical_update_location, next_item_version,
+    validate_existing_type_id, validate_personal_ciphertext, ItemContractError,
+    MAX_CIPHERTEXT_BYTES,
+};
 use zann_core::Identity;
 use zann_core::{ChangeOp, ChangeType, Item, SyncStatus};
 
@@ -32,19 +35,150 @@ fn db_error() -> ApplyChangeError {
     }
 }
 
+fn verify_payload_pair(
+    payload_enc: Option<Vec<u8>>,
+    checksum: Option<String>,
+    required: bool,
+) -> Result<Option<(Vec<u8>, String)>, ApplyChangeError> {
+    match (payload_enc, checksum) {
+        (Some(payload_enc), Some(checksum)) => {
+            validate_personal_ciphertext(&payload_enc, &checksum).map_err(contract_error)?;
+            Ok(Some((payload_enc, checksum)))
+        }
+        (Some(_), None) => Err(ApplyChangeError {
+            status: StatusCode::BAD_REQUEST,
+            error: "missing_checksum",
+        }),
+        (None, Some(_)) => Err(ApplyChangeError {
+            status: StatusCode::BAD_REQUEST,
+            error: "checksum_without_payload",
+        }),
+        (None, None) if required => Err(ApplyChangeError {
+            status: StatusCode::BAD_REQUEST,
+            error: "missing_payload",
+        }),
+        (None, None) => Ok(None),
+    }
+}
+
+fn contract_error(error: ItemContractError) -> ApplyChangeError {
+    ApplyChangeError {
+        status: if error == ItemContractError::PayloadTooLarge {
+            StatusCode::PAYLOAD_TOO_LARGE
+        } else {
+            StatusCode::BAD_REQUEST
+        },
+        error: error.code(),
+    }
+}
+
+fn conflict_for_item(item: &Item, reason: &'static str, server_seq: i64) -> ApplyChangeResult {
+    ApplyChangeResult::Conflict(SyncPushConflict {
+        item_id: item.id.to_string(),
+        reason,
+        server_seq,
+        server_updated_at: item.updated_at.to_rfc3339(),
+    })
+}
+
+fn current_generation_applied(item: &Item, seq: i64) -> ApplyChangeResult {
+    ApplyChangeResult::Applied {
+        item_id: item.id,
+        applied_change: SyncAppliedChange {
+            item_id: item.id.to_string(),
+            seq,
+            updated_at: item.updated_at.to_rfc3339(),
+            deleted_at: item.deleted_at.as_ref().map(|value| value.to_rfc3339()),
+        },
+    }
+}
+
+async fn load_bounded_item(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+    vault_id: Uuid,
+) -> Result<Option<Item>, ApplyChangeError> {
+    let metadata = query!(
+        r#"
+        SELECT (
+            is_canonical_item_path(path)
+            AND octet_length(path)::BIGINT <= 500
+            AND octet_length(name)::BIGINT BETWEEN 1 AND 200
+            AND name = canonical_item_basename(path)
+            AND is_canonical_item_type(type_id)
+            AND octet_length(type_id)::BIGINT <= 128
+            AND octet_length(checksum)::BIGINT = 64
+            AND checksum ~ '^[0-9a-f]{64}$'
+            AND octet_length(payload_enc)::BIGINT BETWEEN 1 AND $3
+            AND (tags IS NULL OR octet_length(tags::text)::BIGINT <= 65536)
+        ) AS within_bounds
+        FROM items
+        WHERE id = $1 AND vault_id = $2
+        "#,
+        item_id,
+        vault_id,
+        MAX_CIPHERTEXT_BYTES as i64
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|err| {
+        tracing::error!(event = "sync_push_item_metadata_failed", error = %err, "DB error");
+        db_error()
+    })?;
+    let Some(metadata) = metadata else {
+        return Ok(None);
+    };
+    if !metadata
+        .try_get::<bool, _>("within_bounds")
+        .map_err(|_| db_error())?
+    {
+        return Err(ApplyChangeError {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            error: "invalid_item_row",
+        });
+    }
+
+    query_as!(
+        Item,
+        r#"
+        SELECT
+            id as "id", vault_id as "vault_id", path, name, type_id,
+            tags as "tags", favorite as "favorite", payload_enc, checksum,
+            version as "version", row_version as "row_version", device_id as "device_id",
+            sync_status as "sync_status", deleted_at as "deleted_at",
+            deleted_by_user_id as "deleted_by_user_id",
+            deleted_by_device_id as "deleted_by_device_id",
+            created_at as "created_at", updated_at as "updated_at"
+        FROM items
+        WHERE id = $1 AND vault_id = $2
+        "#,
+        item_id,
+        vault_id
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|err| {
+        tracing::error!(event = "sync_push_item_load_failed", error = %err, "DB error");
+        db_error()
+    })
+}
+
 async fn insert_item_history(
     conn: &mut PgConnection,
     history: &zann_core::ItemHistory,
 ) -> Result<(), ApplyChangeError> {
-    if let Err(err) = query!(
+    let result = query!(
         r"
-        INSERT INTO item_history (
+        INSERT INTO item_history AS existing (
             id, item_id, payload_enc, checksum, version, change_type, fields_changed,
             changed_by_user_id, changed_by_email, changed_by_name, changed_by_device_id,
             changed_by_device_name, created_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-        ON CONFLICT (item_id, version) DO NOTHING
+        ON CONFLICT (item_id, version) DO UPDATE
+        SET item_id = existing.item_id
+        WHERE existing.payload_enc IS NOT DISTINCT FROM excluded.payload_enc
+          AND existing.checksum IS NOT DISTINCT FROM excluded.checksum
         ",
         history.id,
         history.item_id,
@@ -62,16 +196,43 @@ async fn insert_item_history(
     )
     .execute(&mut *conn)
     .await
-    {
+    .map_err(|err| {
         tracing::error!(
             event = "sync_push_history_insert_failed",
             error = %err,
             item_id = %history.item_id,
             "Failed to insert item history"
         );
+        db_error()
+    })?;
+    if result.rows_affected() == 0 {
+        tracing::error!(
+            event = "sync_push_history_generation_conflict",
+            item_id = %history.item_id,
+            version = history.version,
+            "Conflicting item history generation"
+        );
         return Err(db_error());
     }
     Ok(())
+}
+
+async fn enforce_item_history_limit(
+    conn: &mut PgConnection,
+    item_id: Uuid,
+) -> Result<(), ApplyChangeError> {
+    prune_item_history(&mut *conn, item_id, ITEM_HISTORY_LIMIT)
+        .await
+        .map(|_| ())
+        .map_err(|err| {
+            tracing::error!(
+                event = "sync_push_history_prune_failed",
+                error = %err,
+                item_id = %item_id,
+                "Failed to prune item history"
+            );
+            db_error()
+        })
 }
 
 pub(crate) async fn apply_change(
@@ -83,37 +244,63 @@ pub(crate) async fn apply_change(
 ) -> Result<ApplyChangeResult, ApplyChangeError> {
     let operation = change.operation;
     let base_seq = change.base_seq.unwrap_or(0);
-    let max_seq_row = query!(
+    // Serialize writers of an existing item before checking the exact current
+    // generation. Without this lock, two updates with the same base cursor can
+    // both pass the check and the loser fails later as an ambiguous DB error.
+    query!(
         r#"
-        SELECT MAX(seq) as "seq"
-        FROM changes
-        WHERE vault_id = $1 AND item_id = $2
+        SELECT id
+        FROM items
+        WHERE id = $1 AND vault_id = $2
+        FOR UPDATE
         "#,
-        vault_id,
-        change.item_id
+        change.item_id,
+        vault_id
     )
-    .fetch_one(&mut *conn)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(|err| {
         tracing::error!(event = "sync_push_failed", error = %err, "DB error");
         db_error()
     })?;
-    let max_seq = max_seq_row
-        .try_get::<Option<i64>, _>("seq")
+
+    let current_seq_row = query!(
+        r#"
+        SELECT c.seq
+        FROM items i
+        JOIN changes c
+          ON c.item_id = i.id
+         AND c.vault_id = i.vault_id
+         AND c.version = i.version
+        WHERE i.vault_id = $1 AND i.id = $2
+        "#,
+        vault_id,
+        change.item_id
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(|err| {
+        tracing::error!(event = "sync_push_failed", error = %err, "DB error");
+        db_error()
+    })?;
+    let current_seq = current_seq_row
+        .map(|row| row.try_get::<i64, _>("seq"))
+        .transpose()
         .map_err(|err| {
             tracing::error!(event = "sync_push_failed", error = %err, "DB error");
             db_error()
         })?;
 
-    if let Some(server_seq) = max_seq {
-        if base_seq > 0 && server_seq > base_seq {
+    if let Some(server_seq) = current_seq {
+        if server_seq != base_seq {
             let updated_at = match query!(
                 r"
                 SELECT updated_at
                 FROM items
-                WHERE id = $1
+                WHERE id = $1 AND vault_id = $2
                 ",
-                change.item_id
+                change.item_id,
+                vault_id
             )
             .fetch_optional(&mut *conn)
             .await
@@ -143,63 +330,50 @@ pub(crate) async fn apply_change(
         }
     }
 
-    let existing = query_as!(
-        Item,
-        r#"
-        SELECT
-            id as "id",
-            vault_id as "vault_id",
-            path,
-            name,
-            type_id,
-            tags as "tags",
-            favorite as "favorite",
-            payload_enc,
-            checksum,
-            version as "version",
-            row_version as "row_version",
-            device_id as "device_id",
-            sync_status as "sync_status",
-            deleted_at as "deleted_at",
-            deleted_by_user_id as "deleted_by_user_id",
-            deleted_by_device_id as "deleted_by_device_id",
-            created_at as "created_at",
-            updated_at as "updated_at"
-        FROM items
-        WHERE id = $1
-        "#,
-        change.item_id
-    )
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(|err| {
-        tracing::error!(event = "sync_push_failed", error = %err, "DB error");
-        db_error()
-    })?;
+    let existing = load_bounded_item(conn, change.item_id, vault_id).await?;
+
+    // The row lock and exact generation check above make this a state-machine
+    // decision, rather than relying on the deferred database trigger to reject
+    // an invalid transition at commit time. In particular, Update never
+    // revives a tombstone, Restore is the only tombstone -> Active transition,
+    // and an exact retry of Delete is a read-only success.
+    if let Some(item) = existing.as_ref() {
+        let state = (item.sync_status, item.deleted_at.is_some());
+        match operation {
+            ChangeType::Create => {}
+            ChangeType::Update | ChangeType::Restore | ChangeType::Delete => {
+                let Some(server_seq) = current_seq else {
+                    return Ok(conflict_for_item(item, "generation_conflict", 0));
+                };
+                match (operation, state) {
+                    (ChangeType::Update, (SyncStatus::Active, false))
+                    | (ChangeType::Restore, (SyncStatus::Tombstone, true))
+                    | (ChangeType::Delete, (SyncStatus::Active, false)) => {}
+                    (ChangeType::Update, (SyncStatus::Tombstone, true)) => {
+                        return Ok(conflict_for_item(item, "item_deleted", server_seq));
+                    }
+                    (ChangeType::Restore, (SyncStatus::Active, false)) => {
+                        return Ok(conflict_for_item(item, "item_not_deleted", server_seq));
+                    }
+                    (ChangeType::Delete, (SyncStatus::Tombstone, true)) => {
+                        return Ok(current_generation_applied(item, server_seq));
+                    }
+                    _ => {
+                        return Ok(conflict_for_item(item, "invalid_item_state", server_seq));
+                    }
+                }
+            }
+        }
+    }
 
     let now = Utc::now();
     let item_version = match (operation, existing) {
         (ChangeType::Create, None) => {
-            let payload_enc = match change.payload_enc {
-                Some(payload) => payload,
-                None => {
-                    return Err(ApplyChangeError {
-                        status: StatusCode::BAD_REQUEST,
-                        error: "missing_payload",
-                    });
-                }
-            };
-            let checksum = match change.checksum.as_deref() {
-                Some(value) if !value.trim().is_empty() => value.trim().to_string(),
-                _ => {
-                    return Err(ApplyChangeError {
-                        status: StatusCode::BAD_REQUEST,
-                        error: "missing_checksum",
-                    });
-                }
-            };
+            let (payload_enc, checksum) =
+                verify_payload_pair(change.payload_enc, change.checksum, true)?
+                    .expect("required payload pair");
             let path = match change.path.as_deref() {
-                Some(value) if !value.trim().is_empty() => value.trim().to_string(),
+                Some(value) => value,
                 _ => {
                     return Err(ApplyChangeError {
                         status: StatusCode::BAD_REQUEST,
@@ -207,9 +381,10 @@ pub(crate) async fn apply_change(
                     });
                 }
             };
-            let (path, name) = normalize_path_and_name(&path, Some(&path), change.name.as_deref());
+            let (path, name) =
+                canonical_create_location(path, change.name.as_deref()).map_err(contract_error)?;
             let type_id = match change.type_id.as_deref() {
-                Some(value) if !value.trim().is_empty() => value.trim().to_string(),
+                Some(value) => canonical_type_id(value).map_err(contract_error)?,
                 _ => {
                     return Err(ApplyChangeError {
                         status: StatusCode::BAD_REQUEST,
@@ -233,7 +408,7 @@ pub(crate) async fn apply_change(
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: change.item_id.to_string(),
                     reason: "already_exists",
-                    server_seq: max_seq.unwrap_or(0),
+                    server_seq: current_seq.unwrap_or(0),
                     server_updated_at: updated_at,
                 }));
             }
@@ -260,7 +435,7 @@ pub(crate) async fn apply_change(
             };
             let item_version = item.version;
 
-            if let Err(err) = query!(
+            let insert_result = query!(
                 r"
                 INSERT INTO items (
                     id, vault_id, path, name, type_id, tags, favorite, payload_enc, checksum,
@@ -268,6 +443,7 @@ pub(crate) async fn apply_change(
                     deleted_by_device_id, created_at, updated_at
                 )
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+                ON CONFLICT DO NOTHING
                 ",
                 item.id,
                 item.vault_id,
@@ -290,14 +466,22 @@ pub(crate) async fn apply_change(
             )
             .execute(&mut *conn)
             .await
-            {
+            .map_err(|err| {
                 tracing::error!(
                     event = "sync_push_item_insert_failed",
                     error = %err,
                     item_id = %item.id,
                     "Failed to insert item"
                 );
-                return Err(db_error());
+                db_error()
+            })?;
+            if insert_result.rows_affected() == 0 {
+                return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
+                    item_id: change.item_id.to_string(),
+                    reason: "already_exists",
+                    server_seq: 0,
+                    server_updated_at: now.to_rfc3339(),
+                }));
             }
             item_version
         }
@@ -305,21 +489,21 @@ pub(crate) async fn apply_change(
             return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                 item_id: change.item_id.to_string(),
                 reason: "already_exists",
-                server_seq: max_seq.unwrap_or(0),
+                server_seq: current_seq.unwrap_or(0),
                 server_updated_at: now.to_rfc3339(),
             }));
         }
         (ChangeType::Update, Some(mut item)) => {
-            let payload_changed = match (change.payload_enc.as_ref(), change.checksum.as_deref()) {
-                (Some(_), Some(checksum)) => {
-                    let trimmed = checksum.trim();
-                    trimmed.is_empty() || trimmed != item.checksum
-                }
-                (Some(_), None) => true,
-                (None, _) => false,
-            };
-            let (next_path, next_name) =
-                normalize_path_and_name(&item.path, change.path.as_deref(), change.name.as_deref());
+            let payload_update = verify_payload_pair(change.payload_enc, change.checksum, false)?;
+            let payload_changed = payload_update.as_ref().is_some_and(|(payload, checksum)| {
+                payload != &item.payload_enc || checksum != &item.checksum
+            });
+            let (next_path, next_name) = canonical_update_location(
+                &item.path,
+                change.path.as_deref(),
+                change.name.as_deref(),
+            )
+            .map_err(contract_error)?;
             let conflict_updated_at = find_path_conflict(conn, vault_id, &next_path, Some(item.id))
                 .await
                 .map_err(|err| {
@@ -335,7 +519,7 @@ pub(crate) async fn apply_change(
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: item.id.to_string(),
                     reason: "already_exists",
-                    server_seq: max_seq.unwrap_or(0),
+                    server_seq: current_seq.unwrap_or(0),
                     server_updated_at: updated_at,
                 }));
             }
@@ -358,36 +542,24 @@ pub(crate) async fn apply_change(
                     created_at: now,
                 };
                 insert_item_history(conn, &history).await?;
-                if let Err(err) = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await
-                {
-                    tracing::error!(
-                        event = "sync_push_history_prune_failed",
-                        error = %err,
-                        item_id = %item.id,
-                        "Failed to prune item history"
-                    );
-                }
+                enforce_item_history_limit(conn, item.id).await?;
             }
 
             item.path = next_path;
             item.name = next_name;
-            if let Some(type_id) = change.type_id.as_deref() {
-                if !type_id.trim().is_empty() {
-                    item.type_id = type_id.trim().to_string();
-                }
+            validate_existing_type_id(&item.type_id, change.type_id.as_deref())
+                .map_err(contract_error)?;
+
+            if let Some((payload_enc, checksum)) = payload_update {
+                item.payload_enc = payload_enc;
+                item.checksum = checksum;
             }
 
-            if let Some(payload) = change.payload_enc {
-                item.payload_enc = payload;
-            }
-            if let Some(checksum) = change.checksum.as_deref() {
-                if !checksum.trim().is_empty() {
-                    item.checksum = checksum.trim().to_string();
-                }
-            }
-
-            item.version = item.version.saturating_add(1);
-            item.row_version = item.row_version.saturating_add(1);
+            item.version = next_item_version(item.version).map_err(contract_error)?;
+            item.row_version = item
+                .row_version
+                .checked_add(1)
+                .ok_or_else(|| contract_error(ItemContractError::InvalidVersion))?;
             item.device_id = device_id;
             item.updated_at = now;
             let item_version = item.version;
@@ -405,6 +577,9 @@ pub(crate) async fn apply_change(
                     device_id = $9,
                     updated_at = $10
                 WHERE id = $1
+                  AND vault_id = $11
+                  AND sync_status = $12
+                  AND deleted_at IS NULL
                 ",
                 item.id,
                 item.path,
@@ -415,7 +590,9 @@ pub(crate) async fn apply_change(
                 item.version,
                 item.row_version,
                 item.device_id,
-                item.updated_at
+                item.updated_at,
+                vault_id,
+                SyncStatus::Active.as_i32()
             )
             .execute(&mut *conn)
             .await
@@ -429,13 +606,14 @@ pub(crate) async fn apply_change(
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: item.id.to_string(),
                     reason: "concurrent_modification",
-                    server_seq: max_seq.unwrap_or(0),
+                    server_seq: current_seq.unwrap_or(0),
                     server_updated_at: item.updated_at.to_rfc3339(),
                 }));
             }
             item_version
         }
         (ChangeType::Restore, Some(mut item)) => {
+            let payload_update = verify_payload_pair(change.payload_enc, change.checksum, false)?;
             let actor = actor_snapshot(conn, identity, Some(device_id)).await;
             let history = zann_core::ItemHistory {
                 id: Uuid::now_v7(),
@@ -453,43 +631,48 @@ pub(crate) async fn apply_change(
                 created_at: now,
             };
             insert_item_history(conn, &history).await?;
-            if let Err(err) = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await {
+            enforce_item_history_limit(conn, item.id).await?;
+            query!(
+                r#"
+                UPDATE attachments
+                SET deleted_at = NULL
+                WHERE item_id = $1
+                "#,
+                item.id
+            )
+            .execute(&mut *conn)
+            .await
+            .map_err(|err| {
                 tracing::error!(
-                    event = "sync_push_history_prune_failed",
+                    event = "sync_push_attachment_restore_failed",
                     error = %err,
                     item_id = %item.id,
-                    "Failed to prune item history"
+                    "Failed to restore attachment state"
                 );
+                db_error()
+            })?;
+
+            let (next_path, next_name) = canonical_update_location(
+                &item.path,
+                change.path.as_deref(),
+                change.name.as_deref(),
+            )
+            .map_err(contract_error)?;
+            item.path = next_path;
+            item.name = next_name;
+            validate_existing_type_id(&item.type_id, change.type_id.as_deref())
+                .map_err(contract_error)?;
+
+            if let Some((payload_enc, checksum)) = payload_update {
+                item.payload_enc = payload_enc;
+                item.checksum = checksum;
             }
 
-            if let Some(path) = change.path.as_deref() {
-                if !path.trim().is_empty() {
-                    item.path = path.trim().to_string();
-                }
-            }
-            if let Some(name) = change.name.as_deref() {
-                if !name.trim().is_empty() {
-                    item.name = name.trim().to_string();
-                }
-            }
-            if let Some(type_id) = change.type_id.as_deref() {
-                let type_id = type_id.trim();
-                if !type_id.is_empty() {
-                    item.type_id = type_id.to_string();
-                }
-            }
-
-            if let Some(payload) = change.payload_enc {
-                item.payload_enc = payload;
-            }
-            if let Some(checksum) = change.checksum.as_deref() {
-                if !checksum.trim().is_empty() {
-                    item.checksum = checksum.trim().to_string();
-                }
-            }
-
-            item.version = item.version.saturating_add(1);
-            item.row_version = item.row_version.saturating_add(1);
+            item.version = next_item_version(item.version).map_err(contract_error)?;
+            item.row_version = item
+                .row_version
+                .checked_add(1)
+                .ok_or_else(|| contract_error(ItemContractError::InvalidVersion))?;
             item.device_id = device_id;
             item.sync_status = SyncStatus::Active;
             item.deleted_at = None;
@@ -515,6 +698,9 @@ pub(crate) async fn apply_change(
                     deleted_by_device_id = $13,
                     updated_at = $14
                 WHERE id = $1
+                  AND vault_id = $15
+                  AND sync_status = $16
+                  AND deleted_at IS NOT NULL
                 ",
                 item.id,
                 item.path,
@@ -529,7 +715,9 @@ pub(crate) async fn apply_change(
                 item.deleted_at,
                 item.deleted_by_user_id,
                 item.deleted_by_device_id,
-                item.updated_at
+                item.updated_at,
+                vault_id,
+                SyncStatus::Tombstone.as_i32()
             )
             .execute(&mut *conn)
             .await
@@ -543,7 +731,7 @@ pub(crate) async fn apply_change(
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: item.id.to_string(),
                     reason: "concurrent_modification",
-                    server_seq: max_seq.unwrap_or(0),
+                    server_seq: current_seq.unwrap_or(0),
                     server_updated_at: item.updated_at.to_rfc3339(),
                 }));
             }
@@ -567,17 +755,33 @@ pub(crate) async fn apply_change(
                 created_at: now,
             };
             insert_item_history(conn, &history).await?;
-            if let Err(err) = prune_item_history(&mut *conn, item.id, ITEM_HISTORY_LIMIT).await {
+            enforce_item_history_limit(conn, item.id).await?;
+            query!(
+                r#"
+                UPDATE attachments
+                SET deleted_at = $2
+                WHERE item_id = $1 AND deleted_at IS NULL
+                "#,
+                item.id,
+                now
+            )
+            .execute(&mut *conn)
+            .await
+            .map_err(|err| {
                 tracing::error!(
-                    event = "sync_push_history_prune_failed",
+                    event = "sync_push_attachment_delete_failed",
                     error = %err,
                     item_id = %item.id,
-                    "Failed to prune item history"
+                    "Failed to tombstone attachment state"
                 );
-            }
+                db_error()
+            })?;
 
-            item.version = item.version.saturating_add(1);
-            item.row_version = item.row_version.saturating_add(1);
+            item.version = next_item_version(item.version).map_err(contract_error)?;
+            item.row_version = item
+                .row_version
+                .checked_add(1)
+                .ok_or_else(|| contract_error(ItemContractError::InvalidVersion))?;
             item.device_id = device_id;
             item.sync_status = SyncStatus::Tombstone;
             item.deleted_at = Some(now);
@@ -598,6 +802,9 @@ pub(crate) async fn apply_change(
                     deleted_by_device_id = $8,
                     updated_at = $9
                 WHERE id = $1
+                  AND vault_id = $10
+                  AND sync_status = $11
+                  AND deleted_at IS NULL
                 ",
                 item.id,
                 item.version,
@@ -607,7 +814,9 @@ pub(crate) async fn apply_change(
                 item.deleted_at,
                 item.deleted_by_user_id,
                 item.deleted_by_device_id,
-                item.updated_at
+                item.updated_at,
+                vault_id,
+                SyncStatus::Active.as_i32()
             )
             .execute(&mut *conn)
             .await
@@ -621,7 +830,7 @@ pub(crate) async fn apply_change(
                 return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                     item_id: item.id.to_string(),
                     reason: "concurrent_modification",
-                    server_seq: max_seq.unwrap_or(0),
+                    server_seq: current_seq.unwrap_or(0),
                     server_updated_at: item.updated_at.to_rfc3339(),
                 }));
             }
@@ -631,7 +840,7 @@ pub(crate) async fn apply_change(
             return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
                 item_id: change.item_id.to_string(),
                 reason: "missing_item",
-                server_seq: max_seq.unwrap_or(0),
+                server_seq: current_seq.unwrap_or(0),
                 server_updated_at: now.to_rfc3339(),
             }));
         }
@@ -642,10 +851,11 @@ pub(crate) async fn apply_change(
         ChangeType::Update | ChangeType::Restore => ChangeOp::Update,
         ChangeType::Create => ChangeOp::Create,
     };
-    let inserted = query!(
+    let inserted = match query!(
         r#"
         INSERT INTO changes (vault_id, item_id, op, version, device_id, created_at)
         VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (item_id, version) DO NOTHING
         RETURNING seq
         "#,
         vault_id,
@@ -655,17 +865,28 @@ pub(crate) async fn apply_change(
         device_id,
         now
     )
-    .fetch_one(&mut *conn)
+    .fetch_optional(&mut *conn)
     .await
-    .map_err(|err| {
-        tracing::error!(
-            event = "sync_push_change_insert_failed",
-            error = %err,
-            item_id = %change.item_id,
-            "Failed to insert change"
-        );
-        db_error()
-    })?;
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => {
+            return Ok(ApplyChangeResult::Conflict(SyncPushConflict {
+                item_id: change.item_id.to_string(),
+                reason: "generation_conflict",
+                server_seq: current_seq.unwrap_or(0),
+                server_updated_at: now.to_rfc3339(),
+            }));
+        }
+        Err(err) => {
+            tracing::error!(
+                event = "sync_push_change_insert_failed",
+                error = %err,
+                item_id = %change.item_id,
+                "Failed to insert change"
+            );
+            return Err(db_error());
+        }
+    };
     let seq = inserted.try_get::<i64, _>("seq").map_err(|err| {
         tracing::error!(
             event = "sync_push_change_insert_failed",

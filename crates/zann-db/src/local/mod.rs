@@ -16,6 +16,7 @@ macro_rules! query_as {
     }};
 }
 
+mod bounded_read;
 mod enums;
 mod item_history_repo;
 mod item_repo;
@@ -24,17 +25,27 @@ mod models;
 mod pending_change_repo;
 mod storage_repo;
 mod sync_cursor_repo;
+mod sync_repo;
 mod vault_repo;
 
+pub use bounded_read::LocalProjectionReadError;
 pub use enums::KeyWrapType;
 pub use item_history_repo::LocalItemHistoryRepo;
 pub use item_repo::LocalItemRepo;
 pub use metadata_repo::MetadataRepo;
 pub use models::{
     HistorySource, HistorySyncStatus, LocalItem, LocalItemHistory, LocalPendingChange,
-    LocalStorage, LocalSyncCursor, LocalVault,
+    LocalStorage, LocalSyncCheckpoint, LocalSyncCursor, LocalVault,
 };
 pub use pending_change_repo::PendingChangeRepo;
 pub use storage_repo::LocalStorageRepo;
 pub use sync_cursor_repo::SyncCursorRepo;
-pub use vault_repo::LocalVaultRepo;
+pub use sync_repo::{
+    LocalItemExpectation, LocalItemProof, LocalPendingProof, LocalStorageProof, LocalSyncError,
+    LocalSyncGenerationProof, LocalSyncRepo, LocalSyncScope, PullChange, PullPage, PullReceipt,
+    PushCommit, PushOutcome, PushReceipt, ResetProjection, ResetReceipt,
+};
+pub use vault_repo::{
+    CacheKeyFingerprintBatchBind, CacheKeyFingerprintBind, CacheKeyFingerprintBinding,
+    LocalVaultKeyBindError, LocalVaultRepo,
+};

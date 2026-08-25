@@ -1,5 +1,5 @@
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{CachePolicy, VaultKind};
@@ -19,7 +19,7 @@ pub struct VaultListResponse {
     pub vaults: Vec<VaultSummary>,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct PersonalVaultStatusResponse {
     pub personal_vaults_present: bool,
     pub personal_key_envelopes_present: bool,

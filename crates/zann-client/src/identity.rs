@@ -4,13 +4,13 @@ use data_encoding::BASE32_NOPAD;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 
-use crate::types::SystemInfoResponse;
+use zann_core::api::system::SystemInfoResponse;
 
 const MAX_IDENTITY_SKEW_SECONDS: i64 = 300;
 const SIGNATURE_PREFIX: &str = "zann-id:v1";
 
 #[derive(Debug)]
-pub enum IdentityError {
+pub(crate) enum IdentityError {
     Missing,
     InvalidId,
     InvalidSignature,
@@ -19,9 +19,22 @@ pub enum IdentityError {
     InvalidSignatureBytes,
 }
 
-pub fn verify_system_identity(info: &SystemInfoResponse) -> Result<(), IdentityError> {
-    let server_id = info.server_id.as_deref().ok_or(IdentityError::Missing)?;
-    let identity = info.identity.as_ref().ok_or(IdentityError::Missing)?;
+pub(crate) struct IdentityVerifiedSystemInfo(SystemInfoResponse);
+
+impl IdentityVerifiedSystemInfo {
+    pub(crate) fn verify(info: SystemInfoResponse) -> Result<Self, IdentityError> {
+        verify_system_identity(&info)?;
+        Ok(Self(info))
+    }
+
+    pub(crate) fn into_inner(self) -> SystemInfoResponse {
+        self.0
+    }
+}
+
+pub(crate) fn verify_system_identity(info: &SystemInfoResponse) -> Result<(), IdentityError> {
+    let server_id = &info.server_id;
+    let identity = &info.identity;
 
     let public_key_bytes =
         decode_b64(&identity.public_key).map_err(|_| IdentityError::InvalidKey)?;
@@ -30,7 +43,7 @@ pub fn verify_system_identity(info: &SystemInfoResponse) -> Result<(), IdentityE
     }
 
     let computed_id = derive_server_id(&public_key_bytes);
-    if computed_id != server_id {
+    if computed_id != server_id.as_str() {
         return Err(IdentityError::InvalidId);
     }
 

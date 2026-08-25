@@ -2,8 +2,17 @@ use chrono::{DateTime, Utc};
 use sqlx_core::row::Row;
 use uuid::Uuid;
 
-use crate::local::LocalItem;
+use crate::local::{LocalItem, LocalProjectionReadError};
+use crate::services::{MAX_ITEM_NAME_LEN, MAX_ITEM_PATH_LEN, MAX_ITEM_PAYLOAD_BYTES};
 use crate::SqlitePool;
+
+const MAX_ITEM_CIPHERTEXT_BYTES: i64 = (MAX_ITEM_PAYLOAD_BYTES + 256) as i64;
+const MAX_ITEM_PATH_BYTES: i64 = MAX_ITEM_PATH_LEN as i64;
+const MAX_ITEM_NAME_BYTES: i64 = MAX_ITEM_NAME_LEN as i64;
+const MAX_ITEM_TYPE_BYTES: i64 = 128;
+const MAX_ITEM_CHECKSUM_BYTES: i64 = 256;
+const CACHE_KEY_FINGERPRINT_BYTES: i64 = 12;
+const MAX_TIMESTAMP_BYTES: i64 = 64;
 
 pub struct LocalItemRepo<'a> {
     pool: &'a SqlitePool,
@@ -243,6 +252,104 @@ impl<'a> LocalItemRepo<'a> {
         )
         .fetch_optional(self.pool)
         .await
+    }
+
+    /// Reads one item only after a same-snapshot scalar preflight bounds every
+    /// dynamically typed body column before SQLx materializes it.
+    pub async fn get_by_id_bounded(
+        &self,
+        storage_id: Uuid,
+        item_id: Uuid,
+    ) -> Result<Option<LocalItem>, LocalProjectionReadError> {
+        if storage_id.is_nil() || item_id.is_nil() {
+            return Err(LocalProjectionReadError::InvalidInput);
+        }
+        let mut tx = self.pool.begin().await?;
+        let preflight = query!(
+            r#"
+        SELECT CASE WHEN
+                CASE WHEN typeof(id) IN ('blob', 'text')
+                    THEN octet_length(id) IN (16, 36) ELSE 0 END
+                AND CASE WHEN typeof(storage_id) IN ('blob', 'text')
+                    THEN octet_length(storage_id) IN (16, 36) ELSE 0 END
+                AND CASE WHEN typeof(vault_id) IN ('blob', 'text')
+                    THEN octet_length(vault_id) IN (16, 36) ELSE 0 END
+                AND CASE WHEN typeof(path) = 'text'
+                    THEN octet_length(path) BETWEEN 1 AND ?2 ELSE 0 END
+                AND CASE WHEN typeof(name) = 'text'
+                    THEN octet_length(name) BETWEEN 1 AND ?3 ELSE 0 END
+                AND CASE WHEN typeof(type_id) = 'text'
+                    THEN octet_length(type_id) BETWEEN 1 AND ?4 ELSE 0 END
+                AND CASE WHEN typeof(payload_enc) = 'blob'
+                    THEN length(payload_enc) <= ?5 ELSE 0 END
+                AND CASE WHEN typeof(checksum) = 'text'
+                    THEN octet_length(checksum) BETWEEN 1 AND ?6 ELSE 0 END
+                AND (cache_key_fp IS NULL OR CASE WHEN typeof(cache_key_fp) = 'text'
+                    THEN octet_length(cache_key_fp) = ?7 ELSE 0 END)
+                AND CASE WHEN typeof(version) = 'integer'
+                    THEN version >= 1 ELSE 0 END
+                AND (deleted_at IS NULL OR CASE WHEN typeof(deleted_at) = 'text'
+                    THEN octet_length(deleted_at) BETWEEN 1 AND ?8 ELSE 0 END)
+                AND CASE WHEN typeof(updated_at) = 'text'
+                    THEN octet_length(updated_at) BETWEEN 1 AND ?8 ELSE 0 END
+                AND CASE WHEN typeof(sync_status) = 'integer'
+                    THEN sync_status IN (1, 2, 3, 4, 5, 6) ELSE 0 END
+            THEN 1 ELSE 0 END AS valid
+            FROM items_cache
+            WHERE id = ?1
+            "#,
+            item_id,
+            MAX_ITEM_PATH_BYTES,
+            MAX_ITEM_NAME_BYTES,
+            MAX_ITEM_TYPE_BYTES,
+            MAX_ITEM_CIPHERTEXT_BYTES,
+            MAX_ITEM_CHECKSUM_BYTES,
+            CACHE_KEY_FINGERPRINT_BYTES,
+            MAX_TIMESTAMP_BYTES
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(preflight) = preflight else {
+            tx.commit().await?;
+            return Ok(None);
+        };
+        if preflight.try_get::<i64, _>("valid")? != 1 {
+            tx.rollback().await?;
+            return Err(LocalProjectionReadError::CorruptProjection);
+        }
+        let item = query_as!(
+            LocalItem,
+            r#"
+            SELECT
+                id as "id",
+                storage_id as "storage_id",
+                vault_id as "vault_id",
+                path,
+                name,
+                type_id,
+                payload_enc,
+                checksum,
+                cache_key_fp,
+                version as "version",
+                deleted_at as "deleted_at",
+                updated_at as "updated_at",
+                sync_status
+            FROM items_cache
+            WHERE id = ?1
+            "#,
+            item_id
+        )
+        .fetch_optional(&mut *tx)
+        .await?;
+        if item
+            .as_ref()
+            .is_some_and(|stored| stored.storage_id != storage_id)
+        {
+            tx.rollback().await?;
+            return Err(LocalProjectionReadError::CorruptProjection);
+        }
+        tx.commit().await?;
+        Ok(item)
     }
 
     pub async fn list_by_vault(

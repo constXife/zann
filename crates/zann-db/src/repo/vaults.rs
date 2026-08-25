@@ -1,5 +1,51 @@
 use super::prelude::*;
+use sqlx_core::types::Json as SqlxJson;
 use tracing::{instrument, Span};
+
+#[derive(Debug)]
+pub struct VaultCatalogEntry {
+    pub id: Uuid,
+    pub slug: Option<String>,
+    pub name: Option<String>,
+    pub cache_policy: i16,
+    pub tags: Option<SqlxJson<Vec<String>>>,
+}
+
+#[derive(Debug)]
+pub struct VaultKeyMaterialEntry {
+    pub id: Uuid,
+    pub vault_key_enc: Option<Vec<u8>>,
+}
+
+impl<'row> sqlx_core::from_row::FromRow<'row, sqlx_postgres::PgRow> for VaultCatalogEntry {
+    fn from_row(row: &'row sqlx_postgres::PgRow) -> Result<Self, sqlx_core::Error> {
+        Ok(Self {
+            id: row.try_get("id")?,
+            slug: row.try_get("slug")?,
+            name: row.try_get("name")?,
+            cache_policy: row.try_get("cache_policy")?,
+            tags: row.try_get("tags")?,
+        })
+    }
+}
+
+impl<'row> sqlx_core::from_row::FromRow<'row, sqlx_postgres::PgRow> for VaultKeyMaterialEntry {
+    fn from_row(row: &'row sqlx_postgres::PgRow) -> Result<Self, sqlx_core::Error> {
+        Ok(Self {
+            id: row.try_get("id")?,
+            vault_key_enc: row.try_get("vault_key_enc")?,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct VaultCatalogScopeFilter {
+    pub vault_ids: Vec<Uuid>,
+    pub vault_slugs: Vec<String>,
+    pub tags: Vec<String>,
+    /// SQL LIKE patterns whose only wildcard was derived from the scope `*`.
+    pub slug_patterns: Vec<String>,
+}
 
 pub struct VaultRepo<'a> {
     pool: &'a PgPool,
@@ -205,8 +251,129 @@ impl<'a> VaultRepo<'a> {
         .await
     }
 
-    #[instrument(level = "debug", skip(self), fields(db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.list_all"))]
-    pub async fn list_all(&self) -> Result<Vec<Vault>, sqlx_core::Error> {
+    #[instrument(
+        level = "debug",
+        skip(self, filter),
+        fields(limit, db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.list_service_account_catalog")
+    )]
+    pub async fn list_service_account_catalog(
+        &self,
+        filter: &VaultCatalogScopeFilter,
+        limit: i64,
+    ) -> Result<Vec<VaultCatalogEntry>, sqlx_core::Error> {
+        let vaults = query_as!(
+            VaultCatalogEntry,
+            r#"
+            SELECT
+                v.id,
+                CASE
+                    WHEN octet_length(v.slug) BETWEEN 1 AND 128
+                     AND v.slug = btrim(v.slug)
+                     AND v.slug !~ '[^A-Za-z0-9_-]'
+                    THEN v.slug
+                END AS slug,
+                CASE
+                    WHEN octet_length(v.name) BETWEEN 1 AND 200
+                     AND v.name = btrim(v.name)
+                     AND v.name !~ '^[[:space:]]'
+                     AND v.name !~ '[[:space:]]$'
+                    THEN v.name
+                END AS name,
+                v.cache_policy,
+                CASE
+                    WHEN octet_length(v.tags::text) <= 65536
+                    THEN v.tags
+                END AS tags
+            FROM vaults AS v
+            WHERE v.deleted_at IS NULL
+              AND v.kind = $1
+              AND v.encryption_type = $2
+              AND (
+                    v.id = ANY($3::uuid[])
+                    OR v.slug COLLATE "C" = ANY($4::text[])
+                    OR v.tags ?| $5::text[]
+                    OR EXISTS (
+                        SELECT 1
+                        FROM unnest($6::text[]) AS allowed(pattern)
+                        WHERE v.slug COLLATE "C" LIKE allowed.pattern COLLATE "C" ESCAPE '\'
+                    )
+              )
+            ORDER BY v.created_at ASC, v.id ASC
+            LIMIT $7
+            "#,
+            zann_core::VaultKind::Shared.as_i32(),
+            zann_core::VaultEncryptionType::Server.as_i32(),
+            &filter.vault_ids,
+            &filter.vault_slugs,
+            &filter.tags,
+            &filter.slug_patterns,
+            limit
+        )
+        .fetch_all(self.pool)
+        .await?;
+        Span::current().record("db.rows", vaults.len() as i64);
+        Ok(vaults)
+    }
+
+    #[instrument(
+        level = "debug",
+        skip(self, filter),
+        fields(limit, db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.list_service_account_key_material")
+    )]
+    pub async fn list_service_account_key_material(
+        &self,
+        filter: &VaultCatalogScopeFilter,
+        limit: i64,
+    ) -> Result<Vec<VaultKeyMaterialEntry>, sqlx_core::Error> {
+        let vaults = query_as!(
+            VaultKeyMaterialEntry,
+            r#"
+            SELECT
+                v.id,
+                CASE
+                    WHEN octet_length(v.vault_key_enc) BETWEEN 1 AND 65536
+                    THEN v.vault_key_enc
+                END AS vault_key_enc
+            FROM vaults AS v
+            WHERE v.deleted_at IS NULL
+              AND v.kind = $1
+              AND v.encryption_type = $2
+              AND (
+                    v.id = ANY($3::uuid[])
+                    OR v.slug COLLATE "C" = ANY($4::text[])
+                    OR v.tags ?| $5::text[]
+                    OR EXISTS (
+                        SELECT 1
+                        FROM unnest($6::text[]) AS allowed(pattern)
+                        WHERE v.slug COLLATE "C" LIKE allowed.pattern COLLATE "C" ESCAPE '\'
+                    )
+              )
+            ORDER BY v.created_at ASC, v.id ASC
+            LIMIT $7
+            "#,
+            zann_core::VaultKind::Shared.as_i32(),
+            zann_core::VaultEncryptionType::Server.as_i32(),
+            &filter.vault_ids,
+            &filter.vault_slugs,
+            &filter.tags,
+            &filter.slug_patterns,
+            limit
+        )
+        .fetch_all(self.pool)
+        .await?;
+        Span::current().record("db.rows", vaults.len() as i64);
+        Ok(vaults)
+    }
+
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(limit, db.system = "postgresql", db.operation = "SELECT", db.query = "vaults.list_shared_server_bounded")
+    )]
+    pub async fn list_shared_server_bounded(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<Vault>, sqlx_core::Error> {
         let vaults = query_as!(
             Vault,
             r#"
@@ -226,7 +393,18 @@ impl<'a> VaultRepo<'a> {
                 created_at as "created_at"
             FROM vaults
             WHERE deleted_at IS NULL
-            "#
+              AND kind = $1
+              AND encryption_type = $2
+              AND octet_length(slug) BETWEEN 1 AND 128
+              AND octet_length(name) BETWEEN 1 AND 200
+              AND octet_length(vault_key_enc) BETWEEN 1 AND 65536
+              AND octet_length(tags::text) <= 65536
+            ORDER BY created_at ASC, id ASC
+            LIMIT $3
+            "#,
+            zann_core::VaultKind::Shared.as_i32(),
+            zann_core::VaultEncryptionType::Server.as_i32(),
+            limit
         )
         .fetch_all(self.pool)
         .await?;
@@ -292,7 +470,9 @@ impl<'a> VaultRepo<'a> {
             UPDATE vaults
             SET vault_key_enc = $2,
                 row_version = row_version + 1
-            WHERE id = $1 AND deleted_at IS NULL
+            WHERE id = $1
+              AND deleted_at IS NULL
+              AND octet_length(vault_key_enc) = 0
             "#,
             id,
             vault_key_enc

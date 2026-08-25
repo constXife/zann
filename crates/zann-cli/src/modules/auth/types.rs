@@ -1,12 +1,4 @@
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize)]
-pub struct ServiceAccountAuthRequest {
-    pub token: String,
-}
-
-#[derive(Deserialize)]
-pub struct ServiceAccountAuthResponse {
-    pub access_token: String,
-    pub expires_in: u64,
-}
+pub(crate) use zann_core::api::auth::{
+    ServiceAccountLoginRequest as ServiceAccountAuthRequest,
+    ServiceAccountLoginResponse as ServiceAccountAuthResponse,
+};

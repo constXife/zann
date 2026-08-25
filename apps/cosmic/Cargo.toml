@@ -22,10 +22,10 @@ libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "dc1cf9f00cbe29
   "wgpu",
 ] }
 open = "5"
-reqwest = { version = "0.12", default-features = false, features = ["charset", "http2", "rustls-tls"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
-zann-client = { path = "../../crates/zann-client" }
+zann-client = { path = "../../crates/zann-client", default-features = false, features = ["app", "os-credentials"] }
+zann-client-sqlite = { path = "../../crates/zann-client-sqlite" }
 zann-core = { path = "../../crates/zann-core" }
 zann-crypto = { path = "../../crates/zann-crypto" }
 zann-db = { path = "../../crates/zann-db", features = ["sqlite"] }

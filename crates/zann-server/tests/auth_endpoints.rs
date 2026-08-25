@@ -1,6 +1,10 @@
 use axum::body::{to_bytes, Body};
 use axum::http::{Method, Request, StatusCode};
 use serde_json::json;
+use sqlx_core::pool::PoolOptions;
+use sqlx_postgres::{PgConnectOptions, Postgres};
+use std::str::FromStr;
+use std::time::Duration;
 use tower::ServiceExt;
 use tracing_subscriber::EnvFilter;
 use uuid::Uuid;
@@ -215,6 +219,109 @@ impl TestApp {
     }
 }
 
+fn refresh_predispatch_router(max_body_bytes: usize) -> axum::Router {
+    let options =
+        PgConnectOptions::from_str("postgres://unreachable:unreachable@127.0.0.1:1/unreachable")
+            .expect("parse intentionally unreachable database URL");
+    let pool = PoolOptions::<Postgres>::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_millis(100))
+        .connect_lazy_with(options);
+    let mut config = ServerConfig::default();
+    config.server.max_body_bytes = max_body_bytes;
+    let usage_tracker = std::sync::Arc::new(UsageTracker::new(pool.clone(), 100));
+    let (secret_policies, secret_default_policy) = support::default_secret_policies();
+    let state = AppState {
+        db: pool,
+        db_tx_isolation: zann_server::settings::DbTxIsolation::ReadCommitted,
+        started_at: std::time::Instant::now(),
+        password_pepper: "unreachable".to_string(),
+        token_pepper: "unreachable".to_string(),
+        server_master_key: Some(std::sync::Arc::new(SecretKey::generate())),
+        identity_key: support::test_identity_key(),
+        access_token_ttl_seconds: 3600,
+        refresh_token_ttl_seconds: 3600,
+        argon2_semaphore: std::sync::Arc::new(Semaphore::new(1)),
+        oidc_jwks_cache: OidcJwksCache::new(),
+        config,
+        policy_store: PolicyStore::new(PolicySet::from_rules(Vec::new())),
+        usage_tracker,
+        security_profiles: load_security_profiles(),
+        secret_policies,
+        secret_default_policy,
+    };
+    build_router(state)
+}
+
+#[tokio::test]
+async fn refresh_router_rejections_complete_before_the_rotation_handler() {
+    const MAX_BODY_BYTES: usize = 64;
+    let app = refresh_predispatch_router(MAX_BODY_BYTES);
+    let oversized = serde_json::to_vec(&json!({
+        "refresh_token": "x".repeat(MAX_BODY_BYTES * 2),
+    }))
+    .expect("encode oversized refresh request");
+    let cases = [
+        (
+            Method::POST,
+            "/v1/auth/refresh",
+            Some("application/json"),
+            Body::from("{"),
+            StatusCode::BAD_REQUEST,
+        ),
+        (
+            Method::POST,
+            "/v1/auth/refresh",
+            Some("text/plain"),
+            Body::from(r#"{"refresh_token":"token"}"#),
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        ),
+        (
+            Method::POST,
+            "/v1/auth/refresh",
+            Some("application/json"),
+            Body::from("{}"),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+        (
+            Method::POST,
+            "/v1/auth/refresh",
+            Some("application/json"),
+            Body::from(oversized),
+            StatusCode::PAYLOAD_TOO_LARGE,
+        ),
+        (
+            Method::GET,
+            "/v1/auth/refresh",
+            None,
+            Body::empty(),
+            StatusCode::METHOD_NOT_ALLOWED,
+        ),
+        (
+            Method::POST,
+            "/v1/auth/not-a-route",
+            Some("application/json"),
+            Body::from(r#"{"refresh_token":"token"}"#),
+            // The protected-router merge owns the unmatched fallback and rejects the
+            // unauthenticated request before any auth-domain handler can run.
+            StatusCode::UNAUTHORIZED,
+        ),
+    ];
+
+    for (method, uri, content_type, body, expected) in cases {
+        let mut request = Request::builder().method(method).uri(uri);
+        if let Some(content_type) = content_type {
+            request = request.header("content-type", content_type);
+        }
+        let response = app
+            .clone()
+            .oneshot(request.body(body).expect("refresh contract request"))
+            .await
+            .expect("refresh contract response");
+        assert_eq!(response.status(), expected, "request to {uri}");
+    }
+}
+
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn prelogin_returns_kdf_params() {
@@ -311,6 +418,109 @@ async fn login_issues_tokens() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn refresh_unauthorized_statuses_are_terminal_without_a_second_rotation() {
+    let app = TestApp::new().await;
+    let registration = app
+        .register("refresh-contract@example.com", "password-1")
+        .await;
+    let original_refresh = registration["refresh_token"]
+        .as_str()
+        .expect("registration refresh token")
+        .to_string();
+
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            json!({ "refresh_token": "definitely-not-a-refresh-token" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "invalid_token");
+
+    let (status, first_rotation) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            json!({ "refresh_token": &original_refresh }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "valid refresh must remain usable");
+    let rotated_refresh = first_rotation["refresh_token"]
+        .as_str()
+        .expect("rotated refresh token")
+        .to_string();
+
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            json!({ "refresh_token": &original_refresh }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "invalid_token");
+    let (status, _) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            json!({ "refresh_token": rotated_refresh }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "rejected old token must not rotate the current token"
+    );
+
+    let expired_registration = app
+        .register("expired-refresh-contract@example.com", "password-1")
+        .await;
+    let expired_refresh = expired_registration["refresh_token"]
+        .as_str()
+        .expect("refresh token to expire")
+        .to_string();
+    let refresh_hash = zann_server::tokens::hash_token(&expired_refresh, &app.token_pepper);
+    let repo = SessionRepo::new(&app.pool);
+    let session = repo
+        .get_by_refresh_token_hash(&refresh_hash)
+        .await
+        .expect("expired session lookup")
+        .expect("expired session exists");
+    let forced_expiry = chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() - 1, 0)
+        .expect("representable forced expiry");
+    repo.update_refresh_token(
+        session.id,
+        &session.access_token_hash,
+        session.access_expires_at,
+        &session.refresh_token_hash,
+        forced_expiry,
+    )
+    .await
+    .expect("force refresh expiry");
+
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            json!({ "refresh_token": expired_refresh }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(body["error"], "token_expired");
+    let after = repo
+        .get_by_refresh_token_hash(&refresh_hash)
+        .await
+        .expect("expired session readback")
+        .expect("expired session remains terminally expired");
+    assert_eq!(after.id, session.id);
+    assert_eq!(after.access_token_hash, session.access_token_hash);
+    assert_eq!(after.refresh_token_hash, session.refresh_token_hash);
+    assert_eq!(after.expires_at, forced_expiry);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn login_requires_password() {
     let app = TestApp::new().await;
     let payload = json!({ "email": "missing-password@example.com" });
@@ -370,6 +580,9 @@ async fn service_account_login_accepts_valid_token() {
     );
     assert!(body["access_token"].as_str().is_some());
     assert!(body["service_account_id"].as_str().is_some());
+    assert!(body["owner_user_id"].as_str().is_some());
+    assert!(body["expires_in"].as_u64().is_some_and(|ttl| ttl > 0));
+    assert!(body["vault_keys"].as_array().is_some());
 }
 
 #[tokio::test]

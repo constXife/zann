@@ -24,7 +24,7 @@ fn payload_bytes_roundtrip() {
     let bytes = payload.to_bytes().expect("serialize");
     let decoded = EncryptedPayload::from_bytes(&bytes).expect("deserialize");
 
-    assert_eq!(decoded.type_id, "system/login");
+    assert_eq!(decoded.type_id.as_str(), "system/login");
     assert_eq!(decoded.fields.len(), 2);
     assert!(decoded.fields.contains_key("username"));
     assert!(decoded.fields.contains_key("password"));
@@ -46,7 +46,7 @@ proptest! {
         }
         let bytes = payload.to_bytes().expect("serialize");
         let decoded = EncryptedPayload::from_bytes(&bytes).expect("deserialize");
-        prop_assert_eq!(decoded.type_id, "system/kv");
+        prop_assert_eq!(decoded.type_id.as_str(), "system/kv");
         prop_assert_eq!(decoded.fields.len(), payload.fields.len());
     }
 }

@@ -1,4 +1,7 @@
 use super::prelude::*;
+use sqlx_core::transaction::Transaction;
+use sqlx_postgres::PgRow;
+use sqlx_postgres::Postgres;
 use tracing::{instrument, Span};
 
 pub struct ChangeRepo<'a> {
@@ -22,10 +25,19 @@ impl<'a> ChangeRepo<'a> {
         )
     )]
     pub async fn create(&self, change: &Change) -> Result<(), sqlx_core::Error> {
-        query!(
+        if let Some(matches) = self.existing_generation_matches(change).await? {
+            return if matches {
+                Ok(())
+            } else {
+                Err(conflicting_generation_error())
+            };
+        }
+
+        let result = query!(
             r#"
             INSERT INTO changes (vault_id, item_id, op, version, device_id, created_at)
             VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (item_id, version) DO NOTHING
             "#,
             change.vault_id,
             change.item_id,
@@ -35,45 +47,110 @@ impl<'a> ChangeRepo<'a> {
             change.created_at
         )
         .execute(self.pool)
-        .await
-        .map(|result| {
-            Span::current().record("db.rows", result.rows_affected() as i64);
-        })
+        .await?;
+        Span::current().record("db.rows", result.rows_affected() as i64);
+        if result.rows_affected() == 1 {
+            return Ok(());
+        }
+
+        match self.existing_generation_matches(change).await? {
+            Some(true) => Ok(()),
+            Some(false) | None => Err(conflicting_generation_error()),
+        }
     }
 
-    #[instrument(
-        level = "debug",
-        skip(self),
-        fields(vault_id = %vault_id, since_seq, db.system = "postgresql", db.operation = "SELECT", db.query = "changes.list_since_seq")
-    )]
-    pub async fn list_since_seq(
+    pub async fn create_in(
         &self,
-        vault_id: Uuid,
-        since_seq: i64,
-    ) -> Result<Vec<Change>, sqlx_core::Error> {
-        query_as!(
-            Change,
+        tx: &mut Transaction<'_, Postgres>,
+        change: &Change,
+    ) -> Result<(), sqlx_core::Error> {
+        if let Some(matches) = self.existing_generation_matches_in(tx, change).await? {
+            return if matches {
+                Ok(())
+            } else {
+                Err(conflicting_generation_error())
+            };
+        }
+
+        let result = query!(
             r#"
-            SELECT
-                seq as "seq",
-                vault_id as "vault_id",
-                item_id as "item_id",
-                op as "op",
-                version as "version",
-                device_id as "device_id",
-                created_at as "created_at"
-            FROM changes
-            WHERE vault_id = $1 AND seq > $2
-            ORDER BY seq ASC
+            INSERT INTO changes (vault_id, item_id, op, version, device_id, created_at)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (item_id, version) DO NOTHING
             "#,
-            vault_id,
-            since_seq
+            change.vault_id,
+            change.item_id,
+            change.op.as_i32(),
+            change.version,
+            change.device_id,
+            change.created_at
         )
-        .fetch_all(self.pool)
-        .await
-        .inspect(|changes| {
-            Span::current().record("db.rows", changes.len() as i64);
-        })
+        .execute(&mut **tx)
+        .await?;
+        Span::current().record("db.rows", result.rows_affected() as i64);
+        if result.rows_affected() == 1 {
+            return Ok(());
+        }
+
+        match self.existing_generation_matches_in(tx, change).await? {
+            Some(true) => Ok(()),
+            Some(false) | None => Err(conflicting_generation_error()),
+        }
+    }
+
+    async fn existing_generation_matches(
+        &self,
+        change: &Change,
+    ) -> Result<Option<bool>, sqlx_core::Error> {
+        let row: Option<PgRow> = query!(
+            r#"
+            SELECT (
+                vault_id IS NOT DISTINCT FROM $3
+                AND op IS NOT DISTINCT FROM $4
+                AND device_id IS NOT DISTINCT FROM $5
+                AND created_at IS NOT DISTINCT FROM $6
+            ) AS matches
+            FROM changes
+            WHERE item_id = $1 AND version = $2
+            "#,
+            change.item_id,
+            change.version,
+            change.vault_id,
+            change.op.as_i32() as i16,
+            change.device_id,
+            change.created_at
+        )
+        .fetch_optional(self.pool)
+        .await?;
+        row.map(|row| row.try_get::<bool, _>("matches")).transpose()
+    }
+
+    async fn existing_generation_matches_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        change: &Change,
+    ) -> Result<Option<bool>, sqlx_core::Error> {
+        let row: Option<PgRow> = query!(
+            r#"
+            SELECT (
+                vault_id IS NOT DISTINCT FROM $3
+                AND op IS NOT DISTINCT FROM $4
+                AND device_id IS NOT DISTINCT FROM $5
+                AND created_at IS NOT DISTINCT FROM $6
+            ) AS matches
+            FROM changes
+            WHERE item_id = $1 AND version = $2
+            "#,
+            change.item_id,
+            change.version,
+            change.vault_id,
+            change.op.as_i32() as i16,
+            change.device_id,
+            change.created_at
+        )
+        .fetch_optional(&mut **tx)
+        .await?;
+        row.map(|row| row.try_get::<bool, _>("matches")).transpose()
     }
 
     #[instrument(level = "debug", skip(self), fields(vault_id = %vault_id, db.system = "postgresql", db.operation = "SELECT", db.query = "changes.last_seq_for_vault"))]
@@ -91,4 +168,8 @@ impl<'a> ChangeRepo<'a> {
         let seq: Option<i64> = row.try_get("seq")?;
         Ok(seq.unwrap_or(0))
     }
+}
+
+fn conflicting_generation_error() -> sqlx_core::Error {
+    sqlx_core::Error::Protocol("conflicting change generation semantics".to_string())
 }

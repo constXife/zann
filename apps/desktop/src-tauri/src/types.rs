@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+pub use zann_core::api::auth::OidcConfigResponse;
+pub use zann_core::api::system::{SystemIdentity, SystemInfoResponse};
 use zann_core::EncryptedPayload;
 
 #[derive(Serialize)]
@@ -60,15 +62,6 @@ where
 }
 
 #[derive(Deserialize, Serialize, Clone)]
-pub struct OidcConfigResponse {
-    pub issuer: String,
-    pub client_id: String,
-    #[serde(default)]
-    pub audience: Option<String>,
-    pub scopes: Vec<String>,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
 pub struct OidcDiscovery {
     pub authorization_endpoint: String,
     #[serde(default)]
@@ -92,41 +85,6 @@ pub struct TokenErrorResponse {
     pub error: String,
     #[serde(default)]
     pub error_description: Option<String>,
-}
-
-#[derive(Deserialize)]
-pub struct OidcExchangeResponse {
-    pub access_token: String,
-    pub refresh_token: String,
-    pub expires_in: u64,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-pub struct SystemInfoResponse {
-    #[serde(default)]
-    pub server_id: Option<String>,
-    #[serde(default)]
-    pub identity: Option<SystemIdentity>,
-    pub server_fingerprint: String,
-    #[serde(default)]
-    pub server_name: Option<String>,
-    #[serde(default = "default_true")]
-    pub personal_vaults_enabled: bool,
-    #[serde(default)]
-    pub internal_users_present: Option<bool>,
-    #[serde(default)]
-    pub auth_methods: Vec<i32>,
-}
-
-#[derive(Deserialize, Serialize, Clone)]
-pub struct SystemIdentity {
-    pub public_key: String,
-    pub timestamp: i64,
-    pub signature: String,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 #[derive(Serialize)]

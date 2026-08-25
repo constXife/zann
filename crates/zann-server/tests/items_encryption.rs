@@ -213,8 +213,9 @@ async fn shared_vault_accepts_plaintext_payload() {
                 "name": "test",
                 "type_id": "kv",
                 "payload": {
-                    "public": {"user": "test"},
-                    "secret": {}
+                    "v": 1,
+                    "typeId": "kv",
+                    "fields": {"user": {"kind": "text", "value": "test"}}
                 }
             }),
         )
@@ -249,8 +250,9 @@ async fn personal_vault_rejects_plaintext_payload() {
                 "name": "test",
                 "type_id": "kv",
                 "payload": {
-                    "public": {"user": "test"},
-                    "secret": {}
+                    "v": 1,
+                    "typeId": "kv",
+                    "fields": {"user": {"kind": "text", "value": "test"}}
                 }
             }),
         )
@@ -285,7 +287,7 @@ async fn personal_vault_accepts_encrypted_payload() {
                 "name": "test",
                 "type_id": "kv",
                 "payload_enc": [1, 2, 3, 4, 5],
-                "checksum": "abc123"
+                "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3, 4, 5])
             }),
         )
         .await;
@@ -319,8 +321,9 @@ async fn shared_vault_update_accepts_plaintext() {
                 "name": "test",
                 "type_id": "kv",
                 "payload": {
-                    "public": {"user": "test"},
-                    "secret": {}
+                    "v": 1,
+                    "typeId": "kv",
+                    "fields": {"user": {"kind": "text", "value": "test"}}
                 }
             }),
         )
@@ -340,8 +343,12 @@ async fn shared_vault_update_accepts_plaintext() {
             Some(token),
             json!({
                 "payload": {
-                    "public": {"user": "updated"},
-                    "secret": {"password": "secret123"}
+                    "v": 1,
+                    "typeId": "kv",
+                    "fields": {
+                        "user": {"kind": "text", "value": "updated"},
+                        "password": {"kind": "password", "value": "secret123"}
+                    }
                 }
             }),
         )
@@ -374,7 +381,7 @@ async fn personal_vault_update_rejects_plaintext() {
                 "name": "test",
                 "type_id": "kv",
                 "payload_enc": [1, 2, 3, 4, 5],
-                "checksum": "abc123"
+                "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3, 4, 5])
             }),
         )
         .await;
@@ -393,8 +400,9 @@ async fn personal_vault_update_rejects_plaintext() {
             Some(token),
             json!({
                 "payload": {
-                    "public": {"user": "hacked"},
-                    "secret": {}
+                    "v": 1,
+                    "typeId": "kv",
+                    "fields": {"user": {"kind": "text", "value": "hacked"}}
                 }
             }),
         )
@@ -431,8 +439,9 @@ async fn shared_vault_item_get_returns_plaintext_payload() {
                 "name": "test",
                 "type_id": "kv",
                 "payload": {
-                    "public": {"user": "test"},
-                    "secret": {}
+                    "v": 1,
+                    "typeId": "kv",
+                    "fields": {"user": {"kind": "text", "value": "test"}}
                 }
             }),
         )
@@ -457,7 +466,7 @@ async fn shared_vault_item_get_returns_plaintext_payload() {
         json.get("payload_enc").is_none(),
         "payload_enc should be absent"
     );
-    assert_eq!(json["payload"]["public"]["user"], "test");
+    assert_eq!(json["payload"]["fields"]["user"]["value"], "test");
 }
 
 #[tokio::test]
@@ -482,7 +491,7 @@ async fn personal_vault_item_get_returns_encrypted_payload() {
                 "name": "test",
                 "type_id": "kv",
                 "payload_enc": [1, 2, 3, 4, 5],
-                "checksum": "abc123"
+                "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3, 4, 5])
             }),
         )
         .await;

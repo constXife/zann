@@ -1,0 +1,16 @@
+{
+  "current_context": null,
+  "contexts": {},
+  "identity": {
+    "kdf_salt": "bG9jYWwtZml4dHVyZS1zYWx0",
+    "kdf_params": {
+      "algorithm": "argon2id",
+      "iterations": 3,
+      "memory_kb": 65536,
+      "parallelism": 4
+    },
+    "salt_fingerprint": null,
+    "first_seen_at": null,
+    "email": null
+  }
+}
