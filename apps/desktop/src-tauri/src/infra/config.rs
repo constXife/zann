@@ -21,7 +21,7 @@ pub fn save_config(root: &Path, config: &CliConfig) -> Result<(), anyhow::Error>
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, contents)?;
+    zann_app::secure_file::write_private(&path, contents.as_bytes())?;
     Ok(())
 }
 
@@ -63,9 +63,9 @@ pub fn save_settings(root: &Path, settings: DesktopSettings) -> Result<(), anyho
             map.remove(key);
         }
     }
-    std::fs::write(
-        root.join(SETTINGS_FILENAME),
-        serde_json::to_string_pretty(&value)?,
+    zann_app::secure_file::write_private(
+        &root.join(SETTINGS_FILENAME),
+        serde_json::to_string_pretty(&value)?.as_bytes(),
     )?;
     Ok(())
 }
@@ -251,5 +251,26 @@ mod tests {
             .get("future_token")
             .is_none());
         assert!(written["identity"].get("future_identity").is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn token_and_settings_files_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = scratch("private-modes");
+        save_config(&root, &CliConfig::default()).expect("save config");
+        save_settings(&root, DesktopSettings::default()).expect("save settings");
+
+        let assert_private = |path: std::path::PathBuf| {
+            let mode = std::fs::metadata(&path)
+                .expect("metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "{} must be 0600", path.display());
+        };
+        assert_private(root.join(CONFIG_FILENAME));
+        assert_private(root.join(SETTINGS_FILENAME));
     }
 }

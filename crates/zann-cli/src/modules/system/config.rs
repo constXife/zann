@@ -177,10 +177,10 @@ pub(crate) fn load_config() -> anyhow::Result<CliConfig> {
 pub(crate) fn save_config(config: &CliConfig) -> anyhow::Result<()> {
     let path = config_path()?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        ensure_private_dir(parent)?;
     }
     let contents = serde_json::to_string_pretty(config)?;
-    fs::write(path, contents)?;
+    write_private(&path, contents.as_bytes())?;
     Ok(())
 }
 
@@ -227,9 +227,92 @@ pub(crate) fn load_known_hosts() -> anyhow::Result<HashMap<String, String>> {
 pub(crate) fn save_known_hosts(entries: &HashMap<String, String>) -> anyhow::Result<()> {
     let path = known_hosts_path()?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        ensure_private_dir(parent)?;
     }
     let contents = serde_json::to_string_pretty(entries)?;
-    fs::write(path, contents)?;
+    write_private(&path, contents.as_bytes())?;
     Ok(())
+}
+
+/// Owner-only permissions for `~/.zann` state, mirroring
+/// `zann_app::secure_file` (the CLI does not depend on `zann-app`).
+fn write_private(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::PermissionsExt;
+
+        let parent = path
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("path has no parent directory"))?;
+        let tmp_path = parent.join(format!(".{}.tmp", uuid::Uuid::now_v7().simple()));
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&tmp_path)?;
+        let result = (|| -> anyhow::Result<()> {
+            file.write_all(contents)?;
+            file.sync_all()?;
+            std::fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o600))
+                .map_err(|err| anyhow::anyhow!(err))?;
+            Ok(())
+        })();
+        drop(file);
+        match result {
+            Ok(()) => fs::rename(&tmp_path, path).map_err(|err| anyhow::anyhow!(err)),
+            Err(err) => {
+                let _ = fs::remove_file(&tmp_path);
+                Err(err)
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, contents)?;
+        Ok(())
+    }
+}
+
+fn ensure_private_dir(path: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700))
+            .map_err(|err| anyhow::anyhow!(err))?;
+    }
+    Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saved_config_and_known_hosts_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = std::env::temp_dir().join(format!("zann-cli-perm-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("scratch dir");
+        let config = dir.join("config.json");
+        let hosts = dir.join("known_hosts.json");
+
+        write_private(&config, b"{}").expect("write config");
+        write_private(&hosts, b"{}").expect("write known hosts");
+
+        let assert_private = |path: &Path| {
+            let mode = fs::metadata(path).expect("metadata").permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "{} must be 0600", path.display());
+        };
+        assert_private(&config);
+        assert_private(&hosts);
+
+        ensure_private_dir(&dir).expect("ensure dir");
+        let dir_mode = fs::metadata(&dir).expect("metadata").permissions().mode() & 0o777;
+        assert_eq!(dir_mode, 0o700);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

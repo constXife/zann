@@ -135,7 +135,7 @@ fn build_state_at_root(root: PathBuf) -> Result<AppState, anyhow::Error> {
     let db_path = local_db_path(&root);
     let location = SqliteFileLocation::from_path(&db_path)?;
     let root = location.root().to_path_buf();
-    std::fs::create_dir_all(&root)?;
+    zann_app::secure_file::ensure_private_dir(&root)?;
     let pool = tauri::async_runtime::block_on(connect_sqlite_file_with_max(&location, 5))?;
     tauri::async_runtime::block_on(migrate_local(&pool))?;
     let security_profiles = SecurityProfileRegistry::from_yaml(SECURITY_PROFILES_YAML)?;
@@ -166,6 +166,17 @@ mod tests {
             db_path.exists(),
             "SQLite must create the exact path, including URI delimiters"
         );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let mode = std::fs::metadata(&root)
+                .expect("root metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o700, "data root must be owner-only");
+        }
         drop(state);
         let _ = std::fs::remove_dir_all(root);
     }
