@@ -1,4 +1,7 @@
-# Zann client architecture
+---
+title: Zann client architecture
+description: Normative architecture shared by the CLI, Tauri, and COSMIC clients.
+---
 
 This document describes the target architecture shared by the CLI, Tauri and
 COSMIC clients. It is normative for new code. Existing deviations are migration
