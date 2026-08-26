@@ -7614,6 +7614,7 @@ dependencies = [
  "dirs 5.0.1",
  "ed25519-dalek",
  "keyring",
+ "open",
  "percent-encoding",
  "rand 0.8.7",
  "reqwest 0.12.26",

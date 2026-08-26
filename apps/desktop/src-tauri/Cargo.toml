@@ -38,3 +38,6 @@ zann-core = { path = "../../../crates/zann-core", default-features = false, feat
 zann-db = { path = "../../../crates/zann-db", default-features = false, features = ["sqlite"] }
 zann-keystore = { path = "../../../crates/zann-keystore" }
 zann-ui-core = { path = "../../../crates/zann-ui-core" }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+open = "5"
