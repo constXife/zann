@@ -46,20 +46,30 @@ pub async fn auth_middleware(
                     return Err(StatusCode::UNAUTHORIZED);
                 }
             };
-        let email = if claims.email.is_some() {
-            claims.email.clone()
+        let userinfo = if claims.email.is_some() {
+            None
         } else {
             state
                 .oidc_jwks_cache
-                .fetch_userinfo_email(token, &state.config.auth.oidc)
+                .fetch_userinfo(token, &state.config.auth.oidc)
                 .await
                 .ok()
-                .flatten()
         };
         let oidc_token = zann_core::OidcToken {
             issuer: claims.iss.clone(),
             subject: claims.sub.clone(),
-            email,
+            email: claims.email.clone().or_else(|| {
+                userinfo
+                    .as_ref()
+                    .and_then(|userinfo| userinfo.email.clone())
+            }),
+            email_verified: if claims.email.is_some() {
+                claims.email_verified
+            } else {
+                userinfo
+                    .as_ref()
+                    .and_then(|userinfo| userinfo.email_verified)
+            },
             claims: claims.other.clone(),
         };
         match identity_from_oidc(&state, oidc_token).await {

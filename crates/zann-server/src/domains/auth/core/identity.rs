@@ -47,6 +47,18 @@ pub async fn identity_from_oidc(
             .ok_or("user_not_found")?
     } else {
         let email = oidc_token.email.clone().ok_or("email_missing")?;
+        // The email claim is an assertion by the issuer, not a proof of
+        // ownership. Without `email_verified` it must never adopt an existing
+        // account (privilege escalation via a chosen unverified email) nor
+        // register a new one.
+        if oidc_token.email_verified != Some(true) {
+            tracing::warn!(
+                event = "auth_oidc_email_unverified",
+                issuer = %oidc_token.issuer,
+                "OIDC identity rejected: email claim is not verified"
+            );
+            return Err("email_not_verified");
+        }
         let user = if let Some(existing) = user_repo.get_by_email(&email).await.map_err(|err| {
             tracing::error!(
                 event = "auth_oidc_user_lookup_failed",
@@ -110,6 +122,16 @@ pub async fn identity_from_oidc(
             );
             "db_error"
         })?;
+        tracing::info!(
+            event = "audit",
+            category = "auth",
+            action = "oidc_identity_linked",
+            result = "ok",
+            user_id = %identity.user_id,
+            issuer = %identity.issuer,
+            subject = %identity.subject,
+            "OIDC identity bound to a local account"
+        );
 
         user
     };

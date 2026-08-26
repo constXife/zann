@@ -14,6 +14,7 @@ pub struct OidcClaims {
     pub iss: String,
     pub sub: String,
     pub email: Option<String>,
+    pub email_verified: Option<bool>,
     #[serde(flatten)]
     pub other: serde_json::Map<String, Value>,
 }
@@ -187,14 +188,22 @@ struct OidcDiscovery {
 #[derive(Debug, Deserialize)]
 struct OidcUserinfoResponse {
     email: Option<String>,
+    email_verified: Option<bool>,
+}
+
+/// Email attributes resolved from the issuer's userinfo endpoint.
+#[derive(Debug, Clone)]
+pub struct OidcUserinfo {
+    pub email: Option<String>,
+    pub email_verified: Option<bool>,
 }
 
 impl OidcJwksCache {
-    pub async fn fetch_userinfo_email(
+    pub async fn fetch_userinfo(
         &self,
         token: &str,
         config: &OidcConfig,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<OidcUserinfo, String> {
         let endpoint = self.resolve_userinfo_endpoint(config).await?;
         tracing::debug!(
             event = "oidc_userinfo_request",
@@ -230,7 +239,10 @@ impl OidcJwksCache {
                 );
                 "oidc_userinfo_parse_failed".to_string()
             })?;
-        Ok(payload.email)
+        Ok(OidcUserinfo {
+            email: payload.email,
+            email_verified: payload.email_verified,
+        })
     }
 
     async fn resolve_userinfo_endpoint(&self, config: &OidcConfig) -> Result<String, String> {
