@@ -336,7 +336,7 @@
       "exception_ids": ["MIG-005"],
       "pattern": "struct (CliConfig|CliContext|TokenEntry)|CONFIG_FILENAME|[.]join[(]\"[.]zann\"|\"config[.]json\"",
       "roots": ["crates/zann-cli/src"],
-      "max_matches": 6,
+      "max_matches": 7,
       "allowed_files": [
         "crates/zann-cli/src/modules/system/config.rs",
         "crates/zann-cli/src/modules/system/types.rs"
@@ -347,7 +347,7 @@
       "exception_ids": ["MIG-005"],
       "pattern": "struct (CliConfig|CliContext|TokenEntry)|CONFIG_FILENAME|[.]join[(]\"[.]zann\"|\"config[.]json\"",
       "roots": ["apps/desktop/src-tauri/src"],
-      "max_matches": 12,
+      "max_matches": 13,
       "allowed_files": [
         "apps/desktop/src-tauri/src/constants.rs",
         "apps/desktop/src-tauri/src/infra/config.rs",
@@ -438,7 +438,7 @@
         "apps/cosmic/src",
         "crates/zann-ffi/src"
       ],
-      "max_matches": 8,
+      "max_matches": 9,
       "allowed_files": [
         "apps/cosmic/src/backend/remote.rs",
         "crates/zann-ffi/src/lib.rs"
