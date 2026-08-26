@@ -62,6 +62,12 @@ pub(crate) fn init_tracing(
 
 pub fn log_startup(settings: &settings::Settings, metrics_config: &MetricsConfig) {
     let metrics_profile = metrics_config.effective_profile();
+    if settings.config.server.master_key.is_some() {
+        tracing::warn!(
+            event = "master_key_inline_config",
+            "server.master_key is set inline in the config file; prefer ZANN_SMK or server.master_key_file"
+        );
+    }
     if settings.config.server.trusted_proxies.is_empty() {
         tracing::warn!(
             event = "trusted_proxies_empty",

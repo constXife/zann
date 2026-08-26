@@ -237,28 +237,45 @@ fn parse_metrics_profile(value: &str) -> Option<MetricsProfile> {
     }
 }
 
+/// The base64 master key committed to `config/dev.yaml` in public git history
+/// since the initial commit. Any deployment still using it provides no at-rest
+/// protection for shared vaults.
+const PUBLICLY_KNOWN_DEV_MASTER_KEY: &str = "/xdJ8wIDGMQFwaChfY3k7qo1GlzYgR3peAMOFg/0u9w=";
+
+pub(super) fn is_publicly_known_master_key(key: &SecretKey) -> bool {
+    let Ok(known) = parse_master_key(PUBLICLY_KNOWN_DEV_MASTER_KEY) else {
+        return false;
+    };
+    key.as_bytes() == known.as_bytes()
+}
+
 pub(super) fn load_server_master_key(config: &ServerConfig) -> Option<SecretKey> {
-    let mode = &config.server.master_key_mode;
-    let env_key = env::var("ZANN_SMK").ok();
-    if let Some(value) = env_key {
+    if let Ok(value) = env::var("ZANN_SMK") {
         return parse_master_key(&value).ok();
+    }
+    if matches!(config.server.master_key_mode, MasterKeyMode::ManualUnseal) {
+        return config
+            .server
+            .master_key
+            .as_deref()
+            .and_then(|value| parse_master_key(value).ok());
+    }
+    if let Ok(file_path) = env::var("ZANN_SMK_FILE") {
+        return load_master_key_from_file(&file_path, config);
     }
     if let Some(value) = config.server.master_key.as_deref() {
         return parse_master_key(value).ok();
     }
-    if matches!(mode, MasterKeyMode::ManualUnseal) {
-        return None;
+    if let Some(file_path) = config.server.master_key_file.clone() {
+        return load_master_key_from_file(&file_path, config);
     }
+    None
+}
 
-    let file_path = env::var("ZANN_SMK_FILE")
-        .ok()
-        .or_else(|| env::var("ZANN_MASTER_KEY_FILE").ok())
-        .or_else(|| config.server.master_key_file.clone());
-    let file_path = file_path?;
-
-    let path = Path::new(&file_path);
+fn load_master_key_from_file(file_path: &str, config: &ServerConfig) -> Option<SecretKey> {
+    let path = Path::new(file_path);
     if path.exists() {
-        let value = match read_secret_file(&file_path) {
+        let value = match read_secret_file(file_path) {
             Ok(value) => value,
             Err(err) => {
                 warn!(event = "master_key_read_failed", path = %file_path, error = %err);
@@ -268,7 +285,7 @@ pub(super) fn load_server_master_key(config: &ServerConfig) -> Option<SecretKey>
         return parse_master_key(&value).ok();
     }
 
-    if matches!(mode, MasterKeyMode::AutoGenerate) {
+    if matches!(config.server.master_key_mode, MasterKeyMode::AutoGenerate) {
         return match generate_master_key_file(path) {
             Ok(key) => Some(key),
             Err(err) => {

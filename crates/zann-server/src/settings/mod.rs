@@ -214,6 +214,15 @@ pub fn preflight(settings: &Settings) -> Result<(), Vec<String>> {
     if settings.server_master_key.is_none() {
         missing.push("ZANN_SMK or server.master_key/server.master_key_file".to_string());
     }
+    if let Some(key) = settings.server_master_key.as_ref() {
+        if env_config::is_publicly_known_master_key(key) {
+            missing.push(
+                "server master key is the publicly known committed dev key; generate a new one \
+                 (openssl rand -base64 32) and re-wrap shared vault keys"
+                    .to_string(),
+            );
+        }
+    }
     if let Some(err) = validate_master_key_mode(settings) {
         missing.push(err);
     }
@@ -227,13 +236,6 @@ pub fn preflight(settings: &Settings) -> Result<(), Vec<String>> {
     if let Ok(path) = env::var("ZANN_IDENTITY_KEY_FILE") {
         if let Err(err) = env_config::check_key_file_permissions(&path) {
             missing.push(err);
-        }
-    }
-    if let Ok(path) = env::var("ZANN_MASTER_KEY_FILE") {
-        if std::path::Path::new(&path).exists() {
-            if let Err(err) = env_config::check_key_file_permissions(&path) {
-                missing.push(err);
-            }
         }
     }
     if let Some(path) = settings.config.server.master_key_file.as_deref() {
@@ -273,8 +275,7 @@ fn validate_master_key_mode(settings: &Settings) -> Option<String> {
     }
     if matches!(mode, MasterKeyMode::External) {
         let has_file = settings.config.server.master_key_file.as_ref().is_some()
-            || env::var("ZANN_SMK_FILE").is_ok()
-            || env::var("ZANN_MASTER_KEY_FILE").is_ok();
+            || env::var("ZANN_SMK_FILE").is_ok();
         let has_inline =
             settings.config.server.master_key.is_some() || env::var("ZANN_SMK").is_ok();
         if !has_file && !has_inline {
