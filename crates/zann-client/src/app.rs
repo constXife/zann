@@ -73,6 +73,21 @@ pub trait AppSyncStoreFactory: Send + Sync {
         target: SessionTarget,
         master_key: Arc<SecretKey>,
     ) -> SyncStoreFuture<'static, Arc<dyn SyncLocalStore>>;
+
+    /// Removes one target's complete local projection (items, history,
+    /// cursors, pending rows, vaults) in a single terminal transaction.
+    ///
+    /// Unlike [`Self::open_existing`] this is a local maintenance mutation,
+    /// not an operation-scoped open: it must refuse while any pending or
+    /// otherwise unconfirmed local state would be discarded, and it must not
+    /// require remote authorization. Implementations must remain lazy and
+    /// perform no I/O before the returned future is polled.
+    fn reset_projection(
+        self: Arc<Self>,
+        paths: ClientPaths,
+        target: SessionTarget,
+        master_key: Arc<SecretKey>,
+    ) -> SyncStoreFuture<'static, ()>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -529,6 +544,47 @@ impl AppClient {
             engine.pull(&target, operation).await
         })
     }
+
+    /// Removes the target's complete local projection through the persistence
+    /// factory. This is the explicit recovery path for a rebuilt or re-trusted
+    /// server: no remote authorization is attempted, and the factory must
+    /// refuse the reset while any unconfirmed local state would be discarded.
+    /// The same single-flight admission as [`Self::sync`] applies.
+    pub fn reset_sync(
+        &self,
+        target: SessionTarget,
+        master_key: SecretKey,
+    ) -> SyncFuture<'static, ()> {
+        let operation_id = SessionOperationId::new();
+        let permit = match AppSyncPermit::try_acquire() {
+            Ok(permit) => permit,
+            Err(()) => {
+                return Box::pin(async move {
+                    Err(SyncError::new(
+                        operation_id,
+                        SyncErrorKind::Local,
+                        SyncStage::ResolveTarget,
+                    ))
+                });
+            }
+        };
+
+        let paths = self.paths.clone();
+        let factory = Arc::clone(&self.sync_store_factory);
+        Box::pin(async move {
+            let _permit = permit;
+            factory
+                .reset_projection(paths, target, Arc::new(master_key))
+                .await
+                .map_err(|error| {
+                    SyncError::new(
+                        operation_id,
+                        map_reset_store_error(error),
+                        SyncStage::ResolveTarget,
+                    )
+                })
+        })
+    }
 }
 
 impl fmt::Debug for AppClient {
@@ -708,6 +764,16 @@ fn ready_sync_error(
     Box::pin(async move { Err(SyncError::new(operation_id, kind, SyncStage::ResolveTarget)) })
 }
 
+/// Factory reset failures keep the same shape as engine store failures:
+/// unconfirmed local state blocking the reset is a local conflict, everything
+/// else is a local persistence problem.
+fn map_reset_store_error(error: SyncStoreError) -> SyncErrorKind {
+    match error.kind() {
+        SyncStoreErrorKind::PendingPresent => SyncErrorKind::ConcurrentLocalChange,
+        _ => SyncErrorKind::Local,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::pending;
@@ -772,6 +838,17 @@ mod tests {
             let error = SyncStoreError::new(self.kind);
             Box::pin(async move { Err(error) })
         }
+
+        fn reset_projection(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _target: SessionTarget,
+            _master_key: Arc<SecretKey>,
+        ) -> SyncStoreFuture<'static, ()> {
+            self.calls.fetch_add(1, Ordering::AcqRel);
+            let error = SyncStoreError::new(self.kind);
+            Box::pin(async move { Err(error) })
+        }
     }
 
     struct PendingFactory {
@@ -800,6 +877,20 @@ mod tests {
                 let _drop_marker = DropMarker(Arc::clone(&self.dropped));
                 self.started.notify_one();
                 pending::<Result<Arc<dyn SyncLocalStore>, SyncStoreError>>().await
+            })
+        }
+
+        fn reset_projection(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _target: SessionTarget,
+            _master_key: Arc<SecretKey>,
+        ) -> SyncStoreFuture<'static, ()> {
+            self.calls.fetch_add(1, Ordering::AcqRel);
+            Box::pin(async move {
+                let _drop_marker = DropMarker(Arc::clone(&self.dropped));
+                self.started.notify_one();
+                pending::<Result<(), SyncStoreError>>().await
             })
         }
     }
@@ -1107,5 +1198,74 @@ mod tests {
 
         let released = AppSyncPermit::try_acquire().expect("pull completion releases admission");
         drop(released);
+    }
+
+    #[tokio::test]
+    async fn reset_sync_maps_unconfirmed_local_state_to_a_local_conflict() {
+        let _test_lock = APP_TEST_LOCK.lock().await;
+        let factory = Arc::new(ErrorFactory::new(SyncStoreErrorKind::PendingPresent));
+        let client = client("reset-pending", factory.clone());
+
+        let error = client
+            .reset_sync(target(), SecretKey::from_bytes([12_u8; 32]))
+            .await
+            .expect_err("scripted pending-present reset failure");
+        assert_eq!(error.kind(), SyncErrorKind::ConcurrentLocalChange);
+        assert_eq!(error.stage(), SyncStage::ResolveTarget);
+        assert_eq!(factory.calls.load(Ordering::Acquire), 1);
+    }
+
+    #[tokio::test]
+    async fn reset_sync_maps_other_store_failures_to_local() {
+        let _test_lock = APP_TEST_LOCK.lock().await;
+        let factory = Arc::new(ErrorFactory::new(SyncStoreErrorKind::InvalidData));
+        let client = client("reset-invalid", factory.clone());
+
+        let error = client
+            .reset_sync(target(), SecretKey::from_bytes([13_u8; 32]))
+            .await
+            .expect_err("scripted invalid-data reset failure");
+        assert_eq!(error.kind(), SyncErrorKind::Local);
+        assert_eq!(error.stage(), SyncStage::ResolveTarget);
+        assert_eq!(factory.calls.load(Ordering::Acquire), 1);
+    }
+
+    #[tokio::test]
+    async fn reset_sync_is_bounded_by_the_facade_single_flight() {
+        let _test_lock = APP_TEST_LOCK.lock().await;
+        let pending_factory = Arc::new(PendingFactory {
+            calls: AtomicUsize::new(0),
+            started: Notify::new(),
+            dropped: Arc::new(AtomicBool::new(false)),
+        });
+        let pending_client = client("reset-in-flight", pending_factory.clone());
+        let first =
+            tokio::spawn(pending_client.reset_sync(target(), SecretKey::from_bytes([14_u8; 32])));
+        tokio::time::timeout(Duration::from_secs(2), pending_factory.started.notified())
+            .await
+            .expect("scripted reset must start");
+
+        let contender_factory = Arc::new(ErrorFactory::new(SyncStoreErrorKind::Unavailable));
+        let contender = client("reset-contender", contender_factory.clone());
+        let (contender_operation, _) = operation_after(Duration::from_secs(30));
+        let sync_error = contender
+            .sync(
+                target(),
+                SecretKey::from_bytes([14_u8; 32]),
+                contender_operation,
+            )
+            .await
+            .expect_err("a concurrent sync must fail before opening local state");
+        assert_eq!(sync_error.kind(), SyncErrorKind::Local);
+        let reset_error = contender
+            .reset_sync(target(), SecretKey::from_bytes([14_u8; 32]))
+            .await
+            .expect_err("a concurrent reset must fail before opening local state");
+        assert_eq!(reset_error.kind(), SyncErrorKind::Local);
+        assert_eq!(contender_factory.calls.load(Ordering::Acquire), 0);
+        assert_eq!(pending_factory.calls.load(Ordering::Acquire), 1);
+        first.abort();
+        first.await.expect_err("aborted reset task");
+        assert!(pending_factory.dropped.load(Ordering::Acquire));
     }
 }
