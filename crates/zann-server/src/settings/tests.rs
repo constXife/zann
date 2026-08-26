@@ -1,5 +1,6 @@
 use super::*;
 use crate::config::{AuthMode, InternalRegistration};
+use base64::Engine;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -28,6 +29,7 @@ fn clear_metrics_env() {
     env::remove_var("ZANN_METRICS_ENDPOINT");
     env::remove_var("ZANN_METRICS_PROFILE");
     env::remove_var("ZANN_SMK");
+    env::remove_var("ZANN_SMK_FILE");
 }
 
 fn set_policy_config_path() {
@@ -318,4 +320,74 @@ fn tracing_otel_config_parses() {
         Some("zann-server")
     );
     assert_eq!(settings.config.tracing.otel.sampling_ratio, Some(0.25));
+}
+
+#[test]
+fn config_files_do_not_ship_a_master_key() {
+    let config_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
+    let entries = std::fs::read_dir(&config_dir).expect("read config dir");
+    let mut checked = 0;
+    for entry in entries {
+        let path = entry.expect("dir entry").path();
+        if path.extension().and_then(|value| value.to_str()) != Some("yaml") {
+            continue;
+        }
+        let contents = std::fs::read_to_string(&path).expect("read config file");
+        let parsed: serde_yaml::Value = serde_yaml::from_str(&contents).expect("parse config file");
+        assert!(
+            parsed
+                .get("server")
+                .and_then(|server| server.get("master_key"))
+                .is_none(),
+            "{} must not set server.master_key: secrets must not ship in the repo",
+            path.display()
+        );
+        checked += 1;
+    }
+    assert!(checked > 0, "expected config yaml files to check");
+}
+
+#[test]
+fn smk_file_env_beats_inline_config_key() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    clear_auth_env();
+    clear_pepper_env();
+    clear_metrics_env();
+    let smk_path = std::env::temp_dir().join(format!("zann-test-smk-{}.b64", Uuid::new_v4()));
+    std::fs::write(&smk_path, TEST_SMK).expect("write smk file");
+    set_config_with_auth(&format!(
+        "server:\n  master_key: \"{}\"\n",
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB="
+    ));
+    env::set_var("ZANN_SMK_FILE", &smk_path);
+
+    let settings = Settings::from_env_with_options(false).expect("settings");
+    let key = settings.server_master_key.expect("master key");
+    let expected: [u8; 32] = base64::engine::general_purpose::STANDARD
+        .decode(TEST_SMK)
+        .expect("decode expected key")
+        .try_into()
+        .expect("expected key length");
+    assert!(key.as_bytes() == &expected);
+
+    env::remove_var("ZANN_SMK_FILE");
+    let _ = std::fs::remove_file(&smk_path);
+}
+
+#[test]
+fn publicly_known_dev_master_key_fails_preflight() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    clear_auth_env();
+    clear_pepper_env();
+    clear_metrics_env();
+    set_policy_config_path();
+    env::set_var("ZANN_TOKEN_PEPPER", "test-token-pepper");
+    env::set_var("ZANN_PASSWORD_PEPPER", "test-password-pepper");
+    env::set_var("ZANN_SMK", "/xdJ8wIDGMQFwaChfY3k7qo1GlzYgR3peAMOFg/0u9w=");
+
+    let settings = Settings::from_env_with_options(true).expect("settings");
+    let missing = preflight(&settings).expect_err("preflight should fail");
+    assert!(missing
+        .iter()
+        .any(|value| value.contains("publicly known committed dev key")));
 }

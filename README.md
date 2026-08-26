@@ -63,17 +63,27 @@ See `CONTRIBUTING.md` for platform-specific Tauri prerequisites.
 
 Full install guide: `docs/INSTALL.md`.
 
-### Option 2: Self-hosted server (for small teams and CI/CD)
+### Option 2: Local server via Docker Compose (development quickstart)
+
+The bundled `compose.yaml` is a local development quickstart, not a production
+setup. For real self-hosting start from `config/config.example.yaml` and supply
+your own secrets.
 
 ```bash
 # Clone the repo
 git clone https://github.com/constXife/zann
 cd zann
 
+# Provide peppers (the compose file refuses to start without them)
+cp .env.example .env
+# edit .env: set ZANN_PASSWORD_PEPPER and ZANN_TOKEN_PEPPER
+# (openssl rand -base64 32)
+
 # Start the server via Docker Compose
 docker compose up -d
 
 # The server is available at http://localhost:8080
+# The shared-vault master key is generated into ./data/smk on first start
 ```
 
 ## System requirements (server)

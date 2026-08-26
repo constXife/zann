@@ -7,7 +7,8 @@ auth:
     enabled: false
 
 server:
-  master_key: "/xdJ8wIDGMQFwaChfY3k7qo1GlzYgR3peAMOFg/0u9w="
+  master_key_mode: auto_generate
+  master_key_file: "/data/smk"
 
 metrics:
   enabled: true
