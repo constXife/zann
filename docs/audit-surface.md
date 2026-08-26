@@ -1,4 +1,7 @@
-# Audit-surface status
+---
+title: Audit-surface status
+description: Security-sensitive modules, ownership, and audit readiness.
+---
 
 The audit surface is the small set of security-sensitive modules that receive
 security labeling, explicit ownership and stricter CI checks. The list is
