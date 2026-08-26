@@ -116,16 +116,18 @@ impl<'a> SessionRepo<'a> {
             Session,
             r#"
             SELECT
-                id as "id",
-                user_id as "user_id",
-                device_id as "device_id",
-                access_token_hash,
-                access_expires_at as "access_expires_at",
-                refresh_token_hash,
-                expires_at as "expires_at",
-                created_at as "created_at"
-            FROM sessions
-            WHERE refresh_token_hash = $1
+                s.id as "id",
+                s.user_id as "user_id",
+                s.device_id as "device_id",
+                s.access_token_hash,
+                s.access_expires_at as "access_expires_at",
+                s.refresh_token_hash,
+                s.expires_at as "expires_at",
+                s.created_at as "created_at"
+            FROM sessions s
+            JOIN devices d ON d.id = s.device_id
+            WHERE s.refresh_token_hash = $1
+              AND d.revoked_at IS NULL
             "#,
             refresh_token_hash
         )
@@ -146,16 +148,18 @@ impl<'a> SessionRepo<'a> {
             Session,
             r#"
             SELECT
-                id as "id",
-                user_id as "user_id",
-                device_id as "device_id",
-                access_token_hash,
-                access_expires_at as "access_expires_at",
-                refresh_token_hash,
-                expires_at as "expires_at",
-                created_at as "created_at"
-            FROM sessions
-            WHERE access_token_hash = $1
+                s.id as "id",
+                s.user_id as "user_id",
+                s.device_id as "device_id",
+                s.access_token_hash,
+                s.access_expires_at as "access_expires_at",
+                s.refresh_token_hash,
+                s.expires_at as "expires_at",
+                s.created_at as "created_at"
+            FROM sessions s
+            JOIN devices d ON d.id = s.device_id
+            WHERE s.access_token_hash = $1
+              AND d.revoked_at IS NULL
             "#,
             access_token_hash
         )
@@ -220,5 +224,65 @@ impl<'a> SessionRepo<'a> {
         .map(|result| {
             Span::current().record("db.rows", result.rows_affected() as i64);
         })
+    }
+
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(device_id = %device_id, db.system = "postgresql", db.operation = "DELETE", db.query = "sessions.delete_by_device")
+    )]
+    pub async fn delete_by_device(&self, device_id: Uuid) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            DELETE FROM sessions
+            WHERE device_id = $1
+            "#,
+            device_id
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| result.rows_affected())
+    }
+
+    /// Deletes every session of a user except the ones belonging to
+    /// `keep_device_id`; used when a password change must cut off other
+    /// devices while the caller stays signed in.
+    #[instrument(
+        level = "debug",
+        skip(self),
+        fields(user_id = %user_id, db.system = "postgresql", db.operation = "DELETE", db.query = "sessions.delete_for_user_except_device")
+    )]
+    pub async fn delete_for_user_except_device(
+        &self,
+        user_id: Uuid,
+        keep_device_id: Option<Uuid>,
+    ) -> Result<u64, sqlx_core::Error> {
+        match keep_device_id {
+            Some(keep_device_id) => {
+                query!(
+                    r#"
+                    DELETE FROM sessions
+                    WHERE user_id = $1
+                      AND device_id != $2
+                    "#,
+                    user_id,
+                    keep_device_id
+                )
+                .execute(self.pool)
+                .await
+            }
+            None => {
+                query!(
+                    r#"
+                    DELETE FROM sessions
+                    WHERE user_id = $1
+                    "#,
+                    user_id
+                )
+                .execute(self.pool)
+                .await
+            }
+        }
+        .map(|result| result.rows_affected())
     }
 }

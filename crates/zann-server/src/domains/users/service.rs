@@ -1,7 +1,7 @@
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use zann_core::{AuthSource, Identity, User};
-use zann_db::repo::UserRepo;
+use zann_db::repo::{SessionRepo, UserRepo};
 
 use crate::app::AppState;
 use crate::config::AuthMode;
@@ -220,6 +220,28 @@ pub async fn change_password(
     };
     if affected == 0 {
         return Err(MeError::NotFound);
+    }
+
+    let session_repo = SessionRepo::new(&state.db);
+    match session_repo
+        .delete_for_user_except_device(identity.user_id, identity.device_id)
+        .await
+    {
+        Ok(0) => {}
+        Ok(killed) => {
+            tracing::info!(
+                event = "users_me_password_sessions_revoked",
+                killed_sessions = killed,
+                "Sessions of other devices revoked after password change"
+            );
+        }
+        Err(_) => {
+            tracing::error!(
+                event = "users_me_password_failed",
+                "Session revocation after password change failed"
+            );
+            return Err(MeError::DbError);
+        }
     }
 
     tracing::info!(event = "users_me_password_changed", "Password changed");
