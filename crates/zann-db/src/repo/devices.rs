@@ -98,12 +98,16 @@ impl<'a> DeviceRepo<'a> {
             .await
     }
 
+    /// Revokes the device and deletes its sessions in one transaction, so a
+    /// revoked device's access and refresh tokens stop working immediately
+    /// instead of surviving until their TTL lapses.
     pub async fn revoke(
         &self,
         device_id: Uuid,
         revoked_at: DateTime<Utc>,
     ) -> Result<u64, sqlx_core::Error> {
-        query!(
+        let mut tx = self.pool.begin().await?;
+        let revoked = query!(
             r#"
             UPDATE devices
             SET revoked_at = $2
@@ -112,9 +116,24 @@ impl<'a> DeviceRepo<'a> {
             device_id,
             revoked_at
         )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+        if revoked == 0 {
+            tx.commit().await?;
+            return Ok(0);
+        }
+        query!(
+            r#"
+            DELETE FROM sessions
+            WHERE device_id = $1
+            "#,
+            device_id
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(revoked)
     }
 }
 

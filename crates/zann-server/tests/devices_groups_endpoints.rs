@@ -154,6 +154,10 @@ impl TestApp {
     }
 
     async fn login(&self, email: &str, password: &str) -> String {
+        self.login_with_tokens(email, password).await.0
+    }
+
+    async fn login_with_tokens(&self, email: &str, password: &str) -> (String, String) {
         let payload = json!({
             "email": email,
             "password": password,
@@ -164,7 +168,16 @@ impl TestApp {
             .send_json(Method::POST, "/v1/auth/login", None, payload)
             .await;
         assert_eq!(status, StatusCode::OK, "login failed: {:?}", json);
-        json["access_token"].as_str().expect("token").to_string()
+        (
+            json["access_token"]
+                .as_str()
+                .expect("access token")
+                .to_string(),
+            json["refresh_token"]
+                .as_str()
+                .expect("refresh token")
+                .to_string(),
+        )
     }
 
     async fn add_admin_group(&self, user_id: Uuid) {
@@ -236,7 +249,10 @@ async fn devices_list_current_and_revoke() {
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
 
-    let (status, list) = app.get_json("/v1/devices", Some(&token)).await;
+    // The revoked device's own token is dead; a fresh login creates a new
+    // device, whose token can still observe the revoked one.
+    let survivor_token = app.login(email, password).await;
+    let (status, list) = app.get_json("/v1/devices", Some(&survivor_token)).await;
     assert_eq!(status, StatusCode::OK, "devices list failed: {:?}", list);
     let devices = list["devices"].as_array().expect("devices array");
     let revoked = devices
@@ -274,6 +290,110 @@ async fn devices_revoke_other_user_is_not_found() {
         )
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn revoked_device_sessions_die_immediately() {
+    let app = TestApp::new().await;
+    let email = "device-revoke-sessions@example.com";
+    let password = "password-1";
+    app.register(email, password).await;
+    let (access, refresh) = app.login_with_tokens(email, password).await;
+
+    let (status, current) = app.get_json("/v1/devices/current", Some(&access)).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "current device failed: {:?}",
+        current
+    );
+    let device_id = current["id"].as_str().expect("device id");
+
+    let status = app
+        .send_empty(
+            Method::DELETE,
+            &format!("/v1/devices/{}", device_id),
+            Some(&access),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    let (status, body) = app.get_json("/v1/devices", Some(&access)).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "revoked device access token must stop authenticating: {:?}",
+        body
+    );
+
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            None,
+            json!({ "refresh_token": refresh }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "revoked device refresh token must not mint new tokens: {:?}",
+        body
+    );
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn change_password_revokes_other_device_sessions() {
+    let app = TestApp::new().await;
+    let email = "device-password-change@example.com";
+    let password = "password-1";
+    app.register(email, password).await;
+    let (laptop_access, _laptop_refresh) = app.login_with_tokens(email, password).await;
+    let (phone_access, phone_refresh) = app.login_with_tokens(email, password).await;
+    assert_ne!(laptop_access, phone_access);
+
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            "/v1/users/me/password",
+            Some(&laptop_access),
+            json!({ "current_password": password, "new_password": "password-2" }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "change failed: {:?}", body);
+
+    let (status, body) = app.get_json("/v1/devices", Some(&laptop_access)).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "the device that changed the password stays signed in: {:?}",
+        body
+    );
+
+    let (status, body) = app.get_json("/v1/devices", Some(&phone_access)).await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "other device access token must die on password change: {:?}",
+        body
+    );
+
+    let (status, body) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            None,
+            json!({ "refresh_token": phone_refresh }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "other device refresh token must die on password change: {:?}",
+        body
+    );
 }
 
 #[tokio::test]
