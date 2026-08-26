@@ -5,7 +5,7 @@ use std::sync::Arc;
 use zann_ffi::{
     create_core_at_file_location, AppStatusFfi, BackupExportReport, CoreFacade, HardwareKeyFfi,
     ItemDetail, ItemSummary, ItemsFilter, Page, RememberedUnlockFfi, SnapshotFfi,
-    SnapshotRestoreFfi, VerifyReportFfi,
+    SnapshotRestoreFfi, StorageSummaryFfi, VerifyReportFfi,
 };
 use zann_ui_core::ItemCounts;
 
@@ -73,6 +73,10 @@ pub fn sync(facade: &CoreFacade, storage_id: Option<String>) -> Result<(), Strin
     facade
         .remote_sync(storage_id)
         .map_err(|err| err.to_string())
+}
+
+pub fn storages(facade: &CoreFacade) -> Result<Vec<StorageSummaryFfi>, String> {
+    facade.list_storages().map_err(|err| err.to_string())
 }
 
 pub fn items(facade: &CoreFacade, cursor: Option<String>) -> Result<ItemsPage, String> {

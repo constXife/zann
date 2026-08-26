@@ -7,8 +7,9 @@ import { fas } from "@fortawesome/free-solid-svg-icons";
 import { far } from "@fortawesome/free-regular-svg-icons";
 import { fab } from "@fortawesome/free-brands-svg-icons";
 import App from "./App.vue";
-import en from "./i18n/locales/en.json";
-import ru from "./i18n/locales/ru.json";
+// The catalogue is shared with native clients through `zann-ui-core`.
+import en from "../../../i18n/en.json";
+import ru from "../../../i18n/ru.json";
 import "./styles.css";
 
 const logError = (label: string, value: unknown) => {
@@ -33,8 +34,10 @@ window.addEventListener("unhandledrejection", (event) => {
 
 library.add(fas, far, fab);
 
-const fallbackLocale = "en";
-const systemLocale = navigator.language?.split("-")[0] || fallbackLocale;
+const fallbackLocale = "en" as const;
+const normalizeLocale = (value?: string): "en" | "ru" =>
+  value?.split("-")[0] === "ru" ? "ru" : fallbackLocale;
+const systemLocale = normalizeLocale(navigator.language);
 
 if (import.meta.env.VITE_E2E === "1") {
   document.documentElement.dataset.e2e = "true";
@@ -50,8 +53,7 @@ const i18n = createI18n({
 invoke<{ ok: boolean; data?: string }>("system_locale")
   .then((response) => {
     if (response.ok && response.data) {
-      const normalized = response.data.split("-")[0];
-      i18n.global.locale.value = normalized;
+      i18n.global.locale.value = normalizeLocale(response.data);
     }
   })
   .catch(() => {});

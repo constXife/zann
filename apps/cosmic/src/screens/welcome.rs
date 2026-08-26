@@ -7,6 +7,7 @@ use cosmic::iced::Length;
 use cosmic::{theme, widget, Element};
 
 use super::centered;
+use crate::i18n::t;
 
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -18,17 +19,15 @@ pub fn view<'a>() -> Element<'a, Message> {
     let spacing = theme::spacing();
     centered(
         widget::column::with_capacity(4)
-            .push(widget::text::title3("Welcome to zann"))
-            .push(widget::text::body(
-                "Keep the vault on this machine, or connect it to a server.",
-            ))
+            .push(widget::text::title3(t("wizard.title")))
+            .push(widget::text::body(t("wizard.subtitle")))
             .push(
-                widget::button::suggested("Connect to a server")
+                widget::button::suggested(t("wizard.connect"))
                     .width(Length::Fill)
                     .on_press(Message::ConnectToServer),
             )
             .push(
-                widget::button::standard("Use a local vault")
+                widget::button::standard(t("wizard.startLocal"))
                     .width(Length::Fill)
                     .on_press(Message::UseLocalVault),
             )

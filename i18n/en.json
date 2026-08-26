@@ -4,11 +4,14 @@
   },
   "common": {
     "unlock": "Unlock",
+    "lock": "Lock",
     "locked": "Locked",
     "unlocked": "Unlocked",
     "settings": "Settings",
     "command": "Command",
     "close": "Close",
+    "open": "Open",
+    "quit": "Quit",
     "copy": "Copy",
     "copied": "Copied",
     "reveal": "Reveal",
@@ -79,7 +82,8 @@
     "mime": "MIME Type",
     "size": "Size",
     "checksum": "Checksum",
-    "protocol": "Protocol"
+    "protocol": "Protocol",
+    "otp": "One-time code"
   },
   "nav": {
     "vaults": "Vaults",
@@ -119,6 +123,10 @@
     "kvMatches": "{count}/{total} matches",
     "kvNoMatches": "No matching keys or values.",
     "noItems": "No items yet. Create your first item to get started.",
+    "noFields": "This item has no fields.",
+    "loadMore": "Load more",
+    "loadedCount": "{loaded} of {total} loaded, {shown} shown",
+    "syncFailed": "Sync failed: {error}",
     "selectItem": "Select an item",
     "details": "Details",
     "detailsHint": "Details will appear here. Secrets are masked by default.",
@@ -257,6 +265,8 @@
     "hardwareKeyRetry": "Try again"
   },
   "auth": {
+    "serverUrl": "Server URL",
+    "copyLink": "Copy the link",
     "selectMethod": "How would you like to sign in?",
     "emailPassword": "Email & Password",
     "emailPasswordDesc": "Sign in with your email and password",
@@ -315,6 +325,13 @@
     "openBrowser": "Open browser",
     "connected": "Connected. Sync will start shortly.",
     "processing": "Processing. Please wait...",
+    "checking": "Checking…",
+    "starting": "Starting…",
+    "syncAfterUnlock": "The vault will sync with the server right after this.",
+    "oidcHint": "Finish signing in in your browser, then come back here.",
+    "oidcReopen": "Open the sign-in page again",
+    "signInSso": "Sign in with SSO",
+    "fingerprintWarning": "This server presents a different key than the one you trusted. Only continue if you know why it changed.",
     "fingerprintChanged": "Server identity changed",
     "oldFingerprint": "Old fingerprint",
     "newFingerprint": "New fingerprint",
@@ -333,6 +350,7 @@
     "general": {
       "appearance": "Appearance",
       "language": "Language",
+      "languageSystem": "System language",
       "behavior": "Behavior",
       "closeToTray": "Close to tray instead of quitting",
       "closeToTrayHelp": "Zann stays running in the background when you close the window.",
