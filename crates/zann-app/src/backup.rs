@@ -359,7 +359,8 @@ pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport
     if let Some(parent) = output_path.parent() {
         std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
-    let file = File::create(&output_path).map_err(|err| err.to_string())?;
+    let file =
+        crate::secure_file::create_private_file(&output_path).map_err(|err| err.to_string())?;
     let mut writer = BufWriter::new(file);
     let exported_at = Utc::now().to_rfc3339();
     let mut streamer = ExportItemStreamer::new(services, item_repo, vault_queue);

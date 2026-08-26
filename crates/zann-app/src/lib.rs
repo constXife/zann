@@ -8,6 +8,7 @@
 //! items, vaults, storage, history and sync orchestration here in later phases.
 
 pub mod backup;
+pub mod secure_file;
 pub mod snapshot;
 pub mod verify;
 
