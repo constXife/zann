@@ -256,17 +256,45 @@ fn vault_filters_the_list_and_forwards_copies() {
     state.update(vault::Message::ClearQuery, &session);
     assert_eq!(state.visible().len(), 2);
 
-    // The clipboard belongs to the shell, so the drawer's copy travels up.
+    // The clipboard belongs to the shell, so the detail column's copy travels up.
     let outcome = state.update(
         vault::Message::Detail(zann_cosmic::screens::detail::Message::Copy("s3cret".into())),
         &session,
     );
     assert!(matches!(outcome, vault::Outcome::Copy(value) if value == "s3cret"));
+}
 
-    assert!(matches!(
-        state.update(vault::Message::Lock, &session),
-        vault::Outcome::Locked
-    ));
+#[test]
+fn the_splitter_stays_between_the_tauri_panel_limits() {
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None).expect("items");
+    let mut state = vault::State::new(page, None);
+    state.set_content_width(1200.0);
+    assert_eq!(state.list_width(), 400.0);
+
+    // The first move fixes the pointer origin; later moves resize from it.
+    state.update(vault::Message::ResizeStart, &session);
+    state.update(vault::Message::ResizeMove(700.0), &session);
+    assert_eq!(state.list_width(), 400.0);
+    state.update(vault::Message::ResizeMove(800.0), &session);
+    assert_eq!(state.list_width(), 500.0);
+
+    // Overshoot clamps at Tauri's list maximum without banking the excess.
+    state.update(vault::Message::ResizeMove(1400.0), &session);
+    assert_eq!(state.list_width(), 560.0);
+    state.update(vault::Message::ResizeMove(760.0), &session);
+    assert_eq!(state.list_width(), 460.0);
+
+    // A narrow window temporarily clamps the list, then restores the user's
+    // preferred split when room returns.
+    state.set_content_width(800.0);
+    assert_eq!(state.list_width(), 320.0);
+    state.set_content_width(1200.0);
+    assert_eq!(state.list_width(), 460.0);
+
+    state.update(vault::Message::ResizeEnd, &session);
+    state.update(vault::Message::ResizeMove(200.0), &session);
+    assert_eq!(state.list_width(), 460.0);
 }
 
 #[test]

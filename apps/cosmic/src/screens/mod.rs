@@ -18,7 +18,12 @@ use cosmic::{widget, Element};
 /// a pointer-sized move.
 pub enum Screen {
     Welcome,
-    Connect(Box<connect::State>),
+    Connect {
+        state: Box<connect::State>,
+        /// Opening Accounts → Add server must not discard the unlocked vault
+        /// when the user presses Back.
+        return_to: Option<Box<Screen>>,
+    },
     Master(Box<master::State>),
     Vault(Box<vault::State>),
     /// Reached from the vault and always returns to it, so the vault it came

@@ -7,6 +7,8 @@ export default defineConfig({
     port: 5174,
     strictPort: true,
     host: "127.0.0.1",
+    // The shared translation catalogue lives at the repository root.
+    fs: { allow: ["../.."] },
   },
   test: {
     environment: "jsdom",

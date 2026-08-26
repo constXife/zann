@@ -1,4 +1,4 @@
-//! Item detail: turning a decrypted payload into fields the drawer can show.
+//! Item detail: turning a decrypted payload into fields the detail column can show.
 //!
 //! Owned by [`super::vault`], which wraps these messages in its own.
 
@@ -7,6 +7,8 @@ use cosmic::{theme, widget, Element};
 use zann_crypto::secrets::{EncryptedPayload, FieldKind};
 use zann_ffi::ItemDetail;
 use zann_ui_core::{generate_totp, TotpParams};
+
+use crate::i18n::{has, t};
 
 /// Fields the schemas put first, in the order a reader expects them.
 const FIELD_ORDER: &[&str] = &[
@@ -111,7 +113,7 @@ impl Detail {
             .spacing(spacing.space_s);
 
         if self.fields.is_empty() {
-            column = column.push(widget::text::body("This item has no fields."));
+            column = column.push(widget::text::body(t("items.noFields")));
         }
 
         for (index, field) in self.fields.iter().enumerate() {
@@ -163,14 +165,8 @@ fn totp_params(value: &str, payload: &EncryptedPayload) -> TotpParams {
 
 fn label_for(key: &str) -> String {
     match key {
-        "username" => "Username".to_string(),
-        "password" => "Password".to_string(),
-        "url" => "URL".to_string(),
-        "notes" => "Notes".to_string(),
-        "email" => "Email".to_string(),
-        "card_number" => "Card number".to_string(),
-        "cvv" => "CVV".to_string(),
-        "otp" | "totp" => "One-time code".to_string(),
+        "otp" | "totp" => t("fields.otp"),
+        named if has(&format!("fields.{named}")) => t(&format!("fields.{named}")),
         other => {
             let spaced = other.replace('_', " ");
             let mut chars = spaced.chars();
