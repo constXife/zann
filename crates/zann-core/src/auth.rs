@@ -30,6 +30,9 @@ pub struct OidcToken {
     pub issuer: String,
     pub subject: String,
     pub email: Option<String>,
+    /// Whether the issuer attests the `email` claim; an unverified email
+    /// must never adopt or create a local account.
+    pub email_verified: Option<bool>,
     pub claims: Map<String, Value>,
 }
 

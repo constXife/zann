@@ -95,6 +95,7 @@ async fn oidc_rejects_disabled_user() {
         issuer: oidc_identity.issuer.clone(),
         subject: oidc_identity.subject.clone(),
         email: None,
+        email_verified: None,
         claims: Map::new(),
     };
 
@@ -144,6 +145,7 @@ async fn oidc_links_existing_user_by_email() {
         issuer: "https://issuer.example.com".to_string(),
         subject: "subject-existing-user".to_string(),
         email: Some(user.email.clone()),
+        email_verified: Some(true),
         claims: Map::new(),
     };
 
@@ -158,4 +160,113 @@ async fn oidc_links_existing_user_by_email() {
         .expect("load oidc identity")
         .expect("oidc identity created");
     assert_eq!(oidc_identity.user_id, user.id);
+}
+
+async fn fresh_oidc_state() -> AppState {
+    let _guard = support::test_guard().await;
+    let pool = support::setup_shared_db().await;
+    support::reset_db(&pool).await;
+    let mut config = ServerConfig::default();
+    support::tune_test_kdf(&mut config);
+    build_state(pool.clone(), config).await
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn unverified_email_cannot_adopt_an_existing_account() {
+    let state = fresh_oidc_state().await;
+
+    let now = Utc::now();
+    let victim = User {
+        id: uuid::Uuid::now_v7(),
+        email: "victim@example.com".to_string(),
+        full_name: None,
+        password_hash: Some("password-hash".to_string()),
+        kdf_salt: random_kdf_salt(),
+        kdf_algorithm: state.config.auth.kdf.algorithm.clone(),
+        kdf_iterations: i64::from(state.config.auth.kdf.iterations),
+        kdf_memory_kb: i64::from(state.config.auth.kdf.memory_kb),
+        kdf_parallelism: i64::from(state.config.auth.kdf.parallelism),
+        recovery_key_hash: None,
+        status: UserStatus::Active,
+        deleted_at: None,
+        deleted_by_user_id: None,
+        deleted_by_device_id: None,
+        row_version: 1,
+        created_at: now,
+        updated_at: now,
+        last_login_at: None,
+    };
+    UserRepo::new(&state.db)
+        .create(&victim)
+        .await
+        .expect("create victim");
+
+    let token = OidcToken {
+        issuer: "https://attacker-issuer.example.com".to_string(),
+        subject: "attacker-subject".to_string(),
+        email: Some("victim@example.com".to_string()),
+        email_verified: Some(false),
+        claims: Map::new(),
+    };
+
+    let error = identity_from_oidc(&state, token)
+        .await
+        .expect_err("unverified email must not adopt an account");
+    assert_eq!(error, "email_not_verified");
+
+    let binding = OidcIdentityRepo::new(&state.db)
+        .get_by_issuer_subject("https://attacker-issuer.example.com", "attacker-subject")
+        .await
+        .expect("load oidc identity");
+    assert!(binding.is_none(), "no binding must be created");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn unverified_email_cannot_create_an_account() {
+    let state = fresh_oidc_state().await;
+
+    let token = OidcToken {
+        issuer: "https://issuer.example.com".to_string(),
+        subject: "subject-unverified-jit".to_string(),
+        email: Some("unverified-jit@example.com".to_string()),
+        email_verified: None,
+        claims: Map::new(),
+    };
+
+    let error = identity_from_oidc(&state, token)
+        .await
+        .expect_err("unverified email must not create an account");
+    assert_eq!(error, "email_not_verified");
+
+    let user = UserRepo::new(&state.db)
+        .get_by_email("unverified-jit@example.com")
+        .await
+        .expect("user lookup");
+    assert!(user.is_none(), "no user must be provisioned");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn verified_email_provisions_a_new_user() {
+    let state = fresh_oidc_state().await;
+
+    let token = OidcToken {
+        issuer: "https://issuer.example.com".to_string(),
+        subject: "subject-verified-jit".to_string(),
+        email: Some("verified-jit@example.com".to_string()),
+        email_verified: Some(true),
+        claims: Map::new(),
+    };
+
+    let identity = identity_from_oidc(&state, token)
+        .await
+        .expect("verified email provisions an account");
+    let user = UserRepo::new(&state.db)
+        .get_by_email("verified-jit@example.com")
+        .await
+        .expect("user lookup")
+        .expect("user created");
+    assert_eq!(identity.user_id, user.id);
 }

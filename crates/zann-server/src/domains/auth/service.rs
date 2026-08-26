@@ -770,21 +770,29 @@ pub async fn login_oidc(
         }
     };
 
+    let userinfo = if claims.email.is_some() {
+        None
+    } else {
+        state
+            .oidc_jwks_cache
+            .fetch_userinfo(&payload.token, &state.config.auth.oidc)
+            .await
+            .ok()
+    };
     let oidc_token = zann_core::OidcToken {
         issuer: claims.iss.clone(),
         subject: claims.sub.clone(),
-        email: {
-            let email = claims.email.clone();
-            if email.is_some() {
-                email
-            } else {
-                state
-                    .oidc_jwks_cache
-                    .fetch_userinfo_email(&payload.token, &state.config.auth.oidc)
-                    .await
-                    .ok()
-                    .flatten()
-            }
+        email: claims.email.clone().or_else(|| {
+            userinfo
+                .as_ref()
+                .and_then(|userinfo| userinfo.email.clone())
+        }),
+        email_verified: if claims.email.is_some() {
+            claims.email_verified
+        } else {
+            userinfo
+                .as_ref()
+                .and_then(|userinfo| userinfo.email_verified)
         },
         claims: claims.other.clone(),
     };
