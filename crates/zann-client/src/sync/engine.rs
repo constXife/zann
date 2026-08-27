@@ -9,7 +9,7 @@ use uuid::Uuid;
 use zann_core::SyncStatus;
 
 use super::model::{
-    ItemState, PendingExpectation, PullCommitChange, PullPageCommit, PushCommitPlan,
+    ItemState, PendingExpectation, PendingProof, PullCommitChange, PullPageCommit, PushCommitPlan,
     ReconciledCatalog, ResolvedSyncTarget, SyncCursor, SyncError, SyncErrorKind, SyncFuture,
     SyncLocalStore, SyncOutcome, SyncOutcomeStatus, SyncProgress, SyncProgressPhase,
     SyncProgressSink, SyncSeq, SyncStage, SyncStoreError, SyncStoreErrorKind, VaultPlane,
@@ -24,6 +24,7 @@ use crate::session::{
     AppSession, OperationCompletion, SessionAccess, SessionError, SessionErrorKind,
     SessionOperation, SessionTarget,
 };
+use zann_core::ChangeType;
 
 const MAX_REQUEST_TIME: Duration = Duration::from_secs(30);
 
@@ -363,8 +364,8 @@ impl SyncEngine {
                     .map_err(|error| {
                         map_store_error(operation_id, SyncStage::LoadItemStates, error)
                     })?;
-                let states =
-                    validate_item_states(vault.scope(), &item_ids, states).map_err(|kind| {
+                let states = validate_item_states_for_push(vault.scope(), &pending, states)
+                    .map_err(|kind| {
                         SyncError::new(operation_id, kind, SyncStage::LoadItemStates)
                     })?;
                 let timeout = request_timeout(&operation, SyncStage::Push)?;
@@ -847,6 +848,49 @@ fn validate_item_states(
     Ok(mapped)
 }
 
+/// Push preparation accepts exactly the durable pending rows the checkpoint
+/// observed: the store must still report each row under the same pending id,
+/// and the projection expectation must match the operation (a create has no
+/// prior row; every other operation rewrites an existing synced projection).
+/// Anything else means a local edit raced this operation.
+fn validate_item_states_for_push(
+    scope: super::model::SyncScope,
+    pending: &[PendingProof],
+    states: Vec<ItemState>,
+) -> Result<HashMap<Uuid, ItemState>, SyncErrorKind> {
+    if pending.len() != states.len() {
+        return Err(SyncErrorKind::Local);
+    }
+    let expected_by_item = pending
+        .iter()
+        .map(|proof| (proof.item_id(), proof))
+        .collect::<HashMap<_, _>>();
+    if expected_by_item.len() != pending.len() {
+        return Err(SyncErrorKind::Local);
+    }
+    let mut mapped = HashMap::with_capacity(states.len());
+    for state in states {
+        let item_id = state.item_id();
+        let expected = expected_by_item.get(&item_id).ok_or(SyncErrorKind::Local)?;
+        match state.pending() {
+            PendingExpectation::Exact(durable)
+                if durable.pending_id() == expected.pending_id()
+                    && durable.item_id() == expected.item_id() => {}
+            _ => return Err(SyncErrorKind::ConcurrentLocalChange),
+        }
+        let creates_item = matches!(expected.operation(), ChangeType::Create);
+        if creates_item != state.exact_proof().is_none()
+            || state
+                .exact_proof()
+                .is_some_and(|proof| proof.projection().scope() != scope)
+            || mapped.insert(item_id, state).is_some()
+        {
+            return Err(SyncErrorKind::ConcurrentLocalChange);
+        }
+    }
+    Ok(mapped)
+}
+
 fn map_session_error(error: SessionError) -> SyncError {
     let kind = match error.kind() {
         SessionErrorKind::Cancelled => SyncErrorKind::Cancelled,
@@ -957,9 +1001,9 @@ mod tests {
         SyncScope, SyncSeq, SyncStoreFuture, VaultPayloadKey,
     };
     use crate::sync::wire::{
-        validate_catalog, PersonalHistoryWire, PersonalPullChangeWire, PersonalPullPageWire,
-        PushResponseWire, SharedPullChangeWire, SharedPullPageWire, VaultDetailWire, VaultListWire,
-        VaultSummaryWire,
+        validate_catalog, AppliedPushChangeWire, PersonalHistoryWire, PersonalPullChangeWire,
+        PersonalPullPageWire, PushConflictWire, PushResponseWire, SharedPullChangeWire,
+        SharedPullPageWire, VaultDetailWire, VaultListWire, VaultSummaryWire,
     };
 
     const ENDPOINT: &str = "https://sync.example.test";
@@ -1014,8 +1058,10 @@ mod tests {
     struct FakeRemote {
         vaults: Vec<(Uuid, VaultPlane)>,
         pages: Mutex<HashMap<Uuid, VecDeque<PullPageWire>>>,
+        push_response: Mutex<Option<PushResponseWire>>,
         catalog_calls: AtomicUsize,
         pull_calls: AtomicUsize,
+        push_calls: AtomicUsize,
     }
 
     impl FakeRemote {
@@ -1031,8 +1077,10 @@ mod tests {
             Self {
                 vaults: catalog_vaults,
                 pages: Mutex::new(pages),
+                push_response: Mutex::new(None),
                 catalog_calls: AtomicUsize::new(0),
                 pull_calls: AtomicUsize::new(0),
+                push_calls: AtomicUsize::new(0),
             }
         }
 
@@ -1120,7 +1168,14 @@ mod tests {
             _pending: &'a [PendingProof],
             _timeout: Duration,
         ) -> RemoteFuture<'a, PushResponseWire> {
-            Box::pin(async { Err(RemoteError::new(RemoteErrorKind::Unavailable)) })
+            self.push_calls.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                self.push_response
+                    .lock()
+                    .map_err(|_| RemoteError::new(RemoteErrorKind::Unavailable))?
+                    .take()
+                    .ok_or_else(|| RemoteError::new(RemoteErrorKind::Unavailable))
+            })
         }
     }
 
@@ -1128,6 +1183,7 @@ mod tests {
         storage_id: Uuid,
         default_checkpoint: Mutex<(Option<String>, Option<i64>)>,
         committed_checkpoints: Mutex<HashMap<SyncScope, (String, Option<i64>)>>,
+        checkpoint_pending: Mutex<HashMap<SyncScope, Vec<PendingProof>>>,
         stored_items: Mutex<HashMap<(SyncScope, Uuid), StoredProjection>>,
         commit_error: Mutex<Option<SyncStoreErrorKind>>,
         cancel_after_commit: Mutex<Option<SessionCancellationHandle>>,
@@ -1140,6 +1196,7 @@ mod tests {
         item_state_calls: AtomicUsize,
         commit_attempts: AtomicUsize,
         commits: AtomicUsize,
+        push_commits: AtomicUsize,
         local_checksum_valid: AtomicBool,
         local_checksum_differs_from_server: AtomicBool,
         tombstone_seen: AtomicBool,
@@ -1209,6 +1266,7 @@ mod tests {
                 storage_id,
                 default_checkpoint: Mutex::new((Some(cursor_string(1)), Some(1))),
                 committed_checkpoints: Mutex::new(HashMap::new()),
+                checkpoint_pending: Mutex::new(HashMap::new()),
                 stored_items: Mutex::new(HashMap::new()),
                 commit_error: Mutex::new(None),
                 cancel_after_commit: Mutex::new(None),
@@ -1221,6 +1279,7 @@ mod tests {
                 item_state_calls: AtomicUsize::new(0),
                 commit_attempts: AtomicUsize::new(0),
                 commits: AtomicUsize::new(0),
+                push_commits: AtomicUsize::new(0),
                 local_checksum_valid: AtomicBool::new(true),
                 local_checksum_differs_from_server: AtomicBool::new(true),
                 tombstone_seen: AtomicBool::new(false),
@@ -1313,7 +1372,14 @@ mod tests {
                     .map(SyncSeq::new)
                     .transpose()
                     .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::InvalidData))?;
-                SyncCheckpoint::new(cursor, seq, Vec::new())
+                let pending = self
+                    .checkpoint_pending
+                    .lock()
+                    .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::Internal))?
+                    .get(&scope)
+                    .cloned()
+                    .unwrap_or_default();
+                SyncCheckpoint::new(cursor, seq, pending)
                     .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::InvalidData))
             })
         }
@@ -1337,16 +1403,32 @@ mod tests {
                     .stored_items
                     .lock()
                     .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::Internal))?;
+                let pending_by_item = self
+                    .checkpoint_pending
+                    .lock()
+                    .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::Internal))?
+                    .get(&scope)
+                    .cloned()
+                    .unwrap_or_default();
                 item_ids
                     .iter()
                     .copied()
                     .map(|item_id| {
-                        if let Some(projection) = stored.get(&(scope, item_id)) {
-                            projection.proof(scope, item_id).map(ItemState::exact)
+                        let mut state = if let Some(projection) = stored.get(&(scope, item_id)) {
+                            projection.proof(scope, item_id).map(ItemState::exact)?
                         } else {
                             ItemState::absent(item_id)
-                                .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::InvalidData))
+                                .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::InvalidData))?
+                        };
+                        // Mirrors the sqlite adapter: an item referenced by a
+                        // durable pending row reports that row exactly.
+                        if let Some(proof) = pending_by_item
+                            .iter()
+                            .find(|proof| proof.item_id() == item_id)
+                        {
+                            state = state.clone().with_pending(proof.clone());
                         }
+                        Ok(state)
                     })
                     .collect()
             })
@@ -1361,9 +1443,64 @@ mod tests {
 
         fn commit_push(
             self: Arc<Self>,
-            _commit: PushCommitPlan,
+            commit: PushCommitPlan,
         ) -> SyncStoreFuture<'static, PushCommitReceipt> {
-            Box::pin(async { Err(SyncStoreError::new(SyncStoreErrorKind::Unavailable)) })
+            self.push_commits.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                let scope = commit.scope();
+                let pushed_ids = commit
+                    .changes()
+                    .iter()
+                    .map(|change| change.pending().pending_id())
+                    .collect::<HashSet<_>>();
+                let mut pending = self
+                    .checkpoint_pending
+                    .lock()
+                    .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::Internal))?;
+                if let Some(rows) = pending.get_mut(&scope) {
+                    rows.retain(|proof| !pushed_ids.contains(&proof.pending_id()));
+                }
+                let mut stored_items = self
+                    .stored_items
+                    .lock()
+                    .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::Internal))?;
+                for change in commit.changes() {
+                    let item = change.item();
+                    stored_items.insert(
+                        (scope, item.item_id()),
+                        StoredProjection {
+                            path: item.path().to_string(),
+                            name: item.name().to_string(),
+                            type_id: item.type_id().to_string(),
+                            payload_enc: item.payload_enc().to_vec(),
+                            checksum: item.checksum(),
+                            cache_key_fingerprint: "001122aabbcc".to_string(),
+                            seq: item.seq(),
+                            updated_at: item.updated_at(),
+                            deleted_at: item.deleted_at(),
+                            sync_status: SyncStatus::Synced,
+                        },
+                    );
+                }
+                // A push never advances the pull cursor; the checkpoint keeps
+                // its exact cursor and sequence.
+                if let Some(cursor) = commit.expected_cursor() {
+                    self.committed_checkpoints
+                        .lock()
+                        .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::Internal))?
+                        .insert(
+                            scope,
+                            (
+                                cursor.as_str().to_string(),
+                                commit.expected_last_seq().map(|seq| seq.get()),
+                            ),
+                        );
+                }
+                Ok(PushCommitReceipt::new(
+                    commit.changes().len(),
+                    commit.server_head_hint().clone(),
+                ))
+            })
         }
 
         fn commit_pull_page(
@@ -2187,6 +2324,274 @@ mod tests {
             fixture.store.local_history_sentinel.load(Ordering::SeqCst),
             1
         );
+    }
+
+    fn pending_update_proof(
+        scope: SyncScope,
+        item_id: Uuid,
+        base_seq: i64,
+        payload: Vec<u8>,
+    ) -> PendingProof {
+        PendingProof::new(
+            Uuid::now_v7(),
+            scope,
+            item_id,
+            ChangeType::Update,
+            Some(payload.clone()),
+            Some(
+                crate::sync::ContentChecksum::parse(&zann_crypto::payload_checksum(&payload))
+                    .expect("valid checksum"),
+            ),
+            Some(format!("items/{item_id}")),
+            Some(item_id.to_string()),
+            Some("login".to_string()),
+            Some(SyncSeq::new(base_seq).expect("valid base sequence")),
+            chrono::Utc::now(),
+        )
+        .expect("valid pending proof")
+    }
+
+    fn synced_projection(seq: i64) -> StoredProjection {
+        StoredProjection {
+            path: "items/synced".to_string(),
+            name: "synced".to_string(),
+            type_id: "login".to_string(),
+            payload_enc: vec![7, 8, 9],
+            checksum: crate::sync::ContentChecksum::parse(&zann_crypto::payload_checksum(&[
+                7, 8, 9,
+            ]))
+            .expect("valid checksum"),
+            cache_key_fingerprint: "001122aabbcc".to_string(),
+            seq: SyncSeq::new(seq).expect("valid sequence"),
+            updated_at: chrono::Utc::now(),
+            deleted_at: None,
+            sync_status: SyncStatus::Synced,
+        }
+    }
+
+    #[tokio::test]
+    async fn push_conflict_keeps_the_pending_edit_for_the_next_sync() {
+        let fixture = fixture_with_vault(VaultPlane::PersonalClient, |_vault_id| Vec::new());
+        let vault_id = fixture.remote.vaults.first().expect("one vault").0;
+        let item_id = Uuid::now_v7();
+        let scope = SyncScope::new(fixture.store.storage_id, vault_id).expect("valid scope");
+        let edit = pending_update_proof(scope, item_id, 5, vec![42]);
+        fixture
+            .store
+            .default_checkpoint
+            .lock()
+            .expect("default checkpoint")
+            .clone_from(&(Some(cursor_string(5)), Some(5)));
+        fixture
+            .store
+            .checkpoint_pending
+            .lock()
+            .expect("checkpoint pending")
+            .insert(scope, vec![edit]);
+        fixture
+            .store
+            .stored_items
+            .lock()
+            .expect("stored items")
+            .insert((scope, item_id), synced_projection(5));
+        *fixture.remote.push_response.lock().expect("push response") = Some(PushResponseWire {
+            applied: Vec::new(),
+            applied_changes: Vec::new(),
+            conflicts: vec![PushConflictWire {
+                item_id: item_id.to_string(),
+                reason: "conflict".to_string(),
+                server_seq: 6,
+                server_updated_at: TIMESTAMP.to_string(),
+            }],
+            new_cursor: cursor_string(6),
+        });
+
+        let error = fixture
+            .engine
+            .pull(&fixture.target, fixture.operation)
+            .await
+            .expect_err("a conflicted push must fail the whole sync");
+        assert_eq!(error.kind(), SyncErrorKind::ConcurrentRemoteChange);
+        assert_eq!(error.stage(), SyncStage::Push);
+        assert_eq!(fixture.remote.push_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            fixture.store.push_commits.load(Ordering::SeqCst),
+            0,
+            "a conflicted push must never commit locally"
+        );
+
+        // The user edit survives untouched: same durable pending row, same
+        // local projection, ready for the next sync attempt.
+        let checkpoint = fixture
+            .store
+            .load_checkpoint(scope)
+            .await
+            .expect("checkpoint");
+        assert_eq!(checkpoint.pending().len(), 1);
+        assert_eq!(checkpoint.pending()[0].item_id(), item_id);
+        let stored = fixture
+            .store
+            .stored_items
+            .lock()
+            .expect("stored items")
+            .get(&(scope, item_id))
+            .cloned()
+            .expect("edited item survives");
+        assert_eq!(stored.seq.get(), 5);
+        assert_eq!(stored.payload_enc, vec![7, 8, 9]);
+
+        // A later sync retries the same edit instead of silently dropping it.
+        *fixture.remote.push_response.lock().expect("push response") = Some(PushResponseWire {
+            applied: Vec::new(),
+            applied_changes: Vec::new(),
+            conflicts: vec![PushConflictWire {
+                item_id: item_id.to_string(),
+                reason: "conflict".to_string(),
+                server_seq: 6,
+                server_updated_at: TIMESTAMP.to_string(),
+            }],
+            new_cursor: cursor_string(6),
+        });
+        let (retry_operation, _) = SessionOperation::new(Instant::now() + Duration::from_secs(30));
+        let retry = fixture
+            .engine
+            .pull(&fixture.target, retry_operation)
+            .await
+            .expect_err("the conflict persists until the server accepts the edit");
+        assert_eq!(retry.kind(), SyncErrorKind::ConcurrentRemoteChange);
+        assert_eq!(fixture.remote.push_calls.load(Ordering::SeqCst), 2);
+        let checkpoint = fixture
+            .store
+            .load_checkpoint(scope)
+            .await
+            .expect("checkpoint");
+        assert_eq!(
+            checkpoint.pending().len(),
+            1,
+            "the retried edit must still be pending"
+        );
+    }
+
+    #[test]
+    fn item_state_validation_rejects_a_projection_with_a_pending_edit() {
+        let scope = SyncScope::new(Uuid::now_v7(), Uuid::now_v7()).expect("valid scope");
+        let item_id = Uuid::now_v7();
+        let proof = synced_projection(5).proof(scope, item_id).expect("proof");
+        let state =
+            ItemState::exact(proof).with_pending(pending_update_proof(scope, item_id, 5, vec![9]));
+
+        let error = validate_item_states(scope, &[item_id], vec![state]);
+
+        assert_eq!(
+            error.expect_err("a pending edit must block page preparation"),
+            SyncErrorKind::ConcurrentLocalChange
+        );
+    }
+
+    #[tokio::test]
+    async fn successful_push_applies_creates_and_updates_without_advancing_the_pull_cursor() {
+        let fixture = fixture_with_vault(VaultPlane::PersonalClient, |_vault_id| {
+            // A final empty page at the current cursor ends the pull loop.
+            vec![personal_page(Vec::new(), 5, false)]
+        });
+        let vault_id = fixture.remote.vaults.first().expect("one vault").0;
+        let updated_id = Uuid::now_v7();
+        let created_id = Uuid::now_v7();
+        let scope = SyncScope::new(fixture.store.storage_id, vault_id).expect("valid scope");
+        let update = pending_update_proof(scope, updated_id, 5, vec![7, 8, 9]);
+        let create = PendingProof::new(
+            Uuid::now_v7(),
+            scope,
+            created_id,
+            ChangeType::Create,
+            Some(vec![42]),
+            Some(
+                crate::sync::ContentChecksum::parse(&zann_crypto::payload_checksum(&[42]))
+                    .expect("valid checksum"),
+            ),
+            Some(format!("items/{created_id}")),
+            Some(created_id.to_string()),
+            Some("login".to_string()),
+            None,
+            chrono::Utc::now(),
+        )
+        .expect("valid create proof");
+        fixture
+            .store
+            .default_checkpoint
+            .lock()
+            .expect("default checkpoint")
+            .clone_from(&(Some(cursor_string(5)), Some(5)));
+        fixture
+            .store
+            .checkpoint_pending
+            .lock()
+            .expect("checkpoint pending")
+            .insert(scope, vec![update, create]);
+        fixture
+            .store
+            .stored_items
+            .lock()
+            .expect("stored items")
+            .insert((scope, updated_id), synced_projection(5));
+        *fixture.remote.push_response.lock().expect("push response") = Some(PushResponseWire {
+            applied: vec![updated_id.to_string(), created_id.to_string()],
+            applied_changes: vec![
+                AppliedPushChangeWire {
+                    item_id: updated_id.to_string(),
+                    seq: 6,
+                    updated_at: TIMESTAMP.to_string(),
+                    deleted_at: None,
+                },
+                AppliedPushChangeWire {
+                    item_id: created_id.to_string(),
+                    seq: 7,
+                    updated_at: TIMESTAMP.to_string(),
+                    deleted_at: None,
+                },
+            ],
+            conflicts: Vec::new(),
+            new_cursor: cursor_string(7),
+        });
+
+        let outcome = fixture
+            .engine
+            .pull(&fixture.target, fixture.operation)
+            .await
+            .expect("a fully applied push must succeed");
+
+        assert_eq!(outcome.status(), SyncOutcomeStatus::Complete);
+        assert_eq!(fixture.remote.push_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(fixture.store.push_commits.load(Ordering::SeqCst), 1);
+
+        let checkpoint = fixture
+            .store
+            .load_checkpoint(scope)
+            .await
+            .expect("checkpoint");
+        assert!(
+            checkpoint.pending().is_empty(),
+            "applied pending rows must be deleted"
+        );
+        // The push server head is only a hint: the durable pull cursor must
+        // stay exactly where the last applied pull page left it.
+        assert_eq!(checkpoint.cursor().map(|cursor| cursor.sequence()), Some(5));
+        assert_eq!(checkpoint.last_seq().map(|seq| seq.get()), Some(5));
+
+        let stored = fixture.store.stored_items.lock().expect("stored items");
+        let updated = stored
+            .get(&(scope, updated_id))
+            .expect("updated item persists");
+        assert_eq!(updated.seq.get(), 6);
+        assert_eq!(updated.sync_status, SyncStatus::Synced);
+        assert_eq!(updated.payload_enc, vec![7, 8, 9]);
+        let created = stored
+            .get(&(scope, created_id))
+            .expect("created item persists");
+        assert_eq!(created.seq.get(), 7);
+        assert_eq!(created.sync_status, SyncStatus::Synced);
+        assert_eq!(created.payload_enc, vec![42]);
+        assert_eq!(created.path, format!("items/{created_id}"));
     }
 
     #[tokio::test]

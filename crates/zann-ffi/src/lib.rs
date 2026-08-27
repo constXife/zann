@@ -6,7 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
-use zann_client::app::{AppClient, ClientId, ClientPaths, SessionClient, SessionOperation};
+use zann_client::app::{
+    AppClient, ClientId, ClientPaths, CredentialSecret, LegacySessionImport, SessionClient,
+    SessionError, SessionErrorKind, SessionOperation, SyncError, SyncErrorKind, SyncOutcome,
+    SyncOutcomeStatus,
+};
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_client_sqlite::SqliteSyncStoreFactory;
 use zann_core::{ItemCounts, ItemListParams, ItemsService, VaultsService};
@@ -30,9 +34,89 @@ pub enum CoreError {
     Service(String),
     #[error("unimplemented: {0}")]
     Unimplemented(String),
+    #[error("sync {kind}: {message}")]
+    Sync { kind: String, message: String },
 }
 
 pub type CoreResult<T> = Result<T, CoreError>;
+
+/// Stable, client-translatable sync error codes. UI layers match these
+/// strings the same way they match the wire error kinds; keep every value
+/// snake_case and never rename an emitted code.
+fn sync_error_kind_code(kind: SyncErrorKind) -> &'static str {
+    match kind {
+        SyncErrorKind::Cancelled => "sync_cancelled",
+        SyncErrorKind::DeadlineExceeded => "sync_deadline_exceeded",
+        SyncErrorKind::Session => "sync_session",
+        SyncErrorKind::NoLocalTarget => "sync_no_target",
+        SyncErrorKind::AccountBindingRequired => "sync_account_binding_required",
+        SyncErrorKind::AccountBindingMismatch => "sync_account_binding_mismatch",
+        SyncErrorKind::ServerCapabilityMismatch => "sync_server_capability_mismatch",
+        SyncErrorKind::AuthenticationBindingRequired => "sync_authentication_binding_required",
+        SyncErrorKind::AuthenticationBindingMismatch => "sync_authentication_binding_mismatch",
+        SyncErrorKind::Timeout => "network_timeout",
+        SyncErrorKind::TransportUnavailable => "server_unreachable",
+        SyncErrorKind::TransportRejected => "sync_transport_rejected",
+        SyncErrorKind::SessionExpired => "session_expired",
+        SyncErrorKind::Protocol => "sync_protocol",
+        SyncErrorKind::BodyTooLarge => "sync_body_too_large",
+        SyncErrorKind::Crypto => "sync_crypto",
+        SyncErrorKind::Local => "db_error",
+        SyncErrorKind::ConcurrentLocalChange => "sync_local_conflict",
+        SyncErrorKind::ConcurrentRemoteChange => "sync_conflict",
+        SyncErrorKind::CommitOutcomeUnknown => "sync_commit_unknown",
+        SyncErrorKind::PushUnavailable => "sync_push_unavailable",
+        SyncErrorKind::InitialSharedSnapshotUnavailable => "sync_shared_snapshot_unavailable",
+        SyncErrorKind::LimitExceeded => "sync_limit_exceeded",
+        SyncErrorKind::Internal => "sync_internal",
+        // `SyncErrorKind` is non_exhaustive: an unknown future kind keeps the
+        // generic internal code until it gains an explicit translation.
+        _ => "sync_internal",
+    }
+}
+
+impl From<SyncError> for CoreError {
+    fn from(error: SyncError) -> Self {
+        let message = match error.status() {
+            Some(status) => format!("{error}, http status {status}"),
+            None => error.to_string(),
+        };
+        CoreError::Sync {
+            kind: sync_error_kind_code(error.kind()).to_string(),
+            message,
+        }
+    }
+}
+
+fn session_error_kind_code(kind: SessionErrorKind) -> &'static str {
+    match kind {
+        SessionErrorKind::Cancelled => "sync_cancelled",
+        SessionErrorKind::DeadlineExceeded => "sync_deadline_exceeded",
+        SessionErrorKind::SessionExpired | SessionErrorKind::ReauthenticationRequired => {
+            "session_expired"
+        }
+        SessionErrorKind::TransportUnavailable => "server_unreachable",
+        SessionErrorKind::TrustRequired
+        | SessionErrorKind::TrustMismatch
+        | SessionErrorKind::TrustInvalid => "server_fingerprint_changed",
+        SessionErrorKind::InsecureTransport => "insecure_transport",
+        SessionErrorKind::Configuration | SessionErrorKind::SessionNotFound => "sync_no_target",
+        _ => "sync_session",
+    }
+}
+
+impl From<SessionError> for CoreError {
+    fn from(error: SessionError) -> Self {
+        let message = match error.status() {
+            Some(status) => format!("{error}, http status {status}"),
+            None => error.to_string(),
+        };
+        CoreError::Sync {
+            kind: session_error_kind_code(error.kind()).to_string(),
+            message,
+        }
+    }
+}
 
 /// `BackupError` already carries a stable `kind`; keep it rather than
 /// flattening everything into one string, so the UI can still translate.
@@ -1031,8 +1115,88 @@ impl CoreFacade {
         Ok(VaultStatus { unlocked: true })
     }
 
-    pub fn remote_sync(&self, storage_id: Option<String>) -> CoreResult<()> {
+    pub fn remote_sync(&self, storage_id: Option<String>) -> CoreResult<SyncOutcomeFfi> {
         let master_key = self.master_key()?;
+        let client = self.sync_app_client()?;
+        let target = client
+            .configured_target(storage_id.as_deref())
+            .map_err(|error| CoreError::Service(error.to_string()))?;
+        let operation = SessionOperation::new(
+            std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
+        )
+        .0;
+        let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
+        let outcome = self
+            .runtime
+            .block_on(client.sync(target, operation_key, operation))
+            .map_err(CoreError::from)?;
+        Ok(SyncOutcomeFfi::from(outcome))
+    }
+
+    /// Removes the storage's complete local projection. This is the recovery
+    /// path for a rebuilt or re-trusted server: the next sync rebuilds the
+    /// projection from scratch. The reset fails while any unconfirmed local
+    /// change would be discarded.
+    pub fn sync_reset(&self, storage_id: Option<String>) -> CoreResult<()> {
+        let master_key = self.master_key()?;
+        let client = self.sync_app_client()?;
+        let target = client
+            .configured_target(storage_id.as_deref())
+            .map_err(|error| CoreError::Service(error.to_string()))?;
+        let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
+        self.runtime
+            .block_on(client.reset_sync(target, operation_key))
+            .map_err(CoreError::from)
+    }
+
+    /// Commits an already-authenticated legacy desktop session (live tokens
+    /// from the legacy config plus its existing local storage id) as a Config
+    /// v2 connection. Verifies the live server fingerprint and reads the
+    /// account identity with the supplied access token; no login call is
+    /// made and the master password is never required.
+    #[allow(clippy::too_many_arguments)]
+    pub fn import_legacy_account(
+        &self,
+        endpoint: String,
+        connection_name: String,
+        profile_name: String,
+        storage_id: Option<String>,
+        access_token: String,
+        refresh_token: String,
+        access_expires_at: Option<String>,
+    ) -> CoreResult<()> {
+        let client = self.sync_app_client()?;
+        let access = CredentialSecret::new(access_token)
+            .map_err(|_| CoreError::InvalidArgument("access token".to_string()))?;
+        let refresh = CredentialSecret::new(refresh_token)
+            .map_err(|_| CoreError::InvalidArgument("refresh token".to_string()))?;
+        let expires_at = access_expires_at
+            .as_deref()
+            .map(chrono_datetime_from_rfc3339)
+            .transpose()
+            .map_err(|_| CoreError::InvalidArgument("access_expires_at".to_string()))?;
+        let request = LegacySessionImport::new(
+            endpoint,
+            connection_name,
+            profile_name,
+            storage_id,
+            access,
+            refresh,
+            expires_at,
+        );
+        let operation = SessionOperation::new(
+            std::time::Instant::now() + std::time::Duration::from_secs(2 * 60),
+        )
+        .0;
+        self.runtime
+            .block_on(client.import_legacy_session(request, operation))
+            .map(|_| ())
+            .map_err(CoreError::from)
+    }
+}
+
+impl CoreFacade {
+    fn sync_app_client(&self) -> CoreResult<AppClient> {
         let credentials = Arc::new(OsCredentialStore::system_default());
         let factory = Arc::new(
             SqliteSyncStoreFactory::new(&self.database_path)
@@ -1049,18 +1213,31 @@ impl CoreFacade {
         client
             .initialize(&OsLegacyCredentialSource::system_default())
             .map_err(|error| CoreError::Service(error.to_string()))?;
-        let target = client
-            .configured_target(storage_id.as_deref())
-            .map_err(|error| CoreError::Service(error.to_string()))?;
-        let operation = SessionOperation::new(
-            std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
-        )
-        .0;
-        let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
-        self.runtime
-            .block_on(client.sync(target, operation_key, operation))
-            .map(|_| ())
-            .map_err(|error| CoreError::Service(error.to_string()))
+        Ok(client)
+    }
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SyncOutcomeFfi {
+    pub status: String,
+    pub vaults_reconciled: u32,
+    pub pages_committed: u32,
+    pub changes_committed: u32,
+}
+
+impl From<SyncOutcome> for SyncOutcomeFfi {
+    fn from(outcome: SyncOutcome) -> Self {
+        let status = match outcome.status() {
+            SyncOutcomeStatus::Complete => "complete",
+            SyncOutcomeStatus::CancelledPartial => "cancelled_partial",
+            SyncOutcomeStatus::DeadlinePartial => "deadline_partial",
+        };
+        Self {
+            status: status.to_string(),
+            vaults_reconciled: u32::try_from(outcome.vaults_reconciled()).unwrap_or(u32::MAX),
+            pages_committed: u32::try_from(outcome.pages_committed()).unwrap_or(u32::MAX),
+            changes_committed: u32::try_from(outcome.changes_committed()).unwrap_or(u32::MAX),
+        }
     }
 }
 
@@ -1109,6 +1286,14 @@ fn create_core_at_location(location: SqliteFileLocation) -> CoreResult<Arc<CoreF
         identity: Mutex::new(identity),
         root,
     }))
+}
+
+fn chrono_datetime_from_rfc3339(
+    value: &str,
+) -> std::result::Result<chrono::DateTime<chrono::Utc>, String> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|datetime| datetime.with_timezone(&chrono::Utc))
+        .map_err(|err| err.to_string())
 }
 
 impl CoreFacade {
@@ -1337,6 +1522,71 @@ mod compatibility_tests {
         let core = create_core_at_path(&db_path).expect("create core");
 
         assert_eq!(core.root, root);
+    }
+
+    #[test]
+    fn sync_error_kind_codes_match_the_client_error_contract() {
+        assert_eq!(
+            sync_error_kind_code(SyncErrorKind::SessionExpired),
+            "session_expired"
+        );
+        assert_eq!(
+            sync_error_kind_code(SyncErrorKind::Timeout),
+            "network_timeout"
+        );
+        assert_eq!(
+            sync_error_kind_code(SyncErrorKind::TransportUnavailable),
+            "server_unreachable"
+        );
+        assert_eq!(sync_error_kind_code(SyncErrorKind::Local), "db_error");
+        assert_eq!(
+            sync_error_kind_code(SyncErrorKind::ConcurrentRemoteChange),
+            "sync_conflict"
+        );
+        assert_eq!(
+            sync_error_kind_code(SyncErrorKind::ConcurrentLocalChange),
+            "sync_local_conflict"
+        );
+        assert_eq!(sync_error_kind_code(SyncErrorKind::Crypto), "sync_crypto");
+    }
+
+    #[test]
+    fn sync_error_kind_codes_are_snake_case_and_unique() {
+        let codes = [
+            SyncErrorKind::Cancelled,
+            SyncErrorKind::DeadlineExceeded,
+            SyncErrorKind::Session,
+            SyncErrorKind::NoLocalTarget,
+            SyncErrorKind::AccountBindingRequired,
+            SyncErrorKind::AccountBindingMismatch,
+            SyncErrorKind::ServerCapabilityMismatch,
+            SyncErrorKind::AuthenticationBindingRequired,
+            SyncErrorKind::AuthenticationBindingMismatch,
+            SyncErrorKind::Timeout,
+            SyncErrorKind::TransportUnavailable,
+            SyncErrorKind::TransportRejected,
+            SyncErrorKind::SessionExpired,
+            SyncErrorKind::Protocol,
+            SyncErrorKind::BodyTooLarge,
+            SyncErrorKind::Crypto,
+            SyncErrorKind::Local,
+            SyncErrorKind::ConcurrentLocalChange,
+            SyncErrorKind::ConcurrentRemoteChange,
+            SyncErrorKind::CommitOutcomeUnknown,
+            SyncErrorKind::PushUnavailable,
+            SyncErrorKind::InitialSharedSnapshotUnavailable,
+            SyncErrorKind::LimitExceeded,
+            SyncErrorKind::Internal,
+        ]
+        .map(sync_error_kind_code);
+        let unique: std::collections::HashSet<&str> = codes.iter().copied().collect();
+        assert_eq!(unique.len(), codes.len(), "codes must be unique");
+        assert!(
+            codes
+                .iter()
+                .all(|code| code.chars().all(|c| c.is_ascii_lowercase() || c == '_')),
+            "codes must be snake_case"
+        );
     }
 
     #[test]

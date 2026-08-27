@@ -777,10 +777,6 @@ pub(crate) fn validate_push_response(
         let state = state_by_id
             .remove(&item_id)
             .ok_or_else(|| WireError::new(WireErrorKind::Page))?;
-        let local = state
-            .exact_proof()
-            .ok_or_else(|| WireError::new(WireErrorKind::Page))?
-            .projection();
         let (seq, updated_at, deleted_at) = applied
             .remove(&item_id)
             .ok_or_else(|| WireError::new(WireErrorKind::Page))?;
@@ -788,19 +784,61 @@ pub(crate) fn validate_push_response(
         if deleted_at.is_some() != expected_deleted {
             return Err(WireError::new(WireErrorKind::Page));
         }
-        let item = ItemProjection::validated(
-            scope,
-            item_id,
-            local.path().to_string(),
-            local.name().to_string(),
-            local.type_id().to_string(),
-            local.payload_enc().to_vec(),
-            local.checksum(),
-            key.cache_key_fingerprint().to_string(),
-            seq,
-            updated_at,
-            deleted_at,
-        );
+        // A create has no prior local projection: the pushed ciphertext is
+        // the projection the server confirmed. Every other operation keeps
+        // the exact local projection and only takes the server sequence.
+        let item = match proof.operation() {
+            ChangeType::Create => {
+                let payload_enc = proof
+                    .payload_enc()
+                    .ok_or_else(|| WireError::new(WireErrorKind::Page))?
+                    .to_vec();
+                let checksum = proof
+                    .checksum()
+                    .ok_or_else(|| WireError::new(WireErrorKind::Page))?;
+                ItemProjection::validated(
+                    scope,
+                    item_id,
+                    proof
+                        .path()
+                        .ok_or_else(|| WireError::new(WireErrorKind::Page))?
+                        .to_string(),
+                    proof
+                        .name()
+                        .ok_or_else(|| WireError::new(WireErrorKind::Page))?
+                        .to_string(),
+                    proof
+                        .type_id()
+                        .ok_or_else(|| WireError::new(WireErrorKind::Page))?
+                        .to_string(),
+                    payload_enc,
+                    checksum,
+                    key.cache_key_fingerprint().to_string(),
+                    seq,
+                    updated_at,
+                    deleted_at,
+                )
+            }
+            _ => {
+                let local = state
+                    .exact_proof()
+                    .ok_or_else(|| WireError::new(WireErrorKind::Page))?
+                    .projection();
+                ItemProjection::validated(
+                    scope,
+                    item_id,
+                    local.path().to_string(),
+                    local.name().to_string(),
+                    local.type_id().to_string(),
+                    local.payload_enc().to_vec(),
+                    local.checksum(),
+                    key.cache_key_fingerprint().to_string(),
+                    seq,
+                    updated_at,
+                    deleted_at,
+                )
+            }
+        };
         changes.push(PushCommitChange::validated(proof, state, item)?);
     }
     if !applied.is_empty() || !state_by_id.is_empty() {

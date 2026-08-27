@@ -31,9 +31,11 @@ rfd = "0.15"
 csv = "1"
 url = "2"
 percent-encoding = "2"
-tokio = { version = "1", features = ["rt", "sync"] }
+tokio = { version = "1", features = ["rt", "sync", "time"] }
 
 zann-app = { path = "../../../crates/zann-app" }
+zann-client = { path = "../../../crates/zann-client", default-features = false, features = ["app", "os-credentials"] }
+zann-client-sqlite = { path = "../../../crates/zann-client-sqlite" }
 zann-core = { path = "../../../crates/zann-core", default-features = false, features = ["sqlite"] }
 zann-db = { path = "../../../crates/zann-db", default-features = false, features = ["sqlite"] }
 zann-keystore = { path = "../../../crates/zann-keystore" }

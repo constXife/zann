@@ -72,6 +72,7 @@ pub fn unlock(facade: &CoreFacade, password: String) -> Result<(), String> {
 pub fn sync(facade: &CoreFacade, storage_id: Option<String>) -> Result<(), String> {
     facade
         .remote_sync(storage_id)
+        .map(|_| ())
         .map_err(|err| err.to_string())
 }
 

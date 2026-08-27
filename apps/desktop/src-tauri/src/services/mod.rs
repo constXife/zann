@@ -7,7 +7,6 @@ pub(crate) mod items_history;
 pub(crate) mod session;
 pub(crate) mod storage;
 pub(crate) mod sync;
-pub(crate) mod sync_helpers;
 pub(crate) mod totp;
 pub(crate) mod types;
 pub(crate) mod vaults;

@@ -601,7 +601,7 @@ impl ReconciledCatalog {
 }
 
 /// Exact local item projection used as a compare-and-swap proof.
-#[derive(Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct ItemProjection {
     scope: SyncScope,
     item_id: Uuid,
@@ -781,6 +781,7 @@ impl fmt::Debug for ItemProjection {
     }
 }
 
+#[derive(Clone, Eq, PartialEq)]
 pub struct ItemProof {
     projection: ItemProjection,
     sync_status: SyncStatus,
@@ -822,6 +823,7 @@ impl fmt::Debug for ItemProof {
     }
 }
 
+#[derive(Clone, Eq, PartialEq)]
 pub enum ItemState {
     Absent {
         item_id: Uuid,
@@ -908,6 +910,7 @@ impl fmt::Debug for ItemState {
     }
 }
 
+#[derive(Clone, Eq, PartialEq)]
 pub enum PendingExpectation {
     Absent,
     Exact(Box<PendingProof>),
@@ -926,6 +929,7 @@ impl fmt::Debug for PendingExpectation {
 }
 
 /// Exact pending row provenance. Ciphertext is deliberately omitted from Debug.
+#[derive(Clone, Eq, PartialEq)]
 pub struct PendingProof {
     pending_id: Uuid,
     scope: SyncScope,
@@ -1541,6 +1545,12 @@ impl PushCommitChange {
                 if proof.pending_id() == pending.pending_id()
                     && proof.item_id() == pending.item_id() => {}
             _ => return Err(SyncModelError::InvalidPendingProof),
+        }
+        // A create pushes a row with no prior local projection; every other
+        // operation rewrites an existing exact projection.
+        let creates_item = expected.exact_proof().is_none();
+        if creates_item != matches!(pending.operation(), ChangeType::Create) {
+            return Err(SyncModelError::InvalidPendingProof);
         }
         Ok(Self {
             pending,

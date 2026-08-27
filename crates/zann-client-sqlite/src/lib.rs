@@ -32,7 +32,7 @@ use zann_client::app::{
 use zann_client::config::{ConfigError, ConfigRepository, ConnectionId};
 #[cfg(test)]
 use zann_client::config::{CredentialId, CredentialKind, CredentialProfileAnchor};
-use zann_core::{AuthMethod, StorageKind, SyncStatus, VaultKind};
+use zann_core::{AuthMethod, ChangeType, StorageKind, SyncStatus, VaultKind};
 use zann_crypto::SecretKey;
 use zann_db::local::{
     CacheKeyFingerprintBinding, HistorySource, HistorySyncStatus, KeyWrapType, LocalItem,
@@ -40,6 +40,7 @@ use zann_db::local::{
     LocalProjectionReadError, LocalStorage, LocalStorageProof, LocalStorageRepo, LocalSyncError,
     LocalSyncGenerationProof, LocalSyncRepo, LocalSyncScope, LocalVault, LocalVaultKeyBindError,
     LocalVaultRepo, PendingChangeRepo, PullChange, PullPage, PushCommit, PushOutcome,
+    ResetProjection,
 };
 use zann_db::{ExistingSqliteDatabase, SqliteFileLocation, SqlitePool};
 
@@ -85,6 +86,19 @@ impl AppSyncStoreFactory for SqliteSyncStoreFactory {
         Box::pin(async move {
             let store = SqliteSyncStore::open(paths, &database_path, master_key).await?;
             Ok(Arc::new(store) as Arc<dyn SyncLocalStore>)
+        })
+    }
+
+    fn reset_projection(
+        self: Arc<Self>,
+        paths: ClientPaths,
+        _target: SessionTarget,
+        master_key: Arc<SecretKey>,
+    ) -> SyncStoreFuture<'static, ()> {
+        let database_path = self.location.path().to_path_buf();
+        Box::pin(async move {
+            let store = Arc::new(SqliteSyncStore::open(paths, &database_path, master_key).await?);
+            store.reset_single_remote_projection().await
         })
     }
 }
@@ -234,6 +248,36 @@ impl SqliteSyncStore {
             master_key,
             authorization: OnceLock::new(),
         })
+    }
+
+    /// Removes the single remote storage's complete projection in one terminal
+    /// transaction. This is the local recovery path used when a server has been
+    /// rebuilt or re-trusted: it must fail closed while any pending, dirty-item
+    /// or non-server history state would be discarded, and it never requires a
+    /// previously authorized target generation.
+    async fn reset_single_remote_projection(self: Arc<Self>) -> Result<(), SyncStoreError> {
+        let worker = Arc::clone(&self);
+        self.dispatch_terminal_mutation(async move {
+            worker.database.verify_identity().await?;
+            let remotes: Vec<LocalStorage> = LocalStorageRepo::new(worker.database.pool())
+                .list()
+                .await
+                .map_err(|_| store_error(SyncStoreErrorKind::InvalidData))?
+                .into_iter()
+                .filter(|storage| storage.kind == StorageKind::Remote)
+                .collect();
+            let [storage] = remotes.as_slice() else {
+                return Err(store_error(SyncStoreErrorKind::InvalidData));
+            };
+            let proof = LocalStorageProof::try_from(storage).map_err(map_local_sync_error)?;
+            let reset = ResetProjection::new(proof, None).map_err(map_local_sync_error)?;
+            LocalSyncRepo::new(worker.database.pool())
+                .reset_projection(&reset)
+                .await
+                .map(|_| ())
+                .map_err(map_local_sync_error)
+        })
+        .await
     }
 
     /// Test-only injected pool. Production always uses the pinned non-creating
@@ -605,10 +649,6 @@ impl SqliteSyncStore {
         let storage = self.ensure_scope(commit.scope()).await?;
         let mut outcomes = Vec::with_capacity(commit.changes().len());
         for change in commit.changes() {
-            let expected = change
-                .expected()
-                .exact_proof()
-                .ok_or_else(|| store_error(SyncStoreErrorKind::StaleItem))?;
             let pending = change.pending();
             let local_pending = LocalPendingChange {
                 id: pending.pending_id(),
@@ -626,11 +666,20 @@ impl SqliteSyncStore {
             };
             let local_pending = zann_db::local::LocalPendingProof::try_from(&local_pending)
                 .map_err(map_local_sync_error)?;
-            let expected_item =
-                local_item_from_projection(expected.projection(), expected.sync_status())?;
-            let expected_item = LocalItemExpectation::Exact(Box::new(
-                LocalItemProof::try_from(&expected_item).map_err(map_local_sync_error)?,
-            ));
+            let expected_item = match pending.operation() {
+                ChangeType::Create => LocalItemExpectation::Absent,
+                _ => {
+                    let expected = change
+                        .expected()
+                        .exact_proof()
+                        .ok_or_else(|| store_error(SyncStoreErrorKind::StaleItem))?;
+                    let expected_item =
+                        local_item_from_projection(expected.projection(), expected.sync_status())?;
+                    LocalItemExpectation::Exact(Box::new(
+                        LocalItemProof::try_from(&expected_item).map_err(map_local_sync_error)?,
+                    ))
+                }
+            };
             let applied = local_item_from_projection(change.item(), SyncStatus::Synced)?;
             outcomes.push(
                 PushOutcome::applied(
@@ -2999,6 +3048,204 @@ mod tests {
             .await
             .expect("read vault after rejected reset"));
         pool.close().await;
+    }
+
+    async fn reset_test_database(
+        fixture: &ConfigFixture,
+        file_name: &str,
+    ) -> (std::path::PathBuf, SqlitePool) {
+        let database_path = fixture.temp.path().join(file_name);
+        let pool = zann_db::connect_sqlite_path_with_max(&database_path, 1)
+            .await
+            .expect("open reset test database");
+        zann_db::migrate_local(&pool)
+            .await
+            .expect("migrate reset test database");
+        (database_path, pool)
+    }
+
+    async fn seed_reset_projection(pool: &SqlitePool, storage: &LocalStorage) -> Uuid {
+        LocalStorageRepo::new(pool)
+            .upsert(storage)
+            .await
+            .expect("insert reset storage");
+        let vault_id = Uuid::now_v7();
+        LocalVaultRepo::new(pool)
+            .create(&LocalVault {
+                id: vault_id,
+                storage_id: storage.id,
+                slug: "factory-reset".to_string(),
+                name: "Factory reset".to_string(),
+                kind: VaultKind::Personal,
+                is_default: false,
+                vault_key_enc: vec![1, 2, 3],
+                key_wrap_type: KeyWrapType::RemoteStrict,
+                cache_key_fp: Some("001122aabbcc".to_string()),
+                last_synced_at: None,
+            })
+            .await
+            .expect("insert reset vault");
+        vault_id
+    }
+
+    fn canonical_reset_paths(database_path: &Path) -> (std::path::PathBuf, ClientPaths) {
+        let database_path = database_path
+            .canonicalize()
+            .expect("canonicalize reset database path");
+        let root = database_path
+            .parent()
+            .expect("reset database parent")
+            .to_path_buf();
+        (
+            database_path.clone(),
+            ClientPaths::with_local_db(root, database_path),
+        )
+    }
+
+    #[test]
+    fn factory_reset_removes_the_single_remote_projection() {
+        let _serial = TERMINAL_MUTATION_TEST_LOCK
+            .lock()
+            .expect("serialize process-global terminal admission test");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("factory reset test runtime");
+        runtime.block_on(async {
+            let fixture = configured_fixture();
+            let (database_path, pool) =
+                reset_test_database(&fixture, "factory-reset-clean.sqlite").await;
+            let storage = matching_storage(&fixture);
+            let vault_id = seed_reset_projection(&pool, &storage).await;
+            SyncCursorRepo::new(&pool)
+                .upsert_checkpoint(&LocalSyncCheckpoint {
+                    storage_id: storage.id,
+                    vault_id,
+                    cursor: Some("eyJzZXEiOjF9".to_string()),
+                    last_seq: Some(1),
+                    last_sync_at: Some(chrono::Utc::now()),
+                })
+                .await
+                .expect("insert reset checkpoint");
+            let item_id = Uuid::now_v7();
+            LocalItemRepo::new(&pool)
+                .create(&LocalItem {
+                    id: item_id,
+                    storage_id: storage.id,
+                    vault_id,
+                    path: "accounts/factory-reset".to_string(),
+                    name: "factory-reset".to_string(),
+                    type_id: "login".to_string(),
+                    payload_enc: vec![7, 8, 9],
+                    checksum: zann_crypto::payload_checksum(&[7, 8, 9]),
+                    cache_key_fp: Some("001122aabbcc".to_string()),
+                    version: 1,
+                    deleted_at: None,
+                    updated_at: chrono::Utc::now(),
+                    sync_status: SyncStatus::Synced,
+                })
+                .await
+                .expect("insert reset item");
+            pool.close().await;
+
+            let (database_path, paths) = canonical_reset_paths(&database_path);
+            let factory = Arc::new(
+                SqliteSyncStoreFactory::new(&database_path).expect("construct reset factory"),
+            );
+            factory
+                .clone()
+                .reset_projection(paths, fixture.target.clone(), fixture.master_key.clone())
+                .await
+                .expect("reset the clean projection");
+
+            let pool = zann_db::connect_sqlite_path_with_max(&database_path, 1)
+                .await
+                .expect("reopen reset database");
+            assert!(LocalStorageRepo::new(&pool)
+                .get_bounded(storage.id)
+                .await
+                .expect("read storage after reset")
+                .is_some());
+            assert!(!LocalVaultRepo::new(&pool)
+                .exists(storage.id, vault_id)
+                .await
+                .expect("read vault after reset"));
+            assert!(LocalItemRepo::new(&pool)
+                .get_by_id_bounded(storage.id, item_id)
+                .await
+                .expect("read item after reset")
+                .is_none());
+            assert!(SyncCursorRepo::new(&pool)
+                .get(storage.id, vault_id)
+                .await
+                .expect("read cursor after reset")
+                .is_none());
+            pool.close().await;
+        });
+    }
+
+    #[test]
+    fn factory_reset_refuses_unconfirmed_local_state() {
+        let _serial = TERMINAL_MUTATION_TEST_LOCK
+            .lock()
+            .expect("serialize process-global terminal admission test");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("factory reset test runtime");
+        runtime.block_on(async {
+            let fixture = configured_fixture();
+            let (database_path, pool) =
+                reset_test_database(&fixture, "factory-reset-pending.sqlite").await;
+            let storage = matching_storage(&fixture);
+            let vault_id = seed_reset_projection(&pool, &storage).await;
+            PendingChangeRepo::new(&pool)
+                .create(&LocalPendingChange {
+                    id: Uuid::now_v7(),
+                    storage_id: storage.id,
+                    vault_id,
+                    item_id: Uuid::now_v7(),
+                    operation: zann_core::ChangeType::Create,
+                    payload_enc: Some(vec![7]),
+                    checksum: Some(zann_crypto::payload_checksum(&[7])),
+                    path: Some("accounts/factory-reset-pending".to_string()),
+                    name: Some("factory-reset-pending".to_string()),
+                    type_id: Some("login".to_string()),
+                    base_seq: None,
+                    created_at: chrono::Utc::now(),
+                })
+                .await
+                .expect("insert pending row");
+            pool.close().await;
+
+            let (database_path, paths) = canonical_reset_paths(&database_path);
+            let factory = Arc::new(
+                SqliteSyncStoreFactory::new(&database_path).expect("construct reset factory"),
+            );
+            let error = factory
+                .clone()
+                .reset_projection(paths, fixture.target.clone(), fixture.master_key.clone())
+                .await
+                .expect_err("reset must refuse to discard pending state");
+            assert_eq!(error.kind(), SyncStoreErrorKind::PendingPresent);
+
+            let pool = zann_db::connect_sqlite_path_with_max(&database_path, 1)
+                .await
+                .expect("reopen refused reset database");
+            assert!(LocalVaultRepo::new(&pool)
+                .exists(storage.id, vault_id)
+                .await
+                .expect("read vault after refused reset"));
+            assert_eq!(
+                PendingChangeRepo::new(&pool)
+                    .list_by_storage_vault(storage.id, vault_id)
+                    .await
+                    .expect("read pending after refused reset")
+                    .len(),
+                1
+            );
+            pool.close().await;
+        });
     }
 
     #[tokio::test]
