@@ -267,7 +267,7 @@ pub(crate) async fn apply_login_context(
                 service_account_token: None,
             },
         );
-        context.current_token = Some(token_name);
+        context.current_token = Some(token_name.clone());
         if context.storage_id.is_none() {
             context.storage_id = Some(Uuid::now_v7().to_string());
         }
@@ -282,6 +282,25 @@ pub(crate) async fn apply_login_context(
         email: Some(result.email.clone()),
     });
     save_config(&state.root, &config).map_err(|err| err.to_string())?;
+
+    if let Ok(client) = crate::infra::sync_client::app_client(&state.root) {
+        let expires_at =
+            (Utc::now() + ChronoDuration::seconds(result.expires_in as i64)).to_rfc3339();
+        if let Err(error) = crate::infra::sync_client::import_legacy_tokens(
+            &client,
+            server_url,
+            &context_name_from_url(server_url),
+            &token_name,
+            storage_id_string.clone(),
+            &result.access_token,
+            &result.refresh_token,
+            Some(expires_at.as_str()),
+        )
+        .await
+        {
+            append_auth_log(&format!("import_legacy_session_failed error={error}"));
+        }
+    }
 
     if let Some(storage_id) = storage_id_string.as_deref() {
         let storage_uuid = Uuid::parse_str(storage_id).map_err(|e| e.to_string())?;

@@ -18,8 +18,8 @@ pub use crate::config::{
 };
 use crate::session::AppSession;
 pub use crate::session::{
-    AccessSource, LocalLogoutStatus, LoginPassword, LogoutOutcome, OidcLoginInput,
-    OidcLoginInputError, OidcToken, OperationCompletion, PasswordLoginInputError,
+    AccessSource, LegacySessionImport, LocalLogoutStatus, LoginPassword, LogoutOutcome,
+    OidcLoginInput, OidcLoginInputError, OidcToken, OperationCompletion, PasswordLoginInputError,
     PasswordLoginRequest, PasswordRegistrationRequest, RemoteLogoutStatus, SessionAccess,
     SessionCancellationHandle, SessionClient, SessionError, SessionErrorKind, SessionOperation,
     SessionOperationId, SessionTarget, SessionTargetError,
@@ -415,6 +415,16 @@ impl AppClient {
         operation: SessionOperation,
     ) -> Result<SessionAccess, SessionError> {
         self.session.oidc_login(request, operation).await
+    }
+
+    /// Commits an already-authenticated legacy session (live tokens, known
+    /// storage) as a Config v2 connection without any login call.
+    pub async fn import_legacy_session(
+        &self,
+        request: LegacySessionImport,
+        operation: SessionOperation,
+    ) -> Result<SessionAccess, SessionError> {
+        self.session.import_session_tokens(request, operation).await
     }
 
     /// Reads the server's personal-vault initialization state using an opaque

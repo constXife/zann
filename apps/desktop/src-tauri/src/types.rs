@@ -154,6 +154,7 @@ pub struct PersonalVaultStatusResponse {
     pub personal_vault_id: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct SyncPullRequest {
     pub vault_id: String,
@@ -236,12 +237,14 @@ pub struct SyncSharedHistoryEntry {
     pub payload: serde_json::Value,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct SyncPushRequest {
     pub vault_id: String,
     pub changes: Vec<SyncPushChange>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct SyncPushChange {
     pub item_id: String,
@@ -260,12 +263,14 @@ pub struct SyncPushChange {
     pub base_seq: Option<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct SyncSharedPushRequest {
     pub vault_id: String,
     pub changes: Vec<SyncSharedPushChange>,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 pub struct SyncSharedPushChange {
     pub item_id: String,

@@ -7,8 +7,9 @@ use serde_json::Value;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 use zann_client::app::{
-    AppClient, ClientId, ClientPaths, SessionClient, SessionOperation, SyncError, SyncErrorKind,
-    SyncOutcome, SyncOutcomeStatus,
+    AppClient, ClientId, ClientPaths, CredentialSecret, LegacySessionImport, SessionClient,
+    SessionError, SessionErrorKind, SessionOperation, SyncError, SyncErrorKind, SyncOutcome,
+    SyncOutcomeStatus,
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_client_sqlite::SqliteSyncStoreFactory;
@@ -82,6 +83,36 @@ impl From<SyncError> for CoreError {
         };
         CoreError::Sync {
             kind: sync_error_kind_code(error.kind()).to_string(),
+            message,
+        }
+    }
+}
+
+fn session_error_kind_code(kind: SessionErrorKind) -> &'static str {
+    match kind {
+        SessionErrorKind::Cancelled => "sync_cancelled",
+        SessionErrorKind::DeadlineExceeded => "sync_deadline_exceeded",
+        SessionErrorKind::SessionExpired | SessionErrorKind::ReauthenticationRequired => {
+            "session_expired"
+        }
+        SessionErrorKind::TransportUnavailable => "server_unreachable",
+        SessionErrorKind::TrustRequired
+        | SessionErrorKind::TrustMismatch
+        | SessionErrorKind::TrustInvalid => "server_fingerprint_changed",
+        SessionErrorKind::InsecureTransport => "insecure_transport",
+        SessionErrorKind::Configuration | SessionErrorKind::SessionNotFound => "sync_no_target",
+        _ => "sync_session",
+    }
+}
+
+impl From<SessionError> for CoreError {
+    fn from(error: SessionError) -> Self {
+        let message = match error.status() {
+            Some(status) => format!("{error}, http status {status}"),
+            None => error.to_string(),
+        };
+        CoreError::Sync {
+            kind: session_error_kind_code(error.kind()).to_string(),
             message,
         }
     }
@@ -1117,6 +1148,51 @@ impl CoreFacade {
             .block_on(client.reset_sync(target, operation_key))
             .map_err(CoreError::from)
     }
+
+    /// Commits an already-authenticated legacy desktop session (live tokens
+    /// from the legacy config plus its existing local storage id) as a Config
+    /// v2 connection. Verifies the live server fingerprint and reads the
+    /// account identity with the supplied access token; no login call is
+    /// made and the master password is never required.
+    #[allow(clippy::too_many_arguments)]
+    pub fn import_legacy_account(
+        &self,
+        endpoint: String,
+        connection_name: String,
+        profile_name: String,
+        storage_id: Option<String>,
+        access_token: String,
+        refresh_token: String,
+        access_expires_at: Option<String>,
+    ) -> CoreResult<()> {
+        let client = self.sync_app_client()?;
+        let access = CredentialSecret::new(access_token)
+            .map_err(|_| CoreError::InvalidArgument("access token".to_string()))?;
+        let refresh = CredentialSecret::new(refresh_token)
+            .map_err(|_| CoreError::InvalidArgument("refresh token".to_string()))?;
+        let expires_at = access_expires_at
+            .as_deref()
+            .map(chrono_datetime_from_rfc3339)
+            .transpose()
+            .map_err(|_| CoreError::InvalidArgument("access_expires_at".to_string()))?;
+        let request = LegacySessionImport::new(
+            endpoint,
+            connection_name,
+            profile_name,
+            storage_id,
+            access,
+            refresh,
+            expires_at,
+        );
+        let operation = SessionOperation::new(
+            std::time::Instant::now() + std::time::Duration::from_secs(2 * 60),
+        )
+        .0;
+        self.runtime
+            .block_on(client.import_legacy_session(request, operation))
+            .map(|_| ())
+            .map_err(CoreError::from)
+    }
 }
 
 impl CoreFacade {
@@ -1210,6 +1286,14 @@ fn create_core_at_location(location: SqliteFileLocation) -> CoreResult<Arc<CoreF
         identity: Mutex::new(identity),
         root,
     }))
+}
+
+fn chrono_datetime_from_rfc3339(
+    value: &str,
+) -> std::result::Result<chrono::DateTime<chrono::Utc>, String> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|datetime| datetime.with_timezone(&chrono::Utc))
+        .map_err(|err| err.to_string())
 }
 
 impl CoreFacade {

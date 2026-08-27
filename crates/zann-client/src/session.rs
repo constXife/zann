@@ -29,10 +29,10 @@ use crate::config::{
     ActiveCredentialAfterRemoval, AuthOperationIntentPermit, AuthOperationKind,
     AuthOperationRecoveryDisposition, AuthenticatedConnectionTarget, AuthenticatedSessionCommit,
     AuthorizedTargetGeneration, ClientId, ClientPaths, ConfigError, ConfigIdentity,
-    ConfigRepository, ConnectionId, CredentialBundle, CredentialKind, CredentialPortErrorKind,
-    CredentialProfileAnchor, CredentialSecret, CredentialStore, CredentialTransactionOutcome,
-    IdentityCommit, PasswordLoginAnchor, PasswordLoginIntentPermit, StoredConnectionBinding,
-    VerifiedEndpointBinding,
+    ConfigRepository, ConfigV2, ConnectionConfig, ConnectionId, CredentialBundle, CredentialKind,
+    CredentialPortErrorKind, CredentialProfileAnchor, CredentialSecret, CredentialStore,
+    CredentialTransactionOutcome, IdentityCommit, PasswordLoginAnchor, PasswordLoginIntentPermit,
+    StoredConnectionBinding, VerifiedEndpointBinding,
 };
 use crate::remote::auth::{AuthHttpError, AuthHttpErrorKind, AuthHttpTransport};
 use crate::remote::trust::verify_and_bind_system_info;
@@ -1104,6 +1104,51 @@ impl AppSession {
         .oidc_login(request, &operation)
         .await
     }
+
+    pub(crate) async fn import_session_tokens(
+        &self,
+        request: LegacySessionImport,
+        operation: SessionOperation,
+    ) -> Result<SessionAccess, SessionError> {
+        TokenManager {
+            inner: self.inner.clone(),
+        }
+        .import_session_tokens(request, &operation)
+        .await
+    }
+}
+
+/// One-way bridge input for a legacy shell that already holds live tokens.
+pub struct LegacySessionImport {
+    endpoint: String,
+    connection_name: String,
+    profile_name: String,
+    storage_id: Option<String>,
+    access_token: CredentialSecret,
+    refresh_token: CredentialSecret,
+    access_expires_at: Option<DateTime<Utc>>,
+}
+
+impl LegacySessionImport {
+    pub fn new(
+        endpoint: impl Into<String>,
+        connection_name: impl Into<String>,
+        profile_name: impl Into<String>,
+        storage_id: Option<String>,
+        access_token: CredentialSecret,
+        refresh_token: CredentialSecret,
+        access_expires_at: Option<DateTime<Utc>>,
+    ) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            connection_name: connection_name.into(),
+            profile_name: profile_name.into(),
+            storage_id,
+            access_token,
+            refresh_token,
+            access_expires_at,
+        }
+    }
 }
 
 impl fmt::Debug for AppSession {
@@ -1768,6 +1813,240 @@ impl TokenManager {
             authorized_target_generation,
             access_secret: access,
         })
+    }
+
+    /// One-way bridge for a session a legacy shell already holds: trusts the
+    /// live server fingerprint, reads the account identity with the supplied
+    /// access token, and commits the same authenticated session state a
+    /// network login would have produced — without any login call.
+    pub(crate) async fn import_session_tokens(
+        &self,
+        request: LegacySessionImport,
+        operation: &SessionOperation,
+    ) -> Result<SessionAccess, SessionError> {
+        if let Some(kind) = operation.pre_dispatch_error() {
+            return Err(SessionError::new(operation, kind));
+        }
+        let client = self
+            .inner
+            .client
+            .clone()
+            .ok_or_else(|| SessionError::new(operation, SessionErrorKind::Configuration))?;
+        let locks = acquire_session_locks(
+            self.inner.repository.paths().root().to_path_buf(),
+            operation,
+        )
+        .await?;
+        let repository = self.inner.repository.clone();
+        let store = self.inner.credential_store.clone();
+        let (locks, recovered) = run_with_locks(locks, move || {
+            repository.reconcile_auth_operation_with_operation_locks(store.as_ref())
+        })
+        .await
+        .map_err(|kind| SessionError::new(operation, kind))?;
+        let (recovered, _) = recovered
+            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let cleanup_deferred = outcome_has_warnings(&recovered);
+
+        let repository = self.inner.repository.clone();
+        let (locks, snapshot) = run_with_locks(locks, move || repository.snapshot())
+            .await
+            .map_err(|_| SessionError::new(operation, SessionErrorKind::Internal))?;
+        let snapshot = snapshot
+            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        if let Some(bound) = bound_legacy_session(
+            snapshot.config(),
+            &request.connection_name,
+            &request.endpoint,
+            request.storage_id.as_deref(),
+            &request.profile_name,
+        ) {
+            let target = SessionTarget::new(bound.connection_id, request.profile_name.clone())
+                .map_err(|_| SessionError::new(operation, SessionErrorKind::Configuration))?;
+            let storage_id = bound.storage_id.or(request.storage_id.clone());
+            let (locks, authorized_target_generation) = self
+                .generation_from_snapshot(locks, snapshot, &target, operation)
+                .await?;
+            drop(locks);
+            return Ok(imported_session_access(
+                operation,
+                target,
+                bound.endpoint,
+                storage_id,
+                bound.server_fingerprint,
+                bound.account_subject,
+                bound.auth_method,
+                false,
+                request.access_expires_at,
+                cleanup_deferred,
+                authorized_target_generation,
+                request.access_token,
+            ));
+        }
+
+        let access = copy_secret(&request.access_token)
+            .map_err(|kind| SessionError::new(operation, kind))?;
+        let refresh = copy_secret(&request.refresh_token)
+            .map_err(|kind| SessionError::new(operation, kind))?;
+        let Some(timeout) = request_timeout(operation) else {
+            return Err(SessionError::new(
+                operation,
+                SessionErrorKind::DeadlineExceeded,
+            ));
+        };
+        let port = self
+            .inner
+            .auth_factory
+            .connect(&request.endpoint, timeout)
+            .map_err(|failure| SessionError::from_auth(operation, &failure))?;
+        let deadline = tokio::time::Instant::from_std(operation.deadline);
+        let probe = tokio::select! {
+            biased;
+            _ = operation.cancelled() => Err(SessionError::new(operation, SessionErrorKind::Cancelled)),
+            _ = tokio::time::sleep_until(deadline) => Err(SessionError::new(operation, SessionErrorKind::DeadlineExceeded)),
+            result = port.verified_endpoint() => result
+                .map_err(|failure| SessionError::from_auth(operation, &failure)),
+        };
+        let verified = probe?;
+
+        let identity = port
+            .me(access.expose_secret())
+            .await
+            .map_err(|failure| SessionError::from_auth(operation, &failure))?;
+        if identity.email.is_empty()
+            || identity.email.trim() != identity.email
+            || identity.email.len() > LOGIN_EMAIL_MAX_BYTES
+        {
+            return Err(SessionError::new(operation, SessionErrorKind::Protocol));
+        }
+        let prelogin = port
+            .prelogin(&identity.email)
+            .await
+            .map_err(|failure| SessionError::from_auth(operation, &failure))?;
+        let authenticated_identity =
+            match password_login_identity_from_prelogin(prelogin, Some(identity.email.clone())) {
+                Ok(identity) => identity,
+                Err(kind) => return Err(SessionError::new(operation, kind)),
+            };
+        let account_subject = identity.user_id.to_string();
+        let auth_method = match &identity.source {
+            zann_core::AuthSource::Oidc { .. } => AuthMethod::Oidc,
+            _ => AuthMethod::Password,
+        };
+
+        let existing = existing_legacy_connection(
+            snapshot.config(),
+            &request.connection_name,
+            verified.address(),
+            request.storage_id.as_deref(),
+        )
+        .or_else(|| {
+            existing_legacy_connection(
+                snapshot.config(),
+                &request.connection_name,
+                &request.endpoint,
+                request.storage_id.as_deref(),
+            )
+        });
+        let existing_storage_id = existing
+            .as_ref()
+            .and_then(|(_, connection)| connection.metadata().storage_id.clone());
+        let (connection_id, commit_target) = match existing {
+            None => (
+                ConnectionId::deterministic(&request.connection_name, verified.address()),
+                AuthenticatedConnectionTarget::Create {
+                    connection_name: request.connection_name.clone(),
+                },
+            ),
+            Some((connection_id, connection)) => {
+                let metadata = connection.metadata();
+                if let Some(stored) = metadata.server_fingerprint.as_deref() {
+                    if stored != verified.server_fingerprint() {
+                        return Err(SessionError::new(
+                            operation,
+                            SessionErrorKind::TrustMismatch,
+                        ));
+                    }
+                }
+                let expected = StoredConnectionBinding::new(
+                    metadata.address.clone(),
+                    metadata.server_id.clone(),
+                    metadata.server_fingerprint.clone(),
+                    metadata.storage_id.clone(),
+                );
+                let target = if metadata.server_fingerprint.is_none() {
+                    AuthenticatedConnectionTarget::PinExisting {
+                        connection_id: connection_id.clone(),
+                        expected,
+                    }
+                } else {
+                    AuthenticatedConnectionTarget::UseExisting {
+                        connection_id: connection_id.clone(),
+                        expected,
+                    }
+                };
+                (connection_id, target)
+            }
+        };
+        let target = SessionTarget::new(connection_id, request.profile_name.clone())
+            .map_err(|_| SessionError::new(operation, SessionErrorKind::Configuration))?;
+        let commit_storage_id = request.storage_id.clone().or(existing_storage_id);
+        let expires_at = request
+            .access_expires_at
+            .map(|expires| expires.to_rfc3339_opts(SecondsFormat::Secs, true));
+        let commit = AuthenticatedSessionCommit::new(
+            verified.binding.clone(),
+            commit_storage_id.clone(),
+            commit_target,
+            IdentityCommit::InitializeOrMatch(authenticated_identity),
+            client.client_id.clone(),
+            request.profile_name.clone(),
+            CredentialBundle::new(Some(access), Some(refresh), None)
+                .with_access_expires_at(expires_at),
+        )
+        .with_account_binding(account_subject.clone(), auth_method);
+        let expected_revision = snapshot.revision();
+        drop(locks);
+        let repository = self.inner.repository.clone();
+        let store = self.inner.credential_store.clone();
+        let committed = run_blocking(move || {
+            repository.commit_authenticated_session(expected_revision, commit, store.as_ref())
+        })
+        .await
+        .map_err(|_| SessionError::new(operation, SessionErrorKind::Internal))?
+        .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let committed_storage_id = committed
+            .storage_id()
+            .map(str::to_string)
+            .or(commit_storage_id);
+        let repository = self.inner.repository.clone();
+        let snapshot = committed.snapshot().clone();
+        let connection_id = target.connection_id().clone();
+        let profile_name = target.profile_name().to_string();
+        let authorized_target_generation = run_blocking(move || {
+            repository.authorized_target_generation_from_snapshot(
+                &snapshot,
+                &connection_id,
+                &profile_name,
+            )
+        })
+        .await
+        .map_err(|_| SessionError::new(operation, SessionErrorKind::Internal))?
+        .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        Ok(imported_session_access(
+            operation,
+            target,
+            verified.address().to_string(),
+            committed_storage_id,
+            verified.server_fingerprint().to_string(),
+            account_subject,
+            auth_method,
+            verified.personal_vaults_enabled,
+            request.access_expires_at,
+            cleanup_deferred,
+            authorized_target_generation,
+            request.access_token,
+        ))
     }
 
     async fn password_register(
@@ -3723,6 +4002,106 @@ fn checked_expiry(now: DateTime<Utc>, expires_in: u64) -> Option<DateTime<Utc>> 
 fn copy_secret(secret: &CredentialSecret) -> Result<CredentialSecret, SessionErrorKind> {
     CredentialSecret::new(secret.expose_secret().to_string())
         .map_err(|_| SessionErrorKind::Internal)
+}
+
+struct BoundLegacySession {
+    connection_id: ConnectionId,
+    endpoint: String,
+    storage_id: Option<String>,
+    server_fingerprint: String,
+    account_subject: String,
+    auth_method: AuthMethod,
+}
+
+fn existing_legacy_connection<'a>(
+    config: &'a ConfigV2,
+    connection_name: &str,
+    endpoint: &str,
+    storage_id: Option<&str>,
+) -> Option<(ConnectionId, &'a ConnectionConfig)> {
+    let deterministic = ConnectionId::deterministic(connection_name, endpoint);
+    if let Some(connection) = config.connections.get(&deterministic) {
+        return Some((deterministic, connection));
+    }
+    if let Some(storage_id) = storage_id {
+        if let Some((connection_id, connection)) = config
+            .connections
+            .iter()
+            .find(|(_, connection)| connection.metadata().storage_id.as_deref() == Some(storage_id))
+        {
+            return Some((connection_id.clone(), connection));
+        }
+    }
+    config
+        .connections
+        .iter()
+        .find_map(|(connection_id, connection)| {
+            (connection.metadata().name == connection_name)
+                .then(|| (connection_id.clone(), connection))
+        })
+}
+
+fn bound_legacy_session(
+    config: &ConfigV2,
+    connection_name: &str,
+    endpoint: &str,
+    storage_id: Option<&str>,
+    profile_name: &str,
+) -> Option<BoundLegacySession> {
+    let (connection_id, connection) =
+        existing_legacy_connection(config, connection_name, endpoint, storage_id)?;
+    let profile = connection.credential_profiles().get(profile_name)?;
+    Some(BoundLegacySession {
+        connection_id,
+        endpoint: connection.metadata().address.clone(),
+        storage_id: connection.metadata().storage_id.clone(),
+        server_fingerprint: connection
+            .metadata()
+            .server_fingerprint
+            .clone()
+            .unwrap_or_default(),
+        account_subject: profile.account_subject()?.to_string(),
+        auth_method: profile.auth_method()?,
+    })
+}
+
+fn imported_expiry(access_expires_at: Option<DateTime<Utc>>) -> DateTime<Utc> {
+    // An unknown imported expiry is epoch: the next authenticated operation
+    // refreshes before dispatch instead of trusting a stale token.
+    access_expires_at.unwrap_or_else(|| DateTime::from_timestamp(0, 0).expect("unix epoch"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn imported_session_access(
+    operation: &SessionOperation,
+    target: SessionTarget,
+    endpoint: String,
+    storage_id: Option<String>,
+    server_fingerprint: String,
+    account_subject: String,
+    auth_method: AuthMethod,
+    personal_vaults_enabled: bool,
+    access_expires_at: Option<DateTime<Utc>>,
+    cleanup_deferred: bool,
+    authorized_target_generation: Arc<AuthorizedTargetGeneration>,
+    access_secret: CredentialSecret,
+) -> SessionAccess {
+    SessionAccess {
+        operation_id: operation.operation_id,
+        target,
+        endpoint,
+        storage_id,
+        server_fingerprint,
+        account_subject: Some(account_subject),
+        auth_method: Some(auth_method),
+        personal_vaults_enabled,
+        expires_at: imported_expiry(access_expires_at),
+        source: AccessSource::Stored,
+        completion: operation.completion(),
+        cleanup_deferred,
+        authorized_target_generation,
+        access_secret,
+    }
 }
 
 fn credential_read_error_kind(error: ReadCredentialError) -> SessionErrorKind {
@@ -5749,5 +6128,211 @@ mod tests {
 
     fn operation() -> SessionOperation {
         SessionOperation::new(Instant::now() + Duration::from_secs(3)).0
+    }
+
+    #[tokio::test]
+    async fn import_session_tokens_commits_a_full_session_without_any_login() {
+        let temp = TempDir::new().expect("tempdir");
+        let paths = ClientPaths::new(temp.path());
+        let repository = ConfigRepository::new(paths.clone());
+        let store = Arc::new(MemoryStore::default());
+        repository
+            .initialize(
+                &ClientId::new("test").expect("client id"),
+                store.as_ref(),
+                &EmptyLegacyCredentials,
+            )
+            .expect("initialize config");
+        let identity =
+            EndpointIdentity::for_test(ADDRESS, "server-id-test", "fingerprint-test", true, true);
+        let port = FakeAuthPort::new(identity, success_behavior());
+        let app = AppSession::with_components_and_client(
+            paths.clone(),
+            store.clone(),
+            FakeAuthFactory::new(port.clone()),
+            Arc::new(FixedClock(
+                DateTime::parse_from_rfc3339("2026-08-16T12:00:00Z")
+                    .expect("fixed time")
+                    .with_timezone(&Utc),
+            )),
+            Some(SessionClient::new(
+                ClientId::new("test").expect("client id"),
+            )),
+        );
+        let storage_id = Uuid::now_v7().to_string();
+
+        let access = app
+            .import_session_tokens(
+                LegacySessionImport::new(
+                    ADDRESS,
+                    "Desktop",
+                    PROFILE,
+                    Some(storage_id.clone()),
+                    secret("legacy-access"),
+                    secret("legacy-refresh"),
+                    None,
+                ),
+                operation(),
+            )
+            .await
+            .expect("import legacy session");
+
+        assert_eq!(port.probe_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(port.me_calls(), 1);
+        assert_eq!(port.prelogin_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(port.login_calls(), 0, "the bridge must never log in");
+        assert_eq!(port.refresh_calls(), 0);
+
+        let connection_id = ConnectionId::deterministic("Desktop", ADDRESS);
+        let expected_target =
+            SessionTarget::new(connection_id.clone(), PROFILE).expect("imported session target");
+        assert_eq!(access.target(), &expected_target);
+        assert_eq!(access.storage_id(), Some(storage_id.as_str()));
+
+        let snapshot = repository.snapshot().expect("snapshot after import");
+        let connection = snapshot
+            .config()
+            .connections
+            .get(&connection_id)
+            .expect("imported connection exists");
+        assert_eq!(
+            connection.metadata().storage_id.as_deref(),
+            Some(storage_id.as_str())
+        );
+        let profile = connection
+            .credential_profiles()
+            .get(PROFILE)
+            .expect("imported profile exists");
+        assert_eq!(
+            profile.account_subject().map(str::to_string),
+            Some("018f4f08-7f1d-7d57-bd43-bb4b7c520001".to_string())
+        );
+        assert_eq!(profile.auth_method(), Some(zann_core::AuthMethod::Password));
+        assert_eq!(connection.active_credential(), Some(PROFILE));
+        let (_, puts, _) = store.calls();
+        assert!(puts >= 2, "access and refresh secrets must be stored");
+
+        let _ = app
+            .import_session_tokens(
+                LegacySessionImport::new(
+                    ADDRESS,
+                    "Desktop",
+                    PROFILE,
+                    Some(storage_id.clone()),
+                    secret("legacy-access"),
+                    secret("legacy-refresh"),
+                    None,
+                ),
+                operation(),
+            )
+            .await
+            .expect("reimport of an already-bound session is a no-op");
+        assert_eq!(port.probe_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(port.me_calls(), 1);
+        assert_eq!(port.prelogin_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(port.login_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn import_session_tokens_binds_account_on_a_migrated_connection() {
+        let temp = TempDir::new().expect("tempdir");
+        let paths = ClientPaths::new(temp.path());
+        let storage_id = Uuid::now_v7().to_string();
+        fs::write(
+            paths.legacy_config(),
+            format!(
+                r#"{{
+                    "current_context": "Desktop",
+                    "contexts": {{
+                        "Desktop": {{
+                            "addr": "{ADDRESS}",
+                            "server_id": "server-id-test",
+                            "server_fingerprint": "fingerprint-test",
+                            "tokens": {{
+                                "default": {{
+                                    "access_token": "legacy-access",
+                                    "refresh_token": "legacy-refresh"
+                                }}
+                            }},
+                            "current_token": "default",
+                            "storage_id": "{storage_id}"
+                        }}
+                    }}
+                }}"#
+            ),
+        )
+        .expect("write legacy config");
+        let repository = ConfigRepository::new(paths.clone());
+        let store = Arc::new(MemoryStore::default());
+        repository
+            .initialize(
+                &ClientId::new("test").expect("client id"),
+                store.as_ref(),
+                &EmptyLegacyCredentials,
+            )
+            .expect("initialize config");
+        let migrated = repository.snapshot().expect("migrated snapshot");
+        let connection_id = ConnectionId::deterministic("Desktop", ADDRESS);
+        let migrated_profile = migrated
+            .config()
+            .connections
+            .get(&connection_id)
+            .expect("migrated connection")
+            .credential_profiles()
+            .get(PROFILE)
+            .expect("migrated profile");
+        assert!(migrated_profile.account_subject().is_none());
+        assert!(migrated_profile.auth_method().is_none());
+
+        let identity =
+            EndpointIdentity::for_test(ADDRESS, "server-id-test", "fingerprint-test", true, true);
+        let port = FakeAuthPort::new(identity, success_behavior());
+        let app = AppSession::with_components_and_client(
+            paths.clone(),
+            store.clone(),
+            FakeAuthFactory::new(port.clone()),
+            Arc::new(FixedClock(
+                DateTime::parse_from_rfc3339("2026-08-16T12:00:00Z")
+                    .expect("fixed time")
+                    .with_timezone(&Utc),
+            )),
+            Some(SessionClient::new(
+                ClientId::new("test").expect("client id"),
+            )),
+        );
+
+        let access = app
+            .import_session_tokens(
+                LegacySessionImport::new(
+                    ADDRESS,
+                    "Desktop",
+                    PROFILE,
+                    Some(storage_id.clone()),
+                    secret("legacy-access"),
+                    secret("legacy-refresh"),
+                    None,
+                ),
+                operation(),
+            )
+            .await
+            .expect("import onto the migrated connection");
+
+        assert_eq!(port.login_calls(), 0, "the bridge must never log in");
+        assert_eq!(access.target().connection_id(), &connection_id);
+        assert_eq!(access.storage_id(), Some(storage_id.as_str()));
+        let snapshot = repository.snapshot().expect("snapshot after import");
+        let profile = snapshot
+            .config()
+            .connections
+            .get(&connection_id)
+            .expect("imported connection")
+            .credential_profiles()
+            .get(PROFILE)
+            .expect("imported profile");
+        assert_eq!(
+            profile.account_subject().map(str::to_string),
+            Some("018f4f08-7f1d-7d57-bd43-bb4b7c520001".to_string())
+        );
+        assert_eq!(profile.auth_method(), Some(zann_core::AuthMethod::Password));
     }
 }
