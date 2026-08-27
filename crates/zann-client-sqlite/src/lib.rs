@@ -32,7 +32,7 @@ use zann_client::app::{
 use zann_client::config::{ConfigError, ConfigRepository, ConnectionId};
 #[cfg(test)]
 use zann_client::config::{CredentialId, CredentialKind, CredentialProfileAnchor};
-use zann_core::{AuthMethod, StorageKind, SyncStatus, VaultKind};
+use zann_core::{AuthMethod, ChangeType, StorageKind, SyncStatus, VaultKind};
 use zann_crypto::SecretKey;
 use zann_db::local::{
     CacheKeyFingerprintBinding, HistorySource, HistorySyncStatus, KeyWrapType, LocalItem,
@@ -649,10 +649,6 @@ impl SqliteSyncStore {
         let storage = self.ensure_scope(commit.scope()).await?;
         let mut outcomes = Vec::with_capacity(commit.changes().len());
         for change in commit.changes() {
-            let expected = change
-                .expected()
-                .exact_proof()
-                .ok_or_else(|| store_error(SyncStoreErrorKind::StaleItem))?;
             let pending = change.pending();
             let local_pending = LocalPendingChange {
                 id: pending.pending_id(),
@@ -670,11 +666,20 @@ impl SqliteSyncStore {
             };
             let local_pending = zann_db::local::LocalPendingProof::try_from(&local_pending)
                 .map_err(map_local_sync_error)?;
-            let expected_item =
-                local_item_from_projection(expected.projection(), expected.sync_status())?;
-            let expected_item = LocalItemExpectation::Exact(Box::new(
-                LocalItemProof::try_from(&expected_item).map_err(map_local_sync_error)?,
-            ));
+            let expected_item = match pending.operation() {
+                ChangeType::Create => LocalItemExpectation::Absent,
+                _ => {
+                    let expected = change
+                        .expected()
+                        .exact_proof()
+                        .ok_or_else(|| store_error(SyncStoreErrorKind::StaleItem))?;
+                    let expected_item =
+                        local_item_from_projection(expected.projection(), expected.sync_status())?;
+                    LocalItemExpectation::Exact(Box::new(
+                        LocalItemProof::try_from(&expected_item).map_err(map_local_sync_error)?,
+                    ))
+                }
+            };
             let applied = local_item_from_projection(change.item(), SyncStatus::Synced)?;
             outcomes.push(
                 PushOutcome::applied(
