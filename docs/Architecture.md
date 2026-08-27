@@ -97,9 +97,10 @@ The clean crate exposes one low-level discovery primitive:
 bounds the response body and returns system information only after the signed
 server identity verifies.
 
-COSMIC and FFI use the shared `AppClient`; CLI and Tauri keep their existing
-paths until each can move config, trust, auth, refresh and logout together in a
-tested vertical slice. No dual-write bridge is allowed during activation. The
+COSMIC, FFI and the Tauri sync composition root use the shared `AppClient`.
+CLI and remaining Tauri auth/config paths wait until each can move config,
+trust, auth, refresh and logout together in a tested vertical slice. No dual-write
+bridge is allowed during activation. The
 shared boundary durably records in-flight
 password-login, refresh and logout operations. Password login is intentionally
 limited to an already-pinned connection and a present-or-absent profile; it

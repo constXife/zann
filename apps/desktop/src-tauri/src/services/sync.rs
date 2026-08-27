@@ -1,14 +1,10 @@
-use std::time::{Duration, Instant};
-
 use tauri::State;
 use uuid::Uuid;
-use zann_client::app::SessionOperation;
-use zann_core::crypto::SecretKey;
 use zann_core::StorageKind;
 use zann_db::local::{LocalStorageRepo, SyncCursorRepo};
 
 use crate::infra::config::load_config;
-use crate::infra::sync_client::{app_client, import_from_context, sync_error_kind};
+use crate::infra::sync_client::{run_reset, run_sync};
 use crate::state::{ensure_unlocked, AppState};
 use crate::types::ApiResponse;
 
@@ -30,38 +26,20 @@ pub async fn remote_sync(
         return Ok(ApiResponse::err("context_missing", "context not found"));
     };
 
-    let client = match app_client(&state.root) {
-        Ok(client) => client,
-        Err(error) => return Ok(ApiResponse::err("configuration", &error)),
-    };
-    if let Err(error) = import_from_context(&client, &context_name, &context).await {
-        let kind = error
-            .split_once(':')
-            .map(|(kind, _)| kind)
-            .unwrap_or("sync_session");
-        return Ok(ApiResponse::err(kind, &error));
-    }
-
-    let target = match client.configured_target(storage_id.as_deref()) {
-        Ok(target) => target,
-        Err(error) => {
-            return Ok(ApiResponse::err(
-                crate::infra::sync_client::session_error_kind(error.kind()),
-                &error.to_string(),
-            ));
-        }
-    };
-    let operation = SessionOperation::new(Instant::now() + Duration::from_secs(10 * 60)).0;
-    let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
-    match client.sync(target, operation_key, operation).await {
-        Ok(outcome) => Ok(ApiResponse::ok(serde_json::json!({
-            "applied": outcome.changes_committed(),
+    match run_sync(
+        &state.root,
+        &context_name,
+        &context,
+        storage_id.as_deref(),
+        master_key.as_ref(),
+    )
+    .await
+    {
+        Ok(applied) => Ok(ApiResponse::ok(serde_json::json!({
+            "applied": applied,
             "locked_vaults": Vec::<String>::new(),
         }))),
-        Err(error) => Ok(ApiResponse::err(
-            sync_error_kind(&error),
-            &error.to_string(),
-        )),
+        Err(error) => Ok(ApiResponse::err(&error.kind, &error.message)),
     }
 }
 
@@ -90,26 +68,9 @@ pub async fn remote_reset(
     let Some(master_key) = master_key_arc else {
         return Ok(ApiResponse::err("vault_locked", "unlock required"));
     };
-    let client = match app_client(&state.root) {
-        Ok(client) => client,
-        Err(error) => return Ok(ApiResponse::err("configuration", &error)),
-    };
-    let target = match client.configured_target(Some(storage_id.as_str())) {
-        Ok(target) => target,
-        Err(error) => {
-            return Ok(ApiResponse::err(
-                crate::infra::sync_client::session_error_kind(error.kind()),
-                &error.to_string(),
-            ));
-        }
-    };
-    let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
-    match client.reset_sync(target, operation_key).await {
+    match run_reset(&state.root, storage_id.as_str(), master_key.as_ref()).await {
         Ok(()) => Ok(ApiResponse::ok(())),
-        Err(error) => Ok(ApiResponse::err(
-            sync_error_kind(&error),
-            &error.to_string(),
-        )),
+        Err(error) => Ok(ApiResponse::err(&error.kind, &error.message)),
     }
 }
 

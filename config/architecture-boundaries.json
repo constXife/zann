@@ -29,7 +29,7 @@
     "zann-cosmic": ["zann-client", "zann-client-sqlite", "zann-core", "zann-ui-core"],
     "zann-crypto": [],
     "zann-db": ["zann-core", "zann-crypto"],
-    "zann-desktop": ["zann-app", "zann-client", "zann-core", "zann-ui-core"],
+      "zann-desktop": ["zann-app", "zann-client", "zann-client-sqlite", "zann-core", "zann-ui-core"],
     "zann-ffi": ["zann-app", "zann-client", "zann-client-sqlite", "zann-core", "zann-ui-core"],
     "zann-keystore": ["zann-crypto"],
     "zann-server": ["zann-core", "zann-crypto", "zann-db"],
@@ -256,7 +256,7 @@
       "exception_ids": ["MIG-001", "MIG-003", "MIG-004"],
       "pattern": "(zann_db|zann_crypto|reqwest|keyring|argon2)::|[.]bearer_auth[(]",
       "roots": ["apps/desktop/src-tauri/src"],
-      "max_matches": 59,
+      "max_matches": 54,
       "allowed_files": [
         "apps/desktop/src-tauri/src/commands/auth.rs",
         "apps/desktop/src-tauri/src/crypto.rs",
@@ -272,7 +272,6 @@
         "apps/desktop/src-tauri/src/services/session.rs",
         "apps/desktop/src-tauri/src/services/storage.rs",
         "apps/desktop/src-tauri/src/services/sync.rs",
-        "apps/desktop/src-tauri/src/services/sync_helpers.rs",
         "apps/desktop/src-tauri/src/services/vaults.rs",
         "apps/desktop/src-tauri/src/state.rs",
         "apps/desktop/src-tauri/src/util.rs"
@@ -317,7 +316,7 @@
       "exception_ids": ["MIG-001", "MIG-003"],
       "pattern": "/v[0-9]+/",
       "roots": ["apps/desktop/src-tauri/src"],
-      "max_matches": 27,
+      "max_matches": 20,
       "allowed_files": [
         "apps/desktop/src-tauri/src/infra/auth.rs",
         "apps/desktop/src-tauri/src/infra/remote.rs",
@@ -326,8 +325,6 @@
         "apps/desktop/src-tauri/src/services/auth_password.rs",
         "apps/desktop/src-tauri/src/services/backup.rs",
         "apps/desktop/src-tauri/src/services/session.rs",
-        "apps/desktop/src-tauri/src/services/sync.rs",
-        "apps/desktop/src-tauri/src/services/sync_helpers.rs",
         "apps/desktop/src-tauri/src/services/vaults.rs"
       ]
     },
@@ -347,13 +344,12 @@
       "exception_ids": ["MIG-005"],
       "pattern": "struct (CliConfig|CliContext|TokenEntry)|CONFIG_FILENAME|[.]join[(]\"[.]zann\"|\"config[.]json\"",
       "roots": ["apps/desktop/src-tauri/src"],
-      "max_matches": 13,
+      "max_matches": 12,
       "allowed_files": [
         "apps/desktop/src-tauri/src/constants.rs",
         "apps/desktop/src-tauri/src/infra/config.rs",
         "apps/desktop/src-tauri/src/services/auth.rs",
         "apps/desktop/src-tauri/src/services/backup.rs",
-        "apps/desktop/src-tauri/src/services/sync_helpers.rs",
         "apps/desktop/src-tauri/src/state.rs"
       ]
     },
@@ -438,9 +434,10 @@
         "apps/cosmic/src",
         "crates/zann-ffi/src"
       ],
-      "max_matches": 9,
+      "max_matches": 15,
       "allowed_files": [
         "apps/cosmic/src/backend/remote.rs",
+        "apps/desktop/src-tauri/src/infra/sync_client.rs",
         "crates/zann-ffi/src/lib.rs"
       ]
     },

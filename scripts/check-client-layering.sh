@@ -25,9 +25,10 @@ allow_imports=(
   apps/cosmic/src/backend/remote.rs
   # Ф10 — the facade returns payload JSON, so the client decrypts field kinds.
   apps/cosmic/src/screens/detail.rs
-  # Ф4/Ф8/Ф9 — the desktop services have not moved into zann-app yet.
+  # Ф4 — desktop composition root for AppClient sync; remaining services are still a fork.
   apps/desktop/src-tauri/src/crypto.rs
   apps/desktop/src-tauri/src/infra/config.rs
+  apps/desktop/src-tauri/src/infra/sync_client.rs
   apps/desktop/src-tauri/src/services/auth.rs
   apps/desktop/src-tauri/src/services/backup.rs
   apps/desktop/src-tauri/src/services/items.rs
@@ -35,7 +36,6 @@ allow_imports=(
   apps/desktop/src-tauri/src/services/session.rs
   apps/desktop/src-tauri/src/services/storage.rs
   apps/desktop/src-tauri/src/services/sync.rs
-  apps/desktop/src-tauri/src/services/sync_helpers.rs
   apps/desktop/src-tauri/src/services/vaults.rs
   apps/desktop/src-tauri/src/state.rs
   apps/desktop/src-tauri/src/types.rs

@@ -8,9 +8,15 @@ use zann_client::app::{
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_client_sqlite::SqliteSyncStoreFactory;
+use zann_core::crypto::SecretKey;
 
 use crate::state::{local_db_path, CliContext};
 use crate::util::parse_rfc3339;
+
+pub struct MappedError {
+    pub kind: String,
+    pub message: String,
+}
 
 pub fn app_client(root: &Path) -> Result<AppClient, String> {
     let factory = Arc::new(
@@ -61,11 +67,50 @@ pub async fn import_legacy_tokens(
         .map_err(map_session_error)
 }
 
-pub async fn import_from_context(
+pub async fn run_sync(
+    root: &Path,
+    context_name: &str,
+    context: &CliContext,
+    storage_id: Option<&str>,
+    master_key: &SecretKey,
+) -> Result<usize, MappedError> {
+    let client = app_client(root).map_err(configuration_error)?;
+    import_from_context(&client, context_name, context).await?;
+    let target = client
+        .configured_target(storage_id)
+        .map_err(session_mapped)?;
+    let operation = SessionOperation::new(Instant::now() + Duration::from_secs(10 * 60)).0;
+    let outcome = client
+        .sync(
+            target,
+            SecretKey::from_bytes(*master_key.as_bytes()),
+            operation,
+        )
+        .await
+        .map_err(sync_mapped)?;
+    Ok(outcome.changes_committed())
+}
+
+pub async fn run_reset(
+    root: &Path,
+    storage_id: &str,
+    master_key: &SecretKey,
+) -> Result<(), MappedError> {
+    let client = app_client(root).map_err(configuration_error)?;
+    let target = client
+        .configured_target(Some(storage_id))
+        .map_err(session_mapped)?;
+    client
+        .reset_sync(target, SecretKey::from_bytes(*master_key.as_bytes()))
+        .await
+        .map_err(sync_mapped)
+}
+
+async fn import_from_context(
     client: &AppClient,
     context_name: &str,
     context: &CliContext,
-) -> Result<(), String> {
+) -> Result<(), MappedError> {
     let Some(profile_name) = context.current_token.as_deref() else {
         return Ok(());
     };
@@ -89,13 +134,43 @@ pub async fn import_from_context(
         entry.access_expires_at.as_deref(),
     )
     .await
+    .map_err(import_error)
 }
 
-pub fn map_session_error(error: SessionError) -> String {
+fn configuration_error(message: String) -> MappedError {
+    MappedError {
+        kind: "configuration".to_string(),
+        message,
+    }
+}
+
+fn import_error(error: String) -> MappedError {
+    let (kind, message) = error
+        .split_once(':')
+        .map(|(kind, rest)| (kind.to_string(), rest.trim_start().to_string()))
+        .unwrap_or_else(|| ("sync_session".to_string(), error));
+    MappedError { kind, message }
+}
+
+fn map_session_error(error: SessionError) -> String {
     format!("{}: {error}", session_error_kind(error.kind()))
 }
 
-pub fn session_error_kind(kind: SessionErrorKind) -> &'static str {
+fn session_mapped(error: SessionError) -> MappedError {
+    MappedError {
+        kind: session_error_kind(error.kind()).to_string(),
+        message: error.to_string(),
+    }
+}
+
+fn sync_mapped(error: SyncError) -> MappedError {
+    MappedError {
+        kind: sync_error_kind(&error).to_string(),
+        message: error.to_string(),
+    }
+}
+
+fn session_error_kind(kind: SessionErrorKind) -> &'static str {
     match kind {
         SessionErrorKind::SessionExpired | SessionErrorKind::ReauthenticationRequired => {
             "session_expired"
@@ -110,7 +185,7 @@ pub fn session_error_kind(kind: SessionErrorKind) -> &'static str {
     }
 }
 
-pub fn sync_error_kind(error: &SyncError) -> &'static str {
+fn sync_error_kind(error: &SyncError) -> &'static str {
     match error.kind() {
         SyncErrorKind::Cancelled => "sync_cancelled",
         SyncErrorKind::DeadlineExceeded | SyncErrorKind::Timeout => "network_timeout",
