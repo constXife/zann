@@ -112,8 +112,9 @@ async fn main() -> anyhow::Result<()> {
                     &addr,
                     &info.server_fingerprint,
                 )?;
-                let auth = exchange_service_account_token(&client, &addr, &access_token).await?;
-                access_token = auth.access_token;
+                let mut auth =
+                    exchange_service_account_token(&client, &addr, &access_token).await?;
+                access_token = auth.take_access_token();
             }
 
             let mut ctx = CommandContext {

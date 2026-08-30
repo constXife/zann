@@ -75,8 +75,8 @@ pub(crate) async fn handle_run_command(
         &addr,
         &info.server_fingerprint,
     )?;
-    let auth = exchange_service_account_token(client, &addr, &service_account_token).await?;
-    let access_token = auth.access_token.clone();
+    let mut auth = exchange_service_account_token(client, &addr, &service_account_token).await?;
+    let access_token = auth.take_access_token();
 
     let (vault_id, path) = resolve_path_for_context(
         &args.path,
