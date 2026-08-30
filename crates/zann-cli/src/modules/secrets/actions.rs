@@ -186,7 +186,7 @@ pub(crate) fn secrets_client(
     ctx: &CommandContext<'_>,
 ) -> Result<SecretsClient, SecretsClientError> {
     let security = if ctx.allow_insecure {
-        SecretsTransportSecurity::AllowInsecure
+        SecretsTransportSecurity::AllowLoopbackHttp
     } else {
         SecretsTransportSecurity::RequireTls
     };

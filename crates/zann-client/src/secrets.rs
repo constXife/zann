@@ -43,7 +43,7 @@ const MAX_SECRET_PATH_SEGMENT_BYTES: usize = 200;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SecretsTransportSecurity {
     RequireTls,
-    AllowInsecure,
+    AllowLoopbackHttp,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -229,10 +229,10 @@ impl SecretsClient {
         security: SecretsTransportSecurity,
     ) -> Result<Self, SecretsClientError> {
         let base_url = canonical_base_url(endpoint)?;
-        if base_url.scheme() != "https"
-            && !endpoint_is_loopback(&base_url)
-            && security != SecretsTransportSecurity::AllowInsecure
-        {
+        let loopback_http = base_url.scheme() == "http"
+            && endpoint_is_loopback(&base_url)
+            && security == SecretsTransportSecurity::AllowLoopbackHttp;
+        if base_url.scheme() != "https" && !loopback_http {
             return Err(SecretsClientError::new(
                 SecretOperation::Configure,
                 SecretsClientErrorKind::InsecureTransport,
@@ -252,10 +252,7 @@ impl SecretsClient {
             .retry(reqwest::retry::never())
             .referer(false)
             .connect_timeout(DEFAULT_REQUEST_TIMEOUT);
-        if security == SecretsTransportSecurity::AllowInsecure {
-            builder = builder.danger_accept_invalid_certs(true);
-        }
-        if base_url.scheme() == "http" {
+        if loopback_http {
             builder = builder.no_proxy();
         }
         let client = builder.build().map_err(|_| {
@@ -1160,6 +1157,33 @@ mod tests {
         .to_string()
     }
 
+    #[test]
+    fn transport_only_allows_plaintext_for_explicit_loopback() {
+        for security in [
+            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
+        ] {
+            let error = SecretsClient::new("http://example.com", "access-token", security)
+                .expect_err("remote plaintext transport must be rejected");
+            assert_eq!(error.kind(), SecretsClientErrorKind::InsecureTransport);
+        }
+
+        let error = SecretsClient::new(
+            "http://127.0.0.1:8080",
+            "access-token",
+            SecretsTransportSecurity::RequireTls,
+        )
+        .expect_err("loopback plaintext transport must be explicit");
+        assert_eq!(error.kind(), SecretsClientErrorKind::InsecureTransport);
+
+        SecretsClient::new(
+            "http://127.0.0.1:8080",
+            "access-token",
+            SecretsTransportSecurity::AllowLoopbackHttp,
+        )
+        .expect("explicit loopback plaintext transport");
+    }
+
     #[tokio::test]
     async fn get_encodes_path_segments_and_sends_sensitive_bearer() {
         let mut server = Server::new_async().await;
@@ -1177,7 +1201,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let response = client
@@ -1217,7 +1241,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let response = client
@@ -1237,7 +1261,7 @@ mod tests {
         let client = SecretsClient::new(
             "https://zann.example.test",
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         for limit in [0, MAX_SECRET_LIST_LIMIT + 1] {
@@ -1267,7 +1291,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let error = client
@@ -1297,7 +1321,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
 
@@ -1327,7 +1351,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let response = client
@@ -1367,7 +1391,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let payload = SecretSetRequest {
@@ -1413,7 +1437,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let response = client
@@ -1477,7 +1501,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
 
@@ -1508,7 +1532,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let error = client
@@ -1558,7 +1582,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let response = client
@@ -1612,7 +1636,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let response = client
@@ -1634,7 +1658,7 @@ mod tests {
         let client = SecretsClient::new(
             "https://zann.example.test",
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         for paths in [Vec::new(), vec!["path".to_string(); MAX_BATCH_SECRETS + 1]] {
@@ -1669,7 +1693,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let error = client
@@ -1684,7 +1708,7 @@ mod tests {
         let client = SecretsClient::new(
             "https://zann.example.test",
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let payload = SecretSetRequest {
@@ -1712,7 +1736,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let error = client
@@ -1737,7 +1761,7 @@ mod tests {
         let client = SecretsClient::new(
             &server.url(),
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         let error = client
@@ -1752,7 +1776,7 @@ mod tests {
         let client = SecretsClient::new(
             "https://zann.example.test",
             "access-token",
-            SecretsTransportSecurity::RequireTls,
+            SecretsTransportSecurity::AllowLoopbackHttp,
         )
         .expect("client");
         for path in ["", "services//api", "services/../api", "./api"] {
