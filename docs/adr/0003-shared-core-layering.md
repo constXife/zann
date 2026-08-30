@@ -1,9 +1,16 @@
 # ADR 0003: One door, headless core, inverted platform dependencies
 
-- **Status:** Proposed
+- **Status:** Superseded by [ADR 0001](0001-shared-client-core.md)
 - **Date:** 2026-08-09
-- **Supersedes:** the *Plan* and *Alternatives* sections of ADR 0001. Its
-  diagnosis stands; its ordering and one of its rejections do not.
+- **Superseded on:** 2026-08-26
+
+> Historical note: the diagnosis and migration evidence below remain useful,
+> but its ownership decision is no longer normative. The accepted ADR 0001 and
+> `docs/architecture/capabilities.md` make `zann-client::app` the sole
+> application-composition owner. The existing `zann-app` crate is frozen as a
+> transitional home for backup, snapshot and verification code until those use
+> cases are exposed through ports owned by the canonical facade. It must not
+> grow session, auth, sync, item, vault or storage orchestration.
 
 ## Context
 

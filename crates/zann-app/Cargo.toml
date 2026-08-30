@@ -5,13 +5,14 @@ edition = "2021"
 publish = false
 license = "MIT"
 
-# Headless application layer: the logic every client needs and no client should
-# own. No toolkit, no `$HOME`, no file dialogs — callers hand in the paths and
-# the unlocked key. See docs/adr/0003-shared-core-layering.md.
+# Frozen transitional implementations for backup, snapshots and verification.
+# `zann-client::app` is the sole application-composition owner; do not add new
+# capabilities here. See docs/architecture/capabilities.md (MIG-008).
 
 [dependencies]
 anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
+csv = "1"
 percent-encoding = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -5,6 +5,9 @@ import type { Settings } from "../../../types";
 
 type PaletteItem = { action?: () => void; enabled?: boolean };
 
+export const temporaryRevealKeyForPlatform = (platform: string): "Alt" | "Shift" =>
+  /Mac|iPhone|iPad/i.test(platform) ? "Alt" : "Shift";
+
 type AppEventHandlersOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
   settings: Ref<Settings | null>;
@@ -70,6 +73,7 @@ export function useAppEventHandlers({
 }: AppEventHandlersOptions) {
   const lastActivityAt = ref(Date.now());
   const altRevealAll = ref(false);
+  const temporaryRevealKey = temporaryRevealKeyForPlatform(navigator.platform);
   let cacheInvalidationUnlisten: null | (() => void) = null;
   let settingsUnlisten: null | (() => void) = null;
   let trayNoticeUnlisten: null | (() => void) = null;
@@ -243,19 +247,19 @@ export function useAppEventHandlers({
     }
   };
 
-  const handleAltRevealKeydown = (event: KeyboardEvent) => {
-    if (event.key === "Alt") {
+  const handleTemporaryRevealKeydown = (event: KeyboardEvent) => {
+    if (event.key === temporaryRevealKey) {
       altRevealAll.value = true;
     }
   };
 
-  const handleAltRevealKeyup = (event: KeyboardEvent) => {
-    if (event.key === "Alt") {
+  const handleTemporaryRevealKeyup = (event: KeyboardEvent) => {
+    if (event.key === temporaryRevealKey) {
       altRevealAll.value = false;
     }
   };
 
-  const handleAltRevealBlur = () => {
+  const handleTemporaryRevealBlur = () => {
     altRevealAll.value = false;
   };
 
@@ -295,11 +299,11 @@ export function useAppEventHandlers({
     window.addEventListener("keydown", onActivity);
     window.addEventListener("click", onActivity);
     window.addEventListener("scroll", onActivity);
-    window.addEventListener("keydown", handleAltRevealKeydown);
-    window.addEventListener("keyup", handleAltRevealKeyup);
+    window.addEventListener("keydown", handleTemporaryRevealKeydown);
+    window.addEventListener("keyup", handleTemporaryRevealKeyup);
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("blur", onBlur);
-    window.addEventListener("blur", handleAltRevealBlur);
+    window.addEventListener("blur", handleTemporaryRevealBlur);
     window.addEventListener("beforeunload", onBeforeUnload);
     void initCacheInvalidationListener();
     void initSettingsListener();
@@ -312,11 +316,11 @@ export function useAppEventHandlers({
     window.removeEventListener("keydown", onActivity);
     window.removeEventListener("click", onActivity);
     window.removeEventListener("scroll", onActivity);
-    window.removeEventListener("keydown", handleAltRevealKeydown);
-    window.removeEventListener("keyup", handleAltRevealKeyup);
+    window.removeEventListener("keydown", handleTemporaryRevealKeydown);
+    window.removeEventListener("keyup", handleTemporaryRevealKeyup);
     document.removeEventListener("visibilitychange", onVisibility);
     window.removeEventListener("blur", onBlur);
-    window.removeEventListener("blur", handleAltRevealBlur);
+    window.removeEventListener("blur", handleTemporaryRevealBlur);
     window.removeEventListener("beforeunload", onBeforeUnload);
     if (cacheInvalidationUnlisten) {
       cacheInvalidationUnlisten();

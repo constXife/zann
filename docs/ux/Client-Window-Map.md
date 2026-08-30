@@ -109,7 +109,8 @@ Entry:
 - After unlock or onboarding.
 
 Primary actions:
-- Browse vaults and items.
+- Select storage and vault from the navigation sidebar.
+- Browse categories/folders and items.
 - Create, edit, delete items.
 - Search.
 - Sync (if server).

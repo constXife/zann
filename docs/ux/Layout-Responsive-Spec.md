@@ -24,6 +24,36 @@
 - Inspector / right rail: metadata, history, audit, participants, sync status.
 - Global toolbar: search, create, sync status, lock/unlock.
 
+## Desktop Vault Home Contract
+
+This section is normative for every desktop client. Toolkits may render native
+controls, but they MUST preserve the same information architecture and region
+ownership.
+
+- MUST: Use the semantic order `navigation sidebar -> items list -> item detail`.
+- MUST: Put storage and vault selectors in the navigation sidebar, before
+  categories and folders. They are context, not list filters.
+- MUST: Keep search and list pagination in the items workspace, not the
+  navigation sidebar.
+- MUST: Keep reveal, copy, TOTP and item actions in the detail workspace.
+- SHOULD: Hide the vault selector when the current storage has only one vault;
+  hiding it MUST NOT move controls between semantic regions.
+- MUST: A vault switch clears stale item detail, loads the selected vault's
+  first page and updates category/folder counts as one visible transition.
+- MUST: Transient input state (held modifiers, hover, focus, loading hints,
+  copy/reveal feedback) MUST NOT insert or remove layout rows or resize columns.
+  Use an overlay, reserved slot or style-only change if feedback is necessary.
+- MUST: The whole value surface is the copy target. Hover and successful-copy
+  feedback SHOULD style that same surface without changing its text or geometry.
+- MUST: Holding `Option`/`Alt` on macOS or `Shift` on Linux and Windows may
+  reveal masked values only while held. Releasing it or losing window focus
+  hides them without changing persistent reveal state. Linux and Windows MUST
+  NOT bind this behavior to `Alt`, because it participates in app switching.
+
+Tauri is the current reference implementation for region placement. It is not
+the reference for widget styling: COSMIC, SwiftUI and other clients SHOULD use
+their platform-native controls inside the same semantic regions.
+
 ## Breakpoint Rules (Layout Table)
 
 | Surface | Navigation | Items list | Detail view | Inspector/right rail | Global toolbar |
@@ -57,3 +87,15 @@
 - MUST: No auto-reveal on resize, rotate, or layout switch.
 - SHOULD: Avoid showing sensitive columns (e.g., password/TOTP) in narrow list modes.
 - MUST: Clipboard/reveal actions require explicit user action in all layouts.
+
+## Cross-client Conformance
+
+- A layout-affecting change MUST update this specification before or together
+  with client code.
+- The change MUST be checked against every shipping GUI client. Implement it in
+  the same change, or record a time-bounded waiver with owner and rationale.
+- Each client MUST have state-level tests for context preservation and secret
+  visibility. Release UI checks SHOULD capture Vault Home at narrow, medium and
+  wide desktop widths.
+- Reviewers MUST verify semantic region ownership, not pixel identity. Shared
+  geometry belongs in `zann-ui-core`; native widget appearance remains local.

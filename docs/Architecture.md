@@ -54,6 +54,12 @@ internal domain model.
 those crates are introduced, their code must remain in the canonical owner
 listed in the capability map; it must not be copied into a shell.
 
+`zann-app` is not a second application-composition owner. It is a frozen
+transitional package containing only the already-extracted backup, snapshot and
+verification implementations. New application capabilities belong to
+`zann-client::app`; the transitional package is removed as those local use cases
+move behind DB-free ports. MIG-008 records and bounds this exception.
+
 ## Boundary rules
 
 ### Shells

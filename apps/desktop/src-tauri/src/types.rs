@@ -634,6 +634,7 @@ pub struct TotpCodeResponse {
 #[derive(Serialize)]
 pub struct ApplePasswordsImportResponse {
     pub imported_items: usize,
+    pub renamed_items: usize,
     pub skipped_existing: usize,
     pub skipped_invalid: usize,
 }

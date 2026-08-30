@@ -17,7 +17,7 @@ use std::sync::OnceLock;
 
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::core::layout::Limits;
-use cosmic::iced::{event, keyboard, mouse, window, Event, Size, Subscription};
+use cosmic::iced::{event, keyboard, mouse, window, Event, Length, Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{menu, nav_bar};
 use cosmic::{executor, widget, Element};
@@ -79,6 +79,7 @@ enum Message {
     OpenSettings,
     Quit,
     Unfocused,
+    TemporaryReveal(bool),
     Activity,
     ClipboardExpired(u64),
     ClipboardRead(Option<String>),
@@ -120,6 +121,17 @@ fn key_binds() -> &'static HashMap<menu::KeyBind, Action> {
             (bind("q"), Action::Quit),
         ])
     })
+}
+
+/// Option is conventional on macOS and does not participate in application
+/// switching there. Alt does participate in switching on Linux and Windows,
+/// so those platforms use Shift for hold-to-reveal instead.
+fn temporary_reveal_key() -> keyboard::Key {
+    #[cfg(target_os = "macos")]
+    let named = keyboard::key::Named::Alt;
+    #[cfg(not(target_os = "macos"))]
+    let named = keyboard::key::Named::Shift;
+    keyboard::Key::Named(named)
 }
 
 /// Lifts a screen's task into the shell's message type.
@@ -273,6 +285,44 @@ impl cosmic::Application for App {
         }
     }
 
+    /// Keep the storage/vault context in the navigation column, matching the
+    /// desktop layout contract while still using native COSMIC widgets.
+    fn nav_bar(&self) -> Option<Element<'_, cosmic::Action<Self::Message>>> {
+        if !self.core.nav_bar_active() {
+            return None;
+        }
+        let Shell::Ready {
+            screen: Screen::Vault(vault),
+            ..
+        } = &self.shell
+        else {
+            return None;
+        };
+
+        let nav = widget::nav_bar(vault.nav_model(), |id| {
+            cosmic::Action::Cosmic(cosmic::app::Action::NavBar(id))
+        })
+        .into_container()
+        .width(Length::Fill)
+        .height(Length::Fill);
+        let mut column = widget::column::with_capacity(2);
+        if let Some(selector) = vault.vault_selector() {
+            column =
+                column.push(selector.map(|message| cosmic::Action::App(Message::Vault(message))));
+        }
+        column = column.push(nav);
+
+        Some(
+            widget::container(column)
+                .width(Length::Fixed(280.0))
+                .height(Length::Fill)
+                .class(cosmic::theme::Container::custom(
+                    widget::nav_bar::nav_bar_style,
+                ))
+                .into(),
+        )
+    }
+
     fn on_nav_select(&mut self, id: nav_bar::Id) -> Task<Self::Message> {
         if let Shell::Ready {
             screen: Screen::Vault(vault),
@@ -280,6 +330,9 @@ impl cosmic::Application for App {
         } = &mut self.shell
         {
             vault.activate_nav(id);
+            if vault.category_needs_prefetch() {
+                return cosmic::task::message(Message::Vault(vault::Message::LoadMore));
+            }
         }
         Task::none()
     }
@@ -313,6 +366,16 @@ impl cosmic::Application for App {
 
         let shell_events = event::listen_with(|event, _, _| match event {
             Event::Window(window::Event::Unfocused) => Some(Message::Unfocused),
+            Event::Keyboard(keyboard::Event::KeyPressed { ref key, .. })
+                if *key == temporary_reveal_key() =>
+            {
+                Some(Message::TemporaryReveal(true))
+            }
+            Event::Keyboard(keyboard::Event::KeyReleased { ref key, .. })
+                if *key == temporary_reveal_key() =>
+            {
+                Some(Message::TemporaryReveal(false))
+            }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 ref key,
                 ref physical_key,
@@ -348,11 +411,31 @@ impl cosmic::Application for App {
             Message::Quit => return self.quit(),
             Message::Settings(message) => return self.update_settings(message),
             Message::Unfocused => {
+                if let Shell::Ready {
+                    screen: Screen::Vault(vault) | Screen::Settings { vault, .. },
+                    ..
+                } = &mut self.shell
+                {
+                    vault.set_temporary_reveal(false);
+                }
                 return if self.preferences.lock_on_focus_loss {
                     self.lock()
                 } else {
                     Task::none()
                 };
+            }
+            Message::TemporaryReveal(held) => {
+                if let Shell::Ready {
+                    screen: Screen::Vault(vault) | Screen::Settings { vault, .. },
+                    ..
+                } = &mut self.shell
+                {
+                    vault.set_temporary_reveal(held);
+                    if held {
+                        vault.record_activity();
+                    }
+                }
+                return Task::none();
             }
             Message::Activity => {
                 if let Shell::Ready {
@@ -465,12 +548,13 @@ impl cosmic::Application for App {
                         master::Outcome::None => Task::none(),
                         master::Outcome::Task(task) => lift(task, Message::Master),
                         master::Outcome::Opened { page, sync_error } => {
+                            let load_vaults = vault::State::load_vaults(session);
                             let mut vault = vault::State::new(page, sync_error);
                             vault.set_content_width(content_width);
                             vault.set_auto_lock_minutes(auto_lock_minutes);
                             vault.set_reveal_seconds(reveal_seconds);
                             *screen = Screen::Vault(Box::new(vault));
-                            Task::none()
+                            lift(load_vaults, Message::Vault)
                         }
                     }
                 }
@@ -482,7 +566,10 @@ impl cosmic::Application for App {
                     match state.update(message, session) {
                         vault::Outcome::None => Task::none(),
                         vault::Outcome::Task(task) => lift(task, Message::Vault),
-                        vault::Outcome::Copy(value) => cosmic::task::message(Message::Copy(value)),
+                        vault::Outcome::Copy { value, feedback } => Task::batch([
+                            cosmic::task::message(Message::Copy(value)),
+                            lift(feedback, Message::Vault),
+                        ]),
                         vault::Outcome::Locked => cosmic::task::message(Message::Lock),
                     }
                 }
@@ -494,6 +581,7 @@ impl cosmic::Application for App {
                 | Message::OpenSettings
                 | Message::Quit
                 | Message::Unfocused
+                | Message::TemporaryReveal(_)
                 | Message::Activity
                 | Message::ClipboardExpired(_)
                 | Message::ClipboardRead(_)
@@ -617,15 +705,19 @@ impl App {
                     Message::Settings,
                 )
             }
-            settings::Outcome::Close => {
-                let Shell::Ready { screen, .. } = &mut self.shell else {
+            settings::Outcome::Close { page } => {
+                let Shell::Ready { session, screen } = &mut self.shell else {
                     return Task::none();
                 };
+                let load_vaults = vault::State::load_vaults(session);
                 let parked = std::mem::replace(screen, Screen::Welcome);
-                if let Screen::Settings { vault, .. } = parked {
+                if let Screen::Settings { mut vault, .. } = parked {
+                    if let Some(page) = page {
+                        vault.replace_page(page);
+                    }
                     *screen = Screen::Vault(vault);
                 }
-                Task::none()
+                lift(load_vaults, Message::Vault)
             }
             settings::Outcome::AddServer => {
                 if let Shell::Ready { screen, .. } = &mut self.shell {

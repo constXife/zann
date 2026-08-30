@@ -228,6 +228,7 @@ export type PlainBackupImportResponse = {
 
 export type ApplePasswordsImportResponse = {
   imported_items: number;
+  renamed_items: number;
   skipped_existing: number;
   skipped_invalid: number;
 };

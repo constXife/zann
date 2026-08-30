@@ -12,15 +12,12 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
-use csv::ReaderBuilder;
 use uuid::Uuid;
 use zann_app::backup::{
-    extract_totp_meta, insert_payload_field, read_backup_metadata, slugify,
-    stream_backup_items_async, ApplePasswordsRow, BackupCtx, ImportOutcome, BACKUP_VERSION,
+    read_backup_metadata, slugify, stream_backup_items_async, BackupCtx, ImportOutcome,
+    BACKUP_VERSION,
 };
-use zann_core::{
-    CachePolicy, EncryptedPayload, FieldKind, ItemsService, StorageKind, VaultKind, VaultsService,
-};
+use zann_core::{CachePolicy, ItemsService, StorageKind, VaultKind, VaultsService};
 use zann_db::local::{
     KeyWrapType, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVault, LocalVaultRepo,
 };
@@ -180,6 +177,7 @@ pub async fn apple_import(
     target_storage_id: Option<String>,
 ) -> Result<ApiResponse<ApplePasswordsImportResponse>, String> {
     ensure_unlocked(&state).await?;
+    let ctx = backup_ctx(&state).await?;
     append_backup_log(&format!(
         "apple_import_mode_raw target_storage_id={}",
         target_storage_id.as_deref().unwrap_or("<none>")
@@ -202,26 +200,7 @@ pub async fn apple_import(
     let services = LocalServices::new(&state.pool, master_key.as_ref());
     let storage_repo = LocalStorageRepo::new(&state.pool);
     let vault_repo = LocalVaultRepo::new(&state.pool);
-    let item_repo = LocalItemRepo::new(&state.pool);
-
-    let mut target_storage_id = target_storage_id;
-    if target_storage_id.is_none() {
-        if let Ok(storages) = storage_repo.list().await {
-            let remote = storages
-                .into_iter()
-                .filter(|storage| storage.kind == StorageKind::Remote)
-                .collect::<Vec<_>>();
-            if remote.len() == 1 {
-                target_storage_id = Some(remote[0].id.to_string());
-                append_backup_log(&format!(
-                    "apple_import_mode_fallback storage_id={}",
-                    remote[0].id
-                ));
-            }
-        }
-    }
-
-    let (storage_id, personal_vault_id) =
+    let (_storage_id, _personal_vault_id) =
         if let Some(target_storage_id) = target_storage_id.as_deref() {
             let target_id =
                 Uuid::parse_str(target_storage_id).map_err(|_| "invalid storage id".to_string())?;
@@ -369,153 +348,15 @@ pub async fn apple_import(
             }
         },
     };
-    append_backup_log(&format!("apple_import_start path={}", input_path.display()));
-
-    let mut reader = ReaderBuilder::new()
-        .trim(csv::Trim::All)
-        .from_path(&input_path)
-        .map_err(|err| err.to_string())?;
-
-    let mut imported_items = 0usize;
-    let mut skipped_existing = 0usize;
-    let mut skipped_invalid = 0usize;
-
-    for (index, result) in reader.deserialize::<ApplePasswordsRow>().enumerate() {
-        let row = match result {
-            Ok(row) => row,
-            Err(err) => {
-                append_backup_log(&format!(
-                    "apple_import_failed path={} error={}",
-                    input_path.display(),
-                    err
-                ));
-                return Err(err.to_string());
-            }
-        };
-        let row_number = index + 2;
-        let title = row.title.trim();
-        if title.is_empty() {
-            skipped_invalid += 1;
-            append_backup_log(&format!(
-                "apple_import_skip path={} row={} reason=missing_title",
-                input_path.display(),
-                row_number
-            ));
-            continue;
-        }
-
-        let existing = item_repo
-            .get_active_by_vault_path(storage_id, personal_vault_id, title)
-            .await
-            .map_err(|err| err.to_string())?;
-        if existing.is_some() {
-            skipped_existing += 1;
-            append_backup_log(&format!(
-                "apple_import_skip path={} row={} title={} reason=existing_path",
-                input_path.display(),
-                row_number,
-                title
-            ));
-            continue;
-        }
-
-        let mut payload = EncryptedPayload::new("login");
-        insert_payload_field(
-            &mut payload,
-            "username",
-            FieldKind::Text,
-            row.username.as_deref(),
-        );
-        insert_payload_field(
-            &mut payload,
-            "password",
-            FieldKind::Password,
-            row.password.as_deref(),
-        );
-        insert_payload_field(&mut payload, "url", FieldKind::Url, row.url.as_deref());
-        insert_payload_field(&mut payload, "notes", FieldKind::Note, row.notes.as_deref());
-        if let Some(otp_auth) = row.otp_auth.as_deref() {
-            if let Some(meta) = extract_totp_meta(otp_auth) {
-                insert_payload_field(
-                    &mut payload,
-                    "totp_secret",
-                    FieldKind::Otp,
-                    Some(meta.secret.as_str()),
-                );
-                let mut extra = payload.extra.take().unwrap_or_default();
-                if let Some(value) = meta.otp_type {
-                    extra.insert("otp_type".to_string(), value);
-                }
-                if let Some(value) = meta.issuer {
-                    extra.insert("otp_issuer".to_string(), value);
-                }
-                if let Some(value) = meta.algorithm {
-                    extra.insert("otp_algorithm".to_string(), value);
-                }
-                if let Some(value) = meta.label {
-                    extra.insert("otp_label".to_string(), value);
-                }
-                if let Some(value) = meta.digits {
-                    extra.insert("otp_digits".to_string(), value);
-                }
-                if let Some(value) = meta.period {
-                    extra.insert("otp_period".to_string(), value);
-                }
-                if !extra.is_empty() {
-                    payload.extra = Some(extra);
-                }
-            }
-        }
-
-        match services
-            .put_item(
-                storage_id,
-                personal_vault_id,
-                title.to_string(),
-                "login".to_string(),
-                payload,
-            )
-            .await
-        {
-            Ok(_) => imported_items += 1,
-            Err(err) if err.kind == "item_exists" => skipped_existing += 1,
-            Err(err)
-                if matches!(
-                    err.kind.as_str(),
-                    "path_required"
-                        | "path_invalid"
-                        | "path_segment_invalid"
-                        | "name_too_long"
-                        | "path_segments_limit"
-                        | "payload_too_large"
-                ) =>
-            {
-                skipped_invalid += 1;
-                append_backup_log(&format!(
-                    "apple_import_skip path={} row={} title={} reason={}",
-                    input_path.display(),
-                    row_number,
-                    title,
-                    err.kind
-                ));
-            }
-            Err(err) => return Err(err.message),
-        }
+    match zann_app::backup::apple_passwords_import(&ctx, input_path, target_storage_id).await {
+        Ok(report) => Ok(ApiResponse::ok(ApplePasswordsImportResponse {
+            imported_items: report.imported_items,
+            renamed_items: report.renamed_items,
+            skipped_existing: 0,
+            skipped_invalid: report.skipped_invalid,
+        })),
+        Err(err) => from_backup_error(err),
     }
-
-    append_backup_log(&format!(
-        "apple_import_ok path={} imported={} skipped_existing={} skipped_invalid={}",
-        input_path.display(),
-        imported_items,
-        skipped_existing,
-        skipped_invalid
-    ));
-
-    Ok(ApiResponse::ok(ApplePasswordsImportResponse {
-        imported_items,
-        skipped_existing,
-        skipped_invalid,
-    }))
 }
 fn default_backup_path(root: &Path) -> PathBuf {
     let filename = format!(

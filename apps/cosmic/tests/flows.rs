@@ -7,7 +7,8 @@ use zann_cosmic::backend::remote::{LoginOutcome, Method, Remote, ServerProbe};
 use zann_cosmic::screens::detail::Detail;
 use zann_cosmic::screens::{connect, master, vault};
 use zann_cosmic::session::Session;
-use zann_ffi::ItemUpdate;
+use zann_ffi::{ItemSummary, ItemUpdate, VaultSummaryFfi};
+use zann_ui_core::ItemCounts;
 
 static DB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -158,14 +159,14 @@ fn remote_fails_closed_outside_the_session_composition_thread() {
 fn detail_masks_secrets_and_reads_totp() {
     let (_dir, session) = vault_with_items();
     let facade = session.facade();
-    let page = local::items(&facade, None).expect("items");
+    let page = local::items(&facade, None, None).expect("items");
     let login = page
         .items
         .iter()
         .find(|item| item.type_id == "login")
         .expect("login in the page");
 
-    let detail = Detail::parse(local::item_get(&facade, login.id.clone()).expect("item_get"))
+    let mut detail = Detail::parse(local::item_get(&facade, login.id.clone()).expect("item_get"))
         .expect("parse");
 
     let password = detail
@@ -174,6 +175,8 @@ fn detail_masks_secrets_and_reads_totp() {
         .find(|field| field.key == "password")
         .expect("password field");
     assert!(password.masked, "a password field is masked by default");
+    assert_ne!(password.display_value(false), "hunter2");
+    assert_eq!(password.display_value(true), "hunter2");
 
     let otp = detail
         .fields
@@ -190,6 +193,134 @@ fn detail_masks_secrets_and_reads_totp() {
     // Fields come out in reading order, not hash order.
     let keys: Vec<&str> = detail.fields.iter().map(|f| f.key.as_str()).collect();
     assert_eq!(keys, ["username", "password", "otp"]);
+
+    detail.update(zann_cosmic::screens::detail::Message::Copy {
+        index: 1,
+        value: "hunter2".to_string(),
+    });
+    assert_eq!(detail.copied_field(), Some(1));
+    detail.clear_copy_feedback();
+    assert_eq!(detail.copied_field(), None);
+}
+
+#[test]
+fn vault_context_exposes_the_active_personal_vault() {
+    let (_dir, session) = vault_with_items();
+    let facade = session.facade();
+    let context = local::vault_context(&facade).expect("vault context");
+
+    assert_eq!(context.vaults.len(), 1);
+    assert_eq!(context.vaults[0].kind, "personal");
+    assert_eq!(
+        context.current_vault_id.as_deref(),
+        Some(context.vaults[0].id.as_str())
+    );
+    assert_eq!(context.vaults[0].item_count, 2);
+
+    let page =
+        local::switch_vault(&facade, context.vaults[0].id.clone()).expect("switch current vault");
+    assert_eq!(page.total, 2);
+}
+
+#[test]
+fn search_finds_an_item_beyond_the_first_loaded_page() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (session, status) =
+        Session::open_at(dir.path().join("local.sqlite")).expect("open session");
+    assert!(!status.initialized);
+
+    let facade = session.facade();
+    local::initialize_master_password(&facade, "demo-password".to_string()).expect("initialize");
+    facade
+        .debug_create_kv_item(
+            "Hetzner".to_string(),
+            "username".to_string(),
+            "demo".to_string(),
+        )
+        .expect("target item");
+    for index in 0..local::PAGE_LIMIT {
+        facade
+            .debug_create_kv_item(
+                format!("newer/item-{index:03}"),
+                "key".to_string(),
+                index.to_string(),
+            )
+            .expect("filler item");
+    }
+
+    let first_page = local::items(&facade, None, None).expect("first page");
+    assert_eq!(first_page.items.len(), local::PAGE_LIMIT as usize);
+    assert_eq!(first_page.total, u64::from(local::PAGE_LIMIT) + 1);
+    assert!(
+        first_page.items.iter().all(|item| item.title != "Hetzner"),
+        "the regression needs Hetzner to be outside the first loaded page"
+    );
+
+    let second_page = local::items(&facade, first_page.next_cursor.clone(), None)
+        .expect("second page without a skipped lookahead row");
+    assert!(
+        second_page.items.iter().any(|item| item.title == "Hetzner"),
+        "cursor pagination must not skip the first row of the next page"
+    );
+
+    let search =
+        local::items(&facade, None, Some("Hetzner".to_string())).expect("search whole vault");
+    assert_eq!(search.total, 1);
+    assert_eq!(search.items.len(), 1);
+    assert_eq!(search.items[0].title, "Hetzner");
+    assert!(search.next_cursor.is_none());
+}
+
+#[test]
+fn infinite_scroll_prefetches_and_caps_the_summary_cache() {
+    let (_dir, session) = vault_with_items();
+    let page_size = local::PAGE_LIMIT as usize;
+    let make_page = |page: usize| local::ItemsPage {
+        items: (0..page_size)
+            .map(|index| ItemSummary {
+                id: format!("{page}-{index}"),
+                title: format!("item-{page}-{index}"),
+                path: format!("items/{page}/{index}"),
+                type_id: "login".to_string(),
+                deleted: false,
+            })
+            .collect(),
+        next_cursor: Some(format!("cursor-{page}")),
+        total: 10_000,
+        counts: ItemCounts::default(),
+    };
+
+    let mut state = vault::State::new(make_page(0), None);
+    let prefetch = state.update(
+        vault::Message::ListScrolled {
+            remaining: 100.0,
+            viewport_height: 600.0,
+        },
+        &session,
+    );
+    assert!(matches!(prefetch, vault::Outcome::Task(_)));
+
+    // Simulate completed pages. The list keeps at most five backend pages,
+    // even if more scroll notifications arrive afterwards.
+    for page in 1..=6 {
+        state.update(
+            vault::Message::MoreLoaded {
+                generation: 0,
+                result: Ok(make_page(page)),
+            },
+            &session,
+        );
+    }
+    assert_eq!(state.visible().len(), page_size * 5);
+
+    let capped = state.update(
+        vault::Message::ListScrolled {
+            remaining: 0.0,
+            viewport_height: 600.0,
+        },
+        &session,
+    );
+    assert!(matches!(capped, vault::Outcome::None));
 }
 
 #[test]
@@ -218,7 +349,7 @@ fn detail_reads_otpauth_uri_parameters() {
 #[test]
 fn master_hands_the_open_vault_to_the_shell() {
     let (_dir, session) = vault_with_items();
-    let page = local::items(&session.facade(), None).expect("items");
+    let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = master::State::new(master::Mode::Unlock, None);
 
     let failed = state.update(
@@ -243,7 +374,7 @@ fn master_hands_the_open_vault_to_the_shell() {
 #[test]
 fn vault_filters_the_list_and_forwards_copies() {
     let (_dir, session) = vault_with_items();
-    let page = local::items(&session.facade(), None).expect("items");
+    let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = vault::State::new(page, None);
 
     assert_eq!(state.visible().len(), 2);
@@ -258,16 +389,55 @@ fn vault_filters_the_list_and_forwards_copies() {
 
     // The clipboard belongs to the shell, so the detail column's copy travels up.
     let outcome = state.update(
-        vault::Message::Detail(zann_cosmic::screens::detail::Message::Copy("s3cret".into())),
+        vault::Message::Detail(zann_cosmic::screens::detail::Message::Copy {
+            index: 0,
+            value: "s3cret".into(),
+        }),
         &session,
     );
-    assert!(matches!(outcome, vault::Outcome::Copy(value) if value == "s3cret"));
+    assert!(matches!(
+        outcome,
+        vault::Outcome::Copy { value, .. } if value == "s3cret"
+    ));
+}
+
+#[test]
+fn vault_selector_only_reserves_sidebar_space_for_multiple_vaults() {
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).expect("items");
+    let mut state = vault::State::new(page, None);
+    assert!(state.vault_selector().is_none());
+
+    state.update(
+        vault::Message::VaultsLoaded(Ok(local::VaultContext {
+            current_vault_id: Some("personal".to_string()),
+            vaults: vec![
+                VaultSummaryFfi {
+                    id: "personal".to_string(),
+                    name: "Personal".to_string(),
+                    kind: "personal".to_string(),
+                    is_default: false,
+                    item_count: 399,
+                },
+                VaultSummaryFfi {
+                    id: "shared".to_string(),
+                    name: "infra".to_string(),
+                    kind: "shared".to_string(),
+                    is_default: false,
+                    item_count: 15,
+                },
+            ],
+        })),
+        &session,
+    );
+
+    assert!(state.vault_selector().is_some());
 }
 
 #[test]
 fn the_splitter_stays_between_the_tauri_panel_limits() {
     let (_dir, session) = vault_with_items();
-    let page = local::items(&session.facade(), None).expect("items");
+    let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = vault::State::new(page, None);
     state.set_content_width(1200.0);
     assert_eq!(state.list_width(), 400.0);

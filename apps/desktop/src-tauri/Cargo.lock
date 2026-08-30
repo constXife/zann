@@ -7575,6 +7575,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "csv",
  "percent-encoding",
  "serde",
  "serde_json",
@@ -7689,7 +7690,6 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "chrono",
- "csv",
  "data-encoding",
  "dirs 5.0.1",
  "ed25519-dalek",
