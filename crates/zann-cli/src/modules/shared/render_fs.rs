@@ -1,7 +1,11 @@
+use std::collections::HashSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
+use uuid::Uuid;
+use zann_client::delivery::PlannedDeliveryFile;
+use zann_client::secrets::BatchResult;
 use zann_client::secrets::MAX_BATCH_SECRETS;
 
 use crate::modules::secrets::{batch_get_with_refresh, list_with_refresh};
@@ -68,6 +72,196 @@ pub(crate) async fn materialize_shared(
             break;
         }
     }
+    Ok(())
+}
+
+pub(crate) fn publish_delivery_generation(
+    out: &Path,
+    plan: &[PlannedDeliveryFile],
+    results: &[BatchResult],
+    retain_generations: usize,
+    skip_unchanged: bool,
+) -> anyhow::Result<String> {
+    if plan.len() != results.len() || !(1..=10).contains(&retain_generations) {
+        anyhow::bail!("invalid delivery generation input");
+    }
+    prepare_materialize_root(out)?;
+    let generations = out.join("generations");
+    ensure_private_directory(&generations, true)?;
+    if skip_unchanged {
+        if let Some(id) = matching_current_generation(out, plan, results)? {
+            return Ok(id);
+        }
+    }
+
+    let generation = Uuid::now_v7().to_string();
+    let generation_root = generations.join(&generation);
+    create_private_generation_directory(&generation_root)?;
+    ensure_private_directory(&generation_root, true)?;
+    let mut cleanup = GenerationCleanup::new(generation_root.clone());
+
+    for (planned, result) in plan.iter().zip(results) {
+        if result.status != "ok" || result.path.trim_matches('/') != planned.secret() {
+            anyhow::bail!("invalid delivery batch result");
+        }
+        let secret = result
+            .secret
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("invalid delivery batch result"))?;
+        let relative = normalize_output_path(planned.target())?;
+        let target = generation_root.join(&relative);
+        if let Some(parent) = relative.parent() {
+            ensure_private_subdirectories(&generation_root, parent)?;
+        }
+        ensure_file_size(&secret.value)?;
+        write_atomic_private(&target, secret.value.as_bytes())?;
+    }
+    sync_directory(&generation_root)?;
+    sync_directory(&generations)?;
+
+    write_atomic_private(&out.join("current"), format!("{generation}\n").as_bytes())?;
+    cleanup.disarm();
+    if let Err(error) = prune_generations(&generations, &generation, retain_generations) {
+        tracing::warn!(error = %error, "unable to prune old delivery generations");
+    }
+    Ok(generation)
+}
+
+fn matching_current_generation(
+    out: &Path,
+    plan: &[PlannedDeliveryFile],
+    results: &[BatchResult],
+) -> anyhow::Result<Option<String>> {
+    let current_path = out.join("current");
+    let mut current = match open_existing_nofollow(&current_path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    validate_open_file(&current_path, &current)?;
+    secure_file_permissions(&current)?;
+    if current.metadata()?.len() > 64 {
+        anyhow::bail!("invalid delivery generation pointer");
+    }
+    let mut pointer = String::new();
+    current.read_to_string(&mut pointer)?;
+    let id = pointer
+        .strip_suffix('\n')
+        .ok_or_else(|| anyhow::anyhow!("invalid delivery generation pointer"))?;
+    if id.contains('\n') {
+        anyhow::bail!("invalid delivery generation pointer");
+    }
+    let parsed =
+        Uuid::parse_str(id).map_err(|_| anyhow::anyhow!("invalid delivery generation pointer"))?;
+    if parsed.get_version_num() != 7 {
+        anyhow::bail!("invalid delivery generation pointer");
+    }
+
+    let generation_root = out.join("generations").join(id);
+    ensure_private_directory(&generation_root, true)?;
+    let expected = plan
+        .iter()
+        .map(|file| normalize_output_path(file.target()))
+        .collect::<Result<HashSet<_>, _>>()?;
+    let mut actual = HashSet::with_capacity(expected.len());
+    collect_generation_files(&generation_root, &generation_root, &mut actual)?;
+    if actual != expected {
+        return Ok(None);
+    }
+
+    for (planned, result) in plan.iter().zip(results) {
+        let secret = result
+            .secret
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("invalid delivery batch result"))?;
+        let target = generation_root.join(normalize_output_path(planned.target())?);
+        if !is_same_contents(&target, &secret.value)? {
+            return Ok(None);
+        }
+    }
+    Ok(Some(id.to_string()))
+}
+
+fn collect_generation_files(
+    root: &Path,
+    directory: &Path,
+    files: &mut HashSet<PathBuf>,
+) -> anyhow::Result<()> {
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() {
+            anyhow::bail!("delivery generation contains a symlink");
+        }
+        if metadata.is_dir() {
+            validate_private_directory_permissions(&path, &metadata)?;
+            collect_generation_files(root, &path, files)?;
+        } else if metadata.is_file() {
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| anyhow::anyhow!("invalid delivery generation path"))?;
+            files.insert(relative.to_path_buf());
+        } else {
+            anyhow::bail!("delivery generation contains a non-file entry");
+        }
+    }
+    Ok(())
+}
+
+fn create_private_generation_directory(path: &Path) -> io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    configure_private_directory(&mut builder);
+    builder.create(path)
+}
+
+struct GenerationCleanup {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl GenerationCleanup {
+    fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for GenerationCleanup {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
+fn prune_generations(root: &Path, current: &str, retain: usize) -> anyhow::Result<()> {
+    let mut names = Vec::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if Uuid::parse_str(&name).is_err() {
+            continue;
+        }
+        let metadata = fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            anyhow::bail!("invalid delivery generation entry");
+        }
+        names.push(name);
+    }
+    names.sort_unstable_by(|left, right| right.cmp(left));
+    let mut kept = 0usize;
+    for name in names {
+        if name == current || kept < retain.saturating_sub(1) {
+            kept += usize::from(name != current);
+            continue;
+        }
+        fs::remove_dir_all(root.join(name))?;
+    }
+    sync_directory(root)?;
     Ok(())
 }
 
@@ -445,13 +639,15 @@ pub(crate) fn normalize_output_path(path: &str) -> anyhow::Result<PathBuf> {
 mod tests {
     use super::{
         ensure_file_size, ensure_private_directory, materialize_shared, normalize_output_path,
-        write_atomic_private,
+        publish_delivery_generation, write_atomic_private,
     };
     use crate::modules::system::{CliConfig, CommandContext};
     use mockito::{Matcher, Server};
     use serde_json::json;
     use std::path::PathBuf;
     use tempfile::tempdir;
+    use zann_client::delivery::DeliveryPlan;
+    use zann_client::secrets::{BatchResult, SecretResponse};
 
     #[test]
     fn normalize_output_path_allows_simple() {
@@ -474,6 +670,78 @@ mod tests {
     fn materialized_values_are_bounded() {
         assert!(ensure_file_size(&"x".repeat(super::MAX_MATERIALIZED_FILE_BYTES)).is_ok());
         assert!(ensure_file_size(&"x".repeat(super::MAX_MATERIALIZED_FILE_BYTES + 1)).is_err());
+    }
+
+    #[test]
+    fn delivery_retention_prunes_only_after_publication() {
+        let directory = tempdir().expect("tempdir");
+        let out = directory.path().join("delivery");
+        let plan = DeliveryPlan::from_yaml(
+            "version: 1\nvault: infra\nfiles:\n  - secret: service/password\n    target: password\n",
+        )
+        .expect("plan");
+
+        let first_results = vec![delivery_result("first")];
+        let first = publish_delivery_generation(&out, plan.files(), &first_results, 1, false)
+            .expect("first generation");
+        assert!(out.join("generations").join(&first).exists());
+
+        let second_results = vec![delivery_result("second")];
+        let second = publish_delivery_generation(&out, plan.files(), &second_results, 1, false)
+            .expect("second generation");
+        assert!(!out.join("generations").join(first).exists());
+        assert_eq!(
+            std::fs::read_to_string(out.join("current")).expect("current"),
+            format!("{second}\n")
+        );
+        assert_eq!(
+            std::fs::read_to_string(out.join("generations").join(second).join("password"))
+                .expect("secret"),
+            "second"
+        );
+    }
+
+    #[test]
+    fn delivery_can_reuse_an_exact_complete_generation() {
+        let directory = tempdir().expect("tempdir");
+        let out = directory.path().join("delivery");
+        let plan = DeliveryPlan::from_yaml(
+            "version: 1\nvault: infra\nfiles:\n  - secret: service/password\n    target: password\n",
+        )
+        .expect("plan");
+        let first_results = vec![delivery_result("same")];
+        let first = publish_delivery_generation(&out, plan.files(), &first_results, 2, true)
+            .expect("first generation");
+        let second_results = vec![delivery_result("same")];
+        let second = publish_delivery_generation(&out, plan.files(), &second_results, 2, true)
+            .expect("unchanged generation");
+
+        assert_eq!(first, second);
+        assert_eq!(
+            std::fs::read_dir(out.join("generations"))
+                .expect("generations")
+                .count(),
+            1
+        );
+    }
+
+    fn delivery_result(value: &str) -> BatchResult {
+        BatchResult {
+            path: "service/password".to_string(),
+            status: "ok".to_string(),
+            secret: Some(SecretResponse {
+                item_id: "00000000-0000-0000-0000-000000000001".to_string(),
+                path: "/service/password".to_string(),
+                vault_id: "infra".to_string(),
+                value: value.to_string(),
+                policy: "default".to_string(),
+                meta: None,
+                version: 1,
+                previous_version: None,
+                created: None,
+            }),
+            error: None,
+        }
     }
 
     #[cfg(unix)]

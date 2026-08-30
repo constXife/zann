@@ -19,7 +19,7 @@ serde = { version = "1.0.203", features = ["derive"] }
 serde_json = "1.0.117"
 tokio = { version = "1.38.0", features = ["io-util", "macros", "process", "rt-multi-thread", "signal", "time"] }
 zann-core = { path = "../zann-core", default-features = false }
-zann-client = { path = "../zann-client", default-features = false, features = ["remote"] }
+zann-client = { path = "../zann-client", default-features = false, features = ["delivery", "remote"] }
 uuid = { version = "1.10.0", features = ["v7", "serde"] }
 blake3 = "1"
 urlencoding = "2.1.3"

@@ -21,7 +21,7 @@ pub(crate) use http::{
     create_shared_item, delete_shared_item, fetch_vaults, set_secret_value, update_shared_item,
 };
 pub(crate) use render::render_shared_template;
-pub(crate) use render_fs::materialize_shared;
+pub(crate) use render_fs::{materialize_shared, publish_delivery_generation};
 pub(crate) use resolve::{
     resolve_path_arg, resolve_path_for_context, resolve_shared_item_id, resolve_vault_arg,
 };

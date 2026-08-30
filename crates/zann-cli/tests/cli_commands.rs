@@ -1363,6 +1363,196 @@ fn materialize_command_chunks_batch_reads_at_sixty_four() {
 }
 
 #[test]
+fn delivery_apply_publishes_one_complete_generation() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+    server
+        .mock("POST", "/v1/vaults/infra/secrets/batch/get")
+        .match_header("authorization", "Bearer token")
+        .match_body(Matcher::Json(json!({
+            "paths": ["services/web/database", "services/web/session-key"]
+        })))
+        .with_status(200)
+        .with_body(
+            json!([{
+                "path": "services/web/database",
+                "status": "ok",
+                "secret": {
+                    "item_id": "00000000-0000-0000-0000-000000000001",
+                    "path": "/services/web/database",
+                    "vault_id": "infra",
+                    "value": "database-password",
+                    "policy": "default",
+                    "version": 3
+                }
+            }, {
+                "path": "services/web/session-key",
+                "status": "ok",
+                "secret": {
+                    "item_id": "00000000-0000-0000-0000-000000000002",
+                    "path": "/services/web/session-key",
+                    "vault_id": "infra",
+                    "value": "session-key",
+                    "policy": "default",
+                    "version": 2
+                }
+            }])
+            .to_string(),
+        )
+        .create();
+
+    let profile_dir = tempdir().expect("profile dir");
+    let profile = profile_dir.path().join("web.yaml");
+    fs::write(
+        &profile,
+        "version: 1\nvault: infra\nfiles:\n  - secret: services/web/database\n    target: database-password\n  - secret: services/web/session-key\n    target: nested/session-key\n",
+    )
+    .expect("profile");
+    let out = profile_dir.path().join("published");
+
+    let assertion = authenticated_cmd(home_dir.path())
+        .args(["--addr", &server.url(), "--insecure", "delivery", "apply"])
+        .arg("--profile")
+        .arg(&profile)
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .success();
+    let generation = String::from_utf8(assertion.get_output().stdout.clone())
+        .expect("utf8 generation")
+        .trim()
+        .to_string();
+    uuid::Uuid::parse_str(&generation).expect("generation UUID");
+
+    assert_eq!(
+        fs::read_to_string(out.join("current")).expect("current pointer"),
+        format!("{generation}\n")
+    );
+    assert_eq!(
+        fs::read_to_string(
+            out.join("generations")
+                .join(&generation)
+                .join("database-password")
+        )
+        .expect("database credential"),
+        "database-password"
+    );
+    assert_eq!(
+        fs::read_to_string(
+            out.join("generations")
+                .join(&generation)
+                .join("nested/session-key")
+        )
+        .expect("session credential"),
+        "session-key"
+    );
+}
+
+#[test]
+fn delivery_apply_fails_before_publication_on_partial_batch_error() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+    server
+        .mock("POST", "/v1/vaults/infra/secrets/batch/get")
+        .with_status(200)
+        .with_body(
+            json!([{
+                "path": "services/web/database",
+                "status": "ok",
+                "secret": {
+                    "item_id": "00000000-0000-0000-0000-000000000001",
+                    "path": "/services/web/database",
+                    "vault_id": "infra",
+                    "value": "must-not-be-published",
+                    "policy": "default",
+                    "version": 3
+                }
+            }, {
+                "path": "services/web/missing",
+                "status": "error",
+                "error": {"error": "not_found"}
+            }])
+            .to_string(),
+        )
+        .create();
+
+    let profile_dir = tempdir().expect("profile dir");
+    let profile = profile_dir.path().join("web.yaml");
+    fs::write(
+        &profile,
+        "version: 1\nvault: infra\nfiles:\n  - secret: services/web/database\n    target: database-password\n  - secret: services/web/missing\n    target: missing\n",
+    )
+    .expect("profile");
+    let out = profile_dir.path().join("published");
+
+    authenticated_cmd(home_dir.path())
+        .args(["--addr", &server.url(), "--insecure", "delivery", "apply"])
+        .arg("--profile")
+        .arg(&profile)
+        .arg("--out")
+        .arg(&out)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "one or more delivery profile secrets were unavailable",
+        ))
+        .stderr(predicate::str::contains("must-not-be-published").not());
+
+    assert!(!out.join("current").exists());
+    assert!(!out.join("generations").exists());
+}
+
+#[test]
+fn delivery_apply_enforces_sink_capacity_before_publication() {
+    let home_dir = tempdir().expect("tempdir");
+    let mut server = Server::new();
+    server
+        .mock("POST", "/v1/vaults/infra/secrets/batch/get")
+        .with_status(200)
+        .with_body(
+            json!([{
+                "path": "services/web/database",
+                "status": "ok",
+                "secret": {
+                    "item_id": "00000000-0000-0000-0000-000000000001",
+                    "path": "/services/web/database",
+                    "vault_id": "infra",
+                    "value": "too-large-for-this-sink",
+                    "policy": "default",
+                    "version": 3
+                }
+            }])
+            .to_string(),
+        )
+        .create();
+
+    let profile_dir = tempdir().expect("profile dir");
+    let profile = profile_dir.path().join("web.yaml");
+    fs::write(
+        &profile,
+        "version: 1\nvault: infra\nfiles:\n  - secret: services/web/database\n    target: database-password\n",
+    )
+    .expect("profile");
+    let out = profile_dir.path().join("published");
+
+    authenticated_cmd(home_dir.path())
+        .args(["--addr", &server.url(), "--insecure", "delivery", "apply"])
+        .arg("--profile")
+        .arg(&profile)
+        .arg("--out")
+        .arg(&out)
+        .args(["--max-total-bytes", "8"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains(
+            "delivery profile values exceed sink capacity",
+        ))
+        .stderr(predicate::str::contains("too-large-for-this-sink").not());
+
+    assert!(!out.exists());
+}
+
+#[test]
 fn render_command_renders_template() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
