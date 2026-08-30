@@ -648,6 +648,10 @@ async fn retype_item_command(
         device_id: provision_device.id,
         created_at: item.updated_at,
     };
+    item_repo
+        .authorize_type_retype_in(&mut tx, item.id, &from_type_id, &to_type_id)
+        .await
+        .map_err(db_error("item_retype_authorization_failed"))?;
     let affected = item_repo
         .update_in(&mut tx, &item)
         .await

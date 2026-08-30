@@ -16,7 +16,7 @@ use std::time::Duration;
 use uuid::Uuid;
 use zann_core::{Change, ChangeOp, ChangeType};
 use zann_crypto::vault_crypto as core_crypto;
-use zann_db::repo::ChangeRepo;
+use zann_db::repo::{ChangeRepo, ItemRepo};
 use zann_db::PgPool;
 
 use client_workflow_support::{login_payload, TestApp};
@@ -522,6 +522,86 @@ async fn shared_push_rejects_type_changes_without_mutating_item_history_or_chang
             after.try_get::<i64, _>(column).expect("after number")
         );
     }
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn item_type_retype_authorization_is_transaction_local_and_exactly_scoped() {
+    let app = TestApp::new_with_smk().await;
+    let registration = app
+        .register("scoped-type-retype@example.com", "password")
+        .await;
+    let token = registration["access_token"].as_str().expect("token");
+    let vault = app.create_shared_vault(token, "scoped-type-retype").await;
+    let vault_id = Uuid::parse_str(vault["id"].as_str().expect("vault id")).expect("vault uuid");
+    let item_id = Uuid::now_v7();
+    let (status, created) = app
+        .send_json(
+            Method::POST,
+            "/v1/sync/shared/push",
+            Some(token),
+            json!({
+                "vault_id": vault_id,
+                "changes": [{
+                    "item_id": item_id,
+                    "operation": ChangeType::Create.as_i32(),
+                    "path": "scoped-retype",
+                    "name": "scoped-retype",
+                    "type_id": "login",
+                    "payload": login_payload("before"),
+                }],
+            }),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "create: {created:?}");
+
+    for (authorized_item_id, authorized_from, authorized_to) in [
+        (Uuid::now_v7(), "login", "kv"),
+        (item_id, "note", "kv"),
+        (item_id, "login", "note"),
+    ] {
+        assert_retype_authorization_rejected(
+            &app.pool,
+            item_id,
+            authorized_item_id,
+            authorized_from,
+            authorized_to,
+        )
+        .await;
+    }
+
+    let repo = ItemRepo::new(&app.pool);
+    let mut tx = app.pool.begin().await.expect("begin exact retype");
+    repo.authorize_type_retype_in(&mut tx, item_id, "login", "kv")
+        .await
+        .expect("authorize exact retype");
+    update_item_type_for_trigger_test(&mut tx, item_id, "kv").await;
+    raw_sql("SET CONSTRAINTS ALL IMMEDIATE")
+        .execute(&mut *tx)
+        .await
+        .expect("exactly scoped retype must pass deferred trigger");
+    tx.rollback().await.expect("roll back exact retype probe");
+
+    let row = sqlx_core::query::query::<Postgres>(
+        r#"
+        SELECT
+            type_id,
+            version,
+            (SELECT COUNT(*) FROM changes WHERE item_id = items.id) AS change_count
+        FROM items
+        WHERE id = $1
+        "#,
+    )
+    .bind(item_id)
+    .fetch_one(&app.pool)
+    .await
+    .expect("item after scoped retype probes");
+    assert_eq!(row.try_get::<String, _>("type_id").expect("type"), "login");
+    assert_eq!(row.try_get::<i64, _>("version").expect("version"), 1);
+    assert_eq!(
+        row.try_get::<i64, _>("change_count").expect("change count"),
+        1
+    );
 }
 
 #[tokio::test]
@@ -2563,6 +2643,54 @@ async fn rejected_migration_constraint(pool: &PgPool) -> String {
         .and_then(|error| error.constraint())
         .expect("migration error constraint")
         .to_string()
+}
+
+async fn assert_retype_authorization_rejected(
+    pool: &PgPool,
+    item_id: Uuid,
+    authorized_item_id: Uuid,
+    authorized_from: &str,
+    authorized_to: &str,
+) {
+    let repo = ItemRepo::new(pool);
+    let mut tx = pool.begin().await.expect("begin rejected retype");
+    repo.authorize_type_retype_in(&mut tx, authorized_item_id, authorized_from, authorized_to)
+        .await
+        .expect("set mismatched retype authorization");
+    update_item_type_for_trigger_test(&mut tx, item_id, "kv").await;
+    let error = raw_sql("SET CONSTRAINTS ALL IMMEDIATE")
+        .execute(&mut *tx)
+        .await
+        .expect_err("mismatched retype authorization must fail closed");
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|error| error.constraint()),
+        Some("items_type_immutable")
+    );
+    tx.rollback().await.expect("roll back rejected retype");
+}
+
+async fn update_item_type_for_trigger_test(
+    tx: &mut sqlx_core::transaction::Transaction<'_, Postgres>,
+    item_id: Uuid,
+    type_id: &str,
+) {
+    sqlx_core::query::query::<Postgres>(
+        r#"
+        UPDATE items
+        SET type_id = $2,
+            version = version + 1,
+            row_version = row_version + 1,
+            updated_at = clock_timestamp()
+        WHERE id = $1
+        "#,
+    )
+    .bind(item_id)
+    .bind(type_id)
+    .execute(&mut **tx)
+    .await
+    .expect("stage item type update");
 }
 
 fn cursor_seq(value: &serde_json::Value) -> i64 {
