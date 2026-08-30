@@ -120,7 +120,7 @@ impl State {
                             let sync_error = storage
                                 .map(|storage| local::sync(&facade, Some(storage)))
                                 .and_then(Result::err);
-                            local::items(&facade, None).map(|page| (page, sync_error))
+                            local::items(&facade, None, None).map(|page| (page, sync_error))
                         })
                         .await,
                     )
@@ -158,7 +158,7 @@ impl State {
                     let sync_error = storage
                         .map(|storage| local::sync(&facade, Some(storage)))
                         .and_then(Result::err);
-                    local::items(&facade, None).map(|page| (page, sync_error))
+                    local::items(&facade, None, None).map(|page| (page, sync_error))
                 })
                 .await,
             )

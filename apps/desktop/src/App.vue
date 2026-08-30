@@ -898,12 +898,6 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="h-full">
-    <div
-      v-if="altRevealAll"
-      class="fixed bottom-4 right-4 z-50 rounded-full border border-[var(--border-color)] bg-[var(--bg-secondary)]/90 px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] shadow-lg"
-    >
-      Alt reveal
-    </div>
     <KeepAlive>
       <AppShell
         v-if="showMain"

@@ -62,6 +62,11 @@ The planned crates identify accepted extraction boundaries. Until they exist:
 - new cross-client flow policy MUST introduce `zann-flows` first; a bug fix to
   an existing duplicated flow stays within MIG-006, adds parity coverage and
   MUST NOT expand either implementation;
+- `zann-app` is a frozen transitional implementation package under MIG-008. It
+  may retain only its existing backup, snapshot and verification modules while
+  those use cases are ported to `zann-client::app`; it MUST NOT acquire auth,
+  session, sync, item, vault or storage orchestration, remote transport, config
+  ownership or platform dependencies;
 - a PR that introduces the planned crate updates the map from **planned** to
   **active** and adds dependency/conformance coverage.
 

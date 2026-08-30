@@ -6,18 +6,19 @@
 
 use std::path::PathBuf;
 
+use cosmic::dialog::file_chooser::{self, FileFilter};
 use cosmic::iced::{Alignment, Length, Task};
 use cosmic::{theme, widget, Element};
 use zann_ffi::{
-    BackupExportReport, RememberedUnlockFfi, SnapshotFfi, SnapshotRestoreFfi, StorageSummaryFfi,
-    VerifyReportFfi,
+    ApplePasswordsImportReportFfi, ApplePasswordsPreflightFfi, BackupExportReport,
+    RememberedUnlockFfi, SnapshotFfi, SnapshotRestoreFfi, StorageSummaryFfi, VerifyReportFfi,
 };
 use zann_ui_core::settings::{AUTO_LOCK_MINUTES, CLIPBOARD_SECONDS, REVEAL_SECONDS};
 use zann_ui_core::{DevicePreferences, SettingsSection, LANGUAGES};
 
 use crate::backend::local;
 use crate::backend::off_thread;
-use crate::i18n::t;
+use crate::i18n::{t, t_args};
 use crate::preferences::Change;
 use crate::session::Session;
 
@@ -38,6 +39,10 @@ pub struct State {
     /// Result of the last export, kept on screen so the path can be read off
     /// and the file found.
     exported: Option<BackupExportReport>,
+    apple_selection: Option<AppleSelection>,
+    apple_imported: Option<ApplePasswordsImportReportFfi>,
+    import_target_storage_id: String,
+    refresh_vault_on_close: bool,
     snapshots: Vec<SnapshotFfi>,
     restore_target: String,
     /// The snapshot a restore has been asked for but not yet confirmed.
@@ -48,9 +53,16 @@ pub struct State {
 }
 
 #[derive(Clone, Debug)]
+pub struct AppleSelection {
+    path: String,
+    preflight: ApplePasswordsPreflightFfi,
+}
+
+#[derive(Clone, Debug)]
 pub struct Loaded {
     remembered: RememberedUnlockFfi,
     storages: Vec<StorageSummaryFfi>,
+    current_storage_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +77,10 @@ pub enum Message {
     Forget,
     Export,
     Exported(Result<BackupExportReport, String>),
+    ChooseApplePasswords,
+    ApplePrepared(Result<Option<AppleSelection>, String>),
+    ImportApplePasswords,
+    AppleImported(Result<ApplePasswordsImportReportFfi, String>),
     Snapshot,
     Snapshots(Result<Vec<SnapshotFfi>, String>),
     /// Ask for a restore. Shows the confirmation; does not touch anything.
@@ -79,6 +95,7 @@ pub enum Message {
     AddServer,
     Open(String),
     Close,
+    CloseLoaded(Result<local::ItemsPage, String>),
 }
 
 pub enum Outcome {
@@ -88,7 +105,9 @@ pub enum Outcome {
     Sync(String),
     AddServer,
     Open(String),
-    Close,
+    Close {
+        page: Option<local::ItemsPage>,
+    },
     /// A restore replaced the database, so the vault is locked and the screens
     /// behind this one are showing rows that no longer exist.
     Restored {
@@ -110,6 +129,10 @@ impl State {
             busy: false,
             error: None,
             exported: None,
+            apple_selection: None,
+            apple_imported: None,
+            import_target_storage_id: "local".to_string(),
+            refresh_vault_on_close: false,
             snapshots: Vec::new(),
             restore_target: String::new(),
             confirming: None,
@@ -127,6 +150,7 @@ impl State {
                         Ok(Loaded {
                             remembered: local::remembered_unlock(&facade)?,
                             storages: local::storages(&facade)?,
+                            current_storage_id: local::current_storage_id(&facade),
                         })
                     })
                     .await,
@@ -149,6 +173,7 @@ impl State {
             Message::Loaded(Ok(loaded)) => {
                 self.remembered = Some(loaded.remembered);
                 self.storages = loaded.storages;
+                self.import_target_storage_id = loaded.current_storage_id;
             }
             Message::Loaded(Err(err)) => self.error = Some(err),
             Message::RememberedLoaded(result) => {
@@ -249,6 +274,103 @@ impl State {
             }
 
             Message::Exported(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
+            Message::ChooseApplePasswords => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                self.busy = true;
+                self.error = None;
+                let facade = session.facade();
+                return Outcome::Task(cosmic::task::future(async move {
+                    let result = match file_chooser::open::Dialog::new()
+                        .title(t("settings.backups.importAppleAction"))
+                        .filter(FileFilter::new("Apple Passwords CSV").glob("*.csv"))
+                        .open_file()
+                        .await
+                    {
+                        Ok(response) => match response.url().to_file_path() {
+                            Ok(path) => {
+                                let path = path.display().to_string();
+                                let worker_path = path.clone();
+                                off_thread(move || {
+                                    local::apple_passwords_preflight(&facade, worker_path)
+                                })
+                                .await
+                                .map(|preflight| Some(AppleSelection { path, preflight }))
+                            }
+                            Err(()) => Err(t("settings.backups.importApplePickerLocalOnly")),
+                        },
+                        Err(file_chooser::Error::Cancelled) => Ok(None),
+                        Err(err) => Err(t_args(
+                            "settings.backups.importApplePickerFailed",
+                            &[("error", &err.to_string())],
+                        )),
+                    };
+                    Message::ApplePrepared(result)
+                }));
+            }
+
+            Message::ApplePrepared(Ok(Some(selection))) => {
+                self.busy = false;
+                self.apple_selection = Some(selection);
+                self.apple_imported = None;
+            }
+
+            Message::ApplePrepared(Ok(None)) => self.busy = false,
+
+            Message::ApplePrepared(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
+
+            Message::ImportApplePasswords => {
+                if self.busy {
+                    return Outcome::None;
+                }
+                let Some(selection) = self.apple_selection.clone() else {
+                    return Outcome::None;
+                };
+                if self.import_target_storage_id.is_empty() {
+                    self.error = Some(t("settings.backups.importAppleTargetMissing"));
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                let target_storage_id = self.import_target_storage_id.clone();
+                self.busy = true;
+                self.error = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::AppleImported(
+                        off_thread(move || {
+                            local::import_apple_passwords(
+                                &facade,
+                                selection.path,
+                                target_storage_id,
+                            )
+                        })
+                        .await,
+                    )
+                }));
+            }
+
+            Message::AppleImported(Ok(report)) => {
+                self.busy = false;
+                self.apple_selection = None;
+                self.apple_imported = Some(report);
+                self.refresh_vault_on_close = true;
+                let target_is_remote = self.storages.iter().any(|storage| {
+                    storage.id == self.import_target_storage_id && storage.kind == "remote"
+                });
+                if target_is_remote && !self.syncing {
+                    self.syncing = true;
+                    return Outcome::Sync(self.import_target_storage_id.clone());
+                }
+            }
+
+            Message::AppleImported(Err(err)) => {
                 self.busy = false;
                 self.error = Some(err);
             }
@@ -365,7 +487,30 @@ impl State {
             }
             Message::AddServer => return Outcome::AddServer,
             Message::Open(target) => return Outcome::Open(target),
-            Message::Close => return Outcome::Close,
+            Message::Close => {
+                if !self.refresh_vault_on_close {
+                    return Outcome::Close { page: None };
+                }
+                if self.busy || self.syncing {
+                    return Outcome::None;
+                }
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::CloseLoaded(
+                        off_thread(move || local::items(&facade, None, None)).await,
+                    )
+                }));
+            }
+            Message::CloseLoaded(Ok(page)) => {
+                self.busy = false;
+                return Outcome::Close { page: Some(page) };
+            }
+            Message::CloseLoaded(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
+            }
         }
         Outcome::None
     }
@@ -404,9 +549,13 @@ impl State {
             SettingsSection::Backups => self.backups(),
             SettingsSection::About => self.about(),
         };
+        let mut close = widget::button::standard(t("wizard.back"));
+        if !self.busy && !self.syncing {
+            close = close.on_press(Message::Close);
+        }
         let header = widget::row::with_capacity(2)
             .push(widget::text::title3(t("settings.title")).width(Length::Fill))
-            .push(widget::button::standard(t("wizard.back")).on_press(Message::Close))
+            .push(close)
             .align_y(Alignment::Center);
         let columns = widget::row::with_capacity(3)
             .push(widget::container(sections).width(Length::Fixed(180.0)))
@@ -628,6 +777,99 @@ impl State {
             column = column.push(widget::text::caption(t(
                 "settings.backups.plainWarningDesc",
             )));
+        }
+
+        column = column
+            .push(widget::text::title3(t("settings.backups.importAppleTitle")))
+            .push(widget::text::caption(t("settings.backups.importAppleDesc")));
+
+        let target_name = self
+            .storages
+            .iter()
+            .find(|storage| storage.id == self.import_target_storage_id)
+            .map_or_else(
+                || t("settings.backups.importTargetLocal"),
+                |storage| storage.name.clone(),
+            );
+        column = column
+            .push(widget::text::caption(t_args(
+                "settings.backups.importAppleTarget",
+                &[("storage", &target_name)],
+            )))
+            .push(widget::text::caption(t(
+                "settings.backups.importApplePlainWarning",
+            )));
+
+        if let Some(selection) = self.apple_selection.as_ref() {
+            let total = selection.preflight.total_rows.to_string();
+            let importable = selection.preflight.importable_items.to_string();
+            column = column
+                .push(widget::text::caption(t_args(
+                    "settings.backups.importAppleSelected",
+                    &[("path", &selection.path)],
+                )))
+                .push(widget::text::body(t_args(
+                    "settings.backups.importApplePreview",
+                    &[("total", &total), ("importable", &importable)],
+                )));
+            if selection.preflight.duplicate_rows > 0 {
+                let duplicates = selection.preflight.duplicate_rows.to_string();
+                column = column.push(widget::text::caption(t_args(
+                    "settings.backups.importAppleDuplicates",
+                    &[("count", &duplicates)],
+                )));
+            }
+            if selection.preflight.invalid_rows > 0 {
+                let invalid = selection.preflight.invalid_rows.to_string();
+                column = column.push(widget::text::caption(t_args(
+                    "settings.backups.importAppleInvalidPreview",
+                    &[("count", &invalid)],
+                )));
+            }
+
+            let mut confirm = widget::button::suggested(if self.busy {
+                t("common.loading")
+            } else {
+                t("settings.backups.importAppleConfirm")
+            });
+            let mut choose_another =
+                widget::button::standard(t("settings.backups.importAppleCancel"));
+            if !self.busy {
+                confirm = confirm.on_press(Message::ImportApplePasswords);
+                choose_another = choose_another.on_press(Message::ChooseApplePasswords);
+            }
+            column = column.push(
+                widget::row::with_capacity(2)
+                    .push(confirm)
+                    .push(choose_another)
+                    .spacing(spacing.space_xs),
+            );
+        } else {
+            let mut choose = widget::button::standard(if self.busy {
+                t("common.loading")
+            } else {
+                t("settings.backups.importAppleAction")
+            });
+            if !self.busy {
+                choose = choose.on_press(Message::ChooseApplePasswords);
+            }
+            column = column.push(choose);
+        }
+
+        if let Some(report) = self.apple_imported.as_ref() {
+            let imported = report.imported_items.to_string();
+            let renamed = report.renamed_items.to_string();
+            let invalid = report.skipped_invalid.to_string();
+            column = column
+                .push(widget::text::body(t("settings.backups.importAppleSuccess")))
+                .push(widget::text::caption(t_args(
+                    "settings.backups.importAppleCounts",
+                    &[("imported", &imported), ("renamed", &renamed)],
+                )))
+                .push(widget::text::caption(t_args(
+                    "settings.backups.importAppleInvalid",
+                    &[("skipped", &invalid)],
+                )));
         }
 
         column = column

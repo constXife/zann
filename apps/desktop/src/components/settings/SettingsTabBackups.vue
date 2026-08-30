@@ -184,7 +184,7 @@ const runAppleImport = async () => {
         <div>{{ t("settings.backups.importedSkippedMissing", { missingStorages: importResult.skipped_missing_storage, missingVaults: importResult.skipped_missing_vault, deleted: importResult.skipped_deleted }) }}</div>
       </div>
       <div v-if="importAppleResult" class="rounded-lg bg-[var(--bg-tertiary)] p-3 text-xs text-[var(--text-secondary)] space-y-1">
-        <div>{{ t("settings.backups.importAppleCounts", { imported: importAppleResult.imported_items, skipped: importAppleResult.skipped_existing }) }}</div>
+        <div>{{ t("settings.backups.importAppleCounts", { imported: importAppleResult.imported_items, renamed: importAppleResult.renamed_items }) }}</div>
         <div>{{ t("settings.backups.importAppleInvalid", { skipped: importAppleResult.skipped_invalid }) }}</div>
       </div>
     </div>

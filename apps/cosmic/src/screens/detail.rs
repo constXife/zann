@@ -2,7 +2,7 @@
 //!
 //! Owned by [`super::vault`], which wraps these messages in its own.
 
-use cosmic::iced::{Alignment, Length};
+use cosmic::iced::{Alignment, Background, Color, Length, Vector};
 use cosmic::{theme, widget, Element};
 use zann_crypto::secrets::{EncryptedPayload, FieldKind};
 use zann_ffi::ItemDetail;
@@ -18,7 +18,7 @@ const FIELD_ORDER: &[&str] = &[
 #[derive(Clone, Debug)]
 pub enum Message {
     ToggleReveal(usize),
-    Copy(String),
+    Copy { index: usize, value: String },
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +40,7 @@ pub struct Detail {
     pub path: String,
     pub type_id: String,
     pub fields: Vec<Field>,
+    copied_field: Option<usize>,
 }
 
 impl Detail {
@@ -83,6 +84,7 @@ impl Detail {
             path: detail.path,
             type_id: detail.type_id,
             fields,
+            copied_field: None,
         })
     }
 
@@ -98,12 +100,22 @@ impl Detail {
                     field.revealed = !field.revealed;
                 }
             }
-            // The shell owns the clipboard; vault forwards this one upwards.
-            Message::Copy(_) => {}
+            // The shell owns the clipboard; vault forwards the value upwards.
+            // Keeping the index here lets the view acknowledge the exact block
+            // without changing its text or geometry.
+            Message::Copy { index, .. } => self.copied_field = Some(index),
         }
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
+    pub fn copied_field(&self) -> Option<usize> {
+        self.copied_field
+    }
+
+    pub fn clear_copy_feedback(&mut self) {
+        self.copied_field = None;
+    }
+
+    pub fn view(&self, reveal_all: bool) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let mut column = widget::column::with_capacity(self.fields.len() + 2)
             .push(widget::text::caption(format!(
@@ -117,10 +129,28 @@ impl Detail {
         }
 
         for (index, field) in self.fields.iter().enumerate() {
-            column = column.push(field_view(index, field, spacing.space_xxs));
+            column = column.push(field_view(
+                index,
+                field,
+                reveal_all,
+                self.copied_field == Some(index),
+                spacing.space_xxs,
+            ));
         }
 
         column.into()
+    }
+}
+
+impl Field {
+    /// The explicit eye button persists for the configured timeout; holding
+    /// the platform reveal modifier is ephemeral and never mutates that state.
+    pub fn display_value(&self, reveal_all: bool) -> String {
+        if self.masked && !self.revealed && !reveal_all {
+            "•".repeat(self.value.chars().count().clamp(4, 24))
+        } else {
+            self.value.clone()
+        }
     }
 }
 
@@ -178,20 +208,23 @@ fn label_for(key: &str) -> String {
     }
 }
 
-fn field_view(index: usize, field: &Field, gap: u16) -> Element<'_, Message> {
+fn field_view(
+    index: usize,
+    field: &Field,
+    reveal_all: bool,
+    copied: bool,
+    gap: u16,
+) -> Element<'_, Message> {
     let rows = widget::column::with_capacity(2)
         .push(widget::text::caption(field.label.clone()))
         .spacing(gap);
 
     if let Some(params) = field.totp.as_ref() {
-        return rows.push(totp_view(params)).into();
+        return rows.push(totp_view(index, params, copied)).into();
     }
 
-    let shown = if field.masked && !field.revealed {
-        "•".repeat(field.value.chars().count().clamp(4, 24))
-    } else {
-        field.value.clone()
-    };
+    let shown = field.display_value(reveal_all);
+    let shown_revealed = field.revealed || reveal_all;
 
     let value: Element<'_, Message> = if field.multiline {
         widget::text::body(shown).into()
@@ -199,14 +232,32 @@ fn field_view(index: usize, field: &Field, gap: u16) -> Element<'_, Message> {
         widget::text::monotext(shown).into()
     };
 
-    let mut controls = widget::row::with_capacity(3)
+    let copy_content = widget::row::with_capacity(2)
         .push(widget::container(value).width(Length::Fill))
+        .push(
+            widget::icon::from_name("edit-copy-symbolic")
+                .size(16)
+                .icon(),
+        )
+        .spacing(gap)
+        .align_y(Alignment::Center);
+    let copy_block = widget::button::custom(copy_content)
+        .class(copy_block_class(copied))
+        .padding([8, 10])
+        .width(Length::Fill)
+        .on_press(Message::Copy {
+            index,
+            value: field.value.clone(),
+        });
+
+    let mut controls = widget::row::with_capacity(2)
+        .push(copy_block)
         .spacing(gap)
         .align_y(Alignment::Center);
 
     if field.masked {
         controls = controls.push(
-            widget::button::icon(widget::icon::from_name(if field.revealed {
+            widget::button::icon(widget::icon::from_name(if shown_revealed {
                 "image-red-eye-symbolic"
             } else {
                 "document-properties-symbolic"
@@ -215,20 +266,15 @@ fn field_view(index: usize, field: &Field, gap: u16) -> Element<'_, Message> {
         );
     }
 
-    controls = controls.push(
-        widget::button::icon(widget::icon::from_name("edit-copy-symbolic"))
-            .on_press(Message::Copy(field.value.clone())),
-    );
-
     rows.push(controls).into()
 }
 
-fn totp_view(params: &TotpParams) -> Element<'_, Message> {
+fn totp_view(index: usize, params: &TotpParams, copied: bool) -> Element<'_, Message> {
     let spacing = theme::spacing();
     match generate_totp(params) {
         Ok(code) => {
             let split = code.code.len() / 2;
-            widget::row::with_capacity(3)
+            let content = widget::row::with_capacity(3)
                 .push(
                     widget::container(widget::text::title3(format!(
                         "{} {}",
@@ -242,13 +288,100 @@ fn totp_view(params: &TotpParams) -> Element<'_, Message> {
                     code.remaining_seconds
                 )))
                 .push(
-                    widget::button::icon(widget::icon::from_name("edit-copy-symbolic"))
-                        .on_press(Message::Copy(code.code.clone())),
+                    widget::icon::from_name("edit-copy-symbolic")
+                        .size(16)
+                        .icon(),
                 )
                 .spacing(spacing.space_xs)
-                .align_y(Alignment::Center)
+                .align_y(Alignment::Center);
+            widget::button::custom(content)
+                .class(copy_block_class(copied))
+                .padding([8, 10])
+                .width(Length::Fill)
+                .on_press(Message::Copy {
+                    index,
+                    value: code.code,
+                })
                 .into()
         }
         Err(err) => widget::text::caption(format!("invalid one-time code: {err}")).into(),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum CopyBlockVisual {
+    Active,
+    Hovered,
+    Pressed,
+    Disabled,
+}
+
+/// A copyable value should read as a quiet inspector surface, not as a stack
+/// of primary form buttons. Hover makes the affordance clear; copying tints
+/// the same surface without changing any content or geometry.
+fn copy_block_class(copied: bool) -> theme::Button {
+    theme::Button::Custom {
+        active: Box::new(move |focused, theme| {
+            copy_block_style(theme, copied, CopyBlockVisual::Active, focused)
+        }),
+        disabled: Box::new(move |theme| {
+            copy_block_style(theme, copied, CopyBlockVisual::Disabled, false)
+        }),
+        hovered: Box::new(move |focused, theme| {
+            copy_block_style(theme, copied, CopyBlockVisual::Hovered, focused)
+        }),
+        pressed: Box::new(move |focused, theme| {
+            copy_block_style(theme, copied, CopyBlockVisual::Pressed, focused)
+        }),
+    }
+}
+
+fn copy_block_style(
+    theme: &cosmic::Theme,
+    copied: bool,
+    visual: CopyBlockVisual,
+    focused: bool,
+) -> widget::button::Style {
+    let cosmic = theme.cosmic();
+    let component = &cosmic.primary(theme.transparent).component;
+    let accent = Color::from(cosmic.accent_color());
+    let mut accent_fill = accent;
+    accent_fill.a = match visual {
+        CopyBlockVisual::Active | CopyBlockVisual::Disabled => 0.12,
+        CopyBlockVisual::Hovered => 0.16,
+        CopyBlockVisual::Pressed => 0.22,
+    };
+
+    let background = if copied {
+        accent_fill
+    } else {
+        Color::from(match visual {
+            CopyBlockVisual::Active => component.base,
+            CopyBlockVisual::Hovered => component.hover,
+            CopyBlockVisual::Pressed => component.pressed,
+            CopyBlockVisual::Disabled => component.disabled,
+        })
+    };
+    let content_color = if matches!(visual, CopyBlockVisual::Disabled) {
+        Color::from(component.on_disabled)
+    } else {
+        Color::from(component.on)
+    };
+
+    widget::button::Style {
+        shadow_offset: Vector::default(),
+        background: Some(Background::Color(background)),
+        border_radius: cosmic.radius_s().into(),
+        border_width: 1.0,
+        border_color: if copied {
+            accent
+        } else {
+            component.divider.into()
+        },
+        outline_width: if focused { 1.0 } else { 0.0 },
+        outline_color: if focused { accent } else { Color::TRANSPARENT },
+        icon_color: Some(if copied { accent } else { content_color }),
+        text_color: Some(content_color),
+        overlay: None,
     }
 }

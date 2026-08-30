@@ -97,7 +97,7 @@ optional mitigation for two clients racing over `~/.zann`; the extension makes i
 load-bearing, and it resolves both problems at once:
 
 ```
-zann-daemon  (session, ~/.zann, zann-app)
+zann-daemon  (session, ~/.zann, zann-client::app)
     ├── COSMIC UI
     ├── native messaging host → browser extension
     └── CLI and future clients
@@ -138,7 +138,7 @@ entirely on it.
    stubs. Only three call sites touch the OS (`rfd::FileDialog`); everything else
    already takes a path. COSMIC gains export.
 2. Add snapshots (`VACUUM INTO`) and `verify`.
-3. Proceed with the safety net and the sync reconciliation from ADR 0003, in that
+3. Proceed with the guardrails and sync migration in accepted ADR 0001, in that
    order — both now sit behind a working export.
 4. Put COSMIC fully on the facade; it gains create, edit and delete.
 5. Native-messaging host plus daemon; browser extension for password and TOTP

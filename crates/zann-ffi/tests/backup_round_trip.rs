@@ -9,7 +9,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use uuid::Uuid;
-use zann_ffi::{create_core, BackupImportOptions};
+use zann_ffi::{create_core, BackupImportOptions, ItemsFilter, Page};
 
 fn temp_root(tag: &str) -> PathBuf {
     let root = std::env::temp_dir().join(format!("zann-ffi-backup-{}-{}", tag, Uuid::now_v7()));
@@ -147,6 +147,89 @@ fn exporting_a_locked_vault_fails() {
 
     core.backup_export_file(root.join("nope.json").display().to_string())
         .expect_err("a locked vault must not export");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn apple_passwords_preflight_and_import_keep_distinct_duplicate_titles() {
+    let root = temp_root("apple");
+    let core = create_core(db_url(&root)).expect("create core");
+    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+        .expect("initialize master password");
+    let csv = root.join("Passwords.csv");
+    fs::write(
+        &csv,
+        concat!(
+            "Title,URL,Username,Password,Notes,OTPAuth\n",
+            "Mail,https://example.com,first@example.com,first-password,,\n",
+            "Mail,https://example.org,second@example.com,second-password,,\n",
+            ",https://invalid.example,invalid,password,,\n",
+        ),
+    )
+    .expect("write Apple CSV");
+
+    let preflight = core
+        .apple_passwords_preflight_file(csv.display().to_string())
+        .expect("preflight");
+    assert_eq!(preflight.total_rows, 3);
+    assert_eq!(preflight.importable_items, 2);
+    assert_eq!(preflight.duplicate_rows, 1);
+    assert_eq!(preflight.invalid_rows, 1);
+
+    let target_storage_id = core.current_storage_id();
+    let report = core
+        .apple_passwords_import_file(
+            csv.display().to_string(),
+            BackupImportOptions {
+                target_storage_id: Some(target_storage_id),
+            },
+        )
+        .expect("import");
+    assert_eq!(report.imported_items, 2);
+    assert_eq!(report.renamed_items, 1);
+    assert_eq!(report.skipped_invalid, 1);
+
+    let page = core
+        .items_list(
+            ItemsFilter {
+                query: None,
+                include_deleted: false,
+            },
+            Page {
+                limit: 10,
+                cursor: None,
+            },
+        )
+        .expect("list imported items");
+    let mut usernames = page
+        .items
+        .iter()
+        .map(|item| {
+            let detail = core.item_get(item.id.clone()).expect("read imported item");
+            let payload: serde_json::Value =
+                serde_json::from_str(&detail.payload_json).expect("decode imported payload");
+            payload["fields"]["username"]["value"]
+                .as_str()
+                .expect("username value")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    usernames.sort();
+    assert_eq!(
+        usernames,
+        vec![
+            "first@example.com".to_string(),
+            "second@example.com".to_string()
+        ]
+    );
+    let mut paths = page
+        .items
+        .into_iter()
+        .map(|item| item.path)
+        .collect::<Vec<_>>();
+    paths.sort();
+    assert_eq!(paths, vec!["Mail".to_string(), "Mail (2)".to_string()]);
 
     let _ = fs::remove_dir_all(&root);
 }

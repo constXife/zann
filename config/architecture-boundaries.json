@@ -47,6 +47,7 @@
   ],
   "forbidden_shared_dependencies": ["clap", "libcosmic", "tauri"],
   "forbidden_direct_dependencies": {
+    "zann-app": ["argon2", "dirs", "keyring", "reqwest", "zann-client", "zann-client-sqlite", "zann-keystore"],
     "zann-cli": ["argon2", "keyring", "reqwest", "zann-crypto", "zann-db", "zann-ffi"],
     "zann-client": ["argon2"],
     "zann-client-sqlite": ["argon2", "dirs", "keyring", "reqwest", "sqlx-core", "sqlx-postgres", "sqlx-sqlite", "zann-keystore"],
@@ -108,6 +109,13 @@
       "grandfathered": true,
       "review_on": "2026-11-16",
       "removal_condition": "SQLx row mapping and features move from zann-core to zann-db"
+    },
+    "MIG-008": {
+      "owner": "@constXife",
+      "tracking": "ADR-0001 phase 7",
+      "grandfathered": true,
+      "review_on": "2026-11-16",
+      "removal_condition": "Backup, snapshot and verification use cases are exposed through zann-client::app ports and the transitional zann-app package is removed"
     }
   },
   "dependency_exceptions": [
@@ -224,6 +232,22 @@
     }
   ],
   "source_rules": [
+    {
+      "name": "transitional-zann-app-module-surface",
+      "exception_ids": ["MIG-008"],
+      "pattern": "pub mod [a-z_][a-z_0-9]*[;{]",
+      "roots": ["crates/zann-app/src"],
+      "max_matches": 4,
+      "allowed_files": ["crates/zann-app/src/lib.rs"]
+    },
+    {
+      "name": "transitional-zann-app-no-canonical-capabilities",
+      "exception_ids": [],
+      "pattern": "pub (async )?fn (auth|login|logout|refresh|sync|items?|vaults?|storages?|connect|unlock|lock)[_A-Za-z0-9]*[(]|pub mod (auth|session|sync|items?|vaults?|storages?|flows)[;{]",
+      "roots": ["crates/zann-app/src"],
+      "max_matches": 0,
+      "allowed_files": []
+    },
     {
       "name": "clean-client-no-legacy-api",
       "exception_ids": [],

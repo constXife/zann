@@ -3,9 +3,10 @@
 use std::sync::Arc;
 
 use zann_ffi::{
-    create_core_at_file_location, AppStatusFfi, BackupExportReport, CoreFacade, HardwareKeyFfi,
-    ItemDetail, ItemSummary, ItemsFilter, Page, RememberedUnlockFfi, SnapshotFfi,
-    SnapshotRestoreFfi, StorageSummaryFfi, VerifyReportFfi,
+    create_core_at_file_location, AppStatusFfi, ApplePasswordsImportReportFfi,
+    ApplePasswordsPreflightFfi, BackupExportReport, BackupImportOptions, CoreFacade,
+    HardwareKeyFfi, ItemDetail, ItemSummary, ItemsFilter, Page, RememberedUnlockFfi, SnapshotFfi,
+    SnapshotRestoreFfi, StorageSummaryFfi, VaultSummaryFfi, VerifyReportFfi,
 };
 use zann_ui_core::ItemCounts;
 
@@ -26,6 +27,13 @@ pub struct ItemsPage {
     pub next_cursor: Option<String>,
     pub total: u64,
     pub counts: ItemCounts,
+}
+
+/// Vault choices for the current storage and the facade's active selection.
+#[derive(Debug, Clone)]
+pub struct VaultContext {
+    pub vaults: Vec<VaultSummaryFfi>,
+    pub current_vault_id: Option<String>,
 }
 
 /// Opens an explicitly resolved database and reports what the app should show first.
@@ -80,11 +88,19 @@ pub fn storages(facade: &CoreFacade) -> Result<Vec<StorageSummaryFfi>, String> {
     facade.list_storages().map_err(|err| err.to_string())
 }
 
-pub fn items(facade: &CoreFacade, cursor: Option<String>) -> Result<ItemsPage, String> {
+pub fn current_storage_id(facade: &CoreFacade) -> String {
+    facade.current_storage_id()
+}
+
+pub fn items(
+    facade: &CoreFacade,
+    cursor: Option<String>,
+    query: Option<String>,
+) -> Result<ItemsPage, String> {
     let page = facade
         .items_list(
             ItemsFilter {
-                query: None,
+                query,
                 // The trash category filters client-side, so deleted items have
                 // to be part of the page.
                 include_deleted: true,
@@ -101,6 +117,32 @@ pub fn items(facade: &CoreFacade, cursor: Option<String>) -> Result<ItemsPage, S
         next_cursor: page.next_cursor,
         total: page.total_count,
     })
+}
+
+pub fn vault_context(facade: &CoreFacade) -> Result<VaultContext, String> {
+    Ok(VaultContext {
+        vaults: facade.list_vaults().map_err(|err| err.to_string())?,
+        current_vault_id: facade.current_vault_id(),
+    })
+}
+
+/// Change the facade selection and load the first page as one UI operation.
+/// If loading fails, restore the old selection so the selector and list cannot
+/// silently point at different vaults.
+pub fn switch_vault(facade: &CoreFacade, vault_id: String) -> Result<ItemsPage, String> {
+    let previous = facade.current_vault_id();
+    facade
+        .set_current_vault(vault_id)
+        .map_err(|err| err.to_string())?;
+    match items(facade, None, None) {
+        Ok(page) => Ok(page),
+        Err(err) => {
+            if let Some(previous) = previous {
+                let _ = facade.set_current_vault(previous);
+            }
+            Err(err)
+        }
+    }
 }
 
 pub fn item_get(facade: &CoreFacade, id: String) -> Result<ItemDetail, String> {
@@ -150,6 +192,46 @@ pub fn export_backup(facade: &CoreFacade) -> Result<BackupExportReport, String> 
     facade
         .backup_export_file(String::new())
         .map_err(|err| err.to_string())
+}
+
+pub fn apple_passwords_preflight(
+    facade: &CoreFacade,
+    path: String,
+) -> Result<ApplePasswordsPreflightFfi, String> {
+    facade
+        .apple_passwords_preflight_file(path)
+        .map_err(|err| err.to_string())
+}
+
+pub fn import_apple_passwords(
+    facade: &CoreFacade,
+    path: String,
+    target_storage_id: String,
+) -> Result<ApplePasswordsImportReportFfi, String> {
+    let report = facade
+        .apple_passwords_import_file(
+            path,
+            BackupImportOptions {
+                target_storage_id: Some(target_storage_id.clone()),
+            },
+        )
+        .map_err(|err| err.to_string())?;
+
+    // The Apple export always belongs to the personal vault. Keep the open
+    // session aligned with the destination so closing Settings shows what was
+    // just imported instead of the previously active shared vault.
+    if facade.current_storage_id() == target_storage_id {
+        let personal = facade
+            .list_vaults()
+            .map_err(|err| err.to_string())?
+            .into_iter()
+            .find(|vault| vault.kind == "personal")
+            .ok_or_else(|| "personal vault not found after import".to_string())?;
+        facade
+            .set_current_vault(personal.id)
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(report)
 }
 
 /// Copy the database aside now, whatever the schedule says.

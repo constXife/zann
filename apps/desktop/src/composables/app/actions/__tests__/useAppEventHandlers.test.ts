@@ -2,7 +2,10 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { defineComponent, ref, computed, nextTick } from "vue";
 import { render, cleanup } from "@testing-library/vue";
 import type { Settings } from "../../../../types";
-import { useAppEventHandlers } from "../useAppEventHandlers";
+import {
+  temporaryRevealKeyForPlatform,
+  useAppEventHandlers,
+} from "../useAppEventHandlers";
 
 const listeners = new Map<string, () => void>();
 
@@ -87,6 +90,12 @@ afterEach(() => {
 });
 
 describe("useAppEventHandlers", () => {
+  it("uses Option on Apple platforms and Shift where Alt switches apps", () => {
+    expect(temporaryRevealKeyForPlatform("MacIntel")).toBe("Alt");
+    expect(temporaryRevealKeyForPlatform("Linux x86_64")).toBe("Shift");
+    expect(temporaryRevealKeyForPlatform("Win32")).toBe("Shift");
+  });
+
   it("shows a tray notice toast when requested", async () => {
     const { showToast } = renderHandlers();
     await nextTick();

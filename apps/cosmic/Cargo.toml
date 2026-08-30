@@ -20,6 +20,7 @@ dirs = "5"
 # renderer on the GPU, like the system COSMIC apps.
 libcosmic = { git = "https://github.com/pop-os/libcosmic", rev = "dc1cf9f00cbe2902a52166492654bb9fee8a73d1", features = [
   "wgpu",
+  "xdg-portal",
 ] }
 open = "5"
 serde_json = "1"

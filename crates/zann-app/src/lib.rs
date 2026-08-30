@@ -1,11 +1,10 @@
-//! Headless application layer.
+//! Transitional local maintenance implementations.
 //!
-//! The logic every Zann client needs and no client should own: no toolkit, no
-//! `$HOME`, no file dialogs. Callers hand in an open pool, an unlocked key, and
-//! the paths they have already resolved.
-//!
-//! Today this is backup, snapshots and verification; ADR 0003 moves session,
-//! items, vaults, storage, history and sync orchestration here in later phases.
+//! `zann-client::app` is the sole application-composition owner. This crate is
+//! frozen under MIG-008 at the three implementations extracted before that
+//! decision: backup, snapshots and verification. Callers hand in an open pool,
+//! an unlocked key and explicit paths; no new session, auth, sync, item, vault
+//! or storage orchestration belongs here.
 
 pub mod backup;
 pub mod secure_file;
@@ -13,8 +12,8 @@ pub mod snapshot;
 pub mod verify;
 
 pub use backup::{
-    BackupCtx, BackupError, ExportReport, ImportOutcome, ImportReport, PlainBackupItem,
-    PlainBackupStorage, PlainBackupVault,
+    ApplePasswordsImportReport, ApplePasswordsPreflight, BackupCtx, BackupError, ExportReport,
+    ImportOutcome, ImportReport, PlainBackupItem, PlainBackupStorage, PlainBackupVault,
 };
 pub use snapshot::{RestoreOutcome, RetentionPolicy, Snapshot, SnapshotError};
 pub use verify::{VerifyError, VerifyProblem, VerifyReport};

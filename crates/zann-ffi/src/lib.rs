@@ -194,6 +194,7 @@ pub struct VaultStatus {
 pub struct VaultSummaryFfi {
     pub id: String,
     pub name: String,
+    pub kind: String,
     pub is_default: bool,
     pub item_count: u64,
 }
@@ -293,9 +294,9 @@ pub struct ItemUpdate {
 pub struct BackupImportOptions {
     /// Storage to import into. `None` — or the string `"local"` — means the
     /// local-only storage. A remote storage is not supported here yet: that
-    /// path still needs the token and HTTP machinery that has not moved into
-    /// `zann-app`, and it reports `Unimplemented` rather than importing into
-    /// the wrong place.
+    /// path is not exposed through the canonical `zann-client::app` facade yet,
+    /// and it reports `Unimplemented` rather than importing into the wrong
+    /// place.
     pub target_storage_id: Option<String>,
 }
 
@@ -314,6 +315,21 @@ pub struct BackupImportReport {
     pub skipped_missing_storage: u64,
     pub skipped_missing_vault: u64,
     pub skipped_deleted: u64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ApplePasswordsPreflightFfi {
+    pub total_rows: u64,
+    pub importable_items: u64,
+    pub duplicate_rows: u64,
+    pub invalid_rows: u64,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ApplePasswordsImportReportFfi {
+    pub imported_items: u64,
+    pub renamed_items: u64,
+    pub skipped_invalid: u64,
 }
 
 /// A point-in-time copy of the vault database. Still encrypted — unlike the
@@ -714,6 +730,10 @@ impl CoreFacade {
             result.push(VaultSummaryFfi {
                 id: vault.id.to_string(),
                 name: vault.name,
+                kind: match vault.kind {
+                    zann_core::VaultKind::Personal => "personal".to_string(),
+                    zann_core::VaultKind::Shared => "shared".to_string(),
+                },
                 is_default: vault.is_default,
                 item_count: count as u64,
             });
@@ -842,6 +862,56 @@ impl CoreFacade {
                 "backup import into a remote storage".to_string(),
             )),
         }
+    }
+
+    /// Inspect an Apple Passwords CSV before the UI asks for confirmation.
+    /// Secret values are streamed through the parser and are not retained in
+    /// the returned summary.
+    pub fn apple_passwords_preflight_file(
+        &self,
+        path: String,
+    ) -> CoreResult<ApplePasswordsPreflightFfi> {
+        let path = path.trim();
+        if path.is_empty() {
+            return Err(CoreError::InvalidArgument(
+                "Apple Passwords CSV path is empty".to_string(),
+            ));
+        }
+        let report = zann_app::backup::apple_passwords_preflight(Path::new(path))?;
+        Ok(ApplePasswordsPreflightFfi {
+            total_rows: report.total_rows as u64,
+            importable_items: report.importable_items as u64,
+            duplicate_rows: report.duplicate_rows as u64,
+            invalid_rows: report.invalid_rows as u64,
+        })
+    }
+
+    /// Import an Apple Passwords CSV into the selected personal vault. Existing
+    /// paths and repeated titles are suffixed instead of overwritten or lost.
+    pub fn apple_passwords_import_file(
+        &self,
+        path: String,
+        options: BackupImportOptions,
+    ) -> CoreResult<ApplePasswordsImportReportFfi> {
+        let ctx = self.backup_ctx()?;
+        let path = path.trim();
+        if path.is_empty() {
+            return Err(CoreError::InvalidArgument(
+                "Apple Passwords CSV path is empty".to_string(),
+            ));
+        }
+        let report = self
+            .runtime
+            .block_on(zann_app::backup::apple_passwords_import(
+                &ctx,
+                PathBuf::from(path),
+                options.target_storage_id,
+            ))?;
+        Ok(ApplePasswordsImportReportFfi {
+            imported_items: report.imported_items as u64,
+            renamed_items: report.renamed_items as u64,
+            skipped_invalid: report.skipped_invalid as u64,
+        })
     }
 
     /// Export every local vault to a plain backup file. An empty `path` writes
