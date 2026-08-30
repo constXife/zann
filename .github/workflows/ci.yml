@@ -21,6 +21,7 @@ jobs:
       client_architecture: ${{ steps.filter.outputs.client_architecture }}
       shared_clients: ${{ steps.filter.outputs.shared_clients }}
       cosmic: ${{ steps.filter.outputs.cosmic }}
+      nix_module: ${{ steps.filter.outputs.nix_module }}
       ci: ${{ steps.filter.outputs.ci }}
     steps:
       - name: Checkout
@@ -144,6 +145,10 @@ jobs:
               - 'apps/cosmic/**'
               - 'flake.nix'
               - 'flake.lock'
+            nix_module:
+              - 'flake.nix'
+              - 'flake.lock'
+              - 'nix/**'
             ci:
               - '.github/workflows/**'
               - '.github/actions/**'
@@ -647,6 +652,27 @@ jobs:
           df -h /
       - name: Build the package
         run: nix build .#zann-cosmic --no-link --print-build-logs
+
+  nix-module:
+    needs: changes
+    if: needs.changes.outputs.nix_module == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Nix
+        uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+      - name: Evaluate flake checks
+        run: nix flake check --no-build
+      - name: Run Zann delivery VM smoke test
+        run: nix build .#checks.x86_64-linux.zann-delivery-vm --no-link --print-build-logs
+      - name: Run Zann delivery real-server VM integration test
+        run: nix build .#checks.x86_64-linux.zann-delivery-real-server-vm --no-link --print-build-logs
 
   licenses:
     needs: changes

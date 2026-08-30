@@ -50,6 +50,7 @@ does not authorize another temporary implementation.
 | Connect, startup, unlock and idle flows | `zann-flows` **(planned)** | Tauri and COSMIC adapters; future clients | typed effect executor, operation IDs and cancellation | flow reducers in components/screens; toolkit, runtime, filesystem or transport in `zann-flows` |
 | Categories, folders, filters and item-detail projection | `zann-ui-core` | Tauri/Vue, COSMIC and future clients | canonical schema/catalogue data, translation and abstract-icon resolver | category, ordering, masking/copy/reveal and TOTP parsing policy in components or screens |
 | Streaming backup/import/export use cases | `zann-client::app` | Tauri and future CLI commands | `Read`/`Write`, progress and cancellation ports | file dialogs in shared services; parsing/encryption policy in Tauri commands |
+| Runtime secret projection and delivery policy | `zann-client::delivery` **(active; composed by `app`)** | CLI, local daemon and deployment adapters | versioned value-free profiles, injected process launcher and atomic generation sink | resolved secrets in Nix evaluation/store, persisted profiles, argv, logs or audit events; profile resolution, collision or serialization policy in adapters |
 | FFI interoperability | `zann-ffi` | non-Rust consumers | binding generation, runtime bridge and FFI-safe DTO conversion | domain, auth, sync, config, crypto or presentation policy in `zann-ffi`; Rust clients using FFI as their internal API |
 | Platform interaction and rendering | each shell | that shell | clipboard, tray, biometrics, browser, file dialogs, terminal IO, toolkit icon mapping | platform APIs in shared domain/application/presentation crates |
 
@@ -67,6 +68,12 @@ The planned crates identify accepted extraction boundaries. Until they exist:
   those use cases are ported to `zann-client::app`; it MUST NOT acquire auth,
   session, sync, item, vault or storage orchestration, remote transport, config
   ownership or platform dependencies;
+- runtime secret delivery follows
+  [ADR 0004](../adr/0004-machine-secret-plane.md) and
+  [ADR 0005](../adr/0005-runtime-secret-delivery-profiles.md). Profile parsing,
+  normalization, bounds and collision policy belong to the active DB-free
+  `zann-client::delivery` slice and MUST NOT be copied into a shell or
+  deployment adapter. Existing `run` and `materialize` remain migration inputs;
 - a PR that introduces the planned crate updates the map from **planned** to
   **active** and adds dependency/conformance coverage.
 

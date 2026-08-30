@@ -29,6 +29,8 @@ export default defineConfig({
           label: "Server",
           items: [
             { label: "Server Guide", link: "/server/" },
+            { label: "Machine Secrets", link: "/machine-secrets/" },
+            { label: "NixOS Delivery", link: "/nixos-delivery/" },
             { label: "Threat Model", link: "/server-threat-model/" },
           ],
         },

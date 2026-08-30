@@ -139,6 +139,37 @@
   "feature_contracts": [
     {
       "package": "zann-client",
+      "feature": "delivery",
+      "required_members": [],
+      "forbidden_members": [
+        "remote",
+        "session",
+        "sync",
+        "config",
+        "app",
+        "dep:reqwest",
+        "dep:tokio",
+        "dep:zann-core",
+        "dep:zann-crypto",
+        "dep:zann-keystore",
+        "zann-db",
+        "dep:zann-db"
+      ],
+      "forbidden_packages": [
+        "reqwest",
+        "tokio",
+        "zann-core",
+        "zann-crypto",
+        "zann-db",
+        "sqlx-core",
+        "sqlx-sqlite",
+        "libsqlite3-sys",
+        "zann-keystore",
+        "keyring"
+      ]
+    },
+    {
+      "package": "zann-client",
       "feature": "config",
       "required_members": [],
       "forbidden_members": [
@@ -208,7 +239,7 @@
     {
       "package": "zann-client",
       "feature": "app",
-      "required_members": ["sync"],
+      "required_members": ["sync", "delivery"],
       "forbidden_members": [
         "dep:dirs",
         "dep:sqlx",
