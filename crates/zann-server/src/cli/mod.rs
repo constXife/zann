@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_provision_retype_item_requires_explicit_source_format_and_types() {
+    fn parse_provision_retype_item_requires_explicit_current_history_formats_and_types() {
         let cli = Cli::parse_from([
             "zann-server",
             "provision",
@@ -267,6 +267,8 @@ mod tests {
             "secret",
             "--source-format",
             "typed-v1",
+            "--history-source-format",
+            "legacy-secret-v0",
             "--to-type-id",
             "kv",
             "--if-exists",
@@ -283,12 +285,16 @@ mod tests {
             command.source_format,
             provision::RetypeSourceFormat::TypedV1
         );
+        assert_eq!(
+            command.history_source_format,
+            provision::RetypeSourceFormat::LegacySecretV0
+        );
         assert_eq!(command.to_type_id, "kv");
         assert!(command.if_exists);
     }
 
     #[test]
-    fn parse_provision_retype_item_rejects_missing_source_format() {
+    fn parse_provision_retype_item_rejects_missing_history_source_format() {
         let result = Cli::try_parse_from([
             "zann-server",
             "provision",
@@ -299,6 +305,8 @@ mod tests {
             "rlyeh/yogg/mcp",
             "--from-type-id",
             "secret",
+            "--source-format",
+            "typed-v1",
             "--to-type-id",
             "kv",
         ]);

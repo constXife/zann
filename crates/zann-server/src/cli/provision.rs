@@ -111,6 +111,12 @@ pub struct RetypeItemArgs {
         help = "Required plaintext encoding of the source item and its retained history"
     )]
     pub source_format: RetypeSourceFormat,
+    #[arg(
+        long,
+        value_enum,
+        help = "Required plaintext encoding of retained history that predates this command"
+    )]
+    pub history_source_format: RetypeSourceFormat,
     #[arg(long, help = "Replacement item type")]
     pub to_type_id: String,
     #[arg(
@@ -598,7 +604,10 @@ async fn retype_item_command(
     if item.type_id != from_type_id {
         return Err("type_mismatch".to_string());
     }
-    if args.source_format == RetypeSourceFormat::LegacySecretV0 && from_type_id != SECRET_TYPE_ID {
+    if (args.source_format == RetypeSourceFormat::LegacySecretV0
+        || args.history_source_format == RetypeSourceFormat::LegacySecretV0)
+        && from_type_id != SECRET_TYPE_ID
+    {
         return Err("invalid_source_format".to_string());
     }
 
@@ -610,7 +619,7 @@ async fn retype_item_command(
         args.source_format,
     )?;
     prepare_retyped_payload(&mut payload, &from_type_id, &to_type_id)?;
-    let history = ItemHistory {
+    let current_history = ItemHistory {
         id: Uuid::now_v7(),
         item_id: item.id,
         payload_enc: item.payload_enc.clone(),
@@ -626,7 +635,7 @@ async fn retype_item_command(
         created_at: Utc::now(),
     };
     history_repo
-        .create_in(&mut tx, &history)
+        .create_in(&mut tx, &current_history)
         .await
         .map_err(db_error("item_history_create_failed"))?;
     history_repo
@@ -639,12 +648,18 @@ async fn retype_item_command(
         .await
         .map_err(db_error("item_history_lock_failed"))?;
     for history in history {
+        let source_format = retype_history_source_format(
+            history.id,
+            current_history.id,
+            args.source_format,
+            args.history_source_format,
+        );
         let mut history_payload = decrypt_payload_for_retype(
             settings,
             &vault,
             item.id,
             &history.payload_enc,
-            args.source_format,
+            source_format,
         )?;
         prepare_retyped_payload(&mut history_payload, &from_type_id, &to_type_id)?;
         let history_payload_enc = encrypt_payload(settings, &vault, item.id, &history_payload)?;
@@ -1314,18 +1329,27 @@ fn decrypt_payload(
     item_id: Uuid,
     payload_enc: &[u8],
 ) -> Result<EncryptedPayload, String> {
+    let payload_bytes = decrypt_payload_bytes(settings, vault, item_id, payload_enc)?;
+    EncryptedPayload::from_bytes(&payload_bytes)
+        .map_err(|err| format!("payload_decode_failed: {err}"))
+}
+
+fn decrypt_payload_bytes(
+    settings: &settings::Settings,
+    vault: &Vault,
+    item_id: Uuid,
+    payload_enc: &[u8],
+) -> Result<Zeroizing<Vec<u8>>, String> {
     let smk = settings
         .server_master_key
         .as_ref()
         .ok_or_else(|| "server_master_key_missing".to_string())?;
     let vault_key = core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
         .map_err(|err| format!("vault_key_decrypt_failed: {err}"))?;
-    let payload_bytes = Zeroizing::new(
+    Ok(Zeroizing::new(
         core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item_id, payload_enc)
             .map_err(|err| format!("payload_decrypt_failed: {err}"))?,
-    );
-    EncryptedPayload::from_bytes(&payload_bytes)
-        .map_err(|err| format!("payload_decode_failed: {err}"))
+    ))
 }
 
 fn decrypt_payload_for_retype(
@@ -1335,16 +1359,8 @@ fn decrypt_payload_for_retype(
     payload_enc: &[u8],
     source_format: RetypeSourceFormat,
 ) -> Result<EncryptedPayload, String> {
-    let smk = settings
-        .server_master_key
-        .as_ref()
-        .ok_or_else(|| "server_master_key_missing".to_string())?;
-    let vault_key = core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
-        .map_err(|err| format!("vault_key_decrypt_failed: {err}"))?;
-    let payload_bytes =
-        core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item_id, payload_enc)
-            .map_err(|err| format!("payload_decrypt_failed: {err}"))?;
-    decode_retype_payload_bytes(payload_bytes, source_format)
+    let mut payload_bytes = decrypt_payload_bytes(settings, vault, item_id, payload_enc)?;
+    decode_retype_payload_bytes(std::mem::take(&mut *payload_bytes), source_format)
 }
 
 fn decode_retype_payload_bytes(
@@ -1360,6 +1376,19 @@ fn decode_retype_payload_bytes(
                 .map_err(|_| "payload_decode_failed: invalid_legacy_secret_v0".to_string())?;
             Ok(secret_payload_to_typed(&legacy))
         }
+    }
+}
+
+fn retype_history_source_format(
+    history_id: Uuid,
+    current_snapshot_id: Uuid,
+    current_format: RetypeSourceFormat,
+    retained_history_format: RetypeSourceFormat,
+) -> RetypeSourceFormat {
+    if history_id == current_snapshot_id {
+        current_format
+    } else {
+        retained_history_format
     }
 }
 
@@ -1510,8 +1539,8 @@ mod tests {
     use super::{
         decode_retype_payload_bytes, ensure_shared_server_vault, insert_provision_field,
         normalize_prefix, parse_ops, parse_ttl, prepare_retyped_payload, read_provision_secret,
-        stage_secret_file, update_history_version, write_secret_file, RetypeSourceFormat,
-        MAX_PROVISION_SECRET_BYTES,
+        retype_history_source_format, stage_secret_file, update_history_version, write_secret_file,
+        RetypeSourceFormat, MAX_PROVISION_SECRET_BYTES,
     };
     use crate::domains::secrets::service::{SECRET_POLICY_FIELD, SECRET_VALUE_FIELD};
     use chrono::Utc;
@@ -1689,6 +1718,29 @@ mod tests {
         assert_eq!(
             actual.fields["client_id"].value,
             "sentinel-provision-secret"
+        );
+    }
+
+    #[test]
+    fn retype_uses_current_format_only_for_the_new_current_snapshot() {
+        let current_snapshot_id = Uuid::now_v7();
+        assert_eq!(
+            retype_history_source_format(
+                current_snapshot_id,
+                current_snapshot_id,
+                RetypeSourceFormat::TypedV1,
+                RetypeSourceFormat::LegacySecretV0,
+            ),
+            RetypeSourceFormat::TypedV1
+        );
+        assert_eq!(
+            retype_history_source_format(
+                Uuid::now_v7(),
+                current_snapshot_id,
+                RetypeSourceFormat::TypedV1,
+                RetypeSourceFormat::LegacySecretV0,
+            ),
+            RetypeSourceFormat::LegacySecretV0
         );
     }
 
