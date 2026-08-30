@@ -26,11 +26,12 @@ pub(crate) use resolve::{
     resolve_path_arg, resolve_path_for_context, resolve_shared_item_id, resolve_vault_arg,
 };
 pub(crate) use types::{
-    ItemSummaryResponse, ItemsResponse, SecretResponse, SharedItemResponse, SharedItemsResponse,
-    SharedListJsonItem, SharedListJsonResponse, VaultListResponse,
+    ItemSummaryResponse, ItemsResponse, SharedItemResponse, SharedItemSummariesResponse,
+    SharedItemsResponse, SharedListJsonItem, SharedListJsonResponse, VaultListResponse,
 };
 pub(crate) use utils::{
     cursor_allows, encode_cursor, normalize_prefix, parse_cursor, parse_item_timestamp,
     parse_selector_if_present, parse_template, parse_template_placeholder, payload_or_error,
     prefix_match, secret_not_found_error, TemplateToken,
 };
+pub(crate) use zann_core::api::secrets::SecretResponse;

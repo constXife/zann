@@ -14,11 +14,15 @@ use tokio::sync::Mutex as TokioMutex;
 use tracing::debug;
 #[cfg(not(test))]
 use tracing::warn;
+use zeroize::Zeroizing;
+
+const MAX_SERVICE_ACCOUNT_AUTH_RESPONSE_BYTES: usize = 64 * 1024;
+const SERVICE_ACCOUNT_LOGIN_PATH: &str = "/v1/auth/service-account";
 
 pub(crate) fn auth_headers(token: &str) -> anyhow::Result<HeaderMap> {
     if token.trim().is_empty() {
         anyhow::bail!(
-            "token is required (ZANN_TOKEN, --token, or config context). Docs: https://github.com/constXife/zann"
+            "token is required (--token-file, ZANN_SERVICE_TOKEN, or config context). Docs: https://github.com/constXife/zann"
         );
     }
     let mut headers = HeaderMap::new();
@@ -262,17 +266,41 @@ pub(crate) async fn exchange_service_account_token(
     addr: &str,
     token: &str,
 ) -> anyhow::Result<ServiceAccountAuthResponse> {
-    let url = format!("{}/v1/auth/service-account", addr.trim_end_matches('/'));
+    let url = format!(
+        "{}{}",
+        addr.trim_end_matches('/'),
+        SERVICE_ACCOUNT_LOGIN_PATH
+    );
     let payload = ServiceAccountAuthRequest {
         token: token.to_string(),
     };
-    let response = client.post(url).json(&payload).send().await?;
+    let mut response = client.post(url).json(&payload).send().await?;
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_default();
-        anyhow::bail!("Service account login failed: {status} {body}");
+        anyhow::bail!("service account login failed: {status}");
     }
-    Ok(response.json::<ServiceAccountAuthResponse>().await?)
+
+    if response
+        .content_length()
+        .is_some_and(|length| length > MAX_SERVICE_ACCOUNT_AUTH_RESPONSE_BYTES as u64)
+    {
+        anyhow::bail!("service account login response exceeded the size limit");
+    }
+
+    let mut body = Zeroizing::new(Vec::new());
+    while let Some(chunk) = response.chunk().await? {
+        let new_length = body
+            .len()
+            .checked_add(chunk.len())
+            .ok_or_else(|| anyhow::anyhow!("service account login response was too large"))?;
+        if new_length > MAX_SERVICE_ACCOUNT_AUTH_RESPONSE_BYTES {
+            anyhow::bail!("service account login response exceeded the size limit");
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    serde_json::from_slice::<ServiceAccountAuthResponse>(&body)
+        .map_err(|_| anyhow::anyhow!("service account login response was invalid"))
 }
 
 pub(crate) async fn ensure_access_token(
@@ -330,13 +358,14 @@ pub(crate) async fn ensure_access_token(
         return Ok(access_token);
     }
 
-    anyhow::bail!("access token not found; use --token or config set-context")
+    anyhow::bail!("access token not found; use --token-file or config set-context")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::modules::system::types::{CliConfig, CliContext, TokenEntry};
+    use reqwest as http;
     use std::collections::HashMap;
 
     #[test]
@@ -403,5 +432,60 @@ mod tests {
         .await?;
         assert_eq!(token, "access");
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn service_account_exchange_does_not_reflect_error_body() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", SERVICE_ACCOUNT_LOGIN_PATH)
+            .with_status(401)
+            .with_body("reflected-super-secret")
+            .create_async()
+            .await;
+
+        let error = match exchange_service_account_token(
+            &http::Client::new(),
+            &server.url(),
+            "zann_sa_test-secret",
+        )
+        .await
+        {
+            Ok(_) => panic!("exchange must fail"),
+            Err(error) => error,
+        };
+
+        mock.assert_async().await;
+        let message = error.to_string();
+        assert!(message.contains("401"));
+        assert!(!message.contains("reflected-super-secret"));
+    }
+
+    #[tokio::test]
+    async fn service_account_exchange_bounds_success_body() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", SERVICE_ACCOUNT_LOGIN_PATH)
+            .with_status(200)
+            .with_body("x".repeat(MAX_SERVICE_ACCOUNT_AUTH_RESPONSE_BYTES + 1))
+            .create_async()
+            .await;
+
+        let error = match exchange_service_account_token(
+            &http::Client::new(),
+            &server.url(),
+            "zann_sa_test-secret",
+        )
+        .await
+        {
+            Ok(_) => panic!("oversized response must fail"),
+            Err(error) => error,
+        };
+
+        mock.assert_async().await;
+        assert_eq!(
+            error.to_string(),
+            "service account login response exceeded the size limit"
+        );
     }
 }

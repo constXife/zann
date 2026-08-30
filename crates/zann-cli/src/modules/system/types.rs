@@ -22,8 +22,8 @@ pub struct CliConfig {
 /// `zann-ffi` creates an identity before any account exists, so it writes
 /// `email` and `salt_fingerprint` as null. Requiring strings here made every
 /// CLI command fail to parse a config written by the desktop or COSMIC client
-/// with `invalid type: null, expected a string`. Until ADR 0003's Ф6 gives the
-/// file one owner, every reader has to be this tolerant.
+/// with `invalid type: null, expected a string`. Until MIG-005 moves this
+/// consumer to Config v2's single writer, every legacy reader must be tolerant.
 pub struct IdentityConfig {
     #[serde(default)]
     pub email: Option<String>,

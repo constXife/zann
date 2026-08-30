@@ -8,7 +8,7 @@ use crate::modules::auth::{
     delete_access_token, delete_service_token, load_access_token, load_service_token,
     store_access_token, store_service_token,
 };
-use crate::{DEFAULT_ADDR, SERVICE_ACCOUNT_PREFIX, TOKEN_MANUAL};
+use crate::{read_token_file, DEFAULT_ADDR, SERVICE_ACCOUNT_PREFIX, TOKEN_MANUAL};
 
 pub(crate) fn handle_config_command(
     args: ConfigArgs,
@@ -30,7 +30,12 @@ pub(crate) fn handle_config_command(
             if let Some(addr) = args.addr {
                 entry.addr = addr;
             }
-            if let Some(token) = args.token {
+            if let Some(token) = args
+                .token_file
+                .as_deref()
+                .map(read_token_file)
+                .transpose()?
+            {
                 let name = args.token_name.unwrap_or_else(|| TOKEN_MANUAL.to_string());
                 let is_service_account = token.starts_with(SERVICE_ACCOUNT_PREFIX);
                 entry.tokens.insert(

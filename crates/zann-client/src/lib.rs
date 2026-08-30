@@ -13,6 +13,8 @@ pub mod oidc;
 pub mod probe;
 #[cfg(feature = "remote")]
 mod remote;
+#[cfg(feature = "remote")]
+pub mod secrets;
 #[cfg(feature = "session")]
 pub mod session;
 #[cfg(feature = "sync")]

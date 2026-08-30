@@ -1,19 +1,23 @@
 use crate::cli_args::*;
 use crate::modules::auth::{clear_keyring_mock, load_access_token, lock_keyring_tests_sync};
 use crate::modules::system::{handle_config_command, CliConfig};
+use std::fs;
 
 #[test]
 fn config_commands_manage_contexts_and_tokens() {
     let _guard = lock_keyring_tests_sync();
     clear_keyring_mock();
     let mut config = CliConfig::default();
+    let token_dir = tempfile::tempdir().expect("token tempdir");
+    let token_file = token_dir.path().join("token");
+    fs::write(&token_file, "token-main\n").expect("write token");
 
     handle_config_command(
         ConfigArgs {
             command: ConfigCommand::SetContext(SetContextArgs {
                 name: "cfg".to_string(),
                 addr: Some("https://example.com".to_string()),
-                token: Some("token-main".to_string()),
+                token_file: Some(token_file.to_string_lossy().into_owned()),
                 token_name: Some("main".to_string()),
                 vault: Some("vault-1".to_string()),
             }),

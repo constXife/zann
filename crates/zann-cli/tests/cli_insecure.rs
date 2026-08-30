@@ -11,7 +11,6 @@ fn http_requires_insecure_flag() {
         // See cli_commands.rs: HOME alone does not isolate a test from a
         // developer machine that has Zann configured.
         .env_remove("ZANN_ADDR")
-        .env_remove("ZANN_TOKEN")
         .env_remove("ZANN_TOKEN_FILE")
         .env_remove("ZANN_SERVER_FINGERPRINT")
         .env_remove("ZANN_SERVICE_TOKEN")

@@ -23,14 +23,12 @@ pub struct SharedMaterializeArgs {
     pub prefix: Option<String>,
     #[arg(long, help = "Output directory")]
     pub out: PathBuf,
-    #[arg(long, help = "Single field to materialize")]
-    pub field: Option<String>,
+    #[arg(long, help = "Single field to materialize (required)")]
+    pub field: String,
     #[arg(long, help = "Skip files that are already up to date")]
     pub skip_unchanged: bool,
-    #[arg(long, help = "Write files non-atomically (overwrite in place)")]
-    pub no_atomic: bool,
-    #[arg(long, default_value_t = 200, help = "Max items per page")]
-    pub limit: i64,
+    #[arg(long, default_value_t = 100, help = "Machine-secret page size (1-100)")]
+    pub limit: usize,
 }
 
 #[derive(Args)]
