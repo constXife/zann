@@ -83,7 +83,7 @@ For server-side bootstrap flows, use the privileged provisioning helpers:
 zann-server provision ensure-system-user
 zann-server provision ensure-vault --name Infrastructure --slug infra
 zann-server provision set-field --vault infra --path rlyeh/yogg/grafana --key value --kind password --value-file /run/secrets/grafana-client-secret
-zann-server provision retype-item --vault infra --path rlyeh/yogg/mcp --from-type-id secret --source-format typed-v1 --to-type-id kv --if-exists
+zann-server provision retype-item --vault infra --path rlyeh/yogg/mcp --from-type-id secret --source-format typed-v1 --history-source-format typed-v1 --to-type-id kv --if-exists
 zann-server provision ensure-token yogg-grafana infra:rlyeh/yogg/grafana read --write-token-file /run/secrets/yogg-zann-token
 ```
 
@@ -100,10 +100,15 @@ stored type no longer matches the server contract. It decrypts and validates
 the current payload and every retained history payload in memory, rewrites only
 their type metadata, and commits the item, history, and change record in one
 transaction. No plaintext is printed or written to disk. Both source and target
-types and the versioned source encoding are required; a mismatch fails closed.
-Use `--source-format typed-v1` for the canonical typed encoding. The explicit
-`legacy-secret-v0` format is restricted to source type `secret` and migrates the
-historical strict `{value, policy, meta}` shape. It is not recognized by normal
+types and the versioned current and retained-history encodings are required; a
+mismatch fails closed. Use `--source-format typed-v1` and
+`--history-source-format typed-v1` when both generations use the canonical
+typed encoding. The explicit `legacy-secret-v0` format is restricted to source
+type `secret` and migrates the historical strict `{value, policy, meta}` shape.
+It may be selected independently for retained history after a current payload
+has already been rewritten. The current payload snapshot created by the command
+always uses `--source-format`; only history that predates the command uses
+`--history-source-format`. Neither historical encoding is recognized by normal
 secret API reads. Use `--if-exists` only for idempotent bootstrap migrations
 where an absent legacy item is expected.
 

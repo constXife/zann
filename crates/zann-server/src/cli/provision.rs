@@ -2,7 +2,6 @@ use chrono::Utc;
 use clap::{Args, Subcommand, ValueEnum};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
-use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde::Serialize;
 use sqlx_core::types::Json as SqlxJson;
 use std::fmt;
@@ -24,7 +23,7 @@ use zann_db::repo::{
     VaultMemberRepo, VaultRepo,
 };
 use zann_db::PgPool;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 use crate::cli::tokens::{SERVICE_ACCOUNT_PREFIX, SERVICE_ACCOUNT_PREFIX_LEN, SYSTEM_OWNER_EMAIL};
 use crate::domains::auth::core::passwords;
@@ -59,8 +58,6 @@ pub enum ProvisionCommand {
     SetField(SetFieldArgs),
     #[command(about = "Retype a shared server-encrypted item without exposing its plaintext")]
     RetypeItem(RetypeItemArgs),
-    #[command(about = "Inspect only the JSON schema of an encrypted item and its history")]
-    InspectItemPayloadSchema(InspectItemPayloadSchemaArgs),
     #[command(about = "Ensure a service account token exists for a scoped shared vault target")]
     EnsureToken(EnsureTokenArgs),
 }
@@ -114,6 +111,12 @@ pub struct RetypeItemArgs {
         help = "Required plaintext encoding of the source item and its retained history"
     )]
     pub source_format: RetypeSourceFormat,
+    #[arg(
+        long,
+        value_enum,
+        help = "Required plaintext encoding of retained history that predates this command"
+    )]
+    pub history_source_format: RetypeSourceFormat,
     #[arg(long, help = "Replacement item type")]
     pub to_type_id: String,
     #[arg(
@@ -121,14 +124,6 @@ pub struct RetypeItemArgs {
         help = "Return successfully when the item does not exist (for idempotent bootstrap)"
     )]
     pub if_exists: bool,
-}
-
-#[derive(Debug, Clone, Args)]
-pub struct InspectItemPayloadSchemaArgs {
-    #[arg(long, help = "Vault name or ID")]
-    pub vault: String,
-    #[arg(long, help = "Shared item path")]
-    pub path: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -219,33 +214,6 @@ struct RetypeItemOutput {
 }
 
 #[derive(Debug, Serialize)]
-struct ItemPayloadSchemaOutput {
-    vault_id: String,
-    item_id: String,
-    path: String,
-    current: PayloadJsonShape,
-    history: Vec<HistoryPayloadJsonShape>,
-}
-
-#[derive(Debug, Serialize)]
-struct HistoryPayloadJsonShape {
-    version: i64,
-    shape: PayloadJsonShape,
-}
-
-#[derive(Debug, Serialize)]
-struct PayloadJsonShape {
-    root_kind: &'static str,
-    object_members: Vec<PayloadJsonMember>,
-}
-
-#[derive(Debug, Serialize)]
-struct PayloadJsonMember {
-    name: String,
-    value_kind: &'static str,
-}
-
-#[derive(Debug, Serialize)]
 struct EnsureTokenOutput {
     status: &'static str,
     token_written: bool,
@@ -293,9 +261,6 @@ pub(crate) async fn run(
         ProvisionCommand::EnsureVault(command) => ensure_vault_command(settings, db, command).await,
         ProvisionCommand::SetField(command) => set_field_command(settings, db, command).await,
         ProvisionCommand::RetypeItem(command) => retype_item_command(settings, db, command).await,
-        ProvisionCommand::InspectItemPayloadSchema(command) => {
-            inspect_item_payload_schema_command(settings, db, command).await
-        }
         ProvisionCommand::EnsureToken(command) => ensure_token_command(settings, db, command).await,
     }
 }
@@ -639,7 +604,10 @@ async fn retype_item_command(
     if item.type_id != from_type_id {
         return Err("type_mismatch".to_string());
     }
-    if args.source_format == RetypeSourceFormat::LegacySecretV0 && from_type_id != SECRET_TYPE_ID {
+    if (args.source_format == RetypeSourceFormat::LegacySecretV0
+        || args.history_source_format == RetypeSourceFormat::LegacySecretV0)
+        && from_type_id != SECRET_TYPE_ID
+    {
         return Err("invalid_source_format".to_string());
     }
 
@@ -651,7 +619,7 @@ async fn retype_item_command(
         args.source_format,
     )?;
     prepare_retyped_payload(&mut payload, &from_type_id, &to_type_id)?;
-    let history = ItemHistory {
+    let current_history = ItemHistory {
         id: Uuid::now_v7(),
         item_id: item.id,
         payload_enc: item.payload_enc.clone(),
@@ -667,7 +635,7 @@ async fn retype_item_command(
         created_at: Utc::now(),
     };
     history_repo
-        .create_in(&mut tx, &history)
+        .create_in(&mut tx, &current_history)
         .await
         .map_err(db_error("item_history_create_failed"))?;
     history_repo
@@ -680,12 +648,18 @@ async fn retype_item_command(
         .await
         .map_err(db_error("item_history_lock_failed"))?;
     for history in history {
+        let source_format = retype_history_source_format(
+            history.id,
+            current_history.id,
+            args.source_format,
+            args.history_source_format,
+        );
         let mut history_payload = decrypt_payload_for_retype(
             settings,
             &vault,
             item.id,
             &history.payload_enc,
-            args.source_format,
+            source_format,
         )?;
         prepare_retyped_payload(&mut history_payload, &from_type_id, &to_type_id)?;
         let history_payload_enc = encrypt_payload(settings, &vault, item.id, &history_payload)?;
@@ -748,51 +722,6 @@ async fn retype_item_command(
         to_type_id,
     };
     print_json(&output)
-}
-
-async fn inspect_item_payload_schema_command(
-    settings: &settings::Settings,
-    db: &PgPool,
-    args: &InspectItemPayloadSchemaArgs,
-) -> Result<(), String> {
-    let path = normalize_path(&args.path);
-    if path.is_empty() {
-        return Err("invalid_path".to_string());
-    }
-
-    let vault = resolve_vault(db, args.vault.trim()).await?;
-    ensure_shared_server_vault(&vault)?;
-    let item = ItemRepo::new(db)
-        .get_by_vault_path(vault.id, &path)
-        .await
-        .map_err(db_error("item_lookup_failed"))?
-        .ok_or_else(|| "item_not_found".to_string())?;
-    if item.deleted_at.is_some() || item.sync_status != SyncStatus::Active {
-        return Err("path_in_use".to_string());
-    }
-
-    let current_bytes = decrypt_payload_bytes(settings, &vault, item.id, &item.payload_enc)?;
-    let current = inspect_payload_json_shape(&current_bytes);
-    let history = ItemHistoryRepo::new(db)
-        .list_by_item_limit(item.id, ITEM_HISTORY_LIMIT)
-        .await
-        .map_err(db_error("item_history_lookup_failed"))?;
-    let mut history_shapes = Vec::with_capacity(history.len());
-    for history in history {
-        let bytes = decrypt_payload_bytes(settings, &vault, item.id, &history.payload_enc)?;
-        history_shapes.push(HistoryPayloadJsonShape {
-            version: history.version,
-            shape: inspect_payload_json_shape(&bytes),
-        });
-    }
-
-    print_json(&ItemPayloadSchemaOutput {
-        vault_id: vault.id.to_string(),
-        item_id: item.id.to_string(),
-        path: item.path,
-        current,
-        history: history_shapes,
-    })
 }
 
 async fn ensure_token_command(
@@ -1450,166 +1379,16 @@ fn decode_retype_payload_bytes(
     }
 }
 
-fn inspect_payload_json_shape(bytes: &[u8]) -> PayloadJsonShape {
-    serde_json::from_slice::<PayloadJsonShape>(bytes).unwrap_or(PayloadJsonShape {
-        root_kind: "invalid-json",
-        object_members: Vec::new(),
-    })
-}
-
-impl<'de> serde::Deserialize<'de> for PayloadJsonShape {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(PayloadJsonShapeVisitor)
-    }
-}
-
-struct PayloadJsonShapeVisitor;
-
-impl<'de> Visitor<'de> for PayloadJsonShapeVisitor {
-    type Value = PayloadJsonShape;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("any JSON value")
-    }
-
-    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-    where
-        M: MapAccess<'de>,
-    {
-        let mut object_members = Vec::new();
-        while let Some(name) = map.next_key::<String>()? {
-            let value_kind = map.next_value::<JsonValueKind>()?.0;
-            object_members.push(PayloadJsonMember { name, value_kind });
-        }
-        object_members.sort_by(|left, right| left.name.cmp(&right.name));
-        Ok(PayloadJsonShape {
-            root_kind: "object",
-            object_members,
-        })
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        while sequence.next_element::<IgnoredAny>()?.is_some() {}
-        Ok(PayloadJsonShape {
-            root_kind: "array",
-            object_members: Vec::new(),
-        })
-    }
-
-    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
-        Ok(non_object_json_shape("boolean"))
-    }
-
-    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
-        Ok(non_object_json_shape("number"))
-    }
-
-    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
-        Ok(non_object_json_shape("number"))
-    }
-
-    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
-        Ok(non_object_json_shape("number"))
-    }
-
-    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
-        Ok(non_object_json_shape("string"))
-    }
-
-    fn visit_string<E>(self, mut value: String) -> Result<Self::Value, E> {
-        value.zeroize();
-        Ok(non_object_json_shape("string"))
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(non_object_json_shape("null"))
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(non_object_json_shape("null"))
-    }
-}
-
-fn non_object_json_shape(root_kind: &'static str) -> PayloadJsonShape {
-    PayloadJsonShape {
-        root_kind,
-        object_members: Vec::new(),
-    }
-}
-
-struct JsonValueKind(&'static str);
-
-impl<'de> serde::Deserialize<'de> for JsonValueKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(JsonValueKindVisitor)
-    }
-}
-
-struct JsonValueKindVisitor;
-
-impl<'de> Visitor<'de> for JsonValueKindVisitor {
-    type Value = JsonValueKind;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("any JSON value")
-    }
-
-    fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
-    where
-        M: MapAccess<'de>,
-    {
-        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
-        Ok(JsonValueKind("object"))
-    }
-
-    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
-    where
-        A: SeqAccess<'de>,
-    {
-        while sequence.next_element::<IgnoredAny>()?.is_some() {}
-        Ok(JsonValueKind("array"))
-    }
-
-    fn visit_bool<E>(self, _value: bool) -> Result<Self::Value, E> {
-        Ok(JsonValueKind("boolean"))
-    }
-
-    fn visit_i64<E>(self, _value: i64) -> Result<Self::Value, E> {
-        Ok(JsonValueKind("number"))
-    }
-
-    fn visit_u64<E>(self, _value: u64) -> Result<Self::Value, E> {
-        Ok(JsonValueKind("number"))
-    }
-
-    fn visit_f64<E>(self, _value: f64) -> Result<Self::Value, E> {
-        Ok(JsonValueKind("number"))
-    }
-
-    fn visit_str<E>(self, _value: &str) -> Result<Self::Value, E> {
-        Ok(JsonValueKind("string"))
-    }
-
-    fn visit_string<E>(self, mut value: String) -> Result<Self::Value, E> {
-        value.zeroize();
-        Ok(JsonValueKind("string"))
-    }
-
-    fn visit_none<E>(self) -> Result<Self::Value, E> {
-        Ok(JsonValueKind("null"))
-    }
-
-    fn visit_unit<E>(self) -> Result<Self::Value, E> {
-        Ok(JsonValueKind("null"))
+fn retype_history_source_format(
+    history_id: Uuid,
+    current_snapshot_id: Uuid,
+    current_format: RetypeSourceFormat,
+    retained_history_format: RetypeSourceFormat,
+) -> RetypeSourceFormat {
+    if history_id == current_snapshot_id {
+        current_format
+    } else {
+        retained_history_format
     }
 }
 
@@ -1759,9 +1538,9 @@ impl StagedSecretFile {
 mod tests {
     use super::{
         decode_retype_payload_bytes, ensure_shared_server_vault, insert_provision_field,
-        inspect_payload_json_shape, normalize_prefix, parse_ops, parse_ttl,
-        prepare_retyped_payload, read_provision_secret, stage_secret_file, update_history_version,
-        write_secret_file, RetypeSourceFormat, MAX_PROVISION_SECRET_BYTES,
+        normalize_prefix, parse_ops, parse_ttl, prepare_retyped_payload, read_provision_secret,
+        retype_history_source_format, stage_secret_file, update_history_version, write_secret_file,
+        RetypeSourceFormat, MAX_PROVISION_SECRET_BYTES,
     };
     use crate::domains::secrets::service::{SECRET_POLICY_FIELD, SECRET_VALUE_FIELD};
     use chrono::Utc;
@@ -1943,36 +1722,26 @@ mod tests {
     }
 
     #[test]
-    fn payload_schema_inspection_reports_only_sorted_names_and_json_types() {
-        let bytes = br#"{
-            "zeta": "sentinel-secret-value",
-            "alpha": {"nested-secret-name": "sentinel-nested-value"},
-            "count": 3,
-            "enabled": true,
-            "empty": null
-        }"#;
-
-        let shape = inspect_payload_json_shape(bytes);
-        assert_eq!(shape.root_kind, "object");
-        let members = shape
-            .object_members
-            .iter()
-            .map(|member| (member.name.as_str(), member.value_kind))
-            .collect::<Vec<_>>();
+    fn retype_uses_current_format_only_for_the_new_current_snapshot() {
+        let current_snapshot_id = Uuid::now_v7();
         assert_eq!(
-            members,
-            vec![
-                ("alpha", "object"),
-                ("count", "number"),
-                ("empty", "null"),
-                ("enabled", "boolean"),
-                ("zeta", "string"),
-            ]
+            retype_history_source_format(
+                current_snapshot_id,
+                current_snapshot_id,
+                RetypeSourceFormat::TypedV1,
+                RetypeSourceFormat::LegacySecretV0,
+            ),
+            RetypeSourceFormat::TypedV1
         );
-        let rendered = serde_json::to_string(&shape).expect("serialize shape");
-        assert!(!rendered.contains("sentinel-secret-value"));
-        assert!(!rendered.contains("sentinel-nested-value"));
-        assert!(!rendered.contains("nested-secret-name"));
+        assert_eq!(
+            retype_history_source_format(
+                Uuid::now_v7(),
+                current_snapshot_id,
+                RetypeSourceFormat::TypedV1,
+                RetypeSourceFormat::LegacySecretV0,
+            ),
+            RetypeSourceFormat::LegacySecretV0
+        );
     }
 
     #[test]
