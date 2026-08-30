@@ -53,6 +53,14 @@
           # вендоринг выводится из него напрямую.
           cargoLock.lockFile = ./Cargo.lock;
           cargoBuildFlags = [
+            "--package"
+            "zann-cli"
+            "--bin"
+            "zann"
+          ];
+          cargoTestFlags = [
+            "--package"
+            "zann-cli"
             "--bin"
             "zann"
           ];
@@ -62,6 +70,7 @@
             openssl
             dbus
             libsecret
+            udev
           ];
 
           meta.mainProgram = "zann";
@@ -89,6 +98,9 @@
             "zann-server"
           ];
           doCheck = false;
+
+          nativeBuildInputs = [ p.pkg-config ];
+          buildInputs = [ p.openssl ];
 
           meta.mainProgram = "zann-server";
         };
