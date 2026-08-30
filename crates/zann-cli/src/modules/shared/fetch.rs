@@ -2,7 +2,8 @@ use uuid::Uuid;
 
 use crate::modules::shared::{
     cursor_allows, encode_cursor, normalize_prefix, parse_cursor, parse_item_timestamp,
-    prefix_match, ItemSummaryResponse, ItemsResponse, SharedItemResponse, SharedItemsResponse,
+    prefix_match, ItemSummaryResponse, ItemsResponse, SharedItemResponse,
+    SharedItemSummariesResponse, SharedItemsResponse,
 };
 use crate::modules::system::http::{append_params, build_params, opt_param};
 
@@ -15,6 +16,33 @@ pub(crate) async fn fetch_shared_items(
     limit: Option<i64>,
     cursor: Option<&str>,
 ) -> anyhow::Result<SharedItemsResponse> {
+    let summaries =
+        fetch_shared_item_summaries(client, addr, access_token, vault_id, prefix, limit, cursor)
+            .await?;
+
+    let mut response_items = Vec::with_capacity(summaries.items.len());
+    for item in summaries.items {
+        let item_id = Uuid::parse_str(&item.id)
+            .map_err(|err| anyhow::anyhow!("invalid item id {}: {err}", item.id))?;
+        let item = fetch_shared_item(client, addr, access_token, vault_id, item_id).await?;
+        response_items.push(item);
+    }
+
+    Ok(SharedItemsResponse {
+        items: response_items,
+        next_cursor: summaries.next_cursor,
+    })
+}
+
+pub(crate) async fn fetch_shared_item_summaries(
+    client: &reqwest::Client,
+    addr: &str,
+    access_token: &str,
+    vault_id: &str,
+    prefix: Option<&str>,
+    limit: Option<i64>,
+    cursor: Option<&str>,
+) -> anyhow::Result<SharedItemSummariesResponse> {
     let items = fetch_item_summaries(client, addr, access_token, vault_id, prefix).await?;
     let limit = limit.unwrap_or(100).clamp(1, 500) as usize;
     let cursor = cursor.and_then(parse_cursor);
@@ -42,16 +70,8 @@ pub(crate) async fn fetch_shared_items(
         page.push(item);
     }
 
-    let mut response_items = Vec::with_capacity(page.len());
-    for item in page {
-        let item_id = Uuid::parse_str(&item.id)
-            .map_err(|err| anyhow::anyhow!("invalid item id {}: {err}", item.id))?;
-        let item = fetch_shared_item(client, addr, access_token, vault_id, item_id).await?;
-        response_items.push(item);
-    }
-
-    Ok(SharedItemsResponse {
-        items: response_items,
+    Ok(SharedItemSummariesResponse {
+        items: page,
         next_cursor: if has_more {
             last_cursor.map(|(ts, id)| encode_cursor(&ts, id))
         } else {

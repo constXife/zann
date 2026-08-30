@@ -33,19 +33,13 @@ async fn main() -> anyhow::Result<()> {
         .danger_accept_invalid_certs(cli.insecure)
         .build()?;
     let mut config = load_config()?;
-    if cli.token.is_some() && cli.token_file.is_some() {
-        anyhow::bail!("use --token or --token-file, not both");
-    }
     let mut addr_arg = cli.addr.clone();
     if addr_arg.is_none() {
         addr_arg = std::env::var(SERVER_URL_ENV)
             .ok()
             .or_else(|| std::env::var("ZANN_SERVER").ok());
     }
-    let mut token_arg = cli.token.clone();
-    if token_arg.is_none() {
-        token_arg = cli.token_file.as_deref().map(read_token_file).transpose()?;
-    }
+    let mut token_arg = cli.token_file.as_deref().map(read_token_file).transpose()?;
     if token_arg.is_none() {
         token_arg = std::env::var(SERVICE_TOKEN_ENV).ok();
     }

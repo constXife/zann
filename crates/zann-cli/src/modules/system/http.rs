@@ -26,15 +26,26 @@ pub(crate) async fn send_request(
         "http request unauthorized; attempting service token exchange"
     );
 
-    let Some(context_name) = ctx.context_name.clone() else {
+    if !refresh_service_account_access_token(ctx).await? {
         return Ok(response);
+    }
+
+    response = send_request_once(ctx, method, &url, payload).await?;
+    Ok(response)
+}
+
+pub(crate) async fn refresh_service_account_access_token(
+    ctx: &mut CommandContext<'_>,
+) -> anyhow::Result<bool> {
+    let Some(context_name) = ctx.context_name.clone() else {
+        return Ok(false);
     };
     let Some(token_name) = ctx.token_name.clone() else {
-        return Ok(response);
+        return Ok(false);
     };
 
     let Some(service_account_token) = load_service_token(&context_name, &token_name)? else {
-        return Ok(response);
+        return Ok(false);
     };
 
     let info = fetch_system_info(ctx.client, ctx.addr).await?;
@@ -57,9 +68,7 @@ pub(crate) async fn send_request(
         entry.access_expires_at = Some(new_expires);
     }
     ctx.access_token = auth.take_access_token();
-
-    response = send_request_once(ctx, method, &url, payload).await?;
-    Ok(response)
+    Ok(true)
 }
 
 pub(crate) async fn send_request_once(

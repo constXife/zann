@@ -22,7 +22,7 @@
   ],
   "allowed_internal_dependencies": {
     "zann-app": ["zann-core", "zann-db"],
-    "zann-cli": ["zann-core", "zann-ui-core"],
+    "zann-cli": ["zann-client", "zann-core", "zann-ui-core"],
     "zann-client": ["zann-core", "zann-crypto", "zann-keystore"],
     "zann-client-sqlite": ["tokio", "zann-client", "zann-core", "zann-crypto", "zann-db"],
     "zann-core": ["zann-crypto"],

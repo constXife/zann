@@ -6441,6 +6441,7 @@ dependencies = [
  "chrono",
  "clap",
  "keyring",
+ "libc",
  "mockito",
  "predicates",
  "rand 0.8.7",
@@ -6453,7 +6454,10 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+ "windows-sys 0.61.2",
+ "zann-client",
  "zann-core",
+ "zeroize",
 ]
 
 [[package]]
@@ -6464,6 +6468,7 @@ dependencies = [
  "chrono",
  "data-encoding",
  "ed25519-dalek",
+ "mockito",
  "rand 0.8.7",
  "reqwest 0.12.26",
  "same-file",

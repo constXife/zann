@@ -342,15 +342,12 @@ pub(crate) async fn handle_materialize(
 ) -> anyhow::Result<()> {
     let vault_id = resolve_vault_arg(args.vault, ctx).await?;
     materialize_shared(
-        ctx.client,
-        ctx.addr,
-        &ctx.access_token,
+        ctx,
         &vault_id,
         args.prefix.as_deref(),
         &args.out,
-        args.field.as_deref(),
+        &args.field,
         args.skip_unchanged,
-        !args.no_atomic,
         args.limit,
     )
     .await?;

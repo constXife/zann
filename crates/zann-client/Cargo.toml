@@ -52,6 +52,7 @@ remote = [
   "dep:serde_json",
   "dep:sha2",
   "dep:zeroize",
+  "dep:uuid",
   "dep:zann-core",
 ]
 config = [
@@ -72,3 +73,7 @@ os-credentials = [
   "config",
   "dep:zann-keystore",
 ]
+
+[dev-dependencies]
+mockito = "1.4"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

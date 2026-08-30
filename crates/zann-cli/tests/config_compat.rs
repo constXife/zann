@@ -36,7 +36,6 @@ fn zann(home: &Path) -> Command {
     let mut command = Command::new(assert_cmd::cargo::cargo_bin!("zann"));
     command
         .env("HOME", home)
-        .env_remove("ZANN_TOKEN")
         .env_remove("ZANN_TOKEN_FILE")
         .env_remove("ZANN_SERVICE_TOKEN");
     command

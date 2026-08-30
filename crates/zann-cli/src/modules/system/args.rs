@@ -60,8 +60,8 @@ pub struct SetContextArgs {
     pub name: String,
     #[arg(long, help = "Server base URL")]
     pub addr: Option<String>,
-    #[arg(long, help = "Access or service token (issued by the server)")]
-    pub token: Option<String>,
+    #[arg(long, help = "Path to a file with an access or service token")]
+    pub token_file: Option<String>,
     #[arg(long, help = "Token name to store in this context")]
     pub token_name: Option<String>,
     #[arg(long, help = "Default vault name or ID for this context")]

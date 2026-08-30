@@ -41,7 +41,7 @@ does not authorize another temporary implementation.
 | Credential lifecycle and port | `zann-client::credentials` | remote auth and application session | injected `CredentialStore`, clock and revocation policy | token refresh/selection/serialization in CLI, Tauri, COSMIC or FFI |
 | Paths and persisted client config | `zann-client::config` | all client shells and application services | injected `ClientPaths`, storage backend, versioned migration | independent writers for shared config; implicit home lookup below the composition root |
 | Server wire contracts | `zann-core::api` **(interim)**; `zann-protocol` **(planned)** | server handlers and the private `zann-client` transport | additive/versioned serde DTOs and explicit compatibility adapters | local wire DTOs, route strings or response decoding in client shells; transport or persistence in protocol types |
-| Remote transport, auth and server trust | private `zann-client` transport; public bounded `zann-client::probe` and `zann-client::session` capabilities | CLI and application sessions | HTTP transport, TLS policy, OIDC callback listener, clock and cancellation | `reqwest`, bearer headers, endpoint paths, fingerprint or OIDC policy in shells and FFI |
+| Remote transport, auth and server trust | private `zann-client` transport; public bounded `zann-client::probe`, `zann-client::secrets` and `zann-client::session` capabilities | CLI and application sessions | HTTP transport, TLS policy, OIDC callback listener, clock and cancellation | `reqwest`, bearer headers, endpoint paths, fingerprint or OIDC policy in shells and FFI |
 | Sync semantics | `zann-client::sync` **(active bidirectional surface)** | local application sessions | transactional repository port, private remote transport, progress/cancellation sink | cursor, merge, conflict, version and deletion policy in shells, FFI or presentation |
 | SQLite sync persistence | `zann-client-sqlite` **(production adapter)** | native application composition roots | explicit `ClientPaths` plus one pre-resolved native SQLite file location, injected sync port, bounded projection proofs and atomic DB CAS | implicit active target selection, `HOME`/URI path derivation, binding replacement, multiple endpoint/profile caches or direct use from shells |
 | Authenticated application session | private `zann-client::session` owner, exposed only through `zann-client::app::AppClient` | COSMIC, FFI and the Tauri sync composition root; future CLI adapter | `CredentialStore`, `ClientPaths`, clock, operation deadline and cancellation | constructing `AppSession` directly; password/OIDC login, trust, refresh, logout, token-selection and ambiguity policy in shells and FFI |
@@ -79,9 +79,10 @@ The planned crates identify accepted extraction boundaries. Until they exist:
 - COSMIC and `zann-ffi` consume the canonical `zann-client::app` surface; a
   second compatibility client package MUST NOT be introduced.
 - Target dependency edges are admitted by the machine baseline only when their
-  required split exists. In particular, CLI -> `zann-client` remains forbidden
-  until `zann-db` is optional and the CLI selects an explicit remote feature
-  with default features disabled.
+  required split exists. CLI -> `zann-client` is limited to explicit bounded
+  capabilities with default features disabled; the current CLI selects only
+  `remote`, whose dependency graph is free of `zann-db`, SQLite and local-vault
+  migrations.
 - Shells MUST NOT depend directly on `zann-db`, `zann-keystore`,
   `zann-crypto`, `reqwest`, `argon2` or `keyring` after their recorded
   migration exception is removed.
