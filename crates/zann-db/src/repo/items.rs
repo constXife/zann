@@ -695,6 +695,67 @@ impl<'a> ItemHistoryRepo<'a> {
         })
     }
 
+    pub async fn list_by_item_limit_for_update_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        item_id: Uuid,
+        limit: i64,
+    ) -> Result<Vec<ItemHistory>, sqlx_core::Error> {
+        let limit = bounded_eager_limit(limit);
+        query_as!(
+            ItemHistory,
+            r#"
+            SELECT
+                id as "id",
+                item_id as "item_id",
+                payload_enc,
+                checksum,
+                version as "version",
+                change_type as "change_type",
+                fields_changed as "fields_changed",
+                changed_by_user_id as "changed_by_user_id",
+                changed_by_email as "changed_by_email",
+                changed_by_name as "changed_by_name",
+                changed_by_device_id as "changed_by_device_id",
+                changed_by_device_name as "changed_by_device_name",
+                created_at as "created_at"
+            FROM item_history
+            WHERE item_id = $1
+            ORDER BY version DESC
+            LIMIT $2
+            FOR UPDATE
+            "#,
+            item_id,
+            limit
+        )
+        .fetch_all(&mut **tx)
+        .await
+    }
+
+    pub async fn update_payload_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        history_id: Uuid,
+        item_id: Uuid,
+        payload_enc: &[u8],
+        checksum: &str,
+    ) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"
+            UPDATE item_history
+            SET payload_enc = $3, checksum = $4
+            WHERE id = $1 AND item_id = $2
+            "#,
+            history_id,
+            item_id,
+            payload_enc,
+            checksum
+        )
+        .execute(&mut **tx)
+        .await
+        .map(|result| result.rows_affected())
+    }
+
     #[instrument(
         level = "debug",
         skip(self),

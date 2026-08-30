@@ -83,6 +83,7 @@ For server-side bootstrap flows, use the privileged provisioning helpers:
 zann-server provision ensure-system-user
 zann-server provision ensure-vault --name Infrastructure --slug infra
 zann-server provision set-field --vault infra --path rlyeh/yogg/grafana --key value --kind password --value-file /run/secrets/grafana-client-secret
+zann-server provision retype-item --vault infra --path rlyeh/yogg/mcp --from-type-id secret --to-type-id kv --if-exists
 zann-server provision ensure-token yogg-grafana infra:rlyeh/yogg/grafana read --write-token-file /run/secrets/yogg-zann-token
 ```
 
@@ -93,6 +94,14 @@ New items use type `secret` by default. For that type, only the canonical
 password field `value` is accepted and the configured default secret policy is
 added automatically. Pass an explicit non-secret `--type-id` for generic typed
 items.
+
+`provision retype-item` is an explicit repair helper for legacy items whose
+stored type no longer matches the server contract. It decrypts and validates
+the current payload and every retained history payload in memory, rewrites only
+their type metadata, and commits the item, history, and change record in one
+transaction. No plaintext is printed or written to disk. Both source and target
+types are required; a mismatch fails closed. Use `--if-exists` only for
+idempotent bootstrap migrations where an absent legacy item is expected.
 
 ## Secret policies
 
