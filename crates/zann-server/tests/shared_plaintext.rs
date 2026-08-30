@@ -327,10 +327,11 @@ impl TestApp {
         let token_hash =
             passwords::hash_service_token(&token, &self.token_pepper, &self.kdf_params)
                 .expect("hash token");
+        let account_id = uuid::Uuid::now_v7();
         let account = ServiceAccount {
-            id: uuid::Uuid::now_v7(),
+            id: account_id,
             owner_user_id: owner.id,
-            name: "shared-sa".to_string(),
+            name: format!("shared-sa-{account_id}"),
             description: None,
             token_hash,
             token_prefix,
@@ -867,8 +868,8 @@ async fn service_account_token_can_set_secret_without_device_id() {
     let vault_id = vault["id"].as_str().expect("vault id");
     let slug = vault["slug"].as_str().expect("vault slug");
     let scopes = vec![
-        format!("{slug}/prefix:allowed:write"),
-        format!("{slug}/prefix:allowed:read"),
+        format!("{slug}/prefix:services/web:write"),
+        format!("{slug}/prefix:services/web:read"),
     ];
     let service_account = app.create_service_account(email, scopes).await;
     let sa_token = service_account["token"].as_str().expect("sa token");
@@ -876,7 +877,7 @@ async fn service_account_token_can_set_secret_without_device_id() {
     let (status, created) = app
         .send_json(
             Method::PUT,
-            &format!("/v1/vaults/{}/secrets/allowed/one", vault_id),
+            &format!("/v1/vaults/{}/secrets/services/web/database", vault_id),
             Some(sa_token),
             json!({ "value": "pw-1" }),
         )
@@ -887,12 +888,47 @@ async fn service_account_token_can_set_secret_without_device_id() {
 
     let (status, fetched) = app
         .get_json(
-            &format!("/v1/vaults/{}/secrets/allowed/one", vault_id),
+            &format!("/v1/vaults/{}/secrets/services/web/database", vault_id),
             Some(sa_token),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "secret get failed: {:?}", fetched);
     assert_eq!(fetched["value"], "pw-1");
+
+    let (status, listed) = app
+        .get_json(
+            &format!("/v1/vaults/{}/secrets?prefix=services%2Fweb", vault_id),
+            Some(sa_token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret list failed: {listed:?}");
+    assert_eq!(listed["secrets"][0]["path"], "/services/web/database");
+    assert!(listed["secrets"][0].get("value").is_none());
+
+    for query in ["", "?prefix=services"] {
+        let (status, _) = app
+            .get_json(
+                &format!("/v1/vaults/{vault_id}/secrets{query}"),
+                Some(sa_token),
+            )
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    let (status, denied) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{}/secrets/services/web-old", vault_id),
+            Some(sa_token),
+            json!({ "value": "pw-2" }),
+        )
+        .await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "sibling prefix unexpectedly allowed: {:?}",
+        denied
+    );
 }
 
 #[tokio::test]
@@ -944,6 +980,108 @@ async fn service_account_access_token_can_set_secret_without_device_id() {
         .await;
     assert_eq!(status, StatusCode::OK, "secret get failed: {:?}", fetched);
     assert_eq!(fetched["value"], "pw-1");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn coordinated_rotation_requires_explicit_service_account_rotate_scope() {
+    let app = TestApp::new_with_smk().await;
+    let email = "shared-rotation-sa@example.com";
+    let user = app.register(email, "password").await;
+    let owner_token = user["access_token"].as_str().expect("token");
+    let vault = app
+        .create_shared_vault(owner_token, "shared-rotation-sa")
+        .await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    let slug = vault["slug"].as_str().expect("vault slug");
+    let (status, created) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{vault_id}/secrets/allowed/database"),
+            Some(owner_token),
+            json!({"value": "previous-password", "policy": "default"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "secret create failed: {created:?}");
+    let item_id = created["item_id"].as_str().expect("item id");
+
+    let rotate_account = app
+        .create_service_account(
+            email,
+            vec![
+                format!("{slug}/prefix:allowed:read"),
+                format!("{slug}/prefix:allowed:rotate"),
+            ],
+        )
+        .await;
+    let rotate_token = rotate_account["token"].as_str().expect("rotate token");
+    let (status, login) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/service-account",
+            None,
+            json!({"token": rotate_token}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "sa login failed: {login:?}");
+    let access_token = login["access_token"].as_str().expect("access token");
+
+    let (status, started) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/shared/items/{item_id}/rotate/start"),
+            Some(access_token),
+            json!({"policy": "default"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "rotation start failed: {started:?}");
+    assert_eq!(started["state"], "rotating");
+    assert_eq!(started["previous_version"], created["version"]);
+    assert_ne!(started["candidate"], "previous-password");
+
+    let (status, _) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/shared/items/{item_id}/rotate/abort"),
+            Some(access_token),
+            json!({"reason": "force must remain admin-only", "force": true}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    let (status, aborted) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/shared/items/{item_id}/rotate/abort"),
+            Some(access_token),
+            json!({"reason": "test cleanup", "force": false}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "rotation abort failed: {aborted:?}");
+
+    let write_account = app
+        .create_service_account(email, vec![format!("{slug}/prefix:allowed:write")])
+        .await;
+    let write_token = write_account["token"].as_str().expect("write token");
+    let (status, login) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/service-account",
+            None,
+            json!({"token": write_token}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "write sa login failed: {login:?}");
+    let write_access = login["access_token"].as_str().expect("write access");
+    let (status, _) = app
+        .send_json(
+            Method::POST,
+            &format!("/v1/shared/items/{item_id}/rotate/start"),
+            Some(write_access),
+            json!({"policy": "default"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
 }
 
 #[tokio::test]

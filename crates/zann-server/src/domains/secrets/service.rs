@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use uuid::Uuid;
+use zann_core::api::secrets::SecretVersionSelector;
 use zann_core::{Change, ChangeOp, ChangeType, Identity, Item, ItemHistory, SyncStatus, Vault};
 use zann_crypto::vault_crypto as core_crypto;
 use zann_crypto::{EncryptedPayload, FieldKind, FieldValue};
@@ -13,7 +14,7 @@ use zeroize::Zeroize;
 
 use crate::app::AppState;
 use crate::domains::access_control::http::{
-    find_vault, parse_scope, vault_role_allows, ScopeRule, ScopeTarget, VaultScope,
+    find_vault, scopes_allow_path, vault_role_allows, VaultScope,
 };
 use crate::domains::access_control::policies::PolicyDecision;
 use crate::domains::auth::helpers::build_device;
@@ -21,7 +22,10 @@ use crate::domains::errors::ServiceError;
 use crate::domains::items::contract::{
     canonical_create_location, next_item_version, validate_typed_payload, ItemContractError,
 };
-use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
+use crate::domains::items::service::{
+    basename_from_path, fetch_item_list_page, parse_item_list_cursor, ItemListPage,
+    ITEM_HISTORY_LIMIT, ITEM_LIST_DEFAULT_LIMIT, ITEM_LIST_MAX_LIMIT,
+};
 use crate::domains::secrets::policies::{generate_secret, PasswordPolicy};
 use crate::infra::metrics;
 
@@ -31,8 +35,8 @@ const SERVICE_ACCOUNT_DEVICE_NAME: &str = "Service Account";
 const SERVICE_ACCOUNT_DEVICE_FINGERPRINT: &str = "service-account";
 
 pub(crate) const SECRET_TYPE_ID: &str = "secret";
-const SECRET_VALUE_FIELD: &str = "value";
-const SECRET_POLICY_FIELD: &str = "policy";
+pub(crate) const SECRET_VALUE_FIELD: &str = "value";
+pub(crate) const SECRET_POLICY_FIELD: &str = "policy";
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -129,6 +133,7 @@ fn wipe_string_map(value: &mut Option<HashMap<String, String>>) {
 
 #[derive(Clone)]
 pub struct SecretRecord {
+    pub item_id: String,
     pub path: String,
     pub vault_id: String,
     pub value: String,
@@ -137,10 +142,21 @@ pub struct SecretRecord {
     pub version: i64,
 }
 
+type SecretRecordParts = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<HashMap<String, String>>,
+    i64,
+);
+
 impl fmt::Debug for SecretRecord {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("SecretRecord")
+            .field("item_id", &self.item_id)
             .field("path", &self.path)
             .field("vault_id", &self.vault_id)
             .field("value", &"<redacted>")
@@ -156,6 +172,7 @@ impl fmt::Debug for SecretRecord {
 
 impl Drop for SecretRecord {
     fn drop(&mut self) {
+        wipe_string(&mut self.item_id);
         wipe_string(&mut self.value);
         wipe_string(&mut self.policy);
         wipe_string_map(&mut self.meta);
@@ -163,17 +180,9 @@ impl Drop for SecretRecord {
 }
 
 impl SecretRecord {
-    pub(crate) fn into_parts(
-        mut self,
-    ) -> (
-        String,
-        String,
-        String,
-        String,
-        Option<HashMap<String, String>>,
-        i64,
-    ) {
+    pub(crate) fn into_parts(mut self) -> SecretRecordParts {
         (
+            std::mem::take(&mut self.item_id),
             std::mem::take(&mut self.path),
             std::mem::take(&mut self.vault_id),
             std::mem::take(&mut self.value),
@@ -185,6 +194,7 @@ impl SecretRecord {
 }
 
 fn secret_record(
+    item_id: Uuid,
     path: String,
     vault_id: Uuid,
     payload: SecretPayload,
@@ -192,6 +202,7 @@ fn secret_record(
 ) -> SecretRecord {
     let (value, policy, meta) = payload.into_parts();
     SecretRecord {
+        item_id: item_id.to_string(),
         path,
         vault_id: vault_id.to_string(),
         value,
@@ -212,14 +223,19 @@ pub async fn get_secret(
     identity: &Identity,
     vault_id: &str,
     path: &str,
+    version: Option<SecretVersionSelector>,
 ) -> Result<SecretRecord, SecretError> {
     let normalized_path = normalize_secret_path(path)?;
     let resource = format!("vaults/{vault_id}/secrets/{normalized_path}");
+    let action = match version {
+        Some(SecretVersionSelector::Previous) => "read_previous",
+        None => "read",
+    };
     let vault = authorize_vault_access(
         state,
         identity,
         vault_id,
-        "read",
+        action,
         &resource,
         &normalized_path,
         VaultScope::Items,
@@ -245,7 +261,35 @@ pub async fn get_secret(
         return Err(SecretError::NotFound);
     }
 
-    let payload = decrypt_secret_payload(state, &vault, &item)?;
+    let (payload, response_version) = match version {
+        Some(SecretVersionSelector::Previous) => {
+            let previous_version = item
+                .version
+                .checked_sub(1)
+                .filter(|version| *version >= 1)
+                .ok_or(SecretError::NotFound)?;
+            let history_repo = ItemHistoryRepo::new(&state.db);
+            let history = history_repo
+                .get_by_item_version(item.id, previous_version)
+                .await
+                .map_err(|_| SecretError::DbError)?
+                .ok_or(SecretError::NotFound)?;
+            let retention =
+                chrono::Duration::seconds(state.config.rotation.stale_retention_seconds.max(0));
+            let expires_at = history
+                .created_at
+                .checked_add_signed(retention)
+                .ok_or(SecretError::Internal("invalid_rotation_retention"))?;
+            if Utc::now() > expires_at {
+                return Err(SecretError::NotFound);
+            }
+            (
+                decrypt_secret_payload_ciphertext(state, &vault, item.id, &history.payload_enc)?,
+                history.version,
+            )
+        }
+        None => (decrypt_secret_payload(state, &vault, &item)?, item.version),
+    };
 
     let usage_tracker = state.usage_tracker.clone();
     let user_id = identity.user_id;
@@ -255,11 +299,54 @@ pub async fn get_secret(
         usage_tracker.record_read(item_id, user_id, device_id).await;
     });
     Ok(secret_record(
+        item.id,
         external_secret_path(&item.path),
         vault.id,
         payload,
-        item.version,
+        response_version,
     ))
+}
+
+pub(crate) async fn list_secrets(
+    state: &AppState,
+    identity: &Identity,
+    vault_id: &str,
+    prefix: Option<&str>,
+    limit: Option<i64>,
+    cursor: Option<&str>,
+) -> Result<ItemListPage, SecretError> {
+    let prefix = normalize_secret_list_prefix(prefix)?;
+    let authorization_path = prefix.as_deref().unwrap_or_default();
+    let resource = if authorization_path.is_empty() {
+        format!("vaults/{vault_id}/secrets")
+    } else {
+        format!("vaults/{vault_id}/secrets/{authorization_path}")
+    };
+    let vault = authorize_vault_access(
+        state,
+        identity,
+        vault_id,
+        "list",
+        &resource,
+        authorization_path,
+        VaultScope::Items,
+    )
+    .await?;
+
+    ensure_server_encryption(state, &vault)?;
+    let cursor = parse_item_list_cursor(cursor)?;
+    let limit = limit
+        .unwrap_or(ITEM_LIST_DEFAULT_LIMIT)
+        .clamp(1, ITEM_LIST_MAX_LIMIT);
+    fetch_item_list_page(
+        state,
+        vault.id,
+        prefix.as_deref(),
+        Some(SECRET_TYPE_ID),
+        cursor,
+        limit,
+    )
+    .await
 }
 
 pub async fn ensure_secret(
@@ -303,6 +390,7 @@ pub async fn ensure_secret(
             });
         }
         let record = secret_record(
+            item.id,
             external_secret_path(&item.path),
             vault.id,
             payload,
@@ -373,6 +461,7 @@ pub async fn ensure_secret(
                     });
                 }
                 let record = secret_record(
+                    existing.id,
                     external_secret_path(&existing.path),
                     vault.id,
                     payload,
@@ -385,6 +474,7 @@ pub async fn ensure_secret(
     };
 
     let record = SecretRecord {
+        item_id: item.id.to_string(),
         path: external_secret_path(&item.path),
         vault_id: vault.id.to_string(),
         value,
@@ -451,6 +541,7 @@ pub async fn set_secret(
             && payload.meta == existing_payload.meta
         {
             let record = secret_record(
+                item.id,
                 external_secret_path(&item.path),
                 vault.id,
                 payload,
@@ -478,6 +569,7 @@ pub async fn set_secret(
         .await?;
 
         let record = secret_record(
+            item.id,
             external_secret_path(&item.path),
             vault.id,
             payload,
@@ -537,6 +629,7 @@ pub async fn set_secret(
     }
 
     let record = SecretRecord {
+        item_id: item.id.to_string(),
         path: external_secret_path(&item.path),
         vault_id: vault.id.to_string(),
         value: value.to_string(),
@@ -618,6 +711,7 @@ pub async fn rotate_secret(
     .await?;
 
     let record = SecretRecord {
+        item_id: item.id.to_string(),
         path: external_secret_path(&item.path),
         vault_id: vault.id.to_string(),
         value,
@@ -768,6 +862,17 @@ fn normalize_secret_path(path: &str) -> Result<String, SecretError> {
     canonical_create_location(storage_path, None)
         .map(|(path, _)| path)
         .map_err(|error| SecretError::BadRequest(error.code()))
+}
+
+fn normalize_secret_list_prefix(prefix: Option<&str>) -> Result<Option<String>, SecretError> {
+    let Some(prefix) = prefix else {
+        return Ok(None);
+    };
+    let prefix = prefix.trim().trim_matches('/');
+    if prefix.is_empty() {
+        return Ok(None);
+    }
+    normalize_secret_path(prefix).map(Some)
 }
 
 fn external_secret_path(storage_path: &str) -> String {
@@ -1032,6 +1137,15 @@ fn decrypt_secret_payload(
     vault: &Vault,
     item: &Item,
 ) -> Result<SecretPayload, SecretError> {
+    decrypt_secret_payload_ciphertext(state, vault, item.id, &item.payload_enc)
+}
+
+fn decrypt_secret_payload_ciphertext(
+    state: &AppState,
+    vault: &Vault,
+    item_id: Uuid,
+    payload_enc: &[u8],
+) -> Result<SecretPayload, SecretError> {
     let Some(smk) = state.server_master_key.as_ref() else {
         return Err(SecretError::Internal("smk_missing"));
     };
@@ -1040,12 +1154,11 @@ fn decrypt_secret_payload(
             tracing::error!(event = "secret_decrypt_failed", error = %err);
             SecretError::Internal("vault_key_decrypt_failed")
         })?;
-    let bytes =
-        core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item.id, &item.payload_enc)
-            .map_err(|err| {
-                tracing::error!(event = "secret_decrypt_failed", error = %err);
-                SecretError::Internal("payload_decrypt_failed")
-            })?;
+    let bytes = core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item_id, payload_enc)
+        .map_err(|err| {
+            tracing::error!(event = "secret_decrypt_failed", error = %err);
+            SecretError::Internal("payload_decrypt_failed")
+        })?;
     let bytes_len = bytes.len();
     let typed = {
         let _span = tracing::debug_span!("serialize_json", op = "secret_payload_decode", bytes_len)
@@ -1118,46 +1231,25 @@ async fn authorize_vault_access(
         }
     };
 
+    if let Some(service_account_id) = identity.service_account_id {
+        let scope_allowed =
+            service_account_allows_path(state, service_account_id, &vault, action, path).await;
+        if !service_account_access_allowed(
+            policies.evaluate(identity, action, resource),
+            scope_allowed,
+        ) {
+            return Err(forbidden_access(action, resource));
+        }
+        return Ok(vault);
+    }
+
     match policies.evaluate(identity, action, resource) {
         PolicyDecision::Allow => {}
-        PolicyDecision::Deny => {
-            metrics::forbidden_access(resource);
-            tracing::warn!(
-                event = "forbidden",
-                action = action,
-                resource = %resource,
-                "Access denied"
-            );
-            return Err(SecretError::ForbiddenNoBody);
-        }
+        PolicyDecision::Deny => return Err(forbidden_access(action, resource)),
         PolicyDecision::NoMatch => {
-            if let Some(service_account_id) = identity.service_account_id {
-                if service_account_allows_path(state, service_account_id, &vault, action, path)
-                    .await
-                {
-                    return Ok(vault);
-                }
-                metrics::forbidden_access(resource);
-                tracing::warn!(
-                    event = "forbidden",
-                    action = action,
-                    resource = %resource,
-                    "Access denied"
-                );
-                return Err(SecretError::ForbiddenNoBody);
-            }
             match vault_role_allows(state, identity, vault.id, action, scope).await {
                 Ok(true) => {}
-                Ok(false) => {
-                    metrics::forbidden_access(resource);
-                    tracing::warn!(
-                        event = "forbidden",
-                        action = action,
-                        resource = %resource,
-                        "Access denied"
-                    );
-                    return Err(SecretError::ForbiddenNoBody);
-                }
+                Ok(false) => return Err(forbidden_access(action, resource)),
                 Err(_) => {
                     tracing::error!(event = "vault_access_failed", "DB error");
                     return Err(SecretError::DbError);
@@ -1167,6 +1259,21 @@ async fn authorize_vault_access(
     }
 
     Ok(vault)
+}
+
+fn service_account_access_allowed(decision: PolicyDecision, scope_allowed: bool) -> bool {
+    scope_allowed && !matches!(decision, PolicyDecision::Deny)
+}
+
+fn forbidden_access(action: &str, resource: &str) -> SecretError {
+    metrics::forbidden_access(resource);
+    tracing::warn!(
+        event = "forbidden",
+        action = action,
+        resource = %resource,
+        "Access denied"
+    );
+    SecretError::ForbiddenNoBody
 }
 
 async fn service_account_scopes(state: &AppState, service_account_id: Uuid) -> Option<Vec<String>> {
@@ -1188,80 +1295,7 @@ async fn service_account_allows_path(
     let Some(scopes) = service_account_scopes(state, service_account_id).await else {
         return false;
     };
-    scopes.iter().any(|scope| {
-        let Some(rule) = parse_scope(scope) else {
-            return false;
-        };
-        scope_allows_action(&rule.permission, action) && scope_matches_path(&rule, vault, path)
-    })
-}
-
-fn scope_allows_action(permission: &str, action: &str) -> bool {
-    match action {
-        "read" | "list" => permission == "read",
-        _ => permission == action,
-    }
-}
-
-fn scope_matches_path(rule: &ScopeRule, vault: &Vault, path: &str) -> bool {
-    if !vault_matches_scope(vault, &rule.target) {
-        return false;
-    }
-    if let Some(prefix) = rule.prefix.as_deref() {
-        return prefix_matches_path(prefix, path);
-    }
-    true
-}
-
-fn vault_matches_scope(vault: &Vault, target: &ScopeTarget) -> bool {
-    match target {
-        ScopeTarget::Vault(scope) => vault.slug == *scope || vault.id.to_string() == *scope,
-        ScopeTarget::Tag(tag) => vault
-            .tags
-            .as_ref()
-            .is_some_and(|tags| tags.0.iter().any(|value| value == tag)),
-        ScopeTarget::Pattern(pattern) => matches_pattern(pattern, &vault.slug),
-    }
-}
-
-fn prefix_matches_path(prefix: &str, path: &str) -> bool {
-    let prefix = prefix.trim_matches('/');
-    let path = path.trim_matches('/');
-    path == prefix || path.starts_with(&format!("{prefix}/"))
-}
-
-fn matches_pattern(pattern: &str, value: &str) -> bool {
-    if pattern == "*" || pattern == "**" {
-        return true;
-    }
-
-    let starts_with_wildcard = pattern.starts_with('*');
-    let ends_with_wildcard = pattern.ends_with('*');
-    let parts: Vec<&str> = pattern.split('*').filter(|part| !part.is_empty()).collect();
-
-    if parts.is_empty() {
-        return true;
-    }
-
-    let mut index = 0;
-    for (i, part) in parts.iter().enumerate() {
-        if let Some(pos) = value[index..].find(part) {
-            if i == 0 && !starts_with_wildcard && pos != 0 {
-                return false;
-            }
-            index += pos + part.len();
-        } else {
-            return false;
-        }
-    }
-
-    if !ends_with_wildcard {
-        if let Some(last) = parts.last() {
-            return value.ends_with(last);
-        }
-    }
-
-    true
+    scopes_allow_path(&scopes, vault, action, path)
 }
 
 #[cfg(test)]
@@ -1451,6 +1485,7 @@ mod tests {
         assert!(!rendered.contains("sentinel-policy"));
 
         let record = SecretRecord {
+            item_id: Uuid::nil().to_string(),
             path: "folder/secret".to_string(),
             vault_id: Uuid::nil().to_string(),
             value: "sentinel-value".to_string(),
@@ -1470,5 +1505,19 @@ mod tests {
         ] {
             assert!(!rendered.contains(sentinel));
         }
+    }
+
+    #[test]
+    fn service_account_scope_is_a_mandatory_policy_ceiling() {
+        assert!(!service_account_access_allowed(
+            PolicyDecision::Allow,
+            false
+        ));
+        assert!(service_account_access_allowed(PolicyDecision::Allow, true));
+        assert!(service_account_access_allowed(
+            PolicyDecision::NoMatch,
+            true
+        ));
+        assert!(!service_account_access_allowed(PolicyDecision::Deny, true));
     }
 }

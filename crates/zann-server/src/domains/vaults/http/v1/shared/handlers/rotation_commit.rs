@@ -2,17 +2,19 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, 
 use chrono::{DateTime, Utc};
 use sqlx_core::row::Row;
 use uuid::Uuid;
-use zann_core::{FieldKind, Identity, SyncStatus};
+use zann_core::{Identity, SyncStatus};
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{ItemRepo, VaultRepo};
 use zeroize::Zeroize;
 
 use crate::app::AppState;
-use crate::domains::access_control::http::{vault_role_allows, VaultScope};
 use crate::domains::items::contract::next_item_version;
 use crate::infra::metrics;
 
-use super::super::helpers::{actor_snapshot, decrypt_rotation_candidate, is_shared_server_vault};
+use super::super::helpers::{
+    actor_snapshot, decrypt_rotation_candidate, is_shared_server_vault, rotation_action_allowed,
+    rotation_password_field_name, RotationTelemetry,
+};
 use super::super::types::{ErrorResponse, RotationCommitResponse};
 use super::super::{ROTATION_STATE_ROTATING, ROTATION_STATE_STALE};
 
@@ -22,12 +24,7 @@ pub(crate) async fn rotate_commit(
     axum::extract::Path(item_id): axum::extract::Path<Uuid>,
 ) -> impl IntoResponse {
     let resource = "shared/items/rotate/commit";
-    let policies = state.policy_store.get();
-
-    if identity.service_account_id.is_some() {
-        metrics::forbidden_access(resource);
-        return StatusCode::FORBIDDEN.into_response();
-    }
+    let mut telemetry = RotationTelemetry::new(&identity, "rotate_commit", item_id);
 
     let item_repo = ItemRepo::new(&state.db);
     let item = match item_repo.get_by_id(item_id).await {
@@ -53,37 +50,30 @@ pub(crate) async fn rotate_commit(
     if !is_shared_server_vault(&vault) {
         return StatusCode::NOT_FOUND.into_response();
     }
+    telemetry.set_target(vault.id, &item.path);
 
-    match policies.evaluate(&identity, "rotate_commit", resource) {
-        crate::domains::access_control::policies::PolicyDecision::Allow => {}
-        crate::domains::access_control::policies::PolicyDecision::Deny => {
+    match rotation_action_allowed(
+        &state,
+        &identity,
+        &vault,
+        "rotate_commit",
+        resource,
+        &item.path,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
             metrics::forbidden_access(resource);
             return StatusCode::FORBIDDEN.into_response();
         }
-        crate::domains::access_control::policies::PolicyDecision::NoMatch => {
-            match vault_role_allows(
-                &state,
-                &identity,
-                vault.id,
-                "rotate_commit",
-                VaultScope::Items,
+        Err(_) => {
+            tracing::error!(event = "rotation_commit_failed", "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
             )
-            .await
-            {
-                Ok(true) => {}
-                Ok(false) => {
-                    metrics::forbidden_access(resource);
-                    return StatusCode::FORBIDDEN.into_response();
-                }
-                Err(_) => {
-                    tracing::error!(event = "rotation_commit_failed", "DB error");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse { error: "db_error" }),
-                    )
-                        .into_response();
-                }
-            }
+                .into_response();
         }
     }
 
@@ -312,24 +302,23 @@ pub(crate) async fn rotate_commit(
             }
         };
 
-    let mut updated = false;
-    for field in payload.fields.values_mut() {
-        if field.kind == FieldKind::Password {
-            field.value.zeroize();
-            field.value = candidate.into_string();
-            updated = true;
-            break;
+    let field_name = match rotation_password_field_name(&payload) {
+        Ok(field_name) => field_name,
+        Err(error) => {
+            return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
         }
-    }
-    if !updated {
+    };
+    let Some(field) = payload.fields.get_mut(&field_name) else {
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
                 error: "password_field_missing",
             }),
         )
             .into_response();
-    }
+    };
+    field.value.zeroize();
+    field.value = candidate.into_string();
 
     let new_payload_enc =
         match core_crypto::encrypt_payload(&vault_key, vault.id, item.id, &payload) {
@@ -521,8 +510,9 @@ pub(crate) async fn rotate_commit(
     }
 
     let response = RotationCommitResponse {
-        status: "committed",
+        status: "committed".to_string(),
         version: new_version,
     };
+    telemetry.succeed();
     (StatusCode::OK, Json(response)).into_response()
 }

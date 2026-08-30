@@ -255,6 +255,11 @@ async fn shared_rotation_flow() {
     assert_eq!(status, StatusCode::OK, "start failed: {:?}", start);
     assert_eq!(start["state"], "rotating");
     let candidate = start["candidate"].as_str().expect("candidate");
+    assert_eq!(
+        candidate.len(),
+        32,
+        "rotation must use the configured default secret policy"
+    );
 
     let (status, status_body) = app
         .get_json(

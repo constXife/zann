@@ -131,8 +131,11 @@ impl<'a> ItemsService for LocalServices<'a> {
                 .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
         };
         let next_cursor = if items.len() > limit as usize {
-            let last = items.pop().expect("limit checked");
-            Some(encode_cursor(&last))
+            items.pop();
+            // The cursor is exclusive (`< updated_at, id`), so it must point
+            // at the last item we actually return. Pointing at the lookahead
+            // row would skip that row on the next page.
+            items.last().map(encode_cursor)
         } else {
             None
         };

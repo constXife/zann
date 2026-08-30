@@ -221,6 +221,48 @@ async fn secrets_ensure_get_rotate_roundtrip() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn secret_get_previous_returns_only_the_immediately_previous_version() {
+    let app = TestApp::new_with_smk().await;
+    let email = "secrets-previous@example.com";
+    let password = "password-1";
+    app.register(email, password).await;
+    let token = app.login(email, password).await;
+    let vault = app.create_shared_vault(&token, "secrets-previous").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+
+    let (status, first) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{vault_id}/secrets/db/password"),
+            Some(&token),
+            json!({"value": "first-value"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "first set failed: {first:?}");
+    let (status, second) = app
+        .send_json(
+            Method::PUT,
+            &format!("/v1/vaults/{vault_id}/secrets/db/password"),
+            Some(&token),
+            json!({"value": "second-value"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "second set failed: {second:?}");
+
+    let (status, previous) = app
+        .get_json(
+            &format!("/v1/vaults/{vault_id}/secrets/db/password?version=previous"),
+            Some(&token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "previous get failed: {previous:?}");
+    assert_eq!(previous["value"], "first-value");
+    assert_eq!(previous["version"], first["version"]);
+    assert_eq!(previous["item_id"], second["item_id"]);
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn secrets_set_creates_and_updates_explicit_values() {
     let app = TestApp::new_with_smk().await;
     let email = "secrets-set@example.com";
@@ -314,6 +356,44 @@ async fn secrets_batch_endpoints() {
     assert_eq!(results.len(), 3);
     assert!(results.iter().any(|r| r["status"] == "ok"));
     assert!(results.iter().any(|r| r["status"] == "error"));
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn secrets_list_is_metadata_only_and_cursor_bounded() {
+    let app = TestApp::new_with_smk().await;
+    let email = "secrets-list@example.com";
+    let password = "password-1";
+    app.register(email, password).await;
+    let token = app.login(email, password).await;
+
+    let vault = app.create_shared_vault(&token, "secrets-list").await;
+    let vault_id = vault["id"].as_str().expect("vault id");
+    for path in ["services/api/one", "services/api/two"] {
+        let (status, response) = app
+            .send_json(
+                Method::PUT,
+                &format!("/v1/vaults/{vault_id}/secrets/{path}"),
+                Some(&token),
+                json!({"value": format!("value-for-{path}")}),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "set failed: {response:?}");
+    }
+
+    let (status, response) = app
+        .get_json(
+            &format!("/v1/vaults/{vault_id}/secrets?prefix=services%2Fapi&limit=1"),
+            Some(&token),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "list failed: {response:?}");
+    let secrets = response["secrets"].as_array().expect("secrets array");
+    assert_eq!(secrets.len(), 1);
+    assert!(response["next_cursor"].as_str().is_some());
+    assert!(secrets[0].get("value").is_none());
+    assert!(secrets[0].get("policy").is_none());
+    assert!(secrets[0].get("meta").is_none());
 }
 
 #[tokio::test]

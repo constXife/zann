@@ -128,6 +128,7 @@ pub(crate) async fn list_shared_items(
         &state,
         vault.id,
         prefix.as_deref(),
+        None,
         cursor,
         limit,
     )

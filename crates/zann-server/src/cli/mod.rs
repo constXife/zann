@@ -212,6 +212,48 @@ mod tests {
     }
 
     #[test]
+    fn parse_provision_set_field_requires_value_file() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "provision",
+            "set-field",
+            "--vault",
+            "infra",
+            "--path",
+            "services/web/database",
+            "--key",
+            "value",
+            "--value-file",
+            "/run/secrets/database-password",
+        ]);
+        let Some(Command::Provision(args)) = cli.command else {
+            panic!("expected provision command");
+        };
+        let provision::ProvisionCommand::SetField(command) = args.command else {
+            panic!("expected set-field command");
+        };
+        assert_eq!(
+            command.value_file,
+            PathBuf::from("/run/secrets/database-password")
+        );
+
+        let result = Cli::try_parse_from([
+            "zann-server",
+            "provision",
+            "set-field",
+            "--vault",
+            "infra",
+            "--path",
+            "services/web/database",
+            "--key",
+            "value",
+            "--value",
+            "plaintext-must-not-be-accepted",
+        ]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn parse_provision_ensure_token_command() {
         let cli = Cli::parse_from([
             "zann-server",

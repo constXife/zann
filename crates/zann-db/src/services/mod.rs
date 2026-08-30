@@ -191,7 +191,7 @@ impl<'a> LocalServices<'a> {
     ///
     /// Public because verification in `zann-app` has to reach the same answer:
     /// a second reading of `key_wrap_type` elsewhere is exactly the kind of
-    /// divergence ADR 0003 is about.
+    /// divergence the shared-client architecture forbids.
     pub fn decrypt_vault_key(&self, vault: &LocalVault) -> ServiceResult<SecretKey> {
         if vault.key_wrap_type == KeyWrapType::RemoteServer {
             return Ok(SecretKey::from_bytes(*self.master_key.as_bytes()));
