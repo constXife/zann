@@ -1,5 +1,6 @@
 use clap::{ArgAction, Parser, Subcommand};
 
+pub use crate::modules::delivery::args::*;
 pub use crate::modules::secrets::args::*;
 pub use crate::modules::shared::args::*;
 pub use crate::modules::system::args::*;
@@ -40,6 +41,8 @@ pub enum Command {
     Run(RunArgs),
     #[command(about = "Read and provision machine secrets")]
     Secret(SecretArgs),
+    #[command(about = "Publish machine secrets from a versioned delivery profile")]
+    Delivery(DeliveryArgs),
     #[command(about = "Coordinate an external secret rotation through an executable hook")]
     Rotate(RotationHookArgs),
     #[command(about = "Print the current identity for the token")]

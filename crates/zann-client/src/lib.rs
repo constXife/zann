@@ -4,6 +4,8 @@ pub mod app;
 pub mod config;
 #[cfg(feature = "os-credentials")]
 pub mod credentials;
+#[cfg(feature = "delivery")]
+pub mod delivery;
 #[cfg(feature = "remote")]
 #[allow(dead_code)]
 mod identity;
