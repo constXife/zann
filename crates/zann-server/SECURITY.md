@@ -61,10 +61,13 @@ formal security audit, and is not recommended for production use.
 
 - Vault access is enforced via role-based checks (admin/operator/member/readonly)
   with explicit action scopes.
-- Service accounts are restricted to read/list actions and only for shared
-  server-encrypted vaults.
-- Service-account scopes are parsed and matched against vault IDs, slugs, tags,
-  or patterns.
+- Service accounts can act only on shared server-encrypted vaults and only
+  through explicit scope permissions: `read`, `write`, `read_history`,
+  `read_previous`, or the deny-by-default coordinated `rotate` permission.
+  Permissions do not imply one another, and force-abort remains admin-only.
+- Service-account scopes are parsed and matched against vault IDs or slugs plus
+  exact path-prefix, tag, or pattern selectors. Prefix matching is bounded by a
+  path-segment boundary.
 - Optional IP allowlists restrict service-account token usage to known sources.
 
 ### Denial of service (resource exhaustion)
@@ -77,7 +80,10 @@ formal security audit, and is not recommended for production use.
 ### Secrets and configuration hardening
 
 - A server master key is required; missing keys fail preflight.
-- On Unix, master key file permissions are checked to prevent group/other access.
+- On Unix, key and pepper paths must be regular files rather than symlinks.
+  Ordinary files may not grant group or other access. A systemd credential may
+  use its managed `0440` mode only when it is an immediate child of the current
+  `$CREDENTIALS_DIRECTORY`; the same mode is rejected elsewhere.
 - Sensitive parameters (`ZANN_PASSWORD_PEPPER`, `ZANN_TOKEN_PEPPER`, `ZANN_SMK`)
   are loaded from environment or secure config paths rather than being hard-coded.
 - Forwarded headers are only trusted when `server.trusted_proxies` is configured.
@@ -110,7 +116,9 @@ formal security audit, and is not recommended for production use.
 
 ## File permissions and secrets hygiene
 
-- Config and secret files should be owned by the service user and set to `0600`.
+- Config and secret files should be owned by the service user and set to `0600`
+  or `0400`. systemd-managed credentials use the narrowly accepted `0440` mode
+  inside `$CREDENTIALS_DIRECTORY`.
 - Data directories should be `0700` (or `0750` if a trusted admin group exists).
 - Avoid storing peppers/tokens in world-readable locations or shared `/tmp`.
 - For Docker, mount config as read-only and keep data on a separate volume.

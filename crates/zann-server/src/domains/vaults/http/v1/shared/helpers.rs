@@ -1,21 +1,75 @@
 use chrono::{DateTime, Utc};
-use rand::seq::SliceRandom;
 use sqlx_core::row::Row;
+use std::collections::HashMap;
+use std::time::Instant;
 use uuid::Uuid;
-use zann_core::{Identity, Vault, VaultEncryptionType, VaultKind};
+use zann_core::{FieldKind, Identity, Vault, VaultEncryptionType, VaultKind};
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::vault_crypto as core_crypto;
+use zann_crypto::EncryptedPayload;
 use zann_db::repo::{DeviceRepo, ServiceAccountRepo, UserRepo};
 use zeroize::Zeroizing;
 
 use super::types::RotationCandidate;
 use super::{ROTATION_STATE_ROTATING, ROTATION_STATE_STALE};
 use crate::app::AppState;
-use crate::domains::access_control::http::{parse_scope, ScopeRule, ScopeTarget};
+use crate::domains::access_control::http::{
+    scopes_allow_path, scopes_allow_prefix, vault_role_allows, VaultScope,
+};
+use crate::domains::access_control::policies::PolicyDecision;
 use crate::domains::auth::helpers::build_device;
+use crate::domains::secrets::policies::{generate_secret, PasswordPolicy};
+use crate::infra::{audit, metrics};
 
 const SERVICE_ACCOUNT_DEVICE_NAME: &str = "Service Account";
 const SERVICE_ACCOUNT_DEVICE_FINGERPRINT: &str = "service-account";
+
+pub(super) struct RotationTelemetry<'a> {
+    identity: &'a Identity,
+    operation: &'static str,
+    result: &'static str,
+    vault_id: String,
+    path: String,
+    started_at: Instant,
+}
+
+impl<'a> RotationTelemetry<'a> {
+    pub(super) fn new(identity: &'a Identity, operation: &'static str, item_id: Uuid) -> Self {
+        Self {
+            identity,
+            operation,
+            result: "error",
+            vault_id: String::new(),
+            path: item_id.to_string(),
+            started_at: Instant::now(),
+        }
+    }
+
+    pub(super) fn set_target(&mut self, vault_id: Uuid, path: &str) {
+        self.vault_id = vault_id.to_string();
+        self.path = path.to_string();
+    }
+
+    pub(super) fn succeed(&mut self) {
+        self.result = "ok";
+    }
+}
+
+impl Drop for RotationTelemetry<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.started_at.elapsed().as_secs_f64();
+        metrics::secrets_operation(self.operation, self.result, elapsed);
+        let detail = (self.result != "ok").then_some(self.result);
+        audit::secrets_event(
+            self.identity,
+            self.operation,
+            self.result,
+            &self.vault_id,
+            &self.path,
+            detail,
+        );
+    }
+}
 
 pub(super) struct RotationRow {
     pub(super) state: Option<String>,
@@ -164,63 +218,52 @@ pub(super) fn decrypt_rotation_candidate(
     Ok(RotationCandidate::new(candidate))
 }
 
-pub(super) fn generate_password(policy: Option<&str>) -> Result<RotationCandidate, &'static str> {
-    let policy = policy.unwrap_or("default");
-    let mut rng = rand::thread_rng();
-    match policy {
-        "default" => {
-            let length = 24;
-            let upper = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
-            let lower = b"abcdefghijkmnopqrstuvwxyz";
-            let digits = b"23456789";
-            let symbols = b"!@#$%^&*_-+=?";
-            let mut chars = Zeroizing::new(Vec::with_capacity(length));
-            chars.push(*upper.choose(&mut rng).ok_or("invalid_policy")?);
-            chars.push(*lower.choose(&mut rng).ok_or("invalid_policy")?);
-            chars.push(*digits.choose(&mut rng).ok_or("invalid_policy")?);
-            chars.push(*symbols.choose(&mut rng).ok_or("invalid_policy")?);
-            let mut all =
-                Vec::with_capacity(upper.len() + lower.len() + digits.len() + symbols.len());
-            all.extend_from_slice(upper);
-            all.extend_from_slice(lower);
-            all.extend_from_slice(digits);
-            all.extend_from_slice(symbols);
-            for _ in chars.len()..length {
-                chars.push(*all.choose(&mut rng).ok_or("invalid_policy")?);
-            }
-            chars.as_mut_slice().shuffle(&mut rng);
-            let candidate = std::str::from_utf8(chars.as_slice())
-                .map_err(|_| "candidate_invalid")?
-                .to_owned();
-            Ok(RotationCandidate::new(candidate))
-        }
-        "alnum" => {
-            let length = 24;
-            let charset = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-            let mut chars = Zeroizing::new(Vec::with_capacity(length));
-            for _ in 0..length {
-                let ch = *charset.choose(&mut rng).ok_or("invalid_policy")?;
-                chars.push(ch);
-            }
-            let candidate = std::str::from_utf8(chars.as_slice())
-                .map_err(|_| "candidate_invalid")?
-                .to_owned();
-            Ok(RotationCandidate::new(candidate))
-        }
-        _ => Err("invalid_policy"),
+pub(super) fn generate_rotation_candidate(
+    policies: &HashMap<String, PasswordPolicy>,
+    default_policy: &str,
+    requested_policy: Option<&str>,
+) -> Result<RotationCandidate, &'static str> {
+    let policy_name = requested_policy.unwrap_or(default_policy);
+    let policy = policies.get(policy_name).ok_or("unknown_policy")?;
+    let candidate = generate_secret(policy)?;
+    Ok(RotationCandidate::new(candidate))
+}
+
+pub(super) fn rotation_password_field_name(
+    payload: &EncryptedPayload,
+) -> Result<String, &'static str> {
+    if payload
+        .fields
+        .get("password")
+        .is_some_and(|field| field.kind == FieldKind::Password)
+    {
+        return Ok("password".to_string());
+    }
+
+    let mut password_fields = payload
+        .fields
+        .iter()
+        .filter(|(_, field)| field.kind == FieldKind::Password)
+        .map(|(name, _)| name);
+    let Some(field_name) = password_fields.next() else {
+        return Err("password_field_missing");
+    };
+    if password_fields.next().is_some() {
+        return Err("password_field_ambiguous");
+    }
+    Ok(field_name.clone())
+}
+
+pub(super) fn rotation_abort_state_allowed(state: Option<&str>, force: bool) -> bool {
+    match state {
+        Some(ROTATION_STATE_ROTATING | ROTATION_STATE_STALE) => true,
+        Some(_) => force,
+        None => false,
     }
 }
 
 pub(super) fn normalize_path(value: &str) -> String {
     value.trim().trim_matches('/').to_string()
-}
-
-pub(super) fn prefix_match(prefix: Option<&str>, path: &str) -> bool {
-    let Some(prefix) = prefix else {
-        return true;
-    };
-    let path = normalize_path(path);
-    path == prefix || path.starts_with(&format!("{}/", prefix))
 }
 
 pub(super) async fn service_account_scopes(
@@ -284,20 +327,6 @@ async fn ensure_service_account_device(
     Ok(device.id)
 }
 
-pub(super) fn scope_allows_action(permission: &str, action: &str) -> bool {
-    match action {
-        "read" | "list" => permission == "read",
-        "read_history" => {
-            matches!(
-                permission,
-                "history_read" | "read_history" | "read_previous"
-            )
-        }
-        "read_previous" => permission == "read_previous",
-        _ => permission == action,
-    }
-}
-
 pub(super) fn evaluate_history_policy(
     policies: &crate::domains::access_control::policies::PolicySet,
     identity: &Identity,
@@ -305,71 +334,6 @@ pub(super) fn evaluate_history_policy(
     resource: &str,
 ) -> crate::domains::access_control::policies::PolicyDecision {
     policies.evaluate(identity, action, resource)
-}
-
-pub(super) fn scope_matches_path(rule: &ScopeRule, vault: &Vault, path: &str) -> bool {
-    if !vault_matches_scope(vault, &rule.target) {
-        return false;
-    }
-    if let Some(prefix) = rule.prefix.as_deref() {
-        return prefix_match(Some(prefix), path);
-    }
-    true
-}
-
-pub(super) fn scope_matches_prefix(rule: &ScopeRule, vault: &Vault, prefix: Option<&str>) -> bool {
-    if !vault_matches_scope(vault, &rule.target) {
-        return false;
-    }
-    if let Some(scope_prefix) = rule.prefix.as_deref() {
-        return prefix.is_some_and(|value| prefix_match(Some(scope_prefix), value));
-    }
-    true
-}
-
-pub(super) fn vault_matches_scope(vault: &Vault, target: &ScopeTarget) -> bool {
-    match target {
-        ScopeTarget::Vault(scope) => vault.slug == *scope || vault.id.to_string() == *scope,
-        ScopeTarget::Tag(tag) => vault
-            .tags
-            .as_ref()
-            .is_some_and(|tags| tags.0.iter().any(|value| value == tag)),
-        ScopeTarget::Pattern(pattern) => matches_pattern(pattern, &vault.slug),
-    }
-}
-
-pub(super) fn matches_pattern(pattern: &str, value: &str) -> bool {
-    if pattern == "*" || pattern == "**" {
-        return true;
-    }
-
-    let starts_with_wildcard = pattern.starts_with('*');
-    let ends_with_wildcard = pattern.ends_with('*');
-    let parts: Vec<&str> = pattern.split('*').filter(|p| !p.is_empty()).collect();
-
-    if parts.is_empty() {
-        return true;
-    }
-
-    let mut index = 0;
-    for (i, part) in parts.iter().enumerate() {
-        if let Some(pos) = value[index..].find(part) {
-            if i == 0 && !starts_with_wildcard && pos != 0 {
-                return false;
-            }
-            index += pos + part.len();
-        } else {
-            return false;
-        }
-    }
-
-    if !ends_with_wildcard {
-        if let Some(last) = parts.last() {
-            return value.ends_with(last);
-        }
-    }
-
-    true
 }
 
 pub(super) async fn service_account_allows_path(
@@ -382,12 +346,7 @@ pub(super) async fn service_account_allows_path(
     let Some(scopes) = service_account_scopes(state, service_account_id).await else {
         return false;
     };
-    scopes.iter().any(|scope| {
-        let Some(rule) = parse_scope(scope) else {
-            return false;
-        };
-        scope_allows_action(&rule.permission, action) && scope_matches_path(&rule, vault, path)
-    })
+    scopes_allow_path(&scopes, vault, action, path)
 }
 
 pub(super) async fn service_account_allows_prefix(
@@ -400,25 +359,126 @@ pub(super) async fn service_account_allows_prefix(
     let Some(scopes) = service_account_scopes(state, service_account_id).await else {
         return false;
     };
-    let mut matched_rules = Vec::new();
-    for scope in &scopes {
-        let Some(rule) = parse_scope(scope) else {
-            continue;
-        };
-        if !scope_allows_action(&rule.permission, action) {
-            continue;
+    scopes_allow_prefix(&scopes, vault, action, prefix)
+}
+
+pub(super) async fn rotation_action_allowed(
+    state: &AppState,
+    identity: &Identity,
+    vault: &Vault,
+    action: &str,
+    resource: &str,
+    path: &str,
+) -> Result<bool, sqlx_core::Error> {
+    let decision = state
+        .policy_store
+        .get()
+        .evaluate(identity, action, resource);
+    if let Some(service_account_id) = identity.service_account_id {
+        if matches!(decision, PolicyDecision::Deny) {
+            return Ok(false);
         }
-        if vault_matches_scope(vault, &rule.target) {
-            matched_rules.push(rule);
+        return Ok(
+            service_account_allows_path(state, service_account_id, vault, action, path).await,
+        );
+    }
+    if action == "rotate_abort_force" {
+        if matches!(decision, PolicyDecision::Deny) {
+            return Ok(false);
+        }
+        // A policy may narrow force-abort but cannot broaden it beyond the
+        // vault-admin role.
+        return vault_role_allows(state, identity, vault.id, action, VaultScope::Items).await;
+    }
+    match decision {
+        PolicyDecision::Allow => Ok(true),
+        PolicyDecision::Deny => Ok(false),
+        PolicyDecision::NoMatch => {
+            vault_role_allows(state, identity, vault.id, action, VaultScope::Items).await
         }
     }
-    if matched_rules.is_empty() {
-        return false;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use zann_crypto::{EncryptedPayload, FieldKind, FieldValue};
+
+    use super::{
+        generate_rotation_candidate, rotation_abort_state_allowed, rotation_password_field_name,
+    };
+    use crate::domains::secrets::policies::PasswordPolicy;
+
+    fn password(value: &str) -> FieldValue {
+        FieldValue {
+            kind: FieldKind::Password,
+            value: value.to_string(),
+            meta: None,
+        }
     }
-    if prefix.is_none() && matched_rules.iter().all(|rule| rule.prefix.is_some()) {
-        return false;
+
+    #[test]
+    fn rotation_uses_configured_secret_policy() {
+        let mut policies = HashMap::new();
+        policies.insert(
+            "database".to_string(),
+            PasswordPolicy {
+                length: 12,
+                min_lowercase: 0,
+                min_uppercase: 0,
+                min_digits: 12,
+                min_symbols: 0,
+                symbols: None,
+            },
+        );
+
+        let candidate =
+            generate_rotation_candidate(&policies, "database", None).expect("candidate");
+        assert_eq!(candidate.as_str().len(), 12);
+        assert!(candidate.as_str().chars().all(|ch| ch.is_ascii_digit()));
+        assert_eq!(
+            generate_rotation_candidate(&policies, "database", Some("missing"))
+                .expect_err("unknown policy"),
+            "unknown_policy"
+        );
     }
-    matched_rules
-        .iter()
-        .any(|rule| scope_matches_prefix(rule, vault, prefix))
+
+    #[test]
+    fn rotation_password_field_selection_is_deterministic() {
+        let mut payload = EncryptedPayload::new("login");
+        payload
+            .fields
+            .insert("secondary".to_string(), password("two"));
+        payload
+            .fields
+            .insert("password".to_string(), password("one"));
+        assert_eq!(
+            rotation_password_field_name(&payload).expect("canonical field"),
+            "password"
+        );
+
+        payload.fields.remove("password");
+        assert_eq!(
+            rotation_password_field_name(&payload).expect("single field"),
+            "secondary"
+        );
+
+        payload
+            .fields
+            .insert("primary".to_string(), password("three"));
+        assert_eq!(
+            rotation_password_field_name(&payload).expect_err("ambiguous fields"),
+            "password_field_ambiguous"
+        );
+    }
+
+    #[test]
+    fn force_abort_only_expands_invalid_state_recovery() {
+        assert!(rotation_abort_state_allowed(Some("rotating"), false));
+        assert!(rotation_abort_state_allowed(Some("stale"), false));
+        assert!(!rotation_abort_state_allowed(Some("corrupt"), false));
+        assert!(rotation_abort_state_allowed(Some("corrupt"), true));
+        assert!(!rotation_abort_state_allowed(None, true));
+    }
 }

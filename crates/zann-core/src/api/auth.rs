@@ -1,5 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
 #[derive(Debug, Serialize, Deserialize, Clone, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -116,6 +117,12 @@ pub struct ServiceAccountLoginRequest {
     pub token: String,
 }
 
+impl Drop for ServiceAccountLoginRequest {
+    fn drop(&mut self) {
+        self.token.zeroize();
+    }
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ServiceAccountLoginResponse {
     pub service_account_id: String,
@@ -125,10 +132,28 @@ pub struct ServiceAccountLoginResponse {
     pub vault_keys: Vec<ServiceAccountVaultKey>,
 }
 
+impl ServiceAccountLoginResponse {
+    pub fn take_access_token(&mut self) -> String {
+        std::mem::take(&mut self.access_token)
+    }
+}
+
+impl Drop for ServiceAccountLoginResponse {
+    fn drop(&mut self) {
+        self.access_token.zeroize();
+    }
+}
+
 #[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ServiceAccountVaultKey {
     pub vault_id: String,
     pub vault_key: String,
+}
+
+impl Drop for ServiceAccountVaultKey {
+    fn drop(&mut self) {
+        self.vault_key.zeroize();
+    }
 }
 
 /// The stable error envelope returned by v1 HTTP endpoints.

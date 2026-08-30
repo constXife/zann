@@ -8545,6 +8545,7 @@ dependencies = [
  "tracing",
  "uuid",
  "zann-crypto",
+ "zeroize",
 ]
 
 [[package]]

@@ -17,7 +17,7 @@ use zeroize::Zeroizing;
 
 use crate::app::AppState;
 use crate::domains::access_control::http::{
-    find_vault, parse_scope, vault_role_allows, ScopeRule, VaultScope,
+    find_vault, scopes_allow_path, scopes_allow_prefix, vault_role_allows, VaultScope,
 };
 use crate::domains::access_control::policies::PolicyDecision;
 use crate::domains::errors::ServiceError;
@@ -166,7 +166,8 @@ pub(crate) async fn list_items(
     let limit = limit
         .unwrap_or(ITEM_LIST_DEFAULT_LIMIT)
         .clamp(1, ITEM_LIST_MAX_LIMIT);
-    let page = fetch_item_list_page(state, vault.id, prefix.as_deref(), cursor, limit).await?;
+    let page =
+        fetch_item_list_page(state, vault.id, prefix.as_deref(), None, cursor, limit).await?;
 
     tracing::info!(
         event = "items_listed",
@@ -205,6 +206,7 @@ pub(crate) async fn fetch_item_list_page(
     state: &AppState,
     vault_id: Uuid,
     prefix: Option<&str>,
+    type_id: Option<&str>,
     cursor: Option<(DateTime<Utc>, Uuid)>,
     limit: i64,
 ) -> Result<ItemListPage, ItemsError> {
@@ -229,17 +231,19 @@ pub(crate) async fn fetch_item_list_page(
         WHERE vault_id = $1
           AND sync_status = 1
           AND ($2::text IS NULL OR path = $2 OR starts_with(path, $2 || '/'))
+          AND ($3::text IS NULL OR type_id = $3)
           AND (
-                $3::timestamptz IS NULL
-                OR updated_at < $3
-                OR (updated_at = $3 AND id < $4)
+                $4::timestamptz IS NULL
+                OR updated_at < $4
+                OR (updated_at = $4 AND id < $5)
               )
         ORDER BY updated_at DESC, id DESC
-        LIMIT $5
+        LIMIT $6
         "#,
     )
     .bind(vault_id)
     .bind(prefix)
+    .bind(type_id)
     .bind(cursor_timestamp)
     .bind(cursor_id)
     .bind(limit + 1)
@@ -1667,14 +1671,6 @@ fn normalize_prefix(value: Option<&str>) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-fn prefix_match(prefix: Option<&str>, path: &str) -> bool {
-    let Some(prefix) = prefix else {
-        return true;
-    };
-    let path = path.trim().trim_matches('/').to_string();
-    path == prefix || path.starts_with(&format!("{}/", prefix))
-}
-
 async fn service_account_scopes(state: &AppState, service_account_id: Uuid) -> Option<Vec<String>> {
     let repo = ServiceAccountRepo::new(&state.db);
     repo.get_by_id(service_account_id)
@@ -1682,78 +1678,6 @@ async fn service_account_scopes(state: &AppState, service_account_id: Uuid) -> O
         .ok()
         .flatten()
         .map(|account| account.scopes.0)
-}
-
-fn scope_matches_path(rule: &ScopeRule, vault: &Vault, path: &str) -> bool {
-    if !vault_matches_scope(vault, &rule.target) {
-        return false;
-    }
-    if let Some(prefix) = rule.prefix.as_deref() {
-        return prefix_match(Some(prefix), path);
-    }
-    true
-}
-
-fn scope_matches_prefix(rule: &ScopeRule, vault: &Vault, prefix: Option<&str>) -> bool {
-    if !vault_matches_scope(vault, &rule.target) {
-        return false;
-    }
-    if let Some(scope_prefix) = rule.prefix.as_deref() {
-        return prefix.is_some_and(|value| prefix_match(Some(scope_prefix), value));
-    }
-    true
-}
-
-fn vault_matches_scope(
-    vault: &Vault,
-    target: &crate::domains::access_control::http::ScopeTarget,
-) -> bool {
-    match target {
-        crate::domains::access_control::http::ScopeTarget::Vault(scope) => {
-            vault.slug == *scope || vault.id.to_string() == *scope
-        }
-        crate::domains::access_control::http::ScopeTarget::Tag(tag) => vault
-            .tags
-            .as_ref()
-            .is_some_and(|tags| tags.0.iter().any(|value| value == tag)),
-        crate::domains::access_control::http::ScopeTarget::Pattern(pattern) => {
-            matches_pattern(pattern, &vault.slug)
-        }
-    }
-}
-
-fn matches_pattern(pattern: &str, value: &str) -> bool {
-    if pattern == "*" || pattern == "**" {
-        return true;
-    }
-
-    let starts_with_wildcard = pattern.starts_with('*');
-    let ends_with_wildcard = pattern.ends_with('*');
-    let parts: Vec<&str> = pattern.split('*').filter(|p| !p.is_empty()).collect();
-
-    if parts.is_empty() {
-        return true;
-    }
-
-    let mut index = 0;
-    for (i, part) in parts.iter().enumerate() {
-        if let Some(pos) = value[index..].find(part) {
-            if i == 0 && !starts_with_wildcard && pos != 0 {
-                return false;
-            }
-            index += pos + part.len();
-        } else {
-            return false;
-        }
-    }
-
-    if !ends_with_wildcard {
-        if let Some(last) = parts.last() {
-            return value.ends_with(last);
-        }
-    }
-
-    true
 }
 
 async fn service_account_allows_path(
@@ -1766,12 +1690,7 @@ async fn service_account_allows_path(
     let Some(scopes) = service_account_scopes(state, service_account_id).await else {
         return false;
     };
-    scopes.iter().any(|scope| {
-        let Some(rule) = parse_scope(scope) else {
-            return false;
-        };
-        scope_allows_action(&rule.permission, action) && scope_matches_path(&rule, vault, path)
-    })
+    scopes_allow_path(&scopes, vault, action, path)
 }
 
 async fn service_account_allows_prefix(
@@ -1784,41 +1703,7 @@ async fn service_account_allows_prefix(
     let Some(scopes) = service_account_scopes(state, service_account_id).await else {
         return false;
     };
-    let mut matched_rules = Vec::new();
-    for scope in &scopes {
-        let Some(rule) = parse_scope(scope) else {
-            continue;
-        };
-        if !scope_allows_action(&rule.permission, action) {
-            continue;
-        }
-        if vault_matches_scope(vault, &rule.target) {
-            matched_rules.push(rule);
-        }
-    }
-    if matched_rules.is_empty() {
-        return false;
-    }
-    if prefix.is_none() && matched_rules.iter().all(|rule| rule.prefix.is_some()) {
-        return false;
-    }
-    matched_rules
-        .iter()
-        .any(|rule| scope_matches_prefix(rule, vault, prefix))
-}
-
-fn scope_allows_action(permission: &str, action: &str) -> bool {
-    match action {
-        "read_history" => {
-            matches!(
-                permission,
-                "history_read" | "read_history" | "read_previous"
-            )
-        }
-        "read_previous" => permission == "read_previous",
-        "read" | "list" => permission == "read",
-        _ => permission == action,
-    }
+    scopes_allow_prefix(&scopes, vault, action, prefix)
 }
 
 fn file_aad(

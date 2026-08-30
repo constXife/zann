@@ -1,18 +1,19 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
     Extension, Json, Router,
 };
-use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::fmt;
+use serde::Serialize;
 use std::io::Write;
 use std::time::Instant;
+use zann_core::api::secrets::{
+    BatchEnsureRequest, BatchGetRequest, BatchResult, ErrorResponse, PolicyMismatchDetails,
+    SecretGetQuery, SecretListQuery, SecretListResponse, SecretRequest, SecretResponse,
+    SecretSetRequest, SecretSummary, SecretVersionSelector,
+};
 use zann_core::Identity;
-use zeroize::Zeroize;
 
 use crate::app::AppState;
 use crate::domains::items::contract::MAX_PLAINTEXT_PAYLOAD_BYTES;
@@ -23,139 +24,9 @@ const MAX_BATCH_SECRETS: usize = 64;
 const MAX_BATCH_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_BATCH_ENSURE_RESULT_OVERHEAD_BYTES: usize = 8 * 1024;
 
-#[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct ErrorResponse {
-    error: &'static str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    details: Option<PolicyMismatchDetails>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct PolicyMismatchDetails {
-    requested_policy: String,
-    existing_policy: String,
-}
-
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub(crate) struct SecretRequest {
-    path: String,
-    #[serde(default)]
-    policy: Option<String>,
-    #[serde(default)]
-    meta: Option<HashMap<String, String>>,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub(crate) struct SecretSetRequest {
-    value: String,
-    #[serde(default)]
-    policy: Option<String>,
-    #[serde(default)]
-    meta: Option<HashMap<String, String>>,
-}
-
-impl fmt::Debug for SecretSetRequest {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("SecretSetRequest")
-            .field("value", &"<redacted>")
-            .field("policy", &"<redacted>")
-            .field(
-                "meta_count",
-                &self.meta.as_ref().map(HashMap::len).unwrap_or(0),
-            )
-            .finish()
-    }
-}
-
-impl Drop for SecretSetRequest {
-    fn drop(&mut self) {
-        wipe_string(&mut self.value);
-        if let Some(policy) = self.policy.as_mut() {
-            wipe_string(policy);
-        }
-        wipe_string_map(&mut self.meta);
-    }
-}
-
-#[derive(Deserialize, Serialize, JsonSchema)]
-pub(crate) struct BatchEnsureRequest {
-    secrets: Vec<SecretRequest>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct BatchGetRequest {
-    paths: Vec<String>,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub(crate) struct SecretResponse {
-    pub(crate) path: String,
-    pub(crate) vault_id: String,
-    pub(crate) value: String,
-    pub(crate) policy: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) meta: Option<HashMap<String, String>>,
-    pub(crate) version: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) previous_version: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) created: Option<bool>,
-}
-
-impl fmt::Debug for SecretResponse {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("SecretResponse")
-            .field("path", &self.path)
-            .field("vault_id", &self.vault_id)
-            .field("value", &"<redacted>")
-            .field("policy", &"<redacted>")
-            .field(
-                "meta_count",
-                &self.meta.as_ref().map(HashMap::len).unwrap_or(0),
-            )
-            .field("version", &self.version)
-            .field("previous_version", &self.previous_version)
-            .field("created", &self.created)
-            .finish()
-    }
-}
-
-impl Drop for SecretResponse {
-    fn drop(&mut self) {
-        wipe_string(&mut self.value);
-        wipe_string(&mut self.policy);
-        wipe_string_map(&mut self.meta);
-    }
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-pub(crate) struct BatchResult {
-    path: String,
-    status: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    secret: Option<SecretResponse>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<ErrorResponse>,
-}
-
-fn wipe_string(value: &mut String) {
-    let mut bytes = std::mem::take(value).into_bytes();
-    bytes.zeroize();
-}
-
-fn wipe_string_map(value: &mut Option<HashMap<String, String>>) {
-    if let Some(map) = value.as_mut() {
-        for (mut key, mut value) in map.drain() {
-            wipe_string(&mut key);
-            wipe_string(&mut value);
-        }
-    }
-}
-
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/v1/vaults/:vault_id/secrets", get(list_secrets))
         .route(
             "/v1/vaults/:vault_id/secrets/*path",
             get(get_secret).put(set_secret),
@@ -169,24 +40,81 @@ pub fn router() -> Router<AppState> {
         .route("/v1/vaults/:vault_id/secrets/batch/get", post(batch_get))
 }
 
+async fn list_secrets(
+    State(state): State<AppState>,
+    Extension(identity): Extension<Identity>,
+    Path(vault_id): Path<String>,
+    Query(query): Query<SecretListQuery>,
+) -> impl IntoResponse {
+    let start = Instant::now();
+    let result = service::list_secrets(
+        &state,
+        &identity,
+        &vault_id,
+        query.prefix.as_deref(),
+        query.limit,
+        query.cursor.as_deref(),
+    )
+    .await;
+    let elapsed = start.elapsed().as_secs_f64();
+    match result {
+        Ok(page) => {
+            let next_cursor = if page.has_more {
+                page.items
+                    .last()
+                    .map(crate::domains::items::service::encode_item_list_cursor)
+            } else {
+                None
+            };
+            let secrets = page
+                .items
+                .into_iter()
+                .map(|item| SecretSummary {
+                    path: format!("/{}", item.path),
+                    version: item.version,
+                    updated_at: item.updated_at.to_rfc3339(),
+                })
+                .collect();
+            metrics::secrets_operation("list", "ok", elapsed);
+            audit::secrets_event(&identity, "list", "ok", &vault_id, "<list>", None);
+            Json(SecretListResponse {
+                secrets,
+                next_cursor,
+            })
+            .into_response()
+        }
+        Err(error) => {
+            let label = error_label(&error);
+            metrics::secrets_operation("list", label, elapsed);
+            audit::secrets_event(&identity, "list", label, &vault_id, "<list>", Some(label));
+            map_secret_error(error)
+        }
+    }
+}
+
 async fn get_secret(
     State(state): State<AppState>,
     Extension(identity): Extension<Identity>,
     Path((vault_id, path)): Path<(String, String)>,
+    Query(query): Query<SecretGetQuery>,
 ) -> impl IntoResponse {
     let start = Instant::now();
-    let result = service::get_secret(&state, &identity, &vault_id, &path).await;
+    let operation = match query.version {
+        Some(SecretVersionSelector::Previous) => "get_previous",
+        None => "get",
+    };
+    let result = service::get_secret(&state, &identity, &vault_id, &path, query.version).await;
     let elapsed = start.elapsed().as_secs_f64();
     match result {
         Ok(record) => {
-            metrics::secrets_operation("get", "ok", elapsed);
-            audit::secrets_event(&identity, "get", "ok", &vault_id, &path, None);
+            metrics::secrets_operation(operation, "ok", elapsed);
+            audit::secrets_event(&identity, operation, "ok", &vault_id, &path, None);
             (StatusCode::OK, Json(secret_response(record, None, None))).into_response()
         }
         Err(err) => {
             let label = error_label(&err);
-            metrics::secrets_operation("get", label, elapsed);
-            audit::secrets_event(&identity, "get", label, &vault_id, &path, Some(label));
+            metrics::secrets_operation(operation, label, elapsed);
+            audit::secrets_event(&identity, operation, label, &vault_id, &path, Some(label));
             map_secret_error(err)
         }
     }
@@ -335,7 +263,7 @@ async fn batch_ensure(
     }
     let mut results = Vec::with_capacity(payload.secrets.len());
     for secret in payload.secrets {
-        let path = secret.path;
+        let path = secret.path.clone();
         let audit_path = path.clone();
         let start = Instant::now();
         let outcome = service::ensure_secret(
@@ -401,11 +329,15 @@ async fn batch_get(
         return batch_payload_too_large();
     }
     let mut results = Vec::with_capacity(payload.paths.len());
-    let mut response_bytes = 0_usize;
-    for path in payload.paths {
+    // Reserve the JSON array brackets up front. Each result after the first
+    // also needs one comma, otherwise the encoded response can exceed the
+    // advertised aggregate limit even though the sum of its entries does not.
+    let mut response_bytes = 2_usize;
+    for path in &payload.paths {
+        let path = path.clone();
         let audit_path = path.clone();
         let start = Instant::now();
-        let outcome = service::get_secret(&state, &identity, &vault_id, &path).await;
+        let outcome = service::get_secret(&state, &identity, &vault_id, &path, None).await;
         let elapsed = start.elapsed().as_secs_f64();
         let result = match outcome {
             Ok(record) => {
@@ -430,7 +362,7 @@ async fn batch_get(
                 }
             }
         };
-        if !reserve_batch_response_bytes(&mut response_bytes, &result) {
+        if !reserve_batch_response_bytes(&mut response_bytes, &result, !results.is_empty()) {
             return batch_payload_too_large();
         }
         results.push(result);
@@ -477,19 +409,26 @@ fn batch_payload_too_large() -> axum::response::Response {
     (
         StatusCode::PAYLOAD_TOO_LARGE,
         Json(ErrorResponse {
-            error: "batch_too_large",
+            error: "batch_too_large".to_string(),
             details: None,
         }),
     )
         .into_response()
 }
 
-fn reserve_batch_response_bytes<T: Serialize>(used: &mut usize, value: &T) -> bool {
+fn reserve_batch_response_bytes<T: Serialize>(
+    used: &mut usize,
+    value: &T,
+    needs_separator: bool,
+) -> bool {
     let mut writer = CountingWriter { written: 0 };
     if serde_json::to_writer(&mut writer, value).is_err() {
         return false;
     }
-    let Some(total) = used.checked_add(writer.written) else {
+    let Some(total) = used
+        .checked_add(usize::from(needs_separator))
+        .and_then(|total| total.checked_add(writer.written))
+    else {
         return false;
     };
     if total > MAX_BATCH_RESPONSE_BYTES {
@@ -522,8 +461,9 @@ fn secret_response(
     previous_version: Option<i64>,
     created: Option<bool>,
 ) -> SecretResponse {
-    let (path, vault_id, value, policy, meta, version) = record.into_parts();
+    let (item_id, path, vault_id, value, policy, meta, version) = record.into_parts();
     SecretResponse {
+        item_id,
         path,
         vault_id,
         value,
@@ -541,7 +481,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::Forbidden(code) => (
             StatusCode::FORBIDDEN,
             Json(ErrorResponse {
-                error: code,
+                error: code.to_string(),
                 details: None,
             }),
         )
@@ -550,7 +490,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::BadRequest(code) => (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
-                error: code,
+                error: code.to_string(),
                 details: None,
             }),
         )
@@ -558,7 +498,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::Conflict(code) => (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
-                error: code,
+                error: code.to_string(),
                 details: None,
             }),
         )
@@ -566,7 +506,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::Unauthorized(code) => (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
-                error: code,
+                error: code.to_string(),
                 details: None,
             }),
         )
@@ -577,7 +517,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         } => (
             StatusCode::CONFLICT,
             Json(ErrorResponse {
-                error: "policy_mismatch",
+                error: "policy_mismatch".to_string(),
                 details: Some(PolicyMismatchDetails {
                     requested_policy: requested,
                     existing_policy: existing,
@@ -588,7 +528,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::PayloadTooLarge(code) => (
             StatusCode::PAYLOAD_TOO_LARGE,
             Json(ErrorResponse {
-                error: code,
+                error: code.to_string(),
                 details: None,
             }),
         )
@@ -596,7 +536,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::DbError => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
-                error: "db_error",
+                error: "db_error".to_string(),
                 details: None,
             }),
         )
@@ -604,7 +544,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::Internal(code) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
-                error: code,
+                error: code.to_string(),
                 details: None,
             }),
         )
@@ -612,7 +552,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::NoChanges => (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
-                error: "no_changes",
+                error: "no_changes".to_string(),
                 details: None,
             }),
         )
@@ -620,7 +560,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::InvalidPassword => (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
-                error: "invalid_password",
+                error: "invalid_password".to_string(),
                 details: None,
             }),
         )
@@ -628,7 +568,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::InvalidCredentials => (
             StatusCode::UNAUTHORIZED,
             Json(ErrorResponse {
-                error: "invalid_credentials",
+                error: "invalid_credentials".to_string(),
                 details: None,
             }),
         )
@@ -636,7 +576,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::Kdf => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
-                error: "kdf_error",
+                error: "kdf_error".to_string(),
                 details: None,
             }),
         )
@@ -644,7 +584,7 @@ fn map_secret_error(error: SecretError) -> axum::response::Response {
         SecretError::DeviceRequired => (
             StatusCode::BAD_REQUEST,
             Json(ErrorResponse {
-                error: "device_required",
+                error: "device_required".to_string(),
                 details: None,
             }),
         )
@@ -658,66 +598,66 @@ fn map_secret_error_body(error: SecretError) -> ErrorResponse {
             existing,
             requested,
         } => ErrorResponse {
-            error: "policy_mismatch",
+            error: "policy_mismatch".to_string(),
             details: Some(PolicyMismatchDetails {
                 requested_policy: requested,
                 existing_policy: existing,
             }),
         },
         SecretError::ForbiddenNoBody => ErrorResponse {
-            error: "forbidden",
+            error: "forbidden".to_string(),
             details: None,
         },
         SecretError::Forbidden(code) => ErrorResponse {
-            error: code,
+            error: code.to_string(),
             details: None,
         },
         SecretError::NotFound => ErrorResponse {
-            error: "not_found",
+            error: "not_found".to_string(),
             details: None,
         },
         SecretError::BadRequest(code) => ErrorResponse {
-            error: code,
+            error: code.to_string(),
             details: None,
         },
         SecretError::Conflict(code) => ErrorResponse {
-            error: code,
+            error: code.to_string(),
             details: None,
         },
         SecretError::Unauthorized(code) => ErrorResponse {
-            error: code,
+            error: code.to_string(),
             details: None,
         },
         SecretError::DbError => ErrorResponse {
-            error: "db_error",
+            error: "db_error".to_string(),
             details: None,
         },
         SecretError::Internal(code) => ErrorResponse {
-            error: code,
+            error: code.to_string(),
             details: None,
         },
         SecretError::PayloadTooLarge(code) => ErrorResponse {
-            error: code,
+            error: code.to_string(),
             details: None,
         },
         SecretError::NoChanges => ErrorResponse {
-            error: "no_changes",
+            error: "no_changes".to_string(),
             details: None,
         },
         SecretError::InvalidPassword => ErrorResponse {
-            error: "invalid_password",
+            error: "invalid_password".to_string(),
             details: None,
         },
         SecretError::InvalidCredentials => ErrorResponse {
-            error: "invalid_credentials",
+            error: "invalid_credentials".to_string(),
             details: None,
         },
         SecretError::Kdf => ErrorResponse {
-            error: "kdf_error",
+            error: "kdf_error".to_string(),
             details: None,
         },
         SecretError::DeviceRequired => ErrorResponse {
-            error: "device_required",
+            error: "device_required".to_string(),
             details: None,
         },
     }
@@ -745,6 +685,12 @@ fn error_label(error: &SecretError) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    #[test]
+    fn exact_secret_list_route_coexists_with_the_secret_path_wildcard() {
+        let _router = router();
+    }
 
     #[test]
     fn secret_http_debug_output_is_redacted() {
@@ -757,6 +703,7 @@ mod tests {
             )])),
         };
         let response = SecretResponse {
+            item_id: "00000000-0000-0000-0000-000000000001".to_string(),
             path: "/folder/secret".to_string(),
             vault_id: "vault".to_string(),
             value: "sentinel-value".to_string(),
@@ -796,8 +743,23 @@ mod tests {
             error: None,
         };
         let mut used = MAX_BATCH_RESPONSE_BYTES - 1;
-        assert!(!reserve_batch_response_bytes(&mut used, &result));
+        assert!(!reserve_batch_response_bytes(&mut used, &result, false));
         assert_eq!(used, MAX_BATCH_RESPONSE_BYTES - 1);
+    }
+
+    #[test]
+    fn batch_response_budget_counts_array_separators() {
+        let result = BatchResult {
+            path: "/secret".to_string(),
+            status: "ok".to_string(),
+            secret: None,
+            error: None,
+        };
+        let encoded = serde_json::to_vec(&result).expect("encoded result");
+        let mut used = MAX_BATCH_RESPONSE_BYTES - encoded.len();
+
+        assert!(!reserve_batch_response_bytes(&mut used, &result, true));
+        assert_eq!(used, MAX_BATCH_RESPONSE_BYTES - encoded.len());
     }
 
     #[test]

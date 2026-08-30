@@ -1,5 +1,5 @@
 use aide::axum::{
-    routing::{delete, get, get_with, post, put},
+    routing::{delete, get, get_with, post, post_with, put},
     ApiRouter,
 };
 use aide::openapi::{Info, OpenApi};
@@ -13,6 +13,10 @@ use zann_core::api::auth::{
     LoginRequest, LoginResponse, LogoutRequest, OidcConfigResponse, OidcLoginRequest,
     PreloginResponse, RefreshRequest, RegisterRequest, ServiceAccountLoginRequest,
     ServiceAccountLoginResponse,
+};
+use zann_core::api::secrets::{
+    BatchEnsureRequest, BatchGetRequest, BatchResult, SecretGetQuery, SecretListQuery,
+    SecretListResponse, SecretRequest, SecretResponse, SecretSetRequest,
 };
 use zann_core::api::system::{SystemIdentity, SystemInfoResponse};
 use zann_core::api::vaults::{PersonalVaultStatusResponse, VaultListResponse};
@@ -34,10 +38,6 @@ use crate::domains::items::http::v1::items_models::{
     ItemHistoryListResponse, ItemResponse, ItemsResponse, UpdateItemRequest,
 };
 use crate::domains::members::http::v1::MembersResponse;
-use crate::domains::secrets::http::v1::{
-    BatchEnsureRequest, BatchGetRequest, BatchResult, SecretRequest, SecretResponse,
-    SecretSetRequest,
-};
 use crate::domains::sync::http::v1::types::{
     SyncPullRequest, SyncPullResponse, SyncPushRequest, SyncPushResponse, SyncSharedPullRequest,
     SyncSharedPullResponse, SyncSharedPushRequest,
@@ -118,27 +118,39 @@ fn doc_router() -> ApiRouter<AppState> {
         .api_route("/v1/shared/items/:item_id", get(shared_items_get))
         .api_route(
             "/v1/shared/items/:item_id/rotate/start",
-            post(shared_rotate_start),
+            post_with(shared_rotate_start, |operation| {
+                operation.response::<200, Json<RotationCandidateResponse>>()
+            }),
         )
         .api_route(
             "/v1/shared/items/:item_id/rotate/status",
-            get(shared_rotate_status),
+            get_with(shared_rotate_status, |operation| {
+                operation.response::<200, Json<RotationStatusResponse>>()
+            }),
         )
         .api_route(
             "/v1/shared/items/:item_id/rotate/candidate",
-            post(shared_rotate_candidate),
+            post_with(shared_rotate_candidate, |operation| {
+                operation.response::<200, Json<RotationCandidateResponse>>()
+            }),
         )
         .api_route(
             "/v1/shared/items/:item_id/rotate/recover",
-            post(shared_rotate_recover),
+            post_with(shared_rotate_recover, |operation| {
+                operation.response::<200, Json<RotationCandidateResponse>>()
+            }),
         )
         .api_route(
             "/v1/shared/items/:item_id/rotate/commit",
-            post(shared_rotate_commit),
+            post_with(shared_rotate_commit, |operation| {
+                operation.response::<200, Json<RotationCommitResponse>>()
+            }),
         )
         .api_route(
             "/v1/shared/items/:item_id/rotate/abort",
-            post(shared_rotate_abort),
+            post_with(shared_rotate_abort, |operation| {
+                operation.response::<200, Json<RotationStatusResponse>>()
+            }),
         )
         .api_route(
             "/v1/shared/items/:item_id/history",
@@ -175,7 +187,16 @@ fn doc_router() -> ApiRouter<AppState> {
         .api_route("/v1/vaults/:vault_id/members", get(members_list))
         .api_route(
             "/v1/vaults/:vault_id/secrets/*path",
-            get(secrets_get).put(secrets_set),
+            get_with(secrets_get, |operation| {
+                operation.response::<200, Json<SecretResponse>>()
+            })
+            .put(secrets_set),
+        )
+        .api_route(
+            "/v1/vaults/:vault_id/secrets",
+            get_with(secrets_list, |operation| {
+                operation.response::<200, Json<SecretListResponse>>()
+            }),
         )
         .api_route("/v1/vaults/:vault_id/secrets/ensure", post(secrets_ensure))
         .api_route("/v1/vaults/:vault_id/secrets/rotate", post(secrets_rotate))
@@ -487,14 +508,13 @@ async fn shared_items_get(Path(_item_id): Path<String>) -> (StatusCode, Json<Sha
 async fn shared_rotate_start(
     Path(_item_id): Path<String>,
     Json(_payload): Json<RotateStartRequest>,
-) -> (StatusCode, Json<RotationStatusResponse>) {
-    not_implemented(RotationStatusResponse {
-        state: String::new(),
-        started_at: None,
-        started_by: None,
+) -> (StatusCode, Json<RotationCandidateResponse>) {
+    not_implemented(RotationCandidateResponse {
+        state: "rotating".to_string(),
+        candidate: zann_core::api::secrets::RotationCandidate::new(String::new()),
+        previous_version: 0,
         expires_at: None,
         recover_until: None,
-        aborted_reason: None,
     })
 }
 
@@ -516,7 +536,8 @@ async fn shared_rotate_candidate(
 ) -> (StatusCode, Json<RotationCandidateResponse>) {
     not_implemented(RotationCandidateResponse {
         state: String::new(),
-        candidate: Default::default(),
+        candidate: zann_core::api::secrets::RotationCandidate::new(String::new()),
+        previous_version: 0,
         expires_at: None,
         recover_until: None,
     })
@@ -524,14 +545,13 @@ async fn shared_rotate_candidate(
 
 async fn shared_rotate_recover(
     Path(_item_id): Path<String>,
-) -> (StatusCode, Json<RotationStatusResponse>) {
-    not_implemented(RotationStatusResponse {
-        state: String::new(),
-        started_at: None,
-        started_by: None,
+) -> (StatusCode, Json<RotationCandidateResponse>) {
+    not_implemented(RotationCandidateResponse {
+        state: "stale".to_string(),
+        candidate: zann_core::api::secrets::RotationCandidate::new(String::new()),
+        previous_version: 0,
         expires_at: None,
         recover_until: None,
-        aborted_reason: None,
     })
 }
 
@@ -539,7 +559,7 @@ async fn shared_rotate_commit(
     Path(_item_id): Path<String>,
 ) -> (StatusCode, Json<RotationCommitResponse>) {
     not_implemented(RotationCommitResponse {
-        status: "not_implemented",
+        status: "not_implemented".to_string(),
         version: 0,
     })
 }
@@ -744,8 +764,10 @@ async fn members_list(Path(_vault_id): Path<String>) -> (StatusCode, Json<Member
 
 async fn secrets_get(
     Path((_vault_id, _path)): Path<(String, String)>,
+    Query(_query): Query<SecretGetQuery>,
 ) -> (StatusCode, Json<SecretResponse>) {
     not_implemented(SecretResponse {
+        item_id: String::new(),
         path: String::new(),
         vault_id: String::new(),
         value: String::new(),
@@ -762,6 +784,7 @@ async fn secrets_set(
     Json(_payload): Json<SecretSetRequest>,
 ) -> (StatusCode, Json<SecretResponse>) {
     not_implemented(SecretResponse {
+        item_id: String::new(),
         path: String::new(),
         vault_id: String::new(),
         value: String::new(),
@@ -773,11 +796,22 @@ async fn secrets_set(
     })
 }
 
+async fn secrets_list(
+    Path(_vault_id): Path<String>,
+    Query(_query): Query<SecretListQuery>,
+) -> (StatusCode, Json<SecretListResponse>) {
+    not_implemented(SecretListResponse {
+        secrets: Vec::new(),
+        next_cursor: None,
+    })
+}
+
 async fn secrets_ensure(
     Path(_vault_id): Path<String>,
     Json(_payload): Json<SecretRequest>,
 ) -> (StatusCode, Json<SecretResponse>) {
     not_implemented(SecretResponse {
+        item_id: String::new(),
         path: String::new(),
         vault_id: String::new(),
         value: String::new(),
@@ -794,6 +828,7 @@ async fn secrets_rotate(
     Json(_payload): Json<SecretRequest>,
 ) -> (StatusCode, Json<SecretResponse>) {
     not_implemented(SecretResponse {
+        item_id: String::new(),
         path: String::new(),
         vault_id: String::new(),
         value: String::new(),
@@ -981,6 +1016,33 @@ mod tests {
         assert_eq!(
             schema.pointer("/properties/auth_methods/items/type"),
             Some(&json!("integer"))
+        );
+    }
+
+    #[test]
+    fn generated_rotation_contracts_include_previous_selector_and_candidate_responses() {
+        let api = serde_json::to_value(build_openapi()).expect("serialize generated OpenAPI");
+        let parameters = api
+            .pointer("/paths/~1v1~1vaults~1{vault_id}~1secrets~1{path+}/get/parameters")
+            .and_then(serde_json::Value::as_array)
+            .expect("secret get query parameters");
+        assert!(parameters.iter().any(|parameter| {
+            parameter.get("name") == Some(&json!("version"))
+                && parameter.pointer("/schema/anyOf/0/$ref")
+                    == Some(&json!("#/components/schemas/SecretVersionSelector"))
+        }));
+        for endpoint in ["start", "candidate", "recover"] {
+            let pointer = format!(
+                "/paths/~1v1~1shared~1items~1{{item_id}}~1rotate~1{endpoint}/post/responses/200/content/application~1json/schema/$ref"
+            );
+            assert_eq!(
+                api.pointer(&pointer),
+                Some(&json!("#/components/schemas/RotationCandidateResponse"))
+            );
+        }
+        assert_eq!(
+            api.pointer("/paths/~1v1~1shared~1items~1{item_id}~1rotate~1commit/post/responses/200/content/application~1json/schema/$ref"),
+            Some(&json!("#/components/schemas/RotationCommitResponse"))
         );
     }
 }

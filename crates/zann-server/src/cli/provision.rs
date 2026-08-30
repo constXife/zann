@@ -4,13 +4,11 @@ use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use serde::Serialize;
 use sqlx_core::types::Json as SqlxJson;
-use std::convert::Infallible;
 use std::fmt;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use uuid::Uuid;
 use zann_core::{
     CachePolicy, Change, ChangeOp, ChangeType, Device, Item, ItemHistory, ServiceAccount,
@@ -32,10 +30,14 @@ use crate::domains::auth::core::passwords;
 use crate::domains::auth::helpers::build_device;
 use crate::domains::items::contract::next_item_version;
 use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
+use crate::domains::secrets::service::{
+    validate_secret_typed_payload, SECRET_POLICY_FIELD, SECRET_TYPE_ID, SECRET_VALUE_FIELD,
+};
 use crate::settings;
 
 const PROVISION_DEVICE_NAME: &str = "provision";
 const PROVISION_DEVICE_FINGERPRINT: &str = "zann:provision:system";
+const MAX_PROVISION_SECRET_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, Args)]
 pub struct ProvisionArgs {
@@ -71,9 +73,13 @@ pub struct SetFieldArgs {
     pub path: String,
     #[arg(long, help = "Field key")]
     pub key: String,
-    #[arg(long, help = "Field value")]
-    pub value: ProvisionSecret,
-    #[arg(long, value_enum, default_value = "text", help = "Field kind")]
+    #[arg(
+        long,
+        value_name = "path",
+        help = "Regular file containing the exact UTF-8 field value"
+    )]
+    pub value_file: PathBuf,
+    #[arg(long, value_enum, default_value = "password", help = "Field kind")]
     pub kind: ProvisionFieldKind,
     #[arg(
         long,
@@ -81,29 +87,6 @@ pub struct SetFieldArgs {
         help = "Item type for newly created items"
     )]
     pub type_id: String,
-}
-
-#[derive(Clone)]
-pub struct ProvisionSecret(Zeroizing<String>);
-
-impl ProvisionSecret {
-    fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-}
-
-impl fmt::Debug for ProvisionSecret {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("ProvisionSecret(<redacted>)")
-    }
-}
-
-impl FromStr for ProvisionSecret {
-    type Err = Infallible;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        Ok(Self(Zeroizing::new(value.to_string())))
-    }
 }
 
 #[derive(Debug, Clone, Args)]
@@ -118,7 +101,7 @@ pub struct EnsureTokenArgs {
     #[arg(
         value_name = "ops",
         default_value = "read",
-        help = "Comma-separated ops (read, write, read_history, read_previous)"
+        help = "Comma-separated ops (read, write, read_history, read_previous, rotate)"
     )]
     pub ops: String,
     #[arg(long)]
@@ -142,7 +125,7 @@ pub struct EnsureTokenArgs {
     pub write_token_file: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum ProvisionFieldKind {
     Text,
     Password,
@@ -280,9 +263,10 @@ async fn set_field_command(
         return Err("invalid_type_id".to_string());
     }
 
+    let value = read_provision_secret(&args.value_file)?;
     let field = FieldValue {
         kind: args.kind.into(),
-        value: args.value.as_str().to_string(),
+        value: value.as_str().to_string(),
         meta: None,
     };
 
@@ -305,7 +289,13 @@ async fn set_field_command(
             serde_json::to_vec(&payload).map_err(|err| format!("payload_encode_failed: {err}"))?,
         );
         payload.type_id = item.type_id.clone();
-        payload.fields.insert(key.to_string(), field);
+        insert_provision_field(
+            &mut payload,
+            key,
+            field,
+            &settings.secret_default_policy,
+            false,
+        )?;
         let after = Zeroizing::new(
             serde_json::to_vec(&payload).map_err(|err| format!("payload_encode_failed: {err}"))?,
         );
@@ -384,7 +374,13 @@ async fn set_field_command(
         }
     } else {
         let mut payload = EncryptedPayload::new(type_id);
-        payload.fields.insert(key.to_string(), field);
+        insert_provision_field(
+            &mut payload,
+            key,
+            field,
+            &settings.secret_default_policy,
+            true,
+        )?;
         let item_id = Uuid::now_v7();
         let payload_enc = encrypt_payload(settings, &vault, item_id, &payload)?;
         let now = Utc::now();
@@ -890,7 +886,7 @@ fn normalize_prefix(prefix: &str) -> Result<NormalizedPrefix, String> {
     }
     Ok(NormalizedPrefix {
         canonical: format!("/{canonical}"),
-        scope: canonical.replace('/', "::"),
+        scope: canonical,
     })
 }
 
@@ -906,6 +902,7 @@ fn parse_ops(value: &str) -> Result<Vec<&'static str>, String> {
             "write" => "write",
             "read_history" => "read_history",
             "read_previous" => "read_previous",
+            "rotate" => "rotate",
             "history_read" => "read_history",
             _ => return Err(format!("invalid_ops:{token}")),
         };
@@ -965,6 +962,64 @@ fn generate_service_account_token(
         token_hash,
         token_prefix,
     })
+}
+
+fn insert_provision_field(
+    payload: &mut EncryptedPayload,
+    key: &str,
+    field: FieldValue,
+    default_secret_policy: &str,
+    new_item: bool,
+) -> Result<(), String> {
+    if payload.type_id == SECRET_TYPE_ID {
+        if key != SECRET_VALUE_FIELD || field.kind != FieldKind::Password || field.meta.is_some() {
+            return Err("invalid_secret_field".to_string());
+        }
+        if new_item {
+            payload.fields.insert(
+                SECRET_POLICY_FIELD.to_string(),
+                FieldValue {
+                    kind: FieldKind::Text,
+                    value: default_secret_policy.to_string(),
+                    meta: None,
+                },
+            );
+        }
+    }
+
+    payload.fields.insert(key.to_string(), field);
+    if payload.type_id == SECRET_TYPE_ID {
+        validate_secret_typed_payload(payload).map_err(|error| error.code().to_string())?;
+    }
+    Ok(())
+}
+
+fn read_provision_secret(path: &Path) -> Result<Zeroizing<String>, String> {
+    let file = fs::File::open(path).map_err(|err| format!("value_file_open_failed: {err}"))?;
+    let metadata = file
+        .metadata()
+        .map_err(|err| format!("value_file_metadata_failed: {err}"))?;
+    if !metadata.file_type().is_file() {
+        return Err("value_file_not_regular".to_string());
+    }
+    if metadata.len() > MAX_PROVISION_SECRET_BYTES {
+        return Err("value_file_too_large".to_string());
+    }
+
+    let mut bytes = Zeroizing::new(Vec::new());
+    file.take(MAX_PROVISION_SECRET_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|err| format!("value_file_read_failed: {err}"))?;
+    if bytes.len() as u64 > MAX_PROVISION_SECRET_BYTES {
+        return Err("value_file_too_large".to_string());
+    }
+    if std::str::from_utf8(&bytes).is_err() {
+        return Err("value_file_invalid_utf8".to_string());
+    }
+
+    let value = String::from_utf8(std::mem::take(&mut *bytes))
+        .expect("UTF-8 was validated before constructing the provision value");
+    Ok(Zeroizing::new(value))
 }
 
 #[cfg(test)]
@@ -1162,14 +1217,15 @@ impl StagedSecretFile {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_shared_server_vault, normalize_prefix, parse_ops, parse_ttl, stage_secret_file,
-        update_history_version, write_secret_file, ProvisionFieldKind, ProvisionSecret,
-        SetFieldArgs,
+        ensure_shared_server_vault, insert_provision_field, normalize_prefix, parse_ops, parse_ttl,
+        read_provision_secret, stage_secret_file, update_history_version, write_secret_file,
+        MAX_PROVISION_SECRET_BYTES,
     };
     use chrono::Utc;
     use std::time::{SystemTime, UNIX_EPOCH};
     use uuid::Uuid;
     use zann_core::{CachePolicy, Vault, VaultEncryptionType, VaultKind};
+    use zann_crypto::{EncryptedPayload, FieldKind, FieldValue};
 
     #[test]
     fn parse_ops_deduplicates_aliases() {
@@ -1178,15 +1234,15 @@ mod tests {
     }
 
     #[test]
-    fn parse_ops_accepts_write() {
-        let ops = parse_ops("read,write").expect("ops");
-        assert_eq!(ops, vec!["read", "write"]);
+    fn parse_ops_accepts_write_and_explicit_rotation() {
+        let ops = parse_ops("read,write,rotate").expect("ops");
+        assert_eq!(ops, vec!["read", "write", "rotate"]);
     }
 
     #[test]
     fn parse_ops_rejects_unknown_values() {
-        let err = parse_ops("read,rotate").expect_err("invalid ops");
-        assert_eq!(err, "invalid_ops:rotate");
+        let err = parse_ops("read,delete").expect_err("invalid ops");
+        assert_eq!(err, "invalid_ops:delete");
     }
 
     #[test]
@@ -1199,24 +1255,77 @@ mod tests {
     fn normalize_prefix_canonicalizes_slashes() {
         let prefix = normalize_prefix("/rlyeh/yogg/grafana/").expect("prefix");
         assert_eq!(prefix.canonical, "/rlyeh/yogg/grafana");
-        assert_eq!(prefix.scope, "rlyeh::yogg::grafana");
+        assert_eq!(prefix.scope, "rlyeh/yogg/grafana");
     }
 
     #[test]
-    fn set_field_args_debug_redacts_plaintext_value() {
-        let args = SetFieldArgs {
-            vault: "vault".to_string(),
-            path: "path".to_string(),
-            key: "password".to_string(),
-            value: "sentinel-provision-secret"
-                .parse::<ProvisionSecret>()
-                .expect("infallible secret parse"),
-            kind: ProvisionFieldKind::Password,
-            type_id: "secret".to_string(),
-        };
-        let rendered = format!("{args:?}");
-        assert!(!rendered.contains("sentinel-provision-secret"));
-        assert!(rendered.contains("<redacted>"));
+    fn read_provision_secret_preserves_exact_utf8_value() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("zann-provision-value-{unique}.txt"));
+        std::fs::write(&path, " sentinel-provision-secret\n").expect("write value fixture");
+
+        let value = read_provision_secret(&path).expect("read provision value");
+        assert_eq!(value.as_str(), " sentinel-provision-secret\n");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn read_provision_secret_rejects_oversized_file() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("zann-provision-large-{unique}.txt"));
+        std::fs::write(&path, vec![b'x'; MAX_PROVISION_SECRET_BYTES as usize + 1])
+            .expect("write oversized fixture");
+
+        let err = read_provision_secret(&path).expect_err("oversized value must fail");
+        assert_eq!(err, "value_file_too_large");
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn insert_provision_field_builds_canonical_machine_secret() {
+        let mut payload = EncryptedPayload::new("secret");
+        insert_provision_field(
+            &mut payload,
+            "value",
+            FieldValue {
+                kind: FieldKind::Password,
+                value: "sentinel-provision-secret".to_string(),
+                meta: None,
+            },
+            "default",
+            true,
+        )
+        .expect("canonical secret field");
+
+        assert_eq!(payload.fields.len(), 2);
+        assert_eq!(payload.fields["policy"].value, "default");
+    }
+
+    #[test]
+    fn insert_provision_field_rejects_noncanonical_secret_field() {
+        let mut payload = EncryptedPayload::new("secret");
+        let err = insert_provision_field(
+            &mut payload,
+            "client_id",
+            FieldValue {
+                kind: FieldKind::Text,
+                value: "sentinel-provision-secret".to_string(),
+                meta: None,
+            },
+            "default",
+            true,
+        )
+        .expect_err("noncanonical secret field must fail");
+
+        assert_eq!(err, "invalid_secret_field");
     }
 
     #[test]

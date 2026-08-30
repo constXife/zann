@@ -1,10 +1,12 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use std::fmt;
+pub(crate) use zann_core::api::secrets::{
+    RotateAbortRequest, RotateStartRequest, RotationCandidate, RotationCandidateResponse,
+    RotationCommitResponse, RotationStatusResponse,
+};
 use zann_core::ChangeType;
 use zann_crypto::EncryptedPayload;
-use zeroize::Zeroizing;
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct ErrorResponse {
@@ -100,94 +102,6 @@ pub(crate) struct UpdateSharedItemRequest {
     pub(crate) favorite: Option<bool>,
     #[schemars(with = "JsonValue")]
     pub(crate) payload: EncryptedPayload,
-}
-
-#[derive(Deserialize, JsonSchema)]
-pub(crate) struct RotateStartRequest {
-    #[serde(default)]
-    pub(crate) policy: Option<String>,
-}
-
-#[derive(Debug, Deserialize, JsonSchema)]
-pub(crate) struct RotateAbortRequest {
-    #[serde(default)]
-    pub(crate) reason: Option<String>,
-    #[serde(default)]
-    pub(crate) force: bool,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub(crate) struct RotationStatusResponse {
-    pub(crate) state: String,
-    pub(crate) started_at: Option<String>,
-    pub(crate) started_by: Option<String>,
-    pub(crate) expires_at: Option<String>,
-    pub(crate) recover_until: Option<String>,
-    pub(crate) aborted_reason: Option<String>,
-}
-
-#[derive(Serialize, JsonSchema)]
-pub(crate) struct RotationCandidateResponse {
-    pub(crate) state: String,
-    pub(crate) candidate: RotationCandidate,
-    pub(crate) expires_at: Option<String>,
-    pub(crate) recover_until: Option<String>,
-}
-
-/// Plaintext rotation candidates are response-scoped secrets. Debug output is
-/// always redacted and the backing allocation is wiped when the response (or
-/// an early-return temporary) is dropped.
-pub(crate) struct RotationCandidate(Zeroizing<String>);
-
-impl Default for RotationCandidate {
-    fn default() -> Self {
-        Self::new(String::new())
-    }
-}
-
-impl RotationCandidate {
-    pub(super) fn new(value: String) -> Self {
-        Self(Zeroizing::new(value))
-    }
-
-    pub(super) fn as_str(&self) -> &str {
-        self.0.as_str()
-    }
-
-    pub(super) fn into_string(mut self) -> String {
-        std::mem::take(&mut *self.0)
-    }
-}
-
-impl fmt::Debug for RotationCandidate {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("RotationCandidate(<redacted>)")
-    }
-}
-
-impl Serialize for RotationCandidate {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl JsonSchema for RotationCandidate {
-    fn schema_name() -> String {
-        "RotationCandidate".to_string()
-    }
-
-    fn json_schema(generator: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        String::json_schema(generator)
-    }
-}
-
-#[derive(Serialize, JsonSchema)]
-pub(crate) struct RotationCommitResponse {
-    pub(crate) status: &'static str,
-    pub(crate) version: i64,
 }
 
 #[cfg(test)]

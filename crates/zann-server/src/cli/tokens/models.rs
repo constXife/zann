@@ -1,5 +1,6 @@
 use chrono::Duration as ChronoDuration;
 use serde::{Deserialize, Serialize};
+use zann_core::{Vault, VaultEncryptionType, VaultKind};
 use zann_db::repo::{UserRepo, VaultRepo};
 use zann_db::PgPool;
 
@@ -26,28 +27,29 @@ pub(super) async fn resolve_owner(
     Ok(owner.id)
 }
 
-pub(super) async fn resolve_shared_vault(
-    db: &PgPool,
-    selector: &str,
-) -> Result<zann_core::Vault, String> {
+pub(super) async fn resolve_shared_vault(db: &PgPool, selector: &str) -> Result<Vault, String> {
     let repo = VaultRepo::new(db);
-    if let Ok(id) = selector.parse::<uuid::Uuid>() {
-        return repo
-            .get_by_id(id)
+    let vault = if let Ok(id) = selector.parse::<uuid::Uuid>() {
+        repo.get_by_id(id)
             .await
             .map_err(|err| {
                 tracing::error!(event = "vault_lookup_failed", error = %err);
                 "vault lookup failed".to_string()
             })?
-            .ok_or_else(|| "vault not found".to_string());
+            .ok_or_else(|| "vault not found".to_string())?
+    } else {
+        repo.get_by_slug(selector)
+            .await
+            .map_err(|err| {
+                tracing::error!(event = "vault_lookup_failed", error = %err);
+                "vault lookup failed".to_string()
+            })?
+            .ok_or_else(|| "vault not found".to_string())?
+    };
+    if vault.kind != VaultKind::Shared || vault.encryption_type != VaultEncryptionType::Server {
+        return Err("vault_not_shared_server_encrypted".to_string());
     }
-    repo.get_by_slug(selector)
-        .await
-        .map_err(|err| {
-            tracing::error!(event = "vault_lookup_failed", error = %err);
-            "vault lookup failed".to_string()
-        })?
-        .ok_or_else(|| "vault not found".to_string())
+    Ok(vault)
 }
 
 pub(super) fn normalize_prefix(prefix: &str) -> Result<NormalizedPrefix, String> {
@@ -61,7 +63,7 @@ pub(super) fn normalize_prefix(prefix: &str) -> Result<NormalizedPrefix, String>
     }
     Ok(NormalizedPrefix {
         canonical: format!("/{canonical}"),
-        scope: canonical.replace('/', "::"),
+        scope: canonical,
     })
 }
 
@@ -78,6 +80,7 @@ pub(super) fn parse_ops(value: &str) -> Result<Vec<&'static str>, String> {
             "write" => "write",
             "read_history" => "read_history",
             "read_previous" => "read_previous",
+            "rotate" => "rotate",
             "history_read" => "read_history",
             _ => return Err(format!("invalid ops: {token}")),
         };
@@ -93,18 +96,25 @@ pub(super) fn parse_ops(value: &str) -> Result<Vec<&'static str>, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_ops;
+    use super::{normalize_prefix, parse_ops};
 
     #[test]
-    fn parse_ops_accepts_write() {
-        let ops = parse_ops("read,write").expect("ops");
-        assert_eq!(ops, vec!["read", "write"]);
+    fn parse_ops_accepts_write_and_explicit_rotation() {
+        let ops = parse_ops("read,write,rotate").expect("ops");
+        assert_eq!(ops, vec!["read", "write", "rotate"]);
     }
 
     #[test]
     fn parse_ops_rejects_unknown_values() {
-        let err = parse_ops("read,rotate").expect_err("invalid ops");
-        assert_eq!(err, "invalid ops: rotate");
+        let err = parse_ops("read,delete").expect_err("invalid ops");
+        assert_eq!(err, "invalid ops: delete");
+    }
+
+    #[test]
+    fn normalize_prefix_emits_documented_slash_scope() {
+        let prefix = normalize_prefix("/services/web/").expect("prefix");
+        assert_eq!(prefix.canonical, "/services/web");
+        assert_eq!(prefix.scope, "services/web");
     }
 }
 

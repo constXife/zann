@@ -17,6 +17,7 @@ sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled"
 tracing = "0.1"
 uuid = { version = "1", features = ["v7", "serde"] }
 zann-crypto = { path = "../zann-crypto" }
+zeroize = "1"
 
 [features]
 default = []

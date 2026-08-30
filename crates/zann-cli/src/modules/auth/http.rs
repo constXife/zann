@@ -310,7 +310,7 @@ pub(crate) async fn ensure_access_token(
             }
         }
 
-        let auth = exchange_service_account_token(client, addr, service_account_token).await?;
+        let mut auth = exchange_service_account_token(client, addr, service_account_token).await?;
         let new_expires =
             (Utc::now() + ChronoDuration::seconds(auth.expires_in as i64)).to_rfc3339();
         store_access_token(context_name, token_name, &auth.access_token)?;
@@ -323,7 +323,7 @@ pub(crate) async fn ensure_access_token(
             entry.access_expires_at = Some(new_expires);
         }
 
-        return Ok(auth.access_token);
+        return Ok(auth.take_access_token());
     }
 
     if let Some(access_token) = load_access_token(context_name, token_name)? {

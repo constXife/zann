@@ -1,16 +1,17 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
 use chrono::Utc;
 use uuid::Uuid;
-use zann_core::{FieldKind, Identity, SyncStatus};
+use zann_core::{Identity, SyncStatus};
 use zann_crypto::vault_crypto as core_crypto;
 use zann_db::repo::{ItemRepo, VaultRepo};
 
 use crate::app::AppState;
-use crate::domains::access_control::http::{vault_role_allows, VaultScope};
 use crate::infra::metrics;
 
 use super::super::helpers::{
-    encrypt_rotation_candidate, fetch_rotation_row, generate_password, is_shared_server_vault,
+    encrypt_rotation_candidate, fetch_rotation_row, generate_rotation_candidate,
+    is_shared_server_vault, rotation_action_allowed, rotation_password_field_name,
+    RotationTelemetry,
 };
 use super::super::types::{ErrorResponse, RotateStartRequest, RotationCandidateResponse};
 use super::super::ROTATION_STATE_ROTATING;
@@ -22,12 +23,7 @@ pub(crate) async fn rotate_start(
     Json(req): Json<RotateStartRequest>,
 ) -> impl IntoResponse {
     let resource = "shared/items/rotate/start";
-    let policies = state.policy_store.get();
-
-    if identity.service_account_id.is_some() {
-        metrics::forbidden_access(resource);
-        return StatusCode::FORBIDDEN.into_response();
-    }
+    let mut telemetry = RotationTelemetry::new(&identity, "rotate_start", item_id);
 
     let item_repo = ItemRepo::new(&state.db);
     let item = match item_repo.get_by_id(item_id).await {
@@ -53,37 +49,30 @@ pub(crate) async fn rotate_start(
     if !is_shared_server_vault(&vault) {
         return StatusCode::NOT_FOUND.into_response();
     }
+    telemetry.set_target(vault.id, &item.path);
 
-    match policies.evaluate(&identity, "rotate_start", resource) {
-        crate::domains::access_control::policies::PolicyDecision::Allow => {}
-        crate::domains::access_control::policies::PolicyDecision::Deny => {
+    match rotation_action_allowed(
+        &state,
+        &identity,
+        &vault,
+        "rotate_start",
+        resource,
+        &item.path,
+    )
+    .await
+    {
+        Ok(true) => {}
+        Ok(false) => {
             metrics::forbidden_access(resource);
             return StatusCode::FORBIDDEN.into_response();
         }
-        crate::domains::access_control::policies::PolicyDecision::NoMatch => {
-            match vault_role_allows(
-                &state,
-                &identity,
-                vault.id,
-                "rotate_start",
-                VaultScope::Items,
+        Err(_) => {
+            tracing::error!(event = "rotation_start_failed", "DB error");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponse { error: "db_error" }),
             )
-            .await
-            {
-                Ok(true) => {}
-                Ok(false) => {
-                    metrics::forbidden_access(resource);
-                    return StatusCode::FORBIDDEN.into_response();
-                }
-                Err(_) => {
-                    tracing::error!(event = "rotation_start_failed", "DB error");
-                    return (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ErrorResponse { error: "db_error" }),
-                    )
-                        .into_response();
-                }
-            }
+                .into_response();
         }
     }
 
@@ -155,21 +144,15 @@ pub(crate) async fn rotate_start(
                     .into_response();
             }
         };
-    if !decrypted
-        .fields
-        .values()
-        .any(|field| field.kind == FieldKind::Password)
-    {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: "password_field_missing",
-            }),
-        )
-            .into_response();
+    if let Err(error) = rotation_password_field_name(&decrypted) {
+        return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error })).into_response();
     }
 
-    let candidate = match generate_password(req.policy.as_deref()) {
+    let candidate = match generate_rotation_candidate(
+        &state.secret_policies,
+        &state.secret_default_policy,
+        req.policy.as_deref(),
+    ) {
         Ok(candidate) => candidate,
         Err(_) => {
             return (
@@ -212,6 +195,7 @@ pub(crate) async fn rotate_start(
           AND rotation_state IS NULL
           AND sync_status = $8
           AND deleted_at IS NULL
+          AND row_version = $9
         "#,
     )
     .bind(ROTATION_STATE_ROTATING)
@@ -222,18 +206,24 @@ pub(crate) async fn rotate_start(
     .bind(recover_until)
     .bind(item.id)
     .bind(SyncStatus::ACTIVE)
+    .bind(item.row_version)
     .execute(&state.db)
     .await;
     match result {
         Ok(result) if result.rows_affected() > 0 => {}
         Ok(_) => {
-            return (
-                StatusCode::CONFLICT,
-                Json(ErrorResponse {
-                    error: "rotation_in_progress",
-                }),
-            )
-                .into_response();
+            let error = match fetch_rotation_row(&state, item.id).await {
+                Ok(Some(row)) if row.state.is_some() => "rotation_in_progress",
+                Ok(Some(_)) => "rotation_conflict",
+                Ok(None) => "rotation_missing",
+                Err(_) => "db_error",
+            };
+            let status = if error == "db_error" {
+                StatusCode::INTERNAL_SERVER_ERROR
+            } else {
+                StatusCode::CONFLICT
+            };
+            return (status, Json(ErrorResponse { error })).into_response();
         }
         Err(_) => {
             tracing::error!(event = "rotation_start_failed", "DB error");
@@ -248,8 +238,10 @@ pub(crate) async fn rotate_start(
     let response = RotationCandidateResponse {
         state: ROTATION_STATE_ROTATING.to_string(),
         candidate,
+        previous_version: item.version,
         expires_at: Some(expires_at.to_rfc3339()),
         recover_until: Some(recover_until.to_rfc3339()),
     };
+    telemetry.succeed();
     (StatusCode::OK, Json(response)).into_response()
 }

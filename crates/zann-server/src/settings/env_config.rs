@@ -20,16 +20,34 @@ use crate::domains::secrets::policies::{
 #[cfg(unix)]
 pub(super) fn check_key_file_permissions(path: &str) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let metadata = fs::metadata(path)
+    let metadata = fs::symlink_metadata(path)
         .map_err(|err| format!("master key file not accessible ({}): {}", path, err))?;
+    if !metadata.file_type().is_file() {
+        return Err(format!("master key path is not a regular file ({path})"));
+    }
     let mode = metadata.permissions().mode();
-    if mode & 0o077 != 0 {
+    let credential_directory = env::var_os("CREDENTIALS_DIRECTORY");
+    if !key_permissions_are_secure(Path::new(path), mode, credential_directory.as_deref()) {
         return Err(format!(
             "master key file has insecure permissions ({}) {:o}",
             path, mode
         ));
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn key_permissions_are_secure(
+    path: &Path,
+    mode: u32,
+    credential_directory: Option<&std::ffi::OsStr>,
+) -> bool {
+    if mode & 0o077 == 0 {
+        return true;
+    }
+
+    mode & 0o077 == 0o040
+        && credential_directory.is_some_and(|directory| path.parent() == Some(Path::new(directory)))
 }
 
 #[cfg(not(unix))]
@@ -583,4 +601,52 @@ pub(super) fn load_secret_policies(
     }
 
     Ok((policies, default_name))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::{check_key_file_permissions, key_permissions_are_secure};
+    use std::ffi::OsStr;
+    use std::os::unix::fs::symlink;
+    use std::path::Path;
+    use uuid::Uuid;
+
+    #[test]
+    fn key_permissions_allow_systemd_group_read_only_in_credential_directory() {
+        let directory = OsStr::new("/run/credentials/zann-server.service");
+        let credential = Path::new("/run/credentials/zann-server.service/server-master-key");
+
+        assert!(key_permissions_are_secure(
+            credential,
+            0o100440,
+            Some(directory)
+        ));
+        assert!(!key_permissions_are_secure(
+            Path::new("/run/secrets/server-master-key"),
+            0o100440,
+            Some(directory)
+        ));
+        assert!(!key_permissions_are_secure(
+            credential,
+            0o100460,
+            Some(directory)
+        ));
+        assert!(!key_permissions_are_secure(
+            credential,
+            0o100444,
+            Some(directory)
+        ));
+        assert!(key_permissions_are_secure(credential, 0o100400, None));
+    }
+
+    #[test]
+    fn key_permissions_reject_symlinks_before_following_them() {
+        let path = std::env::temp_dir().join(format!("zann-key-symlink-{}", Uuid::new_v4()));
+        symlink("unused-target", &path).expect("create test symlink");
+
+        let result = check_key_file_permissions(path.to_str().expect("UTF-8 temp path"));
+        std::fs::remove_file(&path).expect("remove test symlink");
+
+        assert!(result.is_err());
+    }
 }
