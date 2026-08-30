@@ -478,6 +478,30 @@ impl<'a> ItemRepo<'a> {
             rows
         })
     }
+
+    pub async fn authorize_type_retype_in(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        item_id: Uuid,
+        from_type_id: &str,
+        to_type_id: &str,
+    ) -> Result<(), sqlx_core::Error> {
+        let item_id = item_id.to_string();
+        query!(
+            r#"
+            SELECT
+                set_config('zann.retype_item_id', $1, true) AS "item_id!",
+                set_config('zann.retype_from_type_id', $2, true) AS "from_type_id!",
+                set_config('zann.retype_to_type_id', $3, true) AS "to_type_id!"
+            "#,
+            item_id,
+            from_type_id,
+            to_type_id
+        )
+        .execute(&mut **tx)
+        .await
+        .map(|_| ())
+    }
 }
 
 pub struct ItemUsageRepo<'a> {
