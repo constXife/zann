@@ -28,7 +28,9 @@ use zeroize::Zeroizing;
 use crate::cli::tokens::{SERVICE_ACCOUNT_PREFIX, SERVICE_ACCOUNT_PREFIX_LEN, SYSTEM_OWNER_EMAIL};
 use crate::domains::auth::core::passwords;
 use crate::domains::auth::helpers::build_device;
-use crate::domains::items::contract::next_item_version;
+use crate::domains::items::contract::{
+    canonical_type_id, next_item_version, validate_server_typed_payload, validate_typed_payload,
+};
 use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
 use crate::domains::secrets::service::{
     validate_secret_typed_payload, SECRET_POLICY_FIELD, SECRET_TYPE_ID, SECRET_VALUE_FIELD,
@@ -53,6 +55,8 @@ pub enum ProvisionCommand {
     EnsureVault(EnsureVaultArgs),
     #[command(about = "Create or update a field in a shared item")]
     SetField(SetFieldArgs),
+    #[command(about = "Retype a shared server-encrypted item without exposing its plaintext")]
+    RetypeItem(RetypeItemArgs),
     #[command(about = "Ensure a service account token exists for a scoped shared vault target")]
     EnsureToken(EnsureTokenArgs),
 }
@@ -87,6 +91,26 @@ pub struct SetFieldArgs {
         help = "Item type for newly created items"
     )]
     pub type_id: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct RetypeItemArgs {
+    #[arg(long, help = "Vault name or ID")]
+    pub vault: String,
+    #[arg(long, help = "Shared item path")]
+    pub path: String,
+    #[arg(
+        long,
+        help = "Required current item type; the command fails if it does not match"
+    )]
+    pub from_type_id: String,
+    #[arg(long, help = "Replacement item type")]
+    pub to_type_id: String,
+    #[arg(
+        long,
+        help = "Return successfully when the item does not exist (for idempotent bootstrap)"
+    )]
+    pub if_exists: bool,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -159,6 +183,16 @@ struct SetFieldOutput {
 }
 
 #[derive(Debug, Serialize)]
+struct RetypeItemOutput {
+    status: &'static str,
+    vault_id: String,
+    item_id: Option<String>,
+    path: String,
+    from_type_id: String,
+    to_type_id: String,
+}
+
+#[derive(Debug, Serialize)]
 struct EnsureTokenOutput {
     status: &'static str,
     token_written: bool,
@@ -205,6 +239,7 @@ pub(crate) async fn run(
         ProvisionCommand::EnsureSystemUser => ensure_system_user_command(settings, db).await,
         ProvisionCommand::EnsureVault(command) => ensure_vault_command(settings, db, command).await,
         ProvisionCommand::SetField(command) => set_field_command(settings, db, command).await,
+        ProvisionCommand::RetypeItem(command) => retype_item_command(settings, db, command).await,
         ProvisionCommand::EnsureToken(command) => ensure_token_command(settings, db, command).await,
     }
 }
@@ -463,6 +498,178 @@ async fn set_field_command(
         item_id: item.id.to_string(),
         path: item.path,
         key: key.to_string(),
+    };
+    print_json(&output)
+}
+
+async fn retype_item_command(
+    settings: &settings::Settings,
+    db: &PgPool,
+    args: &RetypeItemArgs,
+) -> Result<(), String> {
+    let path = normalize_path(&args.path);
+    if path.is_empty() {
+        return Err("invalid_path".to_string());
+    }
+    let from_type_id =
+        canonical_type_id(args.from_type_id.trim()).map_err(|error| error.code().to_string())?;
+    let to_type_id =
+        canonical_type_id(args.to_type_id.trim()).map_err(|error| error.code().to_string())?;
+    if from_type_id == to_type_id {
+        return Err("invalid_type_transition".to_string());
+    }
+
+    let vault = resolve_vault(db, args.vault.trim()).await?;
+    ensure_shared_server_vault(&vault)?;
+
+    let item_repo = ItemRepo::new(db);
+    let history_repo = ItemHistoryRepo::new(db);
+    let change_repo = ChangeRepo::new(db);
+    let item = item_repo
+        .get_by_vault_path(vault.id, &path)
+        .await
+        .map_err(db_error("item_lookup_failed"))?;
+    let Some(item) = item else {
+        if !args.if_exists {
+            return Err("item_not_found".to_string());
+        }
+        let output = RetypeItemOutput {
+            status: "missing",
+            vault_id: vault.id.to_string(),
+            item_id: None,
+            path,
+            from_type_id,
+            to_type_id,
+        };
+        return print_json(&output);
+    };
+
+    let owner = ensure_system_user(settings, db).await?.0;
+    let provision_device = ensure_provision_device(db, &owner).await?;
+
+    let mut tx = db
+        .begin()
+        .await
+        .map_err(db_error("item_retype_begin_failed"))?;
+    let mut item = item_repo
+        .get_by_id_for_update_in(&mut tx, item.id)
+        .await
+        .map_err(db_error("item_retype_lock_failed"))?
+        .ok_or_else(|| "item_not_found".to_string())?;
+    if item.vault_id != vault.id || item.path != path {
+        return Err("version_conflict".to_string());
+    }
+    if item.deleted_at.is_some() || item.sync_status != SyncStatus::Active {
+        return Err("path_in_use".to_string());
+    }
+
+    let mut payload = decrypt_payload(settings, &vault, item.id, &item.payload_enc)?;
+    if item.type_id == to_type_id {
+        validate_server_typed_payload(&payload, &to_type_id)
+            .map_err(|error| error.code().to_string())?;
+        tx.commit()
+            .await
+            .map_err(db_error("item_retype_commit_failed"))?;
+        let output = RetypeItemOutput {
+            status: "unchanged",
+            vault_id: vault.id.to_string(),
+            item_id: Some(item.id.to_string()),
+            path: item.path,
+            from_type_id,
+            to_type_id,
+        };
+        return print_json(&output);
+    }
+    if item.type_id != from_type_id {
+        return Err("type_mismatch".to_string());
+    }
+
+    prepare_retyped_payload(&mut payload, &from_type_id, &to_type_id)?;
+    let history = ItemHistory {
+        id: Uuid::now_v7(),
+        item_id: item.id,
+        payload_enc: item.payload_enc.clone(),
+        checksum: item.checksum.clone(),
+        version: update_history_version(item.version),
+        change_type: ChangeType::Update,
+        fields_changed: None,
+        changed_by_user_id: owner.id,
+        changed_by_email: owner.email.clone(),
+        changed_by_name: owner.full_name.clone(),
+        changed_by_device_id: Some(provision_device.id),
+        changed_by_device_name: Some(provision_device.name.clone()),
+        created_at: Utc::now(),
+    };
+    history_repo
+        .create_in(&mut tx, &history)
+        .await
+        .map_err(db_error("item_history_create_failed"))?;
+    history_repo
+        .prune_by_item_in(&mut tx, item.id, ITEM_HISTORY_LIMIT)
+        .await
+        .map_err(db_error("item_history_prune_failed"))?;
+
+    let history = history_repo
+        .list_by_item_limit_for_update_in(&mut tx, item.id, ITEM_HISTORY_LIMIT)
+        .await
+        .map_err(db_error("item_history_lock_failed"))?;
+    for history in history {
+        let mut history_payload = decrypt_payload(settings, &vault, item.id, &history.payload_enc)?;
+        prepare_retyped_payload(&mut history_payload, &from_type_id, &to_type_id)?;
+        let history_payload_enc = encrypt_payload(settings, &vault, item.id, &history_payload)?;
+        let history_checksum = core_crypto::payload_checksum(&history_payload_enc);
+        let affected = history_repo
+            .update_payload_in(
+                &mut tx,
+                history.id,
+                item.id,
+                &history_payload_enc,
+                &history_checksum,
+            )
+            .await
+            .map_err(db_error("item_history_retype_failed"))?;
+        if affected != 1 {
+            return Err("version_conflict".to_string());
+        }
+    }
+
+    item.type_id = to_type_id.clone();
+    item.payload_enc = encrypt_payload(settings, &vault, item.id, &payload)?;
+    item.checksum = core_crypto::payload_checksum(&item.payload_enc);
+    item.version = next_item_version(item.version).map_err(|_| "invalid_version".to_string())?;
+    item.device_id = provision_device.id;
+    item.updated_at = Utc::now();
+    let change = Change {
+        seq: 0,
+        vault_id: vault.id,
+        item_id: item.id,
+        op: ChangeOp::Update,
+        version: item.version,
+        device_id: provision_device.id,
+        created_at: item.updated_at,
+    };
+    let affected = item_repo
+        .update_in(&mut tx, &item)
+        .await
+        .map_err(db_error("item_retype_failed"))?;
+    if affected != 1 {
+        return Err("version_conflict".to_string());
+    }
+    change_repo
+        .create_in(&mut tx, &change)
+        .await
+        .map_err(db_error("item_change_create_failed"))?;
+    tx.commit()
+        .await
+        .map_err(db_error("item_retype_commit_failed"))?;
+
+    let output = RetypeItemOutput {
+        status: "retyped",
+        vault_id: vault.id.to_string(),
+        item_id: Some(item.id.to_string()),
+        path: item.path,
+        from_type_id,
+        to_type_id,
     };
     print_json(&output)
 }
@@ -994,6 +1201,20 @@ fn insert_provision_field(
     Ok(())
 }
 
+fn prepare_retyped_payload(
+    payload: &mut EncryptedPayload,
+    from_type_id: &str,
+    to_type_id: &str,
+) -> Result<(), String> {
+    validate_typed_payload(payload, from_type_id).map_err(|error| error.code().to_string())?;
+    payload.type_id = to_type_id.to_string();
+    if let Err(error) = validate_server_typed_payload(payload, to_type_id) {
+        payload.type_id = from_type_id.to_string();
+        return Err(error.code().to_string());
+    }
+    Ok(())
+}
+
 fn read_provision_secret(path: &Path) -> Result<Zeroizing<String>, String> {
     let file = fs::File::open(path).map_err(|err| format!("value_file_open_failed: {err}"))?;
     let metadata = file
@@ -1218,8 +1439,8 @@ impl StagedSecretFile {
 mod tests {
     use super::{
         ensure_shared_server_vault, insert_provision_field, normalize_prefix, parse_ops, parse_ttl,
-        read_provision_secret, stage_secret_file, update_history_version, write_secret_file,
-        MAX_PROVISION_SECRET_BYTES,
+        prepare_retyped_payload, read_provision_secret, stage_secret_file, update_history_version,
+        write_secret_file, MAX_PROVISION_SECRET_BYTES,
     };
     use chrono::Utc;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1326,6 +1547,57 @@ mod tests {
         .expect_err("noncanonical secret field must fail");
 
         assert_eq!(err, "invalid_secret_field");
+    }
+
+    #[test]
+    fn retype_payload_repairs_legacy_secret_without_exposing_fields() {
+        let mut payload = EncryptedPayload::new("secret");
+        payload.fields.insert(
+            "client_id".to_string(),
+            FieldValue {
+                kind: FieldKind::Text,
+                value: "sentinel-provision-secret".to_string(),
+                meta: None,
+            },
+        );
+
+        prepare_retyped_payload(&mut payload, "secret", "login").expect("retype payload");
+
+        assert_eq!(payload.type_id, "login");
+        assert_eq!(
+            payload.fields["client_id"].value,
+            "sentinel-provision-secret"
+        );
+    }
+
+    #[test]
+    fn retype_payload_rejects_mismatched_source_type() {
+        let mut payload = EncryptedPayload::new("login");
+
+        let err = prepare_retyped_payload(&mut payload, "secret", "kv")
+            .expect_err("mismatched source type must fail");
+
+        assert_eq!(err, "invalid_payload");
+        assert_eq!(payload.type_id, "login");
+    }
+
+    #[test]
+    fn retype_payload_rejects_invalid_strict_target_and_restores_source_type() {
+        let mut payload = EncryptedPayload::new("login");
+        payload.fields.insert(
+            "client_id".to_string(),
+            FieldValue {
+                kind: FieldKind::Text,
+                value: "sentinel-provision-secret".to_string(),
+                meta: None,
+            },
+        );
+
+        let err = prepare_retyped_payload(&mut payload, "login", "secret")
+            .expect_err("invalid strict target must fail");
+
+        assert_eq!(err, "invalid_payload");
+        assert_eq!(payload.type_id, "login");
     }
 
     #[test]
