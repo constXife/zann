@@ -6,13 +6,20 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, rust-overlay }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+    }:
     let
       system = "x86_64-linux";
-      pkgsFor = s: import nixpkgs {
-        system = s;
-        overlays = [ (import rust-overlay) ];
-      };
+      pkgsFor =
+        s:
+        import nixpkgs {
+          system = s;
+          overlays = [ (import rust-overlay) ];
+        };
       pkgs = pkgsFor system;
       # Без этого cargo протекал из глобального профиля пользователя,
       # и проект собирался версией, отличной от rust-toolchain.toml.
@@ -22,16 +29,21 @@
       # zann-cli ставится и на десктоп, и на aarch64-хосты, поэтому пакет
       # собирается под обе архитектуры. devShell остаётся x86_64-only —
       # он тянет Qt и WebKit, которые на aarch64 никому не нужны.
-      packageSystems = [ "x86_64-linux" "aarch64-linux" ];
+      packageSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
 
-      zannCliFor = s: let
-        p = pkgsFor s;
-        toolchain = toolchainFor p;
-        rustPlatform = p.makeRustPlatform {
-          cargo = toolchain;
-          rustc = toolchain;
-        };
-      in
+      zannCliFor =
+        s:
+        let
+          p = pkgsFor s;
+          toolchain = toolchainFor p;
+          rustPlatform = p.makeRustPlatform {
+            cargo = toolchain;
+            rustc = toolchain;
+          };
+        in
         rustPlatform.buildRustPackage {
           pname = "zann-cli";
           version = "0.1.0";
@@ -40,35 +52,77 @@
           # зависимостей. Cargo.lock не содержит git-источников, поэтому
           # вендоринг выводится из него напрямую.
           cargoLock.lockFile = ./Cargo.lock;
-          cargoBuildFlags = [ "--bin" "zann" ];
+          cargoBuildFlags = [
+            "--package"
+            "zann-cli"
+            "--bin"
+            "zann"
+          ];
+          cargoTestFlags = [
+            "--package"
+            "zann-cli"
+            "--bin"
+            "zann"
+          ];
 
           nativeBuildInputs = [ p.pkg-config ];
           buildInputs = with p; [
             openssl
             dbus
             libsecret
+            udev
           ];
 
           meta.mainProgram = "zann";
         };
 
+      zannServerFor =
+        s:
+        let
+          p = pkgsFor s;
+          toolchain = toolchainFor p;
+          rustPlatform = p.makeRustPlatform {
+            cargo = toolchain;
+            rustc = toolchain;
+          };
+        in
+        rustPlatform.buildRustPackage {
+          pname = "zann-server";
+          version = "0.1.0";
+          src = self;
+          cargoLock.lockFile = ./Cargo.lock;
+          cargoBuildFlags = [
+            "--package"
+            "zann-server"
+            "--bin"
+            "zann-server"
+          ];
+          doCheck = false;
+
+          nativeBuildInputs = [ p.pkg-config ];
+          buildInputs = [ p.openssl ];
+
+          meta.mainProgram = "zann-server";
+        };
+
       # apps/cosmic живёт вне воркспейса и собирается свежим stable, а не пином
       # из rust-toolchain.toml: rust-version у libcosmic выше.
-      zannCosmic = let
-        toolchain = pkgs.rust-bin.stable.latest.default;
-        rustPlatform = pkgs.makeRustPlatform {
-          cargo = toolchain;
-          rustc = toolchain;
-        };
-        # Библиотеки, которые грузятся через dlopen и потому не попадают в
-        # rpath: без них приложение падает на старте с NoWaylandLib.
-        runtimeLibs = with pkgs; [
-          libxkbcommon
-          wayland
-          vulkan-loader
-          libGL
-        ];
-      in
+      zannCosmic =
+        let
+          toolchain = pkgs.rust-bin.stable.latest.default;
+          rustPlatform = pkgs.makeRustPlatform {
+            cargo = toolchain;
+            rustc = toolchain;
+          };
+          # Библиотеки, которые грузятся через dlopen и потому не попадают в
+          # rpath: без них приложение падает на старте с NoWaylandLib.
+          runtimeLibs = with pkgs; [
+            libxkbcommon
+            wayland
+            vulkan-loader
+            libGL
+          ];
+        in
         rustPlatform.buildRustPackage {
           pname = "zann-cosmic";
           version = "0.1.0-unstable-2026-08-05";
@@ -90,21 +144,30 @@
           # #[cfg(debug_assertions)] и в release не существует. Поэтому пакет
           # собирает только бинарь и не гоняет тесты — их место в debug CI и
           # `just cosmic-test`.
-          cargoBuildFlags = [ "--bin" "zann-cosmic" ];
+          cargoBuildFlags = [
+            "--bin"
+            "zann-cosmic"
+          ];
           doCheck = false;
 
-          nativeBuildInputs = with pkgs; [ pkg-config makeWrapper ];
-          buildInputs = with pkgs; [
-            openssl
-            libxkbcommon
-            wayland
-            expat
-            fontconfig
-            freetype
-            # zann-ffi тянет zann-keystore, а тот hidapi для FIDO2-ключей;
-            # его C-часть требует libudev с заголовками.
-            udev
-          ] ++ runtimeLibs;
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+            makeWrapper
+          ];
+          buildInputs =
+            with pkgs;
+            [
+              openssl
+              libxkbcommon
+              wayland
+              expat
+              fontconfig
+              freetype
+              # zann-ffi тянет zann-keystore, а тот hidapi для FIDO2-ключей;
+              # его C-часть требует libudev с заголовками.
+              udev
+            ]
+            ++ runtimeLibs;
 
           # Иконки лежат у Tauri-приложения: логотип у продукта один.
           postInstall = ''
@@ -128,13 +191,45 @@
         };
     in
     {
-      packages = nixpkgs.lib.genAttrs packageSystems (s: rec {
-        zann-cli = zannCliFor s;
-        default = zann-cli;
-      } // nixpkgs.lib.optionalAttrs (s == system) {
-        # COSMIC-клиент только под x86_64: libcosmic на aarch64 никто не проверял.
-        zann-cosmic = zannCosmic;
-      });
+      nixosModules = {
+        zann-delivery = { lib, pkgs, ... }: {
+          imports = [ ./nix/modules/zann-delivery.nix ];
+          services.zann.delivery.package =
+            lib.mkDefault
+              self.packages.${pkgs.stdenv.hostPlatform.system}.zann-cli;
+        };
+        default = self.nixosModules.zann-delivery;
+      };
+
+      checks.${system} = {
+        zann-delivery-module = import ./nix/tests/zann-delivery-module.nix {
+          inherit nixpkgs system;
+          module = self.nixosModules.zann-delivery;
+        };
+        zann-delivery-vm = import ./nix/tests/zann-delivery-vm.nix {
+          inherit pkgs;
+          module = self.nixosModules.zann-delivery;
+        };
+        zann-delivery-real-server-vm = import ./nix/tests/zann-delivery-real-server-vm.nix {
+          inherit pkgs;
+          module = self.nixosModules.zann-delivery;
+          zannCli = self.packages.${system}.zann-cli;
+          zannServer = self.packages.${system}.zann-server;
+        };
+      };
+
+      packages = nixpkgs.lib.genAttrs packageSystems (
+        s:
+        rec {
+          zann-cli = zannCliFor s;
+          zann-server = zannServerFor s;
+          default = zann-cli;
+        }
+        // nixpkgs.lib.optionalAttrs (s == system) {
+          # COSMIC-клиент только под x86_64: libcosmic на aarch64 никто не проверял.
+          zann-cosmic = zannCosmic;
+        }
+      );
 
       devShells.${system} = {
         default = pkgs.mkShell {

@@ -9,7 +9,11 @@ exceptions recorded in [`architecture/capabilities.md`](architecture/capabilitie
 
 The decision to converge the clients is recorded in
 [`ADR 0001`](adr/0001-shared-client-core.md). The capability map is the source
-of truth for ownership and allowed extension points.
+of truth for ownership and allowed extension points. The machine-facing secret
+plane, rotation ownership and the scope of runtime delivery are specified by
+[`ADR 0004`](adr/0004-machine-secret-plane.md).
+The versioned runtime delivery profile and generation publication contract are
+specified by [`ADR 0005`](adr/0005-runtime-secret-delivery-profiles.md).
 
 ## Goals
 

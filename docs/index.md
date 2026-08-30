@@ -132,7 +132,8 @@ Server threat model: [crates/zann-server/SECURITY.md](crates/zann-server/SECURIT
 ### CLI (token-based)
 
 - Uses tokens issued by the server (service account tokens).
-- Provide tokens via `--token`, `--token-file`, or `zann config set-context`.
+- Provide tokens via `--token-file`, `ZANN_SERVICE_TOKEN`, or a stored context.
+- Token values are not accepted as command-line arguments.
 - Print version info with `zann version`.
 
 Example token creation and CLI setup:
@@ -144,7 +145,7 @@ zann-server token create ci-prod infra:/
 # Configure the CLI in your CI job
 zann config set-context ci \
   --addr https://zann.example.com \
-  --token "$ZANN_SERVICE_TOKEN" \
+  --token-file /run/secrets/zann-service-account-token \
   --vault infra
 ```
 
@@ -160,24 +161,29 @@ Zann supports CI/CD integrations:
 - **Service account tokens** for automation
 - **Prefix-based access control** to limit access
 - **Server fingerprint pinning** to prevent MITM attacks
-- **CLI commands** like `zann get my-secret` for scripts
+- **CLI commands** like `zann secret get services/api/key --vault infra` for scripts
+- **NixOS/systemd delivery** with generation-consistent credential files
 
 Service token + CLI example:
 
 ```bash
 # 1) Create a service account token on the server
 zann-server token create ci-prod infra:/
-# Save the "token" output in your CI secret store as ZANN_SERVICE_TOKEN
+# Mount the "token" output from your CI secret store as a private file
 
 # 2) Configure the CLI in your CI job
 zann config set-context ci \
   --addr https://zann.example.com \
-  --token "$ZANN_SERVICE_TOKEN" \
+  --token-file /run/secrets/zann-service-account-token \
   --vault infra
 
-# 3) Fetch a secret
-export DB_PASSWORD="$(zann get infra/db/creds password)"
+# 3) Fetch a machine secret value
+zann secret get services/api/key --vault infra
 ```
+
+See [Machine Secrets](docs/Machine-Secrets.md) for the API and operating model,
+and [NixOS Secret Delivery](docs/NixOS-Delivery.md) for the fail-closed systemd
+adapter.
 
 ## Performance baseline
 
