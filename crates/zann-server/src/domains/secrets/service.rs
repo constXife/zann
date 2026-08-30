@@ -94,29 +94,6 @@ impl SecretPayloadDecodeError {
     }
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct LegacySecretPayload {
-    value: String,
-    policy: String,
-    #[serde(default)]
-    meta: Option<HashMap<String, String>>,
-}
-
-impl fmt::Debug for LegacySecretPayload {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("LegacySecretPayload(<redacted>)")
-    }
-}
-
-impl Drop for LegacySecretPayload {
-    fn drop(&mut self) {
-        wipe_string(&mut self.value);
-        wipe_string(&mut self.policy);
-        wipe_string_map(&mut self.meta);
-    }
-}
-
 fn wipe_string(value: &mut String) {
     let mut bytes = std::mem::take(value).into_bytes();
     bytes.zeroize();
@@ -1051,12 +1028,10 @@ pub(crate) fn secret_payload_from_typed(
     })
 }
 
-/// Decodes current typed ciphertext and the legacy `{value, policy, meta}` encoding.
+/// Decodes only the canonical typed secret payload.
 ///
-/// The return value is always canonical typed data. Legacy data is never written again:
-/// the warning below inventories records awaiting lazy remediation, and the next secrets
-/// mutation rewrites the item in the typed format. The fallback model is intentionally
-/// strict (`deny_unknown_fields`) so hybrid or ambiguous encodings fail closed.
+/// Historical encodings are accepted solely by the explicit provisioning migration command;
+/// normal secret reads and writes fail closed instead of negotiating payload formats.
 pub(crate) fn decode_secret_payload_bytes(
     mut bytes: Vec<u8>,
 ) -> Result<EncryptedPayload, SecretPayloadDecodeError> {
@@ -1066,37 +1041,9 @@ pub(crate) fn decode_secret_payload_bytes(
 }
 
 fn decode_secret_payload_slice(bytes: &[u8]) -> Result<EncryptedPayload, SecretPayloadDecodeError> {
-    if let Ok(payload) = EncryptedPayload::from_bytes(bytes) {
-        validate_secret_typed_payload(&payload)?;
-        return Ok(payload);
-    }
-
-    let mut legacy = serde_json::from_slice::<LegacySecretPayload>(bytes)
+    let payload = EncryptedPayload::from_bytes(bytes)
         .map_err(|_| SecretPayloadDecodeError::InvalidPayload)?;
-    let mut payload = EncryptedPayload::new(SECRET_TYPE_ID);
-    payload.fields.insert(
-        SECRET_VALUE_FIELD.to_string(),
-        FieldValue {
-            kind: FieldKind::Password,
-            value: std::mem::take(&mut legacy.value),
-            meta: None,
-        },
-    );
-    payload.fields.insert(
-        SECRET_POLICY_FIELD.to_string(),
-        FieldValue {
-            kind: FieldKind::Text,
-            value: std::mem::take(&mut legacy.policy),
-            meta: None,
-        },
-    );
-    payload.extra = legacy.meta.take();
     validate_secret_typed_payload(&payload)?;
-    tracing::warn!(
-        event = "legacy_secret_payload_decoded",
-        remediation = "rewrite_on_next_secret_write",
-        "Legacy secret payload accepted for lazy remediation"
-    );
     Ok(payload)
 }
 
@@ -1339,24 +1286,17 @@ mod tests {
     }
 
     #[test]
-    fn legacy_decode_returns_canonical_typed_payload() {
+    fn normal_secret_decode_rejects_historical_raw_payload() {
         let legacy = br#"{
             "value": "sentinel-value",
             "policy": "sentinel-policy",
             "meta": {"owner": "sentinel-owner"}
         }"#;
 
-        let typed = decode_secret_payload_bytes(legacy.to_vec()).expect("legacy payload");
-        let decoded = secret_payload_from_typed(typed).expect("canonical legacy conversion");
-        assert_eq!(decoded.value, "sentinel-value");
-        assert_eq!(decoded.policy, "sentinel-policy");
-        assert_eq!(
-            decoded.meta,
-            Some(HashMap::from([(
-                "owner".to_string(),
-                "sentinel-owner".to_string()
-            )]))
-        );
+        assert!(matches!(
+            decode_secret_payload_bytes(legacy.to_vec()),
+            Err(SecretPayloadDecodeError::InvalidPayload)
+        ));
     }
 
     #[test]
@@ -1474,15 +1414,6 @@ mod tests {
         ] {
             assert!(!rendered.contains(sentinel));
         }
-
-        let legacy = LegacySecretPayload {
-            value: "sentinel-value".to_string(),
-            policy: "sentinel-policy".to_string(),
-            meta: None,
-        };
-        let rendered = format!("{legacy:?}");
-        assert!(!rendered.contains("sentinel-value"));
-        assert!(!rendered.contains("sentinel-policy"));
 
         let record = SecretRecord {
             item_id: Uuid::nil().to_string(),

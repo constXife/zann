@@ -33,7 +33,8 @@ use crate::domains::items::contract::{
 };
 use crate::domains::items::service::{basename_from_path, ITEM_HISTORY_LIMIT};
 use crate::domains::secrets::service::{
-    validate_secret_typed_payload, SECRET_POLICY_FIELD, SECRET_TYPE_ID, SECRET_VALUE_FIELD,
+    secret_payload_to_typed, validate_secret_typed_payload, SecretPayload, SECRET_POLICY_FIELD,
+    SECRET_TYPE_ID, SECRET_VALUE_FIELD,
 };
 use crate::settings;
 
@@ -104,6 +105,12 @@ pub struct RetypeItemArgs {
         help = "Required current item type; the command fails if it does not match"
     )]
     pub from_type_id: String,
+    #[arg(
+        long,
+        value_enum,
+        help = "Required plaintext encoding of the source item and its retained history"
+    )]
+    pub source_format: RetypeSourceFormat,
     #[arg(long, help = "Replacement item type")]
     pub to_type_id: String,
     #[arg(
@@ -111,6 +118,14 @@ pub struct RetypeItemArgs {
         help = "Return successfully when the item does not exist (for idempotent bootstrap)"
     )]
     pub if_exists: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum RetypeSourceFormat {
+    #[value(name = "typed-v1")]
+    TypedV1,
+    #[value(name = "legacy-secret-v0")]
+    LegacySecretV0,
 }
 
 #[derive(Debug, Clone, Args)]
@@ -563,8 +578,8 @@ async fn retype_item_command(
         return Err("path_in_use".to_string());
     }
 
-    let mut payload = decrypt_payload(settings, &vault, item.id, &item.payload_enc)?;
     if item.type_id == to_type_id {
+        let payload = decrypt_payload(settings, &vault, item.id, &item.payload_enc)?;
         validate_server_typed_payload(&payload, &to_type_id)
             .map_err(|error| error.code().to_string())?;
         tx.commit()
@@ -583,7 +598,17 @@ async fn retype_item_command(
     if item.type_id != from_type_id {
         return Err("type_mismatch".to_string());
     }
+    if args.source_format == RetypeSourceFormat::LegacySecretV0 && from_type_id != SECRET_TYPE_ID {
+        return Err("invalid_source_format".to_string());
+    }
 
+    let mut payload = decrypt_payload_for_retype(
+        settings,
+        &vault,
+        item.id,
+        &item.payload_enc,
+        args.source_format,
+    )?;
     prepare_retyped_payload(&mut payload, &from_type_id, &to_type_id)?;
     let history = ItemHistory {
         id: Uuid::now_v7(),
@@ -614,7 +639,13 @@ async fn retype_item_command(
         .await
         .map_err(db_error("item_history_lock_failed"))?;
     for history in history {
-        let mut history_payload = decrypt_payload(settings, &vault, item.id, &history.payload_enc)?;
+        let mut history_payload = decrypt_payload_for_retype(
+            settings,
+            &vault,
+            item.id,
+            &history.payload_enc,
+            args.source_format,
+        )?;
         prepare_retyped_payload(&mut history_payload, &from_type_id, &to_type_id)?;
         let history_payload_enc = encrypt_payload(settings, &vault, item.id, &history_payload)?;
         let history_checksum = core_crypto::payload_checksum(&history_payload_enc);
@@ -1297,6 +1328,41 @@ fn decrypt_payload(
         .map_err(|err| format!("payload_decode_failed: {err}"))
 }
 
+fn decrypt_payload_for_retype(
+    settings: &settings::Settings,
+    vault: &Vault,
+    item_id: Uuid,
+    payload_enc: &[u8],
+    source_format: RetypeSourceFormat,
+) -> Result<EncryptedPayload, String> {
+    let smk = settings
+        .server_master_key
+        .as_ref()
+        .ok_or_else(|| "server_master_key_missing".to_string())?;
+    let vault_key = core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
+        .map_err(|err| format!("vault_key_decrypt_failed: {err}"))?;
+    let payload_bytes =
+        core_crypto::decrypt_payload_bytes(&vault_key, vault.id, item_id, payload_enc)
+            .map_err(|err| format!("payload_decrypt_failed: {err}"))?;
+    decode_retype_payload_bytes(payload_bytes, source_format)
+}
+
+fn decode_retype_payload_bytes(
+    payload_bytes: Vec<u8>,
+    source_format: RetypeSourceFormat,
+) -> Result<EncryptedPayload, String> {
+    let payload_bytes = Zeroizing::new(payload_bytes);
+    match source_format {
+        RetypeSourceFormat::TypedV1 => EncryptedPayload::from_bytes(&payload_bytes)
+            .map_err(|error| format!("payload_decode_failed: {error}")),
+        RetypeSourceFormat::LegacySecretV0 => {
+            let legacy = serde_json::from_slice::<SecretPayload>(&payload_bytes)
+                .map_err(|_| "payload_decode_failed: invalid_legacy_secret_v0".to_string())?;
+            Ok(secret_payload_to_typed(&legacy))
+        }
+    }
+}
+
 fn encrypt_payload(
     settings: &settings::Settings,
     vault: &Vault,
@@ -1442,10 +1508,12 @@ impl StagedSecretFile {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_shared_server_vault, insert_provision_field, normalize_prefix, parse_ops, parse_ttl,
-        prepare_retyped_payload, read_provision_secret, stage_secret_file, update_history_version,
-        write_secret_file, MAX_PROVISION_SECRET_BYTES,
+        decode_retype_payload_bytes, ensure_shared_server_vault, insert_provision_field,
+        normalize_prefix, parse_ops, parse_ttl, prepare_retyped_payload, read_provision_secret,
+        stage_secret_file, update_history_version, write_secret_file, RetypeSourceFormat,
+        MAX_PROVISION_SECRET_BYTES,
     };
+    use crate::domains::secrets::service::{SECRET_POLICY_FIELD, SECRET_VALUE_FIELD};
     use chrono::Utc;
     use std::time::{SystemTime, UNIX_EPOCH};
     use uuid::Uuid;
@@ -1570,6 +1638,56 @@ mod tests {
         assert_eq!(payload.type_id, "login");
         assert_eq!(
             payload.fields["client_id"].value,
+            "sentinel-provision-secret"
+        );
+    }
+
+    #[test]
+    fn retype_decoder_requires_the_explicit_strict_historical_secret_encoding() {
+        let legacy = br#"{
+            "value": "sentinel-provision-secret",
+            "policy": "default",
+            "meta": {"owner": "platform"}
+        }"#
+        .to_vec();
+
+        let mut payload =
+            decode_retype_payload_bytes(legacy.clone(), RetypeSourceFormat::LegacySecretV0)
+                .expect("legacy secret payload");
+        assert_eq!(payload.type_id, "secret");
+        assert_eq!(
+            payload.fields[SECRET_VALUE_FIELD].value,
+            "sentinel-provision-secret"
+        );
+        assert_eq!(payload.fields[SECRET_POLICY_FIELD].value, "default");
+        assert_eq!(payload.extra.as_ref().expect("meta")["owner"], "platform");
+
+        prepare_retyped_payload(&mut payload, "secret", "kv").expect("retype legacy secret");
+        assert_eq!(payload.type_id, "kv");
+
+        let error = decode_retype_payload_bytes(legacy, RetypeSourceFormat::TypedV1)
+            .expect_err("typed source format must reject legacy bytes");
+        assert_eq!(error, "payload_decode_failed: invalid payload json");
+    }
+
+    #[test]
+    fn retype_decoder_keeps_generic_multi_field_secrets_on_the_generic_path() {
+        let mut expected = EncryptedPayload::new("secret");
+        expected.fields.insert(
+            "client_id".to_string(),
+            FieldValue {
+                kind: FieldKind::Text,
+                value: "sentinel-provision-secret".to_string(),
+                meta: None,
+            },
+        );
+        let bytes = expected.to_bytes().expect("generic payload bytes");
+
+        let actual = decode_retype_payload_bytes(bytes, RetypeSourceFormat::TypedV1)
+            .expect("generic payload");
+        assert_eq!(actual.fields.len(), 1);
+        assert_eq!(
+            actual.fields["client_id"].value,
             "sentinel-provision-secret"
         );
     }

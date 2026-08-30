@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_provision_retype_item_requires_explicit_source_and_target_types() {
+    fn parse_provision_retype_item_requires_explicit_source_format_and_types() {
         let cli = Cli::parse_from([
             "zann-server",
             "provision",
@@ -265,6 +265,8 @@ mod tests {
             "rlyeh/yogg/mcp",
             "--from-type-id",
             "secret",
+            "--source-format",
+            "typed-v1",
             "--to-type-id",
             "kv",
             "--if-exists",
@@ -277,8 +279,30 @@ mod tests {
         };
         assert_eq!(command.path, "rlyeh/yogg/mcp");
         assert_eq!(command.from_type_id, "secret");
+        assert_eq!(
+            command.source_format,
+            provision::RetypeSourceFormat::TypedV1
+        );
         assert_eq!(command.to_type_id, "kv");
         assert!(command.if_exists);
+    }
+
+    #[test]
+    fn parse_provision_retype_item_rejects_missing_source_format() {
+        let result = Cli::try_parse_from([
+            "zann-server",
+            "provision",
+            "retype-item",
+            "--vault",
+            "infra",
+            "--path",
+            "rlyeh/yogg/mcp",
+            "--from-type-id",
+            "secret",
+            "--to-type-id",
+            "kv",
+        ]);
+        assert!(result.is_err());
     }
 
     #[test]
