@@ -1782,6 +1782,29 @@ mod tests {
         }
     }
 
+    /// A temporary directory pinned to its canonical, symlink-free absolute
+    /// path so SQLite location validation observes the real filesystem
+    /// identity even when the platform temp root contains symlinks.
+    struct CanonicalTempDir {
+        _temp: TempDir,
+        canonical: PathBuf,
+    }
+
+    impl CanonicalTempDir {
+        fn new(context: &str) -> Self {
+            let temp = TempDir::new().expect(context);
+            let canonical = fs::canonicalize(temp.path()).expect("canonical temporary directory");
+            Self {
+                _temp: temp,
+                canonical,
+            }
+        }
+
+        fn path(&self) -> &Path {
+            &self.canonical
+        }
+    }
+
     impl LegacyCredentialSource for EmptyLegacyCredentials {
         fn get(
             &self,
@@ -1792,7 +1815,7 @@ mod tests {
     }
 
     struct ConfigFixture {
-        temp: TempDir,
+        temp: CanonicalTempDir,
         paths: ClientPaths,
         target: SessionTarget,
         master_key: Arc<SecretKey>,
@@ -1823,7 +1846,7 @@ mod tests {
     }
 
     fn configured_fixture() -> ConfigFixture {
-        let temp = TempDir::new().expect("temporary adapter root");
+        let temp = CanonicalTempDir::new("temporary adapter root");
         let paths = ClientPaths::new(temp.path());
         let repository = ConfigRepository::new(paths.clone());
         let credentials = MemoryCredentials::default();
@@ -2741,8 +2764,8 @@ mod tests {
         let _lock = CWD_LOCK.lock().expect("lock process working directory");
         let original = std::env::current_dir().expect("read working directory");
         let _restore = CurrentDirGuard(original);
-        let first = TempDir::new().expect("first location root");
-        let second = TempDir::new().expect("second location root");
+        let first = CanonicalTempDir::new("first location root");
+        let second = CanonicalTempDir::new("second location root");
 
         std::env::set_current_dir(first.path()).expect("enter first location root");
         let location = SqliteFileLocation::from_path(Path::new("cache.sqlite"))
@@ -2767,7 +2790,7 @@ mod tests {
     #[tokio::test]
     async fn open_rejects_crossed_config_and_database_roots_before_sqlite_creation() {
         let fixture = configured_fixture();
-        let second = TempDir::new().expect("second adapter root");
+        let second = CanonicalTempDir::new("second adapter root");
         let second_paths = ClientPaths::new(second.path());
         fs::copy(fixture.paths.config(), second_paths.config())
             .expect("copy semantically identical config");

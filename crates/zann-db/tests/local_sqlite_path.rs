@@ -28,6 +28,7 @@ impl TempTree {
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
                 .expect("secure test tree");
         }
+        let path = std::fs::canonicalize(&path).expect("canonical test tree");
         Self(path)
     }
 
