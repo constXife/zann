@@ -21,8 +21,8 @@
           overlays = [ (import rust-overlay) ];
         };
       pkgs = pkgsFor system;
-      # Без этого cargo протекал из глобального профиля пользователя,
-      # и проект собирался версией, отличной от rust-toolchain.toml.
+      # Without this, cargo leaked in from the user's global profile and the
+      # project was built with a version other than rust-toolchain.toml.
       toolchainFor = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
       rustToolchain = toolchainFor pkgs;
 
@@ -43,9 +43,9 @@
         CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
       };
 
-      # zann-cli ставится и на десктоп, и на aarch64-хосты, поэтому пакет
-      # собирается под обе архитектуры. devShell остаётся x86_64-only —
-      # он тянет Qt и WebKit, которые на aarch64 никому не нужны.
+      # zann-cli is installed on desktops and on aarch64 hosts, so the package
+      # is built for both architectures. The devShell stays x86_64-only: it pulls
+      # in Qt and WebKit, which nobody needs on aarch64.
       packageSystems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -65,9 +65,8 @@
           pname = "zann-cli";
           version = "0.1.0";
           src = self;
-          # Не cargoHash: он требует ручного обновления при каждом изменении
-          # зависимостей. Cargo.lock не содержит git-источников, поэтому
-          # вендоринг выводится из него напрямую.
+          # Not cargoHash: it needs a manual update on every dependency change.
+          # Cargo.lock has no git sources, so vendoring is derived from it directly.
           cargoLock.lockFile = ./Cargo.lock;
           cargoBuildFlags = [
             "--package"
@@ -122,8 +121,9 @@
           meta.mainProgram = "zann-server";
         };
 
-      # apps/cosmic живёт вне воркспейса и собирается свежим stable, а не пином
-      # из rust-toolchain.toml: rust-version у libcosmic выше.
+      # apps/cosmic lives outside the workspace and is built with the latest
+      # stable rather than the rust-toolchain.toml pin: libcosmic's rust-version
+      # is higher.
       zannCosmic =
         let
           toolchain = pkgs.rust-bin.stable.latest.default;
@@ -131,8 +131,8 @@
             cargo = toolchain;
             rustc = toolchain;
           };
-          # Библиотеки, которые грузятся через dlopen и потому не попадают в
-          # rpath: без них приложение падает на старте с NoWaylandLib.
+          # Libraries loaded through dlopen, which therefore never reach the rpath:
+          # without them the app crashes on startup with NoWaylandLib.
           runtimeLibs = with pkgs; [
             libxkbcommon
             wayland
@@ -146,21 +146,21 @@
           src = self;
           cargoRoot = "apps/cosmic";
           buildAndTestSubdir = "apps/cosmic";
-          # libcosmic держит iced git-подмодулем, а хешированный fetchgit
-          # подмодули не выкачивает — крейты из iced/ тогда не находятся.
-          # Submodules умеет только ветка allowBuiltinFetchGit, она же
-          # избавляет от одиннадцати outputHashes. Цена — fetch на этапе
-          # вычисления вместо content-addressed выборки.
+          # libcosmic keeps iced as a git submodule, and a hashed fetchgit does not
+          # fetch submodules, so the crates under iced/ are not found. Only the
+          # allowBuiltinFetchGit path handles submodules, and it also avoids eleven
+          # outputHashes. The cost is a fetch at evaluation time instead of a
+          # content-addressed fetch.
           cargoLock = {
             lockFile = ./apps/cosmic/Cargo.lock;
             allowBuiltinFetchGit = true;
           };
 
-          # И пример seed_demo_vault, и tests/flows.rs создают записи через
-          # debug_create_kv_item, который в zann-ffi объявлен под
-          # #[cfg(debug_assertions)] и в release не существует. Поэтому пакет
-          # собирает только бинарь и не гоняет тесты — их место в debug CI и
-          # `just cosmic-test`.
+          # Both the seed_demo_vault example and tests/flows.rs create items through
+          # debug_create_kv_item, which zann-ffi declares under
+          # #[cfg(debug_assertions)], so it does not exist in release. The package
+          # therefore builds only the binary and runs no tests; those belong in
+          # debug CI and `just cosmic-test`.
           cargoBuildFlags = [
             "--bin"
             "zann-cosmic"
@@ -180,13 +180,13 @@
               expat
               fontconfig
               freetype
-              # zann-ffi тянет zann-keystore, а тот hidapi для FIDO2-ключей;
-              # его C-часть требует libudev с заголовками.
+              # zann-ffi pulls in zann-keystore, which uses hidapi for FIDO2 keys;
+              # its C part needs libudev with headers.
               udev
             ]
             ++ runtimeLibs;
 
-          # Иконки лежат у Tauri-приложения: логотип у продукта один.
+          # The icons live with the Tauri app: the product has a single logo.
           postInstall = ''
             install -Dm644 apps/cosmic/data/com.rlyeh.zann.Cosmic.desktop \
               $out/share/applications/com.rlyeh.zann.Cosmic.desktop
@@ -243,7 +243,7 @@
           default = zann-cli;
         }
         // nixpkgs.lib.optionalAttrs (s == system) {
-          # COSMIC-клиент только под x86_64: libcosmic на aarch64 никто не проверял.
+          # COSMIC client is x86_64-only: nobody has checked libcosmic on aarch64.
           zann-cosmic = zannCosmic;
         }
       );
@@ -258,8 +258,8 @@
             k6
             pkg-config
             openssl
-            # hidapi (через ctap-hid-fido2) собирает C-часть и требует libudev
-            # с заголовками; без него FIDO2-бэкенд кейстора не компилируется.
+            # hidapi (via ctap-hid-fido2) builds a C part and needs libudev with
+            # headers; without it the keystore FIDO2 backend does not compile.
             udev
             jemalloc
             llvm
@@ -296,9 +296,9 @@
           OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
         });
 
-        # apps/cosmic живёт вне воркспейса и тянет libcosmic, чей rust-version
-        # опережает пин из rust-toolchain.toml. Отдельный шелл со свежим stable
-        # не трогает сборку остального репозитория.
+        # apps/cosmic lives outside the workspace and pulls in libcosmic, whose
+        # rust-version is ahead of the rust-toolchain.toml pin. A separate shell
+        # with the latest stable leaves the rest of the repository's build alone.
         cosmic = pkgs.mkShell (moldEnv // {
           packages = with pkgs; [
             rust-bin.stable.latest.default
