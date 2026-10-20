@@ -5,9 +5,9 @@ edition = "2021"
 publish = false
 license = "MIT"
 
-# Отдельный воркспейс (в корневом Cargo.toml он в exclude), поэтому профили из
-# корня сюда не наследуются и продублированы. Смысл тот же — см. комментарий
-# в /Cargo.toml.
+# A separate workspace (excluded in the root Cargo.toml), so the root profiles
+# are not inherited here and are duplicated instead. Same rationale: see the
+# comments in /Cargo.toml.
 [profile.dev]
 debug = "line-tables-only"
 split-debuginfo = "unpacked"

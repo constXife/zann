@@ -26,18 +26,19 @@
       toolchainFor = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
       rustToolchain = toolchainFor pkgs;
 
-      # С 1.90 rustc на x86_64-unknown-linux-gnu линкует своим rust-lld, а не
-      # ld.bfd, так что база тут уже быстрая. mold всё равно обгоняет lld на
-      # больших бинарях (а тут webkit, Qt и толстый воркспейс), но выигрыш —
-      # десятки процентов на шаге линковки, а не разы на сборке целиком.
-      # gcc 15 понимает -fuse-ld=mold напрямую, clang в шелл тащить не нужно.
+      # Since 1.90, rustc on x86_64-unknown-linux-gnu links with its bundled
+      # rust-lld instead of ld.bfd, so the baseline is already fast. mold still
+      # beats lld on large binaries (webkit, Qt and a heavy workspace here), but
+      # the gain is tens of percent on the link step, not multiples on the
+      # whole build. gcc 15 understands -fuse-ld=mold directly, so the shell
+      # does not need clang.
       #
-      # Флаг ставится через env, а не через .cargo/config.toml: путь к линкеру
-      # тогда приходит из nix store, и шелл остаётся герметичным — вне
-      # `nix develop` сборка не ломается на отсутствующем mold.
+      # The flag is set through env rather than .cargo/config.toml: the linker
+      # path then comes from the nix store and the shell stays hermetic, so
+      # builds outside `nix develop` do not break on a missing mold.
       #
-      # Переменная именно target-specific: RUSTFLAGS применился бы и к
-      # кросс-таргетам (tauri android/ios), где mold не работает.
+      # The variable is deliberately target-specific: RUSTFLAGS would also hit
+      # cross targets (tauri android/ios), where mold does not work.
       moldEnv = {
         CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS = "-C link-arg=-fuse-ld=mold";
       };
