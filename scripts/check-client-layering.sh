@@ -1,16 +1,13 @@
 #!/usr/bin/env bash
 #
-# Clients go through the facade, and nothing under apps/ is a copy of something
-# under crates/. Both rules come from docs/adr/0003-shared-core-layering.md.
+# Shells under apps/ must not reach directly into low-level infrastructure or
+# non-composition modules, and no file under apps/ may be a byte-identical copy
+# of a file under crates/. Governed by docs/adr/0001-shared-client-core.md and
+# docs/architecture/capabilities.md (complementing check-client-architecture.sh).
 #
-# The desktop backend became a fork of zann-client because nothing ever compared
-# the two trees. This is that comparison. It starts with an allowlist of what is
-# already wrong, so it can be switched on today; each migration phase deletes
-# entries. An empty allowlist means the migration is done.
-#
-# The allowlist only shrinks: an entry that no longer violates anything is
-# reported as stale and fails the run, so the list cannot quietly outlive the
-# problem it documents.
+# The allowlist only shrinks: an entry that no longer matches is reported as
+# stale and fails the run, so the list cannot quietly outlive the migration
+# debt it documents.
 
 set -euo pipefail
 
