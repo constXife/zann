@@ -2,7 +2,13 @@ name: ci
 
 on:
   push:
+    branches: [main]
+    tags: ["v*"]
   pull_request:
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -47,7 +53,7 @@ jobs:
               - 'apps/desktop/src-tauri/**'
             server:
               - 'crates/zann-server/**'
-              - 'config/**'
+              - 'config/*.yaml'
               - 'compose.yaml'
               - 'compose.e2e.yaml'
             docker:
@@ -177,8 +183,8 @@ jobs:
         run: cargo fmt --check
 
   # The desktop backend is excluded from the workspace, so the root fmt, clippy
-  # and test jobs never see its 8.5k lines. This job is what covers them until
-  # ADR 0003's Ф1 brings the crate into the workspace proper.
+  # and test jobs never see its 8.5k lines. This job gives the excluded adapter
+  # explicit coverage while the ADR 0001 migration removes its application fork.
   layering:
     needs: changes
     if: >-
@@ -240,7 +246,7 @@ jobs:
 
   # COSMIC has its own lockfile (51 git sources, which Nix vendoring depends on)
   # and needs a newer toolchain than the workspace pins, so it cannot simply
-  # join the workspace — see apps/cosmic/README.md and ADR 0003.
+  # join the workspace — see apps/cosmic/README.md.
   #
   # Shares the `cosmic` filter with cosmic-package, which deliberately leaves
   # `crates/**` out because libcosmic with wgpu takes tens of minutes (#151).
@@ -632,9 +638,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-  # Упаковка COSMIC-клиента ломается тихо: ревизия libcosmic, его git-подмодули
-  # и доступность crates.io живут вне нашего кода, а обычные rust-джобы
-  # деривацию не трогают вообще.
+  # Package evaluation and build are required: source tests do not prove packaging.
   cosmic-package:
     needs: changes
     if: needs.changes.outputs.cosmic == 'true' || needs.changes.outputs.ci == 'true'
@@ -646,8 +650,12 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@v31
         with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
           extra_nix_config: |
             experimental-features = nix-command flakes
+            ssl-cert-file = /etc/ssl/certs/ca-certificates.crt
+            connect-timeout = 30
+            stalled-download-timeout = 90
       # Дёшево и ловит опечатки в выражении и пропавшие атрибуты.
       - name: Evaluate the flake
         run: nix flake check --no-build
@@ -658,6 +666,9 @@ jobs:
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
           df -h /
       - name: Build the package
+        env:
+          SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
+          NIX_SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
         run: nix build .#zann-cosmic --no-link --print-build-logs
 
   nix-module:
@@ -731,8 +742,8 @@ jobs:
 
   e2e-desktop:
     needs: [changes, server-image]
-    # `rust` too: the desktop backend also depends on shared Rust crates, so a
-    # change that breaks backup or sync no longer touches apps/desktop/** at all.
+    # `rust` too: desktop behaviour also depends on shared Rust crates, so a
+    # change that breaks backup or sync may not touch apps/desktop/** at all.
     if: >-
       needs.changes.outputs.js == 'true' ||
       needs.changes.outputs.rust == 'true' ||
@@ -893,3 +904,51 @@ jobs:
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             docker push "$DOCKER_IMAGE:${GITHUB_REF_NAME}"
           fi
+
+  # One stable status for path-filtered jobs. Every job below must succeed or
+  # be deliberately skipped; failures and cancellations remain failures.
+  ci:
+    name: ci
+    if: ${{ always() && !cancelled() }}
+    needs:
+      - changes
+      - fmt
+      - layering
+      - desktop-rust
+      - cosmic
+      - audit-surface
+      - client-architecture
+      - client-locking-portability
+      - desktop-rust-consumer
+      - cosmic-rust-consumer
+      - cosmic-package
+      - nix-module
+      - test
+      - coverage
+      - audit
+      - licenses
+      - licenses-js
+      - test-js
+      - e2e-desktop
+      - server-image
+      - docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm jobs succeeded or were skipped
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+
+          needs = json.loads(os.environ["RESULTS"])
+          bad = [
+              name
+              for name, job in needs.items()
+              if job.get("result") not in ("success", "skipped")
+          ]
+          if bad:
+              print("failed jobs:", ", ".join(bad))
+              sys.exit(1)
+          print("all required jobs passed")
+          PY
