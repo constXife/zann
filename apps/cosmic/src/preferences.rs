@@ -22,6 +22,7 @@ pub enum Change {
     ClipboardOnExit(bool),
     ClipboardIfUnchanged(bool),
     AutoHideRevealSeconds(u32),
+    CloseToTray(bool),
 }
 
 impl Change {
@@ -35,6 +36,7 @@ impl Change {
             Self::ClipboardOnExit(_) => "clipboard_clear_on_exit",
             Self::ClipboardIfUnchanged(_) => "clipboard_clear_if_unchanged",
             Self::AutoHideRevealSeconds(_) => "auto_hide_reveal_seconds",
+            Self::CloseToTray(_) => "close_to_tray",
         }
     }
 
@@ -47,7 +49,8 @@ impl Change {
             Self::LockOnFocusLoss(value)
             | Self::ClipboardOnLock(value)
             | Self::ClipboardOnExit(value)
-            | Self::ClipboardIfUnchanged(value) => Value::Bool(value),
+            | Self::ClipboardIfUnchanged(value)
+            | Self::CloseToTray(value) => Value::Bool(value),
         }
     }
 }
@@ -71,6 +74,28 @@ impl Store {
             .unwrap_or_default()
     }
 
+    /// Shell-owned preference shared with the Tauri desktop client. It is
+    /// intentionally not part of `DevicePreferences`, whose contract excludes
+    /// platform-specific window and tray behavior.
+    pub fn load_close_to_tray(&self) -> Result<bool, String> {
+        match self.read_root()?.get("close_to_tray") {
+            Some(Value::Bool(value)) => Ok(*value),
+            Some(_) => Err("close_to_tray must be a boolean".into()),
+            None => Ok(zann_ui_core::settings::CLOSE_TO_TRAY_DEFAULT),
+        }
+    }
+
+    fn read_root(&self) -> Result<serde_json::Map<String, Value>, String> {
+        let text = match std::fs::read_to_string(&self.path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(serde_json::Map::new())
+            }
+            Err(error) => return Err(format!("could not read desktop preferences: {error}")),
+        };
+        serde_json::from_str(&text).map_err(|error| format!("invalid desktop preferences: {error}"))
+    }
+
     /// Patch only the field the user changed. Reloading immediately before the
     /// patch prevents this client from writing a stale copy of unrelated keys.
     pub fn save_change(
@@ -81,11 +106,7 @@ impl Store {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
         }
-        let mut root = std::fs::read_to_string(&self.path)
-            .ok()
-            .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-            .and_then(|value| value.as_object().cloned())
-            .unwrap_or_default();
+        let mut root = self.read_root()?;
         root.insert(change.key().to_string(), change.value());
 
         // Validate that the value now represented on disk agrees with the
@@ -115,6 +136,7 @@ pub fn apply(preferences: &mut DevicePreferences, change: Change) {
             preferences.clipboard_clear_if_unchanged = value;
         }
         Change::AutoHideRevealSeconds(value) => preferences.auto_hide_reveal_seconds = value,
+        Change::CloseToTray(_) => {}
     }
 }
 
@@ -145,5 +167,45 @@ mod tests {
         assert_eq!(value["auto_lock_minutes"], 30);
         assert_eq!(value["close_to_tray"], false);
         assert_eq!(value["future"]["value"], 1);
+    }
+
+    #[test]
+    fn close_to_tray_uses_the_shared_desktop_key_and_default() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::new(dir.path());
+        assert!(store.load_close_to_tray().unwrap());
+
+        std::fs::write(dir.path().join(FILENAME), r#"{"close_to_tray":false}"#).expect("fixture");
+        assert!(!store.load_close_to_tray().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod tray_tests {
+    use super::*;
+    #[test]
+    fn tray_policy_uses_shared_default_only_for_absent_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        assert_eq!(
+            store.load_close_to_tray().unwrap(),
+            zann_ui_core::settings::CLOSE_TO_TRAY_DEFAULT
+        );
+        std::fs::write(dir.path().join(FILENAME), r#"{"close_to_tray":false}"#).unwrap();
+        assert!(!store.load_close_to_tray().unwrap());
+        std::fs::write(dir.path().join(FILENAME), r#"{"close_to_tray":"false"}"#).unwrap();
+        assert!(store.load_close_to_tray().is_err());
+    }
+    #[test]
+    fn invalid_settings_are_not_overwritten_by_a_tray_toggle() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILENAME);
+        std::fs::write(&path, "{invalid").unwrap();
+        let store = Store::new(dir.path());
+        assert!(store.load_close_to_tray().is_err());
+        assert!(store
+            .save_change(&DevicePreferences::default(), Change::CloseToTray(false))
+            .is_err());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "{invalid");
     }
 }

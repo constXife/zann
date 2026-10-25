@@ -99,3 +99,21 @@ their platform-native controls inside the same semantic regions.
   wide desktop widths.
 - Reviewers MUST verify semantic region ownership, not pixel identity. Shared
   geometry belongs in `zann-ui-core`; native widget appearance remains local.
+
+## Item editing and history in native desktop clients
+
+- Create/edit and history occupy the detail workspace while preserving the
+  navigation and list columns. Tauri uses its existing create/detail surfaces;
+  COSMIC renders native forms and history controls in the same semantic region.
+- Field templates come from `schemas/item_fields.json`. Draft validation and
+  payload construction for Rust clients belong to `zann-ui-core::item_editor`.
+- Duplicate or invalid field keys prevent submission. Editing preserves typed
+  field metadata and payload extras. Unmasked multiline fields use a text area.
+- Editor reveals use the configured auto-hide timer and hide on window focus
+  loss. Locking destroys the draft; stale asynchronous completions cannot put
+  a previous screen's secrets into the new screen.
+- Restoring a history version requires explicit confirmation. Selecting another
+  version discards its previous preview before loading the new one.
+- Closing a desktop window to tray follows its configured preference. If the
+  tray becomes unavailable, a hidden COSMIC window is reopened; the configured
+  lock-on-hidden policy applies before closing the window.

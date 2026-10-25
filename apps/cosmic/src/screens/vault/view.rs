@@ -27,21 +27,48 @@ impl State {
     fn detail_view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let search = widget::text_input::search_input(t("items.searchPlaceholder"), &self.query)
+            .id(self.search_id.clone())
             .on_input(Message::QueryInput)
             .on_clear(Message::ClearQuery)
             .width(Length::Fill);
 
-        let body: Element<'_, Message> = match self.detail.as_ref() {
-            Some(detail) => widget::column::with_capacity(2)
-                .push(widget::text::title4(detail.title.clone()))
-                .push(
-                    widget::scrollable(detail.view(self.temporary_reveal).map(Message::Detail))
-                        .height(Length::Fill),
-                )
-                .spacing(spacing.space_s)
+        let body: Element<'_, Message> = match (
+            self.editor.as_ref(),
+            self.history.as_ref(),
+            self.detail.as_ref(),
+        ) {
+            (Some(editor), _, _) => widget::scrollable(editor.view().map(Message::Editor))
+                .height(Length::Fill)
+                .apply(widget::container)
                 .padding(spacing.space_s)
                 .into(),
-            None => super::super::centered(widget::text::body(t("items.detailsHint"))),
+            (None, Some(history), _) => history.view().map(Message::History),
+            (None, None, Some(detail)) => {
+                let header = widget::row::with_capacity(3)
+                    .push(
+                        widget::container(widget::text::title4(detail.title.clone()))
+                            .width(Length::Fill),
+                    )
+                    .push(
+                        widget::button::standard(t("items.historyOpen"))
+                            .on_press(Message::OpenHistory),
+                    )
+                    .push(widget::button::standard(t("common.edit")).on_press(Message::OpenEdit))
+                    .spacing(spacing.space_s)
+                    .align_y(Alignment::Center);
+                widget::column::with_capacity(2)
+                    .push(header)
+                    .push(
+                        widget::scrollable(detail.view(self.temporary_reveal).map(Message::Detail))
+                            .height(Length::Fill),
+                    )
+                    .spacing(spacing.space_s)
+                    .padding(spacing.space_s)
+                    .into()
+            }
+            (None, None, None) => {
+                super::super::centered(widget::text::body(t("items.detailsHint")))
+            }
         };
 
         widget::column::with_capacity(2)
@@ -55,9 +82,18 @@ impl State {
         let spacing = theme::spacing();
         let visible = self.visible();
 
-        let toolbar = widget::column::with_capacity(2)
-            .push(widget::text::title4(self.selected_category_label()))
-            .spacing(spacing.space_xs)
+        let mut create = widget::button::suggested(t("common.create"));
+        if !self.busy && !self.searching && self.editor.is_none() && self.history.is_none() {
+            create = create.on_press(Message::OpenCreate);
+        }
+        let toolbar = widget::row::with_capacity(2)
+            .push(
+                widget::container(widget::text::title4(self.selected_category_label()))
+                    .width(Length::Fill),
+            )
+            .push(create)
+            .spacing(spacing.space_s)
+            .align_y(Alignment::Center)
             .width(Length::Fill);
 
         let list: Element<'_, Message> = if visible.is_empty() {
@@ -141,7 +177,7 @@ pub(super) fn vault_label(vault: &VaultSummary) -> String {
 
 fn item_row(item: &ItemSummary) -> Element<'_, Message> {
     let spacing = theme::spacing();
-    widget::row::with_capacity(3)
+    widget::row::with_capacity(2)
         .push(
             widget::icon::from_name(item_icon(&item.type_id))
                 .size(20)
@@ -153,14 +189,6 @@ fn item_row(item: &ItemSummary) -> Element<'_, Message> {
                 .push(widget::text::caption(item.path.clone()))
                 .width(Length::Fill),
         )
-        .push(widget::text::caption({
-            let key = format!("types.{}", item.type_id);
-            if has(&key) {
-                t(&key)
-            } else {
-                item.type_id.clone()
-            }
-        }))
         .spacing(spacing.space_s)
         .align_y(Alignment::Center)
         .into()

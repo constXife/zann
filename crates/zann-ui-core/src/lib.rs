@@ -17,6 +17,7 @@ pub mod folders;
 pub mod i18n;
 pub mod item;
 pub mod item_detail;
+pub mod item_editor;
 pub mod server_url;
 pub mod settings;
 pub mod totp;

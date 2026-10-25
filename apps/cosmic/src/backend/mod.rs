@@ -162,6 +162,13 @@ where
         .unwrap_or_else(|_| Err("background task did not finish".to_string()))
 }
 
+/// Correlate native UI effects across screen destruction and recreation.
+/// This counter is process-wide so reopening a vault cannot reuse a pending ID.
+pub(crate) fn next_view_request() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

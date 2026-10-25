@@ -25,16 +25,28 @@ use zann_cosmic::i18n::t;
 use zann_cosmic::preferences::{self, Store};
 use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};
 use zann_cosmic::session::Session;
+use zann_cosmic::tray;
 use zann_ui_core::DevicePreferences;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let settings = Settings::default().size(WINDOW_SIZE).size_limits(
-        Limits::NONE
-            .min_width(WINDOW_MIN.width)
-            .min_height(WINDOW_MIN.height),
-    );
-    cosmic::app::run::<App>(settings, ())?;
+    let settings = Settings::default()
+        .size(WINDOW_SIZE)
+        .size_limits(
+            Limits::NONE
+                .min_width(WINDOW_MIN.width)
+                .min_height(WINDOW_MIN.height),
+        )
+        .exit_on_close(false);
+    cosmic::app::run_single_instance::<App>(settings, Flags)?;
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct Flags;
+
+impl cosmic::app::CosmicFlags for Flags {
+    type SubCommand = String;
+    type Args = Vec<String>;
 }
 
 /// Either the local database opened and the app has a session, or it did not
@@ -59,13 +71,15 @@ struct App {
     shell: Shell,
     window_width: f32,
     preferences: DevicePreferences,
+    close_to_tray: bool,
+    tray_available: bool,
     preference_store: Option<Store>,
     /// The last secret copied and its generation, so expired timers cannot
     /// clear a newer copy.
     clipboard: (String, u64),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum Message {
     Welcome(welcome::Message),
     Connect(connect::Message),
@@ -78,11 +92,21 @@ enum Message {
     Lock,
     OpenSettings,
     Quit,
+    CloseRequested,
+    Tray(tray::Event),
+    ShowWindow(Option<String>),
     Unfocused,
     TemporaryReveal(bool),
     Activity,
     ClipboardExpired(u64),
     ClipboardRead(Option<String>),
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Nested input and clipboard messages can carry decrypted values.
+        f.write_str("Message(<redacted>)")
+    }
 }
 
 /// Commands in the native header menu. Keeping these separate from messages
@@ -162,7 +186,7 @@ fn remembered_unlock_task(session: &Session) -> Task<Message> {
 
 impl cosmic::Application for App {
     type Executor = executor::Default;
-    type Flags = ();
+    type Flags = Flags;
     type Message = Message;
 
     /// Matches `StartupWMClass` in `data/com.rlyeh.zann.Cosmic.desktop`, which
@@ -229,23 +253,37 @@ impl cosmic::Application for App {
     }
 
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
-        let (shell, preference_store, preferences) = match Session::open() {
-            Ok((session, status)) => {
+        let (shell, preference_store, preferences, close_to_tray) =
+            match Session::open().and_then(|(session, status)| {
                 let store = Store::new(session.database_location().client_root());
-                let preferences = store.load();
-                let screen = if status.initialized {
-                    Screen::Master(Box::new(master::State::new(master::Mode::Unlock, None)))
-                } else if status.storages_count > 0 {
-                    // A server login already happened but the vault was never
-                    // created — finish where that left off.
-                    Screen::Master(Box::new(master::State::new(master::Mode::Create, None)))
-                } else {
-                    Screen::Welcome
-                };
-                (Shell::Ready { session, screen }, Some(store), preferences)
-            }
-            Err(err) => (Shell::Blocked(err), None, DevicePreferences::default()),
-        };
+                let close_to_tray = store.load_close_to_tray()?;
+                Ok((session, status, store, close_to_tray))
+            }) {
+                Ok((session, status, store, close_to_tray)) => {
+                    let preferences = store.load();
+                    let screen = if status.initialized {
+                        Screen::Master(Box::new(master::State::new(master::Mode::Unlock, None)))
+                    } else if status.storages_count > 0 {
+                        // A server login already happened but the vault was never
+                        // created — finish where that left off.
+                        Screen::Master(Box::new(master::State::new(master::Mode::Create, None)))
+                    } else {
+                        Screen::Welcome
+                    };
+                    (
+                        Shell::Ready { session, screen },
+                        Some(store),
+                        preferences,
+                        close_to_tray,
+                    )
+                }
+                Err(err) => (
+                    Shell::Blocked(err),
+                    None,
+                    DevicePreferences::default(),
+                    false,
+                ),
+            };
 
         zann_cosmic::i18n::set_language(preferences.language.as_deref());
 
@@ -254,6 +292,8 @@ impl cosmic::Application for App {
             shell,
             window_width: WINDOW_SIZE.width,
             preferences,
+            close_to_tray,
+            tray_available: false,
             preference_store,
             clipboard: (String::new(), 0),
         };
@@ -365,6 +405,7 @@ impl cosmic::Application for App {
         };
 
         let shell_events = event::listen_with(|event, _, _| match event {
+            Event::Window(window::Event::CloseRequested) => Some(Message::CloseRequested),
             Event::Window(window::Event::Unfocused) => Some(Message::Unfocused),
             Event::Keyboard(keyboard::Event::KeyPressed { ref key, .. })
                 if *key == temporary_reveal_key() =>
@@ -392,7 +433,18 @@ impl cosmic::Application for App {
             _ => None,
         });
 
-        Subscription::batch([screen, shell_events])
+        Subscription::batch([
+            screen,
+            shell_events,
+            tray::subscription().map(Message::Tray),
+        ])
+    }
+
+    fn dbus_activation(
+        &mut self,
+        message: cosmic::dbus_activation::Message,
+    ) -> Task<Self::Message> {
+        cosmic::task::message(Message::ShowWindow(message.activation_token))
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
@@ -409,6 +461,30 @@ impl cosmic::Application for App {
             Message::Lock => return self.lock(),
             Message::OpenSettings => return self.open_settings(),
             Message::Quit => return self.quit(),
+            Message::CloseRequested => {
+                return if self.close_to_tray && self.tray_available {
+                    self.close_window_to_tray()
+                } else {
+                    self.quit()
+                };
+            }
+            Message::Tray(tray::Event::Ready) => {
+                self.tray_available = true;
+                return Task::none();
+            }
+            Message::Tray(tray::Event::Unavailable) => {
+                self.tray_available = false;
+                return if self.core.main_window_id().is_none() {
+                    self.show_window(None)
+                } else {
+                    Task::none()
+                };
+            }
+            Message::Tray(tray::Event::Open) => return self.show_window(None),
+            Message::Tray(tray::Event::Quit) => return self.quit(),
+            Message::ShowWindow(activation_token) => {
+                return self.show_window(activation_token);
+            }
             Message::Settings(message) => return self.update_settings(message),
             Message::Unfocused => {
                 if let Shell::Ready {
@@ -417,6 +493,7 @@ impl cosmic::Application for App {
                 } = &mut self.shell
                 {
                     vault.set_temporary_reveal(false);
+                    vault.hide_editor_revealed();
                 }
                 return if self.preferences.lock_on_focus_loss {
                     self.lock()
@@ -560,7 +637,9 @@ impl cosmic::Application for App {
                 }
 
                 Message::Vault(message) => {
-                    let Screen::Vault(state) = &mut *screen else {
+                    let (Screen::Vault(state) | Screen::Settings { vault: state, .. }) =
+                        &mut *screen
+                    else {
                         return Task::none();
                     };
                     match state.update(message, session) {
@@ -580,6 +659,9 @@ impl cosmic::Application for App {
                 | Message::Lock
                 | Message::OpenSettings
                 | Message::Quit
+                | Message::CloseRequested
+                | Message::Tray(_)
+                | Message::ShowWindow(_)
                 | Message::Unfocused
                 | Message::TemporaryReveal(_)
                 | Message::Activity
@@ -653,6 +735,7 @@ impl App {
 
     fn open_settings(&mut self) -> Task<Message> {
         let preferences = self.preferences.clone();
+        let close_to_tray = self.close_to_tray;
         let Shell::Ready { session, screen } = &mut self.shell else {
             return Task::none();
         };
@@ -665,7 +748,7 @@ impl App {
         let parked = std::mem::replace(screen, Screen::Welcome);
         if let Screen::Vault(vault) = parked {
             *screen = Screen::Settings {
-                state: Box::new(settings::State::new(preferences, data_root)),
+                state: Box::new(settings::State::new(preferences, close_to_tray, data_root)),
                 vault,
             };
         }
@@ -755,6 +838,9 @@ impl App {
         }
 
         self.preferences = next;
+        if let preferences::Change::CloseToTray(value) = change {
+            self.close_to_tray = value;
+        }
         if matches!(change, preferences::Change::ClipboardSeconds(_)) {
             // Cancel a timer scheduled under the previous policy.
             self.clipboard.1 += 1;
@@ -774,6 +860,7 @@ impl App {
                 }
                 Screen::Settings { state, vault } => {
                     state.preferences_changed(self.preferences.clone());
+                    state.close_to_tray_changed(self.close_to_tray);
                     if language_changed {
                         vault.refresh_translations();
                     }
@@ -849,3 +936,5 @@ fn blocked_view(reason: &str) -> Element<'_, Message> {
             .align_x(Alignment::Center),
     )
 }
+
+mod window_lifecycle;

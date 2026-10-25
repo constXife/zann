@@ -604,3 +604,65 @@ fn detail_and_copy_diagnostics_redact_payloads() {
     };
     assert!(!format!("{detail:?} {:?} {message:?}", detail.fields).contains(sentinel));
 }
+
+#[test]
+fn closed_history_requests_cannot_populate_a_new_history_view() {
+    use zann_cosmic::screens::history;
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    let first = local::item_get(&session.facade(), page.items[0].id.clone()).unwrap();
+    let mut vault = vault::State::new(page, None);
+    vault.update(
+        vault::Message::Loaded(Ok(Detail::parse(first).unwrap())),
+        &session,
+    );
+    vault.update(vault::Message::OpenHistory, &session);
+    let old_request = vault.editing_request_id();
+    vault.update(vault::Message::History(history::Message::Close), &session);
+    vault.update(vault::Message::OpenHistory, &session);
+    // A previous open must not be routed to the new history view.
+    assert!(matches!(
+        vault.update(
+            vault::Message::HistoryResponse(
+                old_request,
+                history::Message::EntriesLoaded(Ok(vec![]))
+            ),
+            &session
+        ),
+        vault::Outcome::None
+    ));
+    assert!(vault.history().unwrap().is_loading());
+    // The current request reaches history; its failure is visible but does not
+    // replace the selected item or reopen a closed editor.
+    vault.update(
+        vault::Message::HistoryResponse(
+            vault.editing_request_id(),
+            history::Message::EntriesLoaded(Err("request failed".into())),
+        ),
+        &session,
+    );
+    assert!(!vault.history().unwrap().is_loading());
+}
+
+#[test]
+fn saved_item_from_a_destroyed_screen_cannot_replace_the_new_screen_detail() {
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    let detail =
+        Detail::parse(local::item_get(&session.facade(), page.items[0].id.clone()).unwrap())
+            .unwrap();
+    let mut old = vault::State::new(page.clone(), None);
+    old.update(vault::Message::OpenCreate, &session);
+    let old_request = old.editing_request_id();
+    let mut current = vault::State::new(page, None);
+    current.update(vault::Message::OpenCreate, &session);
+    let current_request = current.editing_request_id();
+    assert_ne!(old_request, current_request);
+    current.update(
+        vault::Message::Saved(old_request, Ok(detail.clone())),
+        &session,
+    );
+    assert!(current.detail().is_none());
+    current.update(vault::Message::Saved(current_request, Ok(detail)), &session);
+    assert!(current.detail().is_some());
+}

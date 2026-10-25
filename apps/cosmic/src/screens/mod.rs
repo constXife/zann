@@ -5,6 +5,8 @@
 
 pub mod connect;
 pub mod detail;
+pub mod editor;
+pub mod history;
 pub mod master;
 pub mod settings;
 pub mod vault;

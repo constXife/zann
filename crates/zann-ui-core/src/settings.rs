@@ -4,6 +4,9 @@
 //! defaults and capabilities; Vue, libcosmic and SwiftUI still render native
 //! controls and adaptive navigation.
 
+/// Shared desktop window-policy default; platform adapters own its execution.
+pub const CLOSE_TO_TRAY_DEFAULT: bool = true;
+
 use serde::{Deserialize, Serialize};
 
 pub const AUTO_LOCK_MINUTES: &[u32] = &[0, 1, 5, 10, 30, 60];
