@@ -1,53 +1,113 @@
-# Repository Guidelines
+# Repository Guidelines (AGENTS.md)
 
-Full contribution rules live in `CONTRIBUTING.md`; this file is a brief, practical summary.
+This file is the operational map for humans and AI agents working in `zann`.
+Normative details live in `docs/`; when a summary here diverges from a canonical
+document below, the canonical document wins.
 
-## Project Structure & Module Organization
-- `crates/` contains the Rust workspace crates: `zann-server`, `zann-cli`, `zann-core`,
-  `zann-crypto`, `zann-db`, `zann-keystore`, `zann-client` (wire types, HTTP, auth, sync),
-  `zann-app` (headless application layer shared by every client), `zann-ui-core`
-  (view logic with no platform dependencies) and `zann-ffi` (the uniffi facade clients call).
-- `apps/desktop/` holds the Tauri desktop app (frontend + `src-tauri/` backend).
-- `config/` stores environment and policy configs (use `config/config.example.yaml` as a template).
-- `schemas/` includes specs and schema artifacts; `docs/` contains documentation and screenshots.
-- `loadtest/` and `grafana/` hold performance tooling; `scripts/` has helper scripts and hooks.
+## Source of Truth (Read in This Order)
+
+1. [`docs/Architecture.md`](docs/Architecture.md) & [`docs/architecture/capabilities.md`](docs/architecture/capabilities.md) — client architecture, single-owner capability map, allowed dependencies, and the `MIG-001`..`MIG-008` exception ledger.
+2. [`config/architecture-boundaries.json`](config/architecture-boundaries.json) — machine-enforced package graph, feature contracts, and source rules checked by `./scripts/check-client-architecture.sh`.
+3. [`docs/adr/`](docs/adr/) — architectural decisions:
+   - [ADR 0001](docs/adr/0001-shared-client-core.md): shared client core & thin interface shells;
+   - [ADR 0002](docs/adr/0002-client-strategy.md): client strategy (`Rust Core + Thin Native Shells` across Linux COSMIC, Apple SwiftUI for macOS/iOS/iPadOS, Android Jetpack Compose, Tauri desktop, and Browser Extension + Daemon);
+   - [ADR 0004](docs/adr/0004-machine-secret-plane.md) & [ADR 0005](docs/adr/0005-runtime-secret-delivery-profiles.md): machine secret plane & runtime delivery profiles.
+4. [`crates/zann-server/SECURITY.md`](crates/zann-server/SECURITY.md) & [`docs/audit-surface.md`](docs/audit-surface.md) — server threat model and client/server security audit surface.
+5. [`docs/ux/`](docs/ux/) — unified UX contracts, layout breakpoints, and theme tokens.
+6. [`CONTRIBUTING.md`](CONTRIBUTING.md) — workflow, CI gates, and PR conventions.
+
+---
+
+## Stage & Proportionality
+
+Zann is currently **Pre-GA (experimental prior to `v0.Y`)**.
+
+- **Strict at every stage (never compromise):**
+  - **Trust-model separation:** Personal vaults (`VaultEncryptionType::Client`) are end-to-end encrypted on the client; the server is opaque storage. Shared vaults (`VaultEncryptionType::Server`) use server-side encryption (`ZANN_SMK`). Never leak personal vault keys or plaintext outside the local client boundary.
+  - **Secret custody:** Never log, print, pass via CLI argv, or derive `Debug` on plaintext secrets, master keys, passwords, or bearer/refresh tokens. Persist files containing tokens, configs, or plain exports with owner-only permissions (`0600` / `0700`).
+  - **Single canonical owner (SSoT):** Every domain, sync, auth, crypto, config, and presentation capability has exactly one owner in [`docs/architecture/capabilities.md`](docs/architecture/capabilities.md).
+  - **Crash-safe & idempotent transitions:** Config locks, credential journals, and SQLite sync transactions (`(cursor, last_seq)` checkpoints) must remain atomic and fail-closed.
+  - **Bounded hot paths:** Server endpoints, sync catalog reconciliation, and local SQLite queries must remain bounded in cardinality and sequential round trips.
+
+- **Pre-GA proportionality (avoid premature ceremony):**
+  - **No fallback or dual-write by default:** When all consumers of an internal API or crate live in this repository, perform a direct cutover in-place and delete the superseded code in the same change.
+  - **Compatibility paths require explicit bounds:** Any temporary migration shim must be recorded in [`docs/architecture/capabilities.md`](docs/architecture/capabilities.md) and [`config/architecture-boundaries.json`](config/architecture-boundaries.json) with an owner, compensating test, and measurable removal condition.
+  - **Subtractive balance:** Touching a legacy path under `MIG-001`..`MIG-008` must narrow or remove the exception rather than expanding it.
+
+---
+
+## Three-Layer Client Architecture
+
+Dependencies point strictly downward (`[SHELL]` → `[PRESENTATION]` → `[CORE]`). Lower layers never import UI toolkits, CLI parsers, or FFI wrappers.
+
+### 1. `[CORE]` — Domain, Crypto, Storage, Transport & Application Services
+- `crates/zann-core`: domain models, vault/item invariants, pure policies, wire DTOs (`zann-core::api`).
+- `crates/zann-crypto`: sole owner of Argon2id KDF, ChaCha20-Poly1305 envelopes, payload checksums, and secret key types.
+- `crates/zann-db` & `crates/zann-client-sqlite`: database repositories, migrations, and the production SQLite sync store adapter.
+- `crates/zann-keystore`: OS secret-store (`keyring`) and FIDO2 hardware-key (`hmac-secret`) unlocking.
+- `crates/zann-client`: canonical client crate (`remote`, `config`, `session`, `sync`, `delivery`, and the canonical `zann-client::app::AppClient` facade).
+- `crates/zann-app`: **frozen** transitional package for backup, snapshot, and verify until moved behind `zann-client::app` ports (`MIG-008`). Do not add new modules or capabilities here.
+- **Portability rule:** Shared core crates must remain cross-compilable to `aarch64-apple-ios`, `aarch64-apple-darwin`, `aarch64-linux-android`, and Linux without implicit `$HOME` lookups or desktop-only C dependencies in default feature sets.
+
+### 2. `[PRESENTATION]` — Toolkit-Neutral View Models & Flows
+- `crates/zann-ui-core`: categories, item counts, client-side filtering, folder trees, field ordering/masking, TOTP generation, server URL normalization, and device preference schemas.
+- `zann-flows` (planned): headless state machines (`handle(State, Event) -> (State, Vec<Effect>)`) with operation IDs and cancellation.
+
+### 3. `[SHELL]` — Native Interfaces & Edge Adapters
+- `apps/cosmic`: COSMIC-native (`libcosmic` / Iced) reference desktop client for Linux. Links `[CORE]` and `[PRESENTATION]` directly in Rust.
+- `apps/desktop`: Tauri desktop app (`src/` Vue 3 + TypeScript frontend, `src-tauri/` Rust backend).
+- `crates/zann-cli`: server-oriented CLI (`zann-client` `remote` + `delivery` surfaces, free of SQLite and GUI deps).
+- `crates/zann-ffi`: UniFFI edge adapter projecting `[CORE]` and `[PRESENTATION]` to non-Rust clients (`apps/apple` SwiftUI for macOS/iOS/iPadOS and `apps/android` Jetpack Compose). Rust clients must not use `zann-ffi` for new capabilities (`MIG-003`).
+- **Shell rule:** Shells own only widgets, layout, navigation, CLI I/O, and OS capability adapters (clipboard, tray, biometrics, file dialogs, browser launch, autofill extensions). Never implement crypto, HTTP routes, sync merge rules, or category/masking logic in a shell.
+
+---
+
+## Structural Budgets & Consolidation
+
+To keep modules navigable and prevent merge collisions across concurrent changes:
+- **File size budget:** `> 400` non-test lines is a review signal; `> 1,000` non-test lines is a hard ceiling — do not add new responsibilities to a file over 1,000 lines without extracting a focused submodule first.
+- **No God-modules:** Keep screen state machines (`apps/cosmic/src/screens/*.rs`), server domains (`crates/zann-server/src/domains/*`), and FFI projections split by domain rather than accumulating everything in `main.rs` or `lib.rs`.
+- Before introducing a new crate, module, endpoint, or cross-client flow, apply [`.agents/skills/consolidation-check/SKILL.md`](.agents/skills/consolidation-check/SKILL.md).
+
+---
+
+## Review & Verification Tiers
+
+Match verification depth to the blast radius of the diff:
+
+- **T0 — Documentation, translations (`i18n/`), or comments only:**
+  - Verify links and accuracy against the code; no heavy test suites required.
+- **T1 — Contained implementation within one crate or shell screen (no boundary/contract change):**
+  - Run `cargo fmt --check`, `cargo clippy` and `cargo test` for the affected package (`cargo test -p <crate>`, `just cosmic-test`, or `just desktop-test`).
+  - Check consolidation rules ([`.agents/skills/consolidation-check/SKILL.md`](.agents/skills/consolidation-check/SKILL.md)).
+- **T2 — Boundary, architecture, or security audit-surface change:**
+  - Triggered by changes to paths in [`docs/audit-surface.md`](docs/audit-surface.md), `crates/zann-crypto/**`, `crates/zann-keystore/**`, `crates/zann-client/**`, `crates/zann-client-sqlite/**`, `crates/zann-server/src/domains/{auth,access_control}/**`, `crates/zann-ffi/**`, `config/architecture-boundaries.json`, or `AGENTS.md`.
+  - Run `./scripts/check-client-architecture.sh` and `./scripts/check-audit-surface-deps.sh` (via `direnv exec .` on NixOS).
+  - Run [`.agents/skills/security-change-review/SKILL.md`](.agents/skills/security-change-review/SKILL.md) and [`.agents/skills/consolidation-check/SKILL.md`](.agents/skills/consolidation-check/SKILL.md).
+
+---
 
 ## Build, Test, and Development Commands
-- `cargo build` builds the Rust workspace.
-- `cargo test` runs the fast, no-DB test suite.
-- `cargo fmt` / `cargo clippy --all-targets --all-features` format and lint Rust code.
-- Run `cargo fmt` before committing changes; CI enforces formatting.
-- `just fast-test`, `just full-test`, `just test` are convenience wrappers (see `Justfile`).
-- `just server-run` or `just server-run-dev` runs the API server with local migrations.
-- `bun install` then `bun run tauri dev` starts the desktop app; `bun run tauri build` builds it.
-- DB integration tests need Podman and `compose.test.yaml` (run via `just server-test-db`).
 
-## Coding Style & Naming Conventions
-- Rust code is formatted with `rustfmt`; keep Clippy clean (warnings are treated as errors in CI).
-- Follow existing module boundaries (e.g., `crates/zann-server/src/domains/...`).
-- Prefer descriptive, domain-scoped module names (`auth`, `vaults`, `sync`).
-- For desktop code, follow the existing TypeScript/Vue style in `apps/desktop`.
+> On NixOS, prefix commands with `direnv exec .` (or use `nix develop .#cosmic` for `apps/cosmic`).
 
-## Testing Guidelines
-- Rust tests live in `crates/*/tests/` and `src/**/tests.rs`.
-- Fast tests are expected on every change; DB-backed tests require the Postgres container.
-- For desktop changes, run `just desktop-test` and add/update e2e tests under `apps/desktop/e2e/`.
+- `cargo build` — build the root Rust workspace.
+- `cargo test` (or `just fast-test`) — run the fast, no-DB workspace test suite.
+- `cargo fmt` / `cargo clippy --all-targets --all-features -- -D warnings` — format and lint Rust code (warnings are errors in CI).
+- `just architecture-check` (`./scripts/check-client-architecture.sh`) — validate client-layer ownership, dependency direction, and `MIG-*` exceptions.
+- `./scripts/check-audit-surface-deps.sh` — validate `zann-crypto` dependency isolation.
+- `just cosmic-test` (`cd apps/cosmic && cargo test`) — run headless flow and backend tests for the COSMIC client.
+- `just cosmic-run` / `nix build .#zann-cosmic` — run or package the COSMIC desktop client.
+- `just desktop-test` (`cd apps/desktop && bun run test`) — run Tauri frontend unit tests.
+- `cd apps/desktop/src-tauri && cargo test` — run Tauri Rust backend tests.
+- `just server-test-db` — run Postgres-backed server integration tests (requires Podman and `compose.test.yaml`).
 
-## Commit & Pull Request Guidelines
-- Use Conventional Commits for PR titles and issue titles: `<type>(<scope>): <subject>`.
-  Example: `feat(server): add audit log export`.
-- Common scopes: `desktop`, `cli`, `server`, `core`, `db`, `keystore`, `ci`, `repo`.
-- One PR per logical change; include a short summary and verification steps.
-- Add screenshots or video for desktop UI changes.
-- Breaking changes: use `!` in the title or add `BREAKING CHANGE:` in the PR body.
+---
 
-## GitHub Issues & Branch Naming
-- Issues use the same Conventional Commits format and map to labels (`t:`, `p:`, `s:`); keep titles short and scoped.
-- Branch names should reflect the same scope and intent, e.g. `feat/server-audit-log` or `fix/desktop-login`.
-- Keep issue updates in the PR description and reference the issue number when applicable.
-- Use GitHub CLI for issue/PR workflows when possible (e.g., `gh issue view 17`, `gh pr create`).
+## Commit, Issue & Pull Request Guidelines
 
-## Security & Configuration Tips
-- Do not commit secrets; use `config/config.example.yaml`.
-- Server threat model lives at `crates/zann-server/SECURITY.md`.
-- When touching crypto/auth paths, read the audit-surface notes in `CONTRIBUTING.md`.
+- Use Conventional Commits for PR and issue titles: `<type>(<scope>): <subject>` (e.g., `feat(cosmic): add trash restore action`, `fix(client): bound catalog reconciliation`).
+- Common scopes: `cosmic`, `desktop`, `client`, `cli`, `server`, `core`, `crypto`, `db`, `keystore`, `ffi`, `ui-core`, `ci`, `repo`.
+- Breaking changes: use `!` in the title or `BREAKING CHANGE:` in the body.
+- One PR per logical change; include a short summary, affected `MIG-*` or ADR references, and exact verification commands run.
+- Use GitHub CLI (`gh issue list`, `gh issue view`, `gh pr create`) to track actionable work and link PRs to issues.
