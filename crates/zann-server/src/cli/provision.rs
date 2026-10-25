@@ -3,7 +3,6 @@ use clap::{Args, Subcommand, ValueEnum};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use serde::Serialize;
-use sqlx_core::types::Json as SqlxJson;
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
@@ -747,12 +746,12 @@ async fn ensure_token_command(
         let mut staged_secret = None;
         let description = Some(spec.description.clone());
         let metadata_changed = account.description != description
-            || account.scopes.0 != spec.scopes
+            || account.scopes != spec.scopes
             || account.expires_at != spec.expires_at;
 
         if metadata_changed {
             account.description = description;
-            account.scopes = sqlx_core::types::Json(spec.scopes.clone());
+            account.scopes = spec.scopes.clone();
             account.expires_at = spec.expires_at;
             repo.update(&account)
                 .await
@@ -772,7 +771,7 @@ async fn ensure_token_command(
             account.token_hash = provisioned.token_hash;
             account.token_prefix = provisioned.token_prefix;
             account.description = Some(spec.description.clone());
-            account.scopes = sqlx_core::types::Json(spec.scopes.clone());
+            account.scopes = spec.scopes.clone();
             account.expires_at = spec.expires_at;
             account.revoked_at = None;
             if let Err(err) = repo.update(&account).await {
@@ -800,7 +799,7 @@ async fn ensure_token_command(
             description: Some(spec.description.clone()),
             token_hash: provisioned.token_hash,
             token_prefix: provisioned.token_prefix,
-            scopes: sqlx_core::types::Json(spec.scopes.clone()),
+            scopes: spec.scopes.clone(),
             allowed_ips: None,
             expires_at: spec.expires_at,
             last_used_at: None,
@@ -834,7 +833,7 @@ async fn ensure_token_command(
             owner_user_id: account.owner_user_id.to_string(),
             name: account.name,
             token_prefix: account.token_prefix,
-            scopes: account.scopes.0,
+            scopes: account.scopes,
             issued_by: spec.issued_by,
             vault_id: spec.vault.id.to_string(),
             vault_slug: spec.vault.slug,
@@ -930,7 +929,7 @@ async fn ensure_shared_vault(
         encryption_type: VaultEncryptionType::Server,
         vault_key_enc,
         cache_policy: CachePolicy::Full,
-        tags: Some(SqlxJson(Vec::<String>::new())),
+        tags: Some(Vec::<String>::new()),
         deleted_at: None,
         deleted_by_user_id: None,
         deleted_by_device_id: None,

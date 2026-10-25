@@ -275,7 +275,7 @@ pub(super) async fn service_account_scopes(
         .await
         .ok()
         .flatten()
-        .map(|account| account.scopes.0)
+        .map(|account| account.scopes)
 }
 
 pub(super) async fn effective_device_id(

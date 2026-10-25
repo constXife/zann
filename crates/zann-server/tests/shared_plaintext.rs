@@ -335,7 +335,7 @@ impl TestApp {
             description: None,
             token_hash,
             token_prefix,
-            scopes: sqlx_core::types::Json(scopes),
+            scopes,
             allowed_ips: None,
             expires_at: None,
             last_used_at: None,

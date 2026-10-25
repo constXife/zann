@@ -1,98 +1,38 @@
-use crate::cli_args::*;
-use crate::modules::auth::{
-    exchange_service_account_token, load_service_token, verify_server_fingerprint,
-};
+use super::CommandContext;
+use crate::cli_args::RunArgs;
 use crate::modules::shared::{
     fetch_shared_item, flatten_payload, is_valid_env_key, payload_or_error,
     resolve_path_for_context, resolve_shared_item_id,
 };
-use crate::modules::system::http::fetch_system_info;
-use crate::modules::system::CliConfig;
-use crate::modules::system::{ensure_secure_addr, resolve_addr};
-use crate::{DEFAULT_ADDR, SERVICE_ACCOUNT_PREFIX};
-pub(crate) async fn handle_server_command(
-    args: ServerArgs,
-    addr_arg: Option<String>,
-    context_arg: Option<String>,
-    allow_insecure: bool,
-    client: &reqwest::Client,
-    config: &CliConfig,
-) -> anyhow::Result<()> {
-    match args.command {
-        ServerCommand::Info(args) => {
-            let addr = resolve_addr(args.addr, addr_arg, context_arg, config)?;
-            ensure_secure_addr(&addr, allow_insecure)?;
-            let info = fetch_system_info(client, &addr).await?;
-            println!("{}", serde_json::to_string_pretty(&info)?);
-        }
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_run_command(
     args: RunArgs,
-    addr_arg: Option<String>,
-    token_arg: Option<String>,
-    token_name_arg: Option<String>,
-    context_arg: Option<String>,
-    allow_insecure: bool,
-    client: &reqwest::Client,
-    config: &mut CliConfig,
+    ctx: &mut CommandContext<'_>,
 ) -> anyhow::Result<()> {
     if args.command.is_empty() {
         anyhow::bail!("command is required after --");
     }
-
-    let context_name = context_arg.or_else(|| config.current_context.clone());
-    let context = context_name
-        .as_deref()
-        .and_then(|name| config.contexts.get(name))
-        .cloned();
-    let addr = addr_arg
-        .or_else(|| context.as_ref().map(|ctx| ctx.addr.clone()))
-        .unwrap_or_else(|| DEFAULT_ADDR.to_string());
-    ensure_secure_addr(&addr, allow_insecure)?;
-    let token_name =
-        token_name_arg.or_else(|| context.as_ref().and_then(|ctx| ctx.current_token.clone()));
-    let mut service_account_token = token_arg
-        .clone()
-        .filter(|value| value.starts_with(SERVICE_ACCOUNT_PREFIX));
-    if service_account_token.is_none() {
-        if let (Some(context_name), Some(token_name)) =
-            (context_name.as_deref(), token_name.as_deref())
-        {
-            service_account_token = load_service_token(context_name, token_name)?;
-        }
-    }
-    let service_account_token = service_account_token
-        .ok_or_else(|| anyhow::anyhow!("service account token required for zann run"))?;
-
-    let info = fetch_system_info(client, &addr).await?;
-    verify_server_fingerprint(
-        config,
-        context_name.as_deref(),
-        &addr,
-        &info.server_fingerprint,
-    )?;
-    let mut auth = exchange_service_account_token(client, &addr, &service_account_token).await?;
-    let access_token = auth.take_access_token();
-
     let (vault_id, path) = resolve_path_for_context(
         &args.path,
         args.vault,
-        context_name.as_deref(),
-        config,
-        client,
-        &addr,
-        &access_token,
+        ctx.context_name.as_deref(),
+        ctx.config,
+        ctx.client,
+        ctx.addr,
+        &ctx.access_token,
     )
     .await?;
-    let item_id =
-        resolve_shared_item_id(client, &addr, &access_token, &vault_id, None, Some(&path))
-            .await
-            .map_err(|_| anyhow::anyhow!("secret not found: {}", path))?;
-    let item = fetch_shared_item(client, &addr, &access_token, &vault_id, item_id).await?;
+    let item_id = resolve_shared_item_id(
+        ctx.client,
+        ctx.addr,
+        &ctx.access_token,
+        &vault_id,
+        None,
+        Some(&path),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("secret not found: {}", path))?;
+    let item =
+        fetch_shared_item(ctx.client, ctx.addr, &ctx.access_token, &vault_id, item_id).await?;
     let mut env_values = std::collections::HashMap::new();
     let payload = payload_or_error(&item)?;
     for (key, value) in flatten_payload(&payload) {

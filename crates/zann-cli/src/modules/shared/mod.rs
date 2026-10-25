@@ -1,9 +1,7 @@
 mod actions;
 pub(crate) mod args;
-mod fetch;
 mod format;
 mod format_table;
-mod http;
 mod render;
 mod render_fs;
 mod resolve;
@@ -14,24 +12,21 @@ pub(crate) use actions::{
     handle_create, handle_delete, handle_get, handle_list, handle_materialize, handle_render,
     handle_set, handle_update,
 };
-pub(crate) use fetch::{fetch_shared_item, fetch_shared_items};
 pub(crate) use format::{flatten_payload, format_env_flat, format_kv_flat, is_valid_env_key};
 pub(crate) use format_table::print_list_table;
-pub(crate) use http::{
-    create_shared_item, delete_shared_item, fetch_vaults, set_secret_value, update_shared_item,
-};
 pub(crate) use render::render_shared_template;
-pub(crate) use render_fs::{materialize_shared, publish_delivery_generation};
+pub(crate) use render_fs::{
+    materialize_shared, publish_delivery_generation, validate_materialize_field,
+};
 pub(crate) use resolve::{
     resolve_path_arg, resolve_path_for_context, resolve_shared_item_id, resolve_vault_arg,
 };
-pub(crate) use types::{
-    ItemSummaryResponse, ItemsResponse, SharedItemResponse, SharedItemSummariesResponse,
-    SharedItemsResponse, SharedListJsonItem, SharedListJsonResponse, VaultListResponse,
-};
+pub(crate) use types::{SharedItemResponse, SharedListJsonItem, SharedListJsonResponse};
 pub(crate) use utils::{
-    cursor_allows, encode_cursor, normalize_prefix, parse_cursor, parse_item_timestamp,
     parse_selector_if_present, parse_template, parse_template_placeholder, payload_or_error,
-    prefix_match, secret_not_found_error, TemplateToken,
+    secret_not_found_error, TemplateToken,
 };
-pub(crate) use zann_core::api::secrets::SecretResponse;
+pub(crate) use zann_client::server::{
+    create_shared_item, delete_shared_item, fetch_vaults, set_secret_value, update_shared_item,
+};
+pub(crate) use zann_client::server::{fetch_shared_item, fetch_shared_items};

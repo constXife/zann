@@ -53,7 +53,7 @@ async fn service_account_allows(
     let Some(account) = repo.get_by_id(service_account_id).await? else {
         return Ok(false);
     };
-    if scopes_allow_vault(&account.scopes.0, vault) {
+    if scopes_allow_vault(&account.scopes, vault) {
         return Ok(true);
     }
     Ok(false)
@@ -217,7 +217,7 @@ pub fn vault_matches_scope(vault: &Vault, target: &ScopeTarget) -> bool {
         ScopeTarget::Tag(tag) => vault
             .tags
             .as_ref()
-            .is_some_and(|tags| tags.0.iter().any(|value| value == tag)),
+            .is_some_and(|tags| tags.iter().any(|value| value == tag)),
         ScopeTarget::Pattern(pattern) => matches_pattern(pattern, &vault.slug),
     }
 }
@@ -302,7 +302,6 @@ fn role_permits(role: VaultMemberRole, action: &str, scope: VaultScope) -> bool 
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
-    use sqlx_core::types::Json;
     use uuid::Uuid;
     use zann_core::{CachePolicy, Vault, VaultEncryptionType, VaultKind, VaultMemberRole};
 
@@ -320,7 +319,7 @@ mod tests {
             encryption_type: VaultEncryptionType::Server,
             vault_key_enc: Vec::new(),
             cache_policy: CachePolicy::Full,
-            tags: Some(Json(vec!["production".to_string()])),
+            tags: Some(vec!["production".to_string()]),
             deleted_at: None,
             deleted_by_user_id: None,
             deleted_by_device_id: None,

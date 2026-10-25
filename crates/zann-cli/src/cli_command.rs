@@ -1,6 +1,5 @@
 use crate::cli_args::*;
 use crate::modules::system::CommandContext;
-use reqwest::Method;
 
 use crate::modules::delivery::handle_delivery_command;
 use crate::modules::secrets::{handle_rotation_hook, handle_secret_command};
@@ -8,8 +7,6 @@ use crate::modules::shared::{
     handle_create, handle_delete, handle_get, handle_list, handle_materialize, handle_render,
     handle_set, handle_update,
 };
-use crate::modules::system::http::print_json_response;
-use crate::modules::system::http::send_request;
 
 pub(crate) async fn handle_command(
     command: Command,
@@ -28,9 +25,8 @@ pub(crate) async fn handle_command(
         Command::Set(args) => handle_set(args, ctx).await?,
         Command::Delete(args) => handle_delete(args, ctx).await?,
         Command::Whoami => {
-            let url = format!("{}/v1/users/me", ctx.addr.trim_end_matches('/'));
-            let response = send_request(ctx, Method::GET, url, None).await?;
-            print_json_response(response).await?;
+            let response = ctx.client.me(&ctx.access_token).await?;
+            println!("{}", serde_json::to_string_pretty(&response)?);
         }
         Command::Server(_) | Command::Run(_) | Command::Version => {}
         Command::Config(_) => {

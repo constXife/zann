@@ -201,7 +201,7 @@ impl TestApp {
             description: None,
             token_hash,
             token_prefix,
-            scopes: sqlx_core::types::Json(Vec::new()),
+            scopes: Vec::new(),
             allowed_ips: None,
             expires_at: None,
             last_used_at: None,

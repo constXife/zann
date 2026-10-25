@@ -135,7 +135,7 @@ fn build_state_at_root(root: PathBuf) -> Result<AppState, anyhow::Error> {
     let db_path = local_db_path(&root);
     let location = SqliteFileLocation::from_path(&db_path)?;
     let root = location.root().to_path_buf();
-    zann_app::secure_file::ensure_private_dir(&root)?;
+    zann_client_sqlite::maintenance::secure_file::ensure_private_dir(&root)?;
     let pool = tauri::async_runtime::block_on(connect_sqlite_file_with_max(&location, 5))?;
     tauri::async_runtime::block_on(migrate_local(&pool))?;
     let security_profiles = SecurityProfileRegistry::from_yaml(SECURITY_PROFILES_YAML)?;

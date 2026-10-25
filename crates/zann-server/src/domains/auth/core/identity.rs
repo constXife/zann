@@ -282,7 +282,7 @@ pub async fn identity_from_service_account_token(
         let Some(client_ip) = client_ip else {
             return Err("ip_not_allowed");
         };
-        if !allowed_ips.0.iter().any(|ip| ip == client_ip) {
+        if !allowed_ips.iter().any(|ip| ip == client_ip) {
             return Err("ip_not_allowed");
         }
     }

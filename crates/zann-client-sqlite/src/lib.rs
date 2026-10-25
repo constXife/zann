@@ -10,6 +10,12 @@
 #![deny(clippy::unwrap_used)]
 #![forbid(unsafe_code)]
 
+#[cfg(feature = "local-vault")]
+pub mod local_vault;
+#[cfg(feature = "local-vault")]
+pub mod maintenance;
+pub use zann_db::SqliteFileLocation;
+
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
@@ -42,7 +48,7 @@ use zann_db::local::{
     LocalVaultRepo, PendingChangeRepo, PullChange, PullPage, PushCommit, PushOutcome,
     ResetProjection,
 };
-use zann_db::{ExistingSqliteDatabase, SqliteFileLocation, SqlitePool};
+use zann_db::{ExistingSqliteDatabase, SqlitePool};
 
 const MAX_ITEM_STATE_IDS: usize = 64;
 const MAX_PENDING_CHANGES: u32 = 64;
@@ -50,7 +56,7 @@ static TERMINAL_MUTATION_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 #[cfg(test)]
 const CONFIG_CAPTURE_ATTEMPTS: usize = 3;
 
-/// Existing-file factory for the DB-free [`zann_client::app::AppClient`].
+/// Existing-file factory for the DB-free authenticated application facade.
 #[derive(Clone)]
 pub struct SqliteSyncStoreFactory {
     location: SqliteFileLocation,
@@ -1870,7 +1876,7 @@ mod tests {
             )
             .expect("insert profile credentials");
 
-        // Account/auth binding is normally installed by AppSession's
+        // Account/auth binding is normally installed by the session owner's
         // authenticated commit. This test fixture edits only those two fields
         // after the public credential transaction has produced repository-
         // bound credential ids.

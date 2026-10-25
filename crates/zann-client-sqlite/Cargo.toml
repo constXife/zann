@@ -13,6 +13,25 @@ zann-core = { path = "../zann-core", default-features = false }
 zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"] }
 
+anyhow = { version = "1", optional = true }
+base64 = { version = "0.22", optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+csv = { version = "1", optional = true }
+percent-encoding = { version = "2", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+serde_json = { version = "1", optional = true }
+thiserror = { version = "1", optional = true }
+url = { version = "2", optional = true }
+zann-keystore = { path = "../zann-keystore", optional = true }
+
+[features]
+default = []
+local-vault = [
+  "dep:anyhow", "dep:base64", "dep:chrono", "dep:csv", "dep:percent-encoding",
+  "dep:serde", "dep:serde_json", "dep:thiserror", "dep:url", "dep:zann-keystore",
+  "zann-client/os-credentials", "tokio/rt-multi-thread", "tokio/sync",
+]
+
 [dev-dependencies]
 chrono = "0.4"
 serde_json = "1"

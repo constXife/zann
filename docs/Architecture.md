@@ -58,11 +58,13 @@ internal domain model.
 those crates are introduced, their code must remain in the canonical owner
 listed in the capability map; it must not be copied into a shell.
 
-`zann-app` is not a second application-composition owner. It is a frozen
-transitional package containing only the already-extracted backup, snapshot and
-verification implementations. New application capabilities belong to
-`zann-client::app`; the transitional package is removed as those local use cases
-move behind DB-free ports. MIG-008 records and bounds this exception.
+Local vault commands and read models are defined by
+`zann-client::app::local::LocalVaultService`. The `zann-client-sqlite/local-vault`
+feature implements the port with explicit native paths, SQLite, remembered
+unlock and maintenance operations. COSMIC calls the port directly; `zann-ffi`
+only converts records and forwards calls for non-Rust consumers. Backup,
+snapshot and verification implementations live in the same native adapter;
+the transitional `zann-app` package has been removed.
 
 ## Boundary rules
 
@@ -108,7 +110,7 @@ bounds the response body and returns system information only after the signed
 server identity verifies.
 
 COSMIC, FFI and the Tauri sync composition root use the shared `AppClient`.
-CLI and remaining Tauri auth/config paths wait until each can move config,
+Remaining Tauri auth/config paths wait until each can move config,
 trust, auth, refresh and logout together in a tested vertical slice. No dual-write
 bridge is allowed during activation. The
 shared boundary durably records in-flight
@@ -361,3 +363,9 @@ selective, but headless client-adapter checks are mandatory.
 
 The exception process and Definition of Done are specified in
 [`architecture/capabilities.md`](architecture/capabilities.md).
+
+The server-oriented CLI uses the bounded `zann-client::server` capability with
+`remote`, Config v2 and the thin OS credential-store adapter. It has no SQLite
+or FFI dependency. Shared item wire responses live in `zann-core::api::items`;
+transport, service-token exchange and endpoint identity verification remain
+inside `zann-client`. Interface code owns terminal trust confirmation only.

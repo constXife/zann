@@ -9,6 +9,9 @@
 
 extern crate sqlx_core as sqlx;
 
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod domain_row;
+
 #[cfg(feature = "sqlite")]
 use same_file::Handle as FileIdentity;
 use sqlx_core::pool::{Pool, PoolOptions};

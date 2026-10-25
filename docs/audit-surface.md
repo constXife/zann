@@ -43,3 +43,11 @@ and dependency direction are additionally enforced by
 There are currently no blessed releases. A future entry must name the exact Git
 revision, reviewed paths, review date, known limitations and the checks that
 were run; a version number alone is not sufficient.
+
+Local vault port and maintenance ownership: `crates/zann-client/src/app/local/**`,
+`crates/zann-client-sqlite/src/local_vault/**`, and SQLite maintenance/row decoding
+under `crates/zann-db/src/{domain_row.rs,local/maintenance.rs,local/sync_repo/**}`
+are included in the sensitive review surface.
+
+The remote-only `zann-client::server` capability and the decomposed
+`zann-client/src/config/v2/**` modules retain the same sensitive review gates.

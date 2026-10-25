@@ -31,7 +31,6 @@ pub(super) async fn tokens_list(db: &zann_db::PgPool, args: &TokenListArgs) -> R
             .and_then(|value| parse_description(value).ok());
         let parsed_scopes: Vec<ParsedScope> = account
             .scopes
-            .0
             .iter()
             .filter_map(|scope| parse_scope_for_list(scope))
             .collect();

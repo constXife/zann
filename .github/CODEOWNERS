@@ -8,6 +8,7 @@
 /crates/zann-keystore/ @constXife
 /crates/zann-client-sqlite/ @constXife
 /crates/zann-client/src/app.rs @constXife
+/crates/zann-client/src/app/ @constXife
 /crates/zann-client/src/sync/ @constXife
 /crates/zann-db/src/lib.rs @constXife
 /crates/zann-db/src/local/bounded_read.rs @constXife
@@ -17,6 +18,9 @@
 /crates/zann-db/src/local/storage_repo.rs @constXife
 /crates/zann-db/src/local/sync_cursor_repo.rs @constXife
 /crates/zann-db/src/local/sync_repo.rs @constXife
+/crates/zann-db/src/local/sync_repo/ @constXife
+/crates/zann-db/src/local/maintenance.rs @constXife
+/crates/zann-db/src/domain_row.rs @constXife
 /crates/zann-db/src/local/vault_repo.rs @constXife
 /crates/zann-db/migrations/0002_sync_cursor_last_seq.sql @constXife
 /crates/zann-db/tests/local_sqlite_path.rs @constXife
@@ -35,3 +39,7 @@
 /docs/adr/0001-shared-client-core.md @constXife
 /config/architecture-boundaries.json @constXife
 /scripts/check-client-architecture.sh @constXife
+
+/crates/zann-client/src/config/v2/ @constXife
+/crates/zann-client/src/server.rs @constXife
+/crates/zann-client/src/server/ @constXife

@@ -49,3 +49,5 @@ pub use vault_repo::{
     CacheKeyFingerprintBatchBind, CacheKeyFingerprintBind, CacheKeyFingerprintBinding,
     LocalVaultKeyBindError, LocalVaultRepo,
 };
+
+pub mod maintenance;

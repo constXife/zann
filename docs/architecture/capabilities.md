@@ -41,7 +41,7 @@ does not authorize another temporary implementation.
 | Credential lifecycle and port | `zann-client::credentials` | remote auth and application session | injected `CredentialStore`, clock and revocation policy | token refresh/selection/serialization in CLI, Tauri, COSMIC or FFI |
 | Paths and persisted client config | `zann-client::config` | all client shells and application services | injected `ClientPaths`, storage backend, versioned migration | independent writers for shared config; implicit home lookup below the composition root |
 | Server wire contracts | `zann-core::api` **(interim)**; `zann-protocol` **(planned)** | server handlers and the private `zann-client` transport | additive/versioned serde DTOs and explicit compatibility adapters | local wire DTOs, route strings or response decoding in client shells; transport or persistence in protocol types |
-| Remote transport, auth and server trust | private `zann-client` transport; public bounded `zann-client::probe`, `zann-client::secrets` and `zann-client::session` capabilities | CLI and application sessions | HTTP transport, TLS policy, OIDC callback listener, clock and cancellation | `reqwest`, bearer headers, endpoint paths, fingerprint or OIDC policy in shells and FFI |
+| Remote transport, auth and server trust | private `zann-client` transport; public bounded `zann-client::probe`, `zann-client::secrets`, `zann-client::server` and `zann-client::session` capabilities | CLI and application sessions | HTTP transport, TLS policy, OIDC callback listener, clock and cancellation | `reqwest`, bearer headers, endpoint paths, fingerprint or OIDC policy in shells and FFI |
 | Sync semantics | `zann-client::sync` **(active bidirectional surface)** | local application sessions | transactional repository port, private remote transport, progress/cancellation sink | cursor, merge, conflict, version and deletion policy in shells, FFI or presentation |
 | SQLite sync persistence | `zann-client-sqlite` **(production adapter)** | native application composition roots | explicit `ClientPaths` plus one pre-resolved native SQLite file location, injected sync port, bounded projection proofs and atomic DB CAS | implicit active target selection, `HOME`/URI path derivation, binding replacement, multiple endpoint/profile caches or direct use from shells |
 | Authenticated application session | private `zann-client::session` owner, exposed only through `zann-client::app::AppClient` | COSMIC, FFI and the Tauri sync composition root; future CLI adapter | `CredentialStore`, `ClientPaths`, clock, operation deadline and cancellation | constructing `AppSession` directly; password/OIDC login, trust, refresh, logout, token-selection and ambiguity policy in shells and FFI |
@@ -49,7 +49,7 @@ does not authorize another temporary implementation.
 | Local vault application use cases | `zann-client::app` **(planned beyond remote sync)** | Tauri, COSMIC and FFI adapters | storage/credential ports, `ClientPaths`, clock and progress sink | local application orchestration in Tauri commands, COSMIC screens or `zann-ffi` |
 | Connect, startup, unlock and idle flows | `zann-flows` **(planned)** | Tauri and COSMIC adapters; future clients | typed effect executor, operation IDs and cancellation | flow reducers in components/screens; toolkit, runtime, filesystem or transport in `zann-flows` |
 | Categories, folders, filters and item-detail projection | `zann-ui-core` | Tauri/Vue, COSMIC and future clients | canonical schema/catalogue data, translation and abstract-icon resolver | category, ordering, masking/copy/reveal and TOTP parsing policy in components or screens |
-| Streaming backup/import/export use cases | `zann-client::app` | Tauri and future CLI commands | `Read`/`Write`, progress and cancellation ports | file dialogs in shared services; parsing/encryption policy in Tauri commands |
+| Streaming backup/import/export use cases | `zann-client::app::local` (port), `zann-client-sqlite::maintenance` (native implementation) | native clients and Tauri adapters | `Read`/`Write`, explicit paths, progress and cancellation ports | file dialogs in shared services; parsing/encryption policy in Tauri commands |
 | Runtime secret projection and delivery policy | `zann-client::delivery` **(active; composed by `app`)** | CLI, local daemon and deployment adapters | versioned value-free profiles, injected process launcher and atomic generation sink | resolved secrets in Nix evaluation/store, persisted profiles, argv, logs or audit events; profile resolution, collision or serialization policy in adapters |
 | FFI interoperability | `zann-ffi` | non-Rust consumers | binding generation, runtime bridge and FFI-safe DTO conversion | domain, auth, sync, config, crypto or presentation policy in `zann-ffi`; Rust clients using FFI as their internal API |
 | Platform interaction and rendering | each shell | that shell | clipboard, tray, biometrics, browser, file dialogs, terminal IO, toolkit icon mapping | platform APIs in shared domain/application/presentation crates |
@@ -63,11 +63,9 @@ The planned crates identify accepted extraction boundaries. Until they exist:
 - new cross-client flow policy MUST introduce `zann-flows` first; a bug fix to
   an existing duplicated flow stays within MIG-006, adds parity coverage and
   MUST NOT expand either implementation;
-- `zann-app` is a frozen transitional implementation package under MIG-008. It
-  may retain only its existing backup, snapshot and verification modules while
-  those use cases are ported to `zann-client::app`; it MUST NOT acquire auth,
-  session, sync, item, vault or storage orchestration, remote transport, config
-  ownership or platform dependencies;
+- local vault operations are exposed through `zann-client::app::local` and
+  implemented by `zann-client-sqlite/local-vault`; the former transitional
+  package has been removed;
 - runtime secret delivery follows
   [ADR 0004](../adr/0004-machine-secret-plane.md) and
   [ADR 0005](../adr/0005-runtime-secret-delivery-profiles.md). Profile parsing,
@@ -76,6 +74,12 @@ The planned crates identify accepted extraction boundaries. Until they exist:
   deployment adapter. Existing `run` and `materialize` remain migration inputs;
 - a PR that introduces the planned crate updates the map from **planned** to
   **active** and adds dependency/conformance coverage.
+
+COSMIC consumes `zann-ui-core::project_item_fields` for canonical payload
+parsing, field order, masking/multiline metadata and TOTP parameter extraction.
+Its detail screen retains translation and temporary reveal/copy state. COSMIC
+no longer has a direct `zann-crypto` dependency (MIG-004). Tauri's
+`useItemDetails.ts` projection remains migration debt under MIG-006.
 
 ## Allowed dependency direction
 
@@ -116,9 +120,9 @@ The planned crates identify accepted extraction boundaries. Until they exist:
   transaction. Shared plaintext is immediately encrypted for the local
   projection and receives a newly computed local checksum. Push conflicts are
   explicit, and initial shared snapshots use the same atomic checkpoint
-  contract. Until MIG-007 removes it from `zann-core`,
-  this graph inherits that crate's existing `sqlx-core` exception but exposes
-  no database adapter or SQLite capability. Page transactions use owned
+  contract. Domain models in `zann-core` are persistence-free; SQLx decoding
+  and JSON column envelopes belong to `zann-db::domain_row` and repositories.
+  This graph exposes no database adapter or SQLite capability. Page transactions use owned
   terminal tasks so cancellation or caller-future drop after dispatch does not
   interrupt them. Runtime/process shutdown is recovered by reading the atomic
   `(cursor, last_seq)` checkpoint before any retry; an ambiguous live COMMIT
@@ -548,12 +552,10 @@ the current scope; they do not permit additional call sites or dependencies.
 | ID | Owner | Frozen legacy scope | Risk | Compensating control | Removal condition |
 |---|---|---|---|---|---|
 | MIG-001 | `@constXife` | `apps/desktop/src-tauri/src/infra/{auth,http,identity,remote}.rs`, `services/{auth,auth_oidc,auth_password,sync,sync_helpers}.rs` and their current command/state glue | remote/auth/sync drift | characterization plus DB-backed parity tests before each slice moves | Tauri uses `zann-client` remote/auth/sync and the fork is deleted (ADR phase 4) |
-| MIG-002 | `@constXife` | `crates/zann-cli/src/modules/auth/{http,types}.rs`, `system/{config,http,types}.rs`, `shared/{fetch,http,types}.rs` and current `reqwest`/`keyring` manifest entries | protocol fields, pagination and config drift | wire fixtures and CLI integration tests | CLI uses remote-only `zann-client`, `CredentialStore` and config v2 (ADR phases 2–3) |
-| MIG-003 | `@constXife` | COSMIC and FFI direct database/crypto/keystore dependencies plus Tauri's current database integration | split roots and application-policy drift | explicit-root tests and canonical facade conformance | remaining shell-local application policy and direct infrastructure edges are removed (ADR phase 5) |
+| MIG-003 | `@constXife` | Tauri's current database/keystore integration and remaining shell-local application policy | split roots and application-policy drift | explicit-root tests and canonical facade conformance | remaining shell-local application policy and direct infrastructure edges are removed (ADR phase 5) |
 | MIG-004 | `@constXife` | `crates/zann-ffi/src/lib.rs`, `apps/desktop/src-tauri/src/crypto.rs` and `services/session.rs` | incompatible or unaudited crypto behaviour | golden compatibility fixtures before replacement | every call routes through `zann-crypto` and copies are deleted (ADR phase 2) |
-| MIG-005 | `@constXife` | legacy config types/writers in `crates/zann-cli/src/modules/system/{config,types}.rs` and `apps/desktop/src-tauri/src/{infra/config,state}.rs` | cross-client data loss and plaintext tokens | backup/round-trip fixtures during migration; no new fields in legacy shape | config v2, locking, atomic replace, namespaces and credential separation are used by all clients (ADR phase 2) |
-| MIG-006 | `@constXife` | `apps/cosmic/src/screens/{connect,detail,vault}.rs`, `apps/desktop/src/composables/app/actions/{useAppAuthFlow,useAppWatchers}.ts`, `apps/desktop/src/composables/app/state/useAppItemFilters.ts`, `apps/desktop/src/composables/{useItemDetails,useFolders}.ts` and `apps/desktop/src/utils/itemCategories.ts` | divergent UI behaviour and stale async results | existing flow/UI tests plus new operation-ID tests | clients consume `zann-flows` and `zann-ui-core`; duplicate policy is deleted (ADR phase 6) |
-| MIG-007 | `@constXife` | SQLx dependencies/features in `crates/zann-core/Cargo.toml` and row mapping in `crates/zann-core/src/models/{from_row,structs}.rs` | domain types remain coupled to concrete persistence | dependency guard freezes the current edges; DB integration tests protect mappings | SQLx row mapping and features move to `zann-db` (ADR phase 5) |
+| MIG-005 | `@constXife` | legacy local identity writer in `crates/zann-client-sqlite/src/local_vault/identity.rs` and `maintenance/snapshot.rs` (moved from FFI / zann-app) and Tauri writers in `apps/desktop/src-tauri/src/{infra/config,state}.rs` | cross-client data loss and plaintext tokens | backup/round-trip fixtures during migration; no new fields in legacy shape | config v2, locking, atomic replace, namespaces and credential separation are used by all clients (ADR phase 2) |
+| MIG-006 | `@constXife` | `apps/cosmic/src/screens/{connect,vault}.rs`, `apps/desktop/src/composables/app/actions/{useAppAuthFlow,useAppWatchers}.ts`, `apps/desktop/src/composables/app/state/useAppItemFilters.ts`, `apps/desktop/src/composables/{useItemDetails,useFolders}.ts` and `apps/desktop/src/utils/itemCategories.ts` | divergent UI behaviour and stale async results | existing flow/UI tests plus new operation-ID tests | clients consume `zann-flows` and `zann-ui-core`; duplicate policy is deleted (ADR phase 6) |
 
 Because these entries predate the exception policy, `@constXife` is their
 responsible owner and the stated ADR removal phase temporarily replaces the
@@ -604,3 +606,24 @@ A new or changed shared capability is done only when:
 
 A migration that adds the shared implementation but leaves independently
 callable legacy policy is not complete.
+
+### Completed local-vault and persistence migrations
+
+MIG-002, MIG-007 and MIG-008 are complete. `zann-core` contains pure domain fields;
+SQLx row decoding and JSON column envelopes are owned by `zann-db`. The local
+vault port is `zann-client::app::local::LocalVaultService`; its SQLite/native
+implementation is `zann-client-sqlite::local_vault`. The optional `local-vault`
+feature composes keystore unlocking and backup/snapshot/verify implementations.
+The default sync adapter remains free of keystore, keyring and FIDO dependencies,
+with a dependency-closure contract guarding that boundary. COSMIC has no direct
+FFI or database dependency; UniFFI converts records and forwards the same port.
+The superseded `zann-app` package is deleted.
+
+The CLI uses `ConfigRepository`, `CredentialStore` and `zann-client::server`.
+Its in-memory context view is projected from Config v2 and is never serialized.
+Remote item operations use the shared redirect-free transport and bounded
+responses; service-account authentication uses the canonical auth transport.
+The server observation must verify its signature and receive explicit trust
+before configured credentials are read. `--insecure` permits loopback HTTP and
+does not disable certificate verification. The legacy local identity writer
+remains under MIG-005; this change closes that migration only for the CLI.

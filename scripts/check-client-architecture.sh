@@ -475,8 +475,7 @@ check_features() {
     | any(.dependencies[]?;
         .name == "zann-client"
         and .kind == null
-        and (.features | index("app") != null)
-        and (.features | index("os-credentials") != null))
+        and (.features | index("app") != null))
   ' "$packages_json" >/dev/null; then
     record_violation "zann-ffi must consume the canonical zann-client app surface"
   fi

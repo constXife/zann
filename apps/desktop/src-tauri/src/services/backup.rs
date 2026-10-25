@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 
 use chrono::Utc;
 use uuid::Uuid;
-use zann_app::backup::{
+use zann_client_sqlite::maintenance::backup::{
     read_backup_metadata, slugify, stream_backup_items_async, BackupCtx, ImportOutcome,
     BACKUP_VERSION,
 };
@@ -92,7 +92,9 @@ async fn backup_ctx(state: &tauri::State<'_, AppState>) -> Result<BackupCtx, Str
 /// readable `kind` came back as a resolved `ApiResponse::err`; everything else
 /// rejected with a bare string. `BackupError::from(String)` tags the latter as
 /// `backup_failed`, so that is the marker.
-fn from_backup_error<T>(err: zann_app::BackupError) -> Result<ApiResponse<T>, String>
+fn from_backup_error<T>(
+    err: zann_client_sqlite::maintenance::BackupError,
+) -> Result<ApiResponse<T>, String>
 where
     T: serde::Serialize,
 {
@@ -124,7 +126,7 @@ pub async fn plain_export(
         },
     };
 
-    match zann_app::backup::plain_export(&ctx, output_path).await {
+    match zann_client_sqlite::maintenance::backup::plain_export(&ctx, output_path).await {
         Ok(report) => Ok(ApiResponse::ok(PlainBackupExportResponse {
             path: report.path,
             storages_count: report.storages_count,
@@ -157,7 +159,9 @@ pub async fn plain_import(
         },
     };
 
-    match zann_app::backup::plain_import(&ctx, input_path, target_storage_id).await {
+    match zann_client_sqlite::maintenance::backup::plain_import(&ctx, input_path, target_storage_id)
+        .await
+    {
         Ok(ImportOutcome::Done(report)) => Ok(ApiResponse::ok(PlainBackupImportResponse {
             imported_items: report.imported_items,
             skipped_existing: report.skipped_existing,
@@ -348,7 +352,13 @@ pub async fn apple_import(
             }
         },
     };
-    match zann_app::backup::apple_passwords_import(&ctx, input_path, target_storage_id).await {
+    match zann_client_sqlite::maintenance::backup::apple_passwords_import(
+        &ctx,
+        input_path,
+        target_storage_id,
+    )
+    .await
+    {
         Ok(report) => Ok(ApiResponse::ok(ApplePasswordsImportResponse {
             imported_items: report.imported_items,
             renamed_items: report.renamed_items,

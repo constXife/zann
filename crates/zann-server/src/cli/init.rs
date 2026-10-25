@@ -311,7 +311,7 @@ pub async fn run(settings: &Settings, db: &zann_db::PgPool, args: &InitArgs) -> 
         encryption_type: VaultEncryptionType::Server,
         vault_key_enc: vault_key_enc.clone(),
         cache_policy: CachePolicy::Full,
-        tags: Some(sqlx_core::types::Json(Vec::<String>::new())),
+        tags: Some(Vec::<String>::new()),
         deleted_at: None,
         deleted_by_user_id: None,
         deleted_by_device_id: None,
@@ -335,7 +335,7 @@ pub async fn run(settings: &Settings, db: &zann_db::PgPool, args: &InitArgs) -> 
     .bind(VaultEncryptionType::Server.as_i32())
     .bind(&vault.vault_key_enc)
     .bind(CachePolicy::Full as i32)
-    .bind(&vault.tags)
+    .bind(vault.tags.as_ref().map(sqlx_core::types::Json))
     .bind(vault.deleted_at)
     .bind(vault.deleted_by_user_id)
     .bind(vault.deleted_by_device_id)

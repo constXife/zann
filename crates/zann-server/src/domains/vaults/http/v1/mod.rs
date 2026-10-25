@@ -257,7 +257,7 @@ fn vault_response(vault: Vault) -> VaultResponse {
         cache_policy: vault.cache_policy,
         vault_key_enc: vault.vault_key_enc,
         encryption_type: vault.encryption_type,
-        tags: vault.tags.map(|tags| tags.0),
+        tags: vault.tags,
         created_at: vault.created_at.to_rfc3339(),
     }
 }

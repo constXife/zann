@@ -21,3 +21,6 @@ pub mod secrets;
 pub mod session;
 #[cfg(feature = "sync")]
 pub mod sync;
+
+#[cfg(all(feature = "remote", feature = "config"))]
+pub mod server;

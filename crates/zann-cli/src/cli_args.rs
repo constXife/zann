@@ -27,7 +27,10 @@ pub struct Cli {
     pub context: Option<String>,
     #[arg(short, long, action = ArgAction::Count, help = "Increase verbosity (-v, -vv)")]
     pub verbose: u8,
-    #[arg(long, help = "Allow http:// and invalid TLS certificates")]
+    #[arg(
+        long,
+        help = "Allow plaintext loopback HTTP; TLS certificates remain verified"
+    )]
     pub insecure: bool,
     #[command(subcommand)]
     pub command: Command,

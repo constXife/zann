@@ -49,6 +49,9 @@ pub(crate) enum AuthOperation {
     ServiceAccountLogin,
     Me,
     PersonalVaultStatus,
+    ServerRead,
+    ServerWrite,
+    ServerDelete,
 }
 
 impl AuthOperation {
@@ -58,13 +61,15 @@ impl AuthOperation {
             | Self::OidcConfig
             | Self::SystemInfo
             | Self::Me
-            | Self::PersonalVaultStatus => RequestSemantics::SafeRead,
-            Self::Logout => RequestSemantics::IdempotentWrite,
+            | Self::PersonalVaultStatus
+            | Self::ServerRead => RequestSemantics::SafeRead,
+            Self::Logout | Self::ServerDelete => RequestSemantics::IdempotentWrite,
             Self::PasswordLogin
             | Self::Register
             | Self::OidcLogin
             | Self::Refresh
-            | Self::ServiceAccountLogin => RequestSemantics::ExactlyOnce,
+            | Self::ServiceAccountLogin
+            | Self::ServerWrite => RequestSemantics::ExactlyOnce,
             Self::Configure => RequestSemantics::Local,
         }
     }
@@ -85,6 +90,9 @@ impl fmt::Display for AuthOperation {
             Self::ServiceAccountLogin => "service_account_login",
             Self::Me => "me",
             Self::PersonalVaultStatus => "personal_vault_status",
+            Self::ServerRead => "server_read",
+            Self::ServerWrite => "server_write",
+            Self::ServerDelete => "server_delete",
         })
     }
 }
@@ -508,9 +516,13 @@ async fn read_bounded_body(
     mut response: reqwest::Response,
 ) -> Result<(StatusCode, Zeroizing<Vec<u8>>), AuthHttpError> {
     let status = response.status();
+    let maximum_bytes = match operation {
+        AuthOperation::ServerRead | AuthOperation::ServerWrite => 2 * 1024 * 1024,
+        _ => MAX_RESPONSE_BODY_BYTES,
+    };
     if response
         .content_length()
-        .is_some_and(|length| length > MAX_RESPONSE_BODY_BYTES as u64)
+        .is_some_and(|length| length > maximum_bytes as u64)
     {
         return Err(response_processing_error(
             operation,
@@ -523,7 +535,7 @@ async fn read_bounded_body(
         .content_length()
         .and_then(|length| usize::try_from(length).ok())
         .unwrap_or_default()
-        .min(MAX_RESPONSE_BODY_BYTES);
+        .min(maximum_bytes);
     let mut body = Zeroizing::new(Vec::with_capacity(capacity));
     while let Some(chunk) = response
         .chunk()
@@ -537,7 +549,7 @@ async fn read_bounded_body(
                 AuthHttpErrorKind::BodyTooLarge,
             ));
         };
-        if next_length > MAX_RESPONSE_BODY_BYTES {
+        if next_length > maximum_bytes {
             return Err(response_processing_error(
                 operation,
                 status,
@@ -679,6 +691,50 @@ fn expect_auth_error<T>(result: Result<T, AuthHttpError>, message: &str) -> Auth
     match result {
         Ok(_) => panic!("{message}"),
         Err(error) => error,
+    }
+}
+
+impl AuthHttpTransport {
+    pub(crate) async fn server_json<T: DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        bearer: &str,
+        payload: Option<&serde_json::Value>,
+        query: &[(String, String)],
+    ) -> Result<T, AuthHttpError> {
+        let operation = if method == reqwest::Method::GET {
+            AuthOperation::ServerRead
+        } else {
+            AuthOperation::ServerWrite
+        };
+        self.ensure_sensitive_transport(operation)?;
+        let token = bearer_authorization_header(bearer)?;
+        let mut request = self
+            .client
+            .request(method, self.url_for(operation, path)?)
+            .timeout(self.request_timeout)
+            .header(AUTHORIZATION, token)
+            .query(query);
+        if let Some(payload) = payload {
+            request = request.json(payload);
+        }
+        self.execute_json(operation, request).await
+    }
+    pub(crate) async fn server_delete(
+        &self,
+        path: &str,
+        bearer: &str,
+    ) -> Result<(), AuthHttpError> {
+        let operation = AuthOperation::ServerDelete;
+        self.ensure_sensitive_transport(operation)?;
+        let token = bearer_authorization_header(bearer)?;
+        let request = self
+            .client
+            .delete(self.url_for(operation, path)?)
+            .timeout(self.request_timeout)
+            .header(AUTHORIZATION, token);
+        self.execute_empty(operation, request).await
     }
 }
 
