@@ -7,125 +7,93 @@ mod modules;
 
 use crate::cli_args::*;
 use crate::cli_command::handle_command;
-use crate::modules::auth::{
-    ensure_access_token, exchange_service_account_token, verify_server_fingerprint,
-};
-use crate::modules::system::http::fetch_system_info;
-use crate::modules::system::CommandContext;
-use crate::modules::system::{handle_config_command, load_config, save_config};
-use crate::modules::system::{handle_run_command, handle_server_command};
+use crate::modules::system::authentication::{access_token, connect};
+use crate::modules::system::{handle_config_command, handle_run_command, CliState, CommandContext};
 use tracing_subscriber::EnvFilter;
 
-pub(crate) const DEFAULT_ADDR: &str = "https://127.0.0.1:8080";
-pub(crate) const REFRESH_SKEW_SECONDS: i64 = 30;
-pub(crate) const TOKEN_MANUAL: &str = "manual";
-pub(crate) const SERVER_FINGERPRINT_ENV: &str = "ZANN_SERVER_FINGERPRINT";
 const SERVER_URL_ENV: &str = "ZANN_SERVER_URL";
 const SERVICE_TOKEN_ENV: &str = "ZANN_SERVICE_TOKEN";
-pub(crate) const SERVICE_ACCOUNT_PREFIX: &str = "zann_sa_";
 const REPO_URL: &str = "https://github.com/constXife/zann";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     init_logging(cli.verbose)?;
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(cli.insecure)
-        .build()?;
-    let mut config = load_config()?;
-    let mut addr_arg = cli.addr.clone();
-    if addr_arg.is_none() {
-        addr_arg = std::env::var(SERVER_URL_ENV)
-            .ok()
-            .or_else(|| std::env::var("ZANN_SERVER").ok());
+    if let Command::Materialize(args) = &cli.command {
+        crate::modules::shared::validate_materialize_field(&args.field)?;
     }
-    let mut token_arg = cli.token_file.as_deref().map(read_token_file).transpose()?;
-    if token_arg.is_none() {
-        token_arg = std::env::var(SERVICE_TOKEN_ENV).ok();
+    if matches!(cli.command, Command::Version) {
+        print_version();
+        return Ok(());
     }
-    let context_arg = cli.context.clone();
-    let token_name_arg = cli.token_name.clone();
-    let command = cli.command;
-
-    match command {
-        Command::Config(args) => {
-            handle_config_command(args, &mut config)?;
-            save_config(&config)?;
-        }
-        Command::Version => {
-            print_version();
-        }
-        Command::Server(args) => {
-            handle_server_command(args, addr_arg, context_arg, cli.insecure, &client, &config)
-                .await?;
-        }
-        Command::Run(args) => {
-            handle_run_command(
-                args,
-                addr_arg,
-                token_arg,
-                token_name_arg,
-                context_arg,
-                cli.insecure,
-                &client,
-                &mut config,
-            )
-            .await?;
-            save_config(&config)?;
-        }
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .ok_or_else(|| anyhow::anyhow!("home directory is not set"))?;
+    let mut state = CliState::open(std::path::PathBuf::from(home).join(".zann"))?;
+    let addr_arg = cli.addr.or_else(|| std::env::var(SERVER_URL_ENV).ok());
+    let token_arg = cli
+        .token_file
+        .as_deref()
+        .map(read_token_file)
+        .transpose()?
+        .or_else(|| std::env::var(SERVICE_TOKEN_ENV).ok());
+    match cli.command {
+        Command::Config(args) => handle_config_command(args, &mut state)?,
+        Command::Server(args) => match args.command {
+            ServerCommand::Info(args) => {
+                let addr = args
+                    .addr
+                    .or(addr_arg)
+                    .or_else(|| {
+                        cli.context
+                            .as_deref()
+                            .or(state.current_context.as_deref())
+                            .and_then(|name| state.contexts.get(name))
+                            .map(|context| context.addr.clone())
+                    })
+                    .ok_or_else(|| anyhow::anyhow!("server address not set"))?;
+                if addr.starts_with("http://") && !cli.insecure {
+                    anyhow::bail!("refusing to use http:// without --insecure");
+                }
+                let info = zann_client::probe::probe_system_info(&addr).await?;
+                println!("{}", serde_json::to_string_pretty(&info)?);
+            }
+        },
         command => {
-            let context_name = context_arg.or_else(|| config.current_context.clone());
+            let context_name = cli.context.or_else(|| state.current_context.clone());
             let context = context_name
                 .as_deref()
-                .and_then(|name| config.contexts.get(name))
-                .cloned();
+                .map(|name| state.context(name))
+                .transpose()?;
             let addr = addr_arg
-                .or_else(|| context.as_ref().map(|ctx| ctx.addr.clone()))
-                .unwrap_or_else(|| DEFAULT_ADDR.to_string());
-            crate::modules::system::ensure_secure_addr(&addr, cli.insecure)?;
-
-            let token_name = token_name_arg
-                .or_else(|| context.as_ref().and_then(|ctx| ctx.current_token.clone()));
-            let mut access_token = if let Some(token) = token_arg.clone() {
-                token
-            } else {
-                let context_name = context_name
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("context not set"))?;
-                let token_name = token_name
-                    .as_deref()
-                    .ok_or_else(|| anyhow::anyhow!("token name not set"))?;
-                ensure_access_token(&client, &addr, context_name, token_name, &mut config).await?
-            };
-
-            if access_token.starts_with(SERVICE_ACCOUNT_PREFIX) {
-                let info = fetch_system_info(&client, &addr).await?;
-                verify_server_fingerprint(
-                    &config,
-                    context_name.as_deref(),
-                    &addr,
-                    &info.server_fingerprint,
-                )?;
-                let mut auth =
-                    exchange_service_account_token(&client, &addr, &access_token).await?;
-                access_token = auth.take_access_token();
-            }
-
+                .or_else(|| context.map(|context| context.addr.clone()))
+                .ok_or_else(|| anyhow::anyhow!("server address not set"))?;
+            let token_name = cli
+                .token_name
+                .or_else(|| context.and_then(|context| context.current_token.clone()));
+            let client = connect(&mut state, context_name.as_deref(), &addr, cli.insecure).await?;
+            let token = access_token(
+                &client,
+                &state,
+                context_name.as_deref(),
+                token_name.as_deref(),
+                token_arg,
+            )
+            .await?;
             let mut ctx = CommandContext {
                 client: &client,
                 addr: &addr,
                 allow_insecure: cli.insecure,
-                access_token,
+                access_token: token,
                 context_name,
                 token_name,
-                config: &mut config,
+                config: &mut state,
             };
-
-            handle_command(command, &mut ctx).await?;
-            save_config(ctx.config)?;
+            match command {
+                Command::Run(args) => handle_run_command(args, &mut ctx).await?,
+                command => handle_command(command, &mut ctx).await?,
+            }
         }
     }
-
     Ok(())
 }
 
@@ -138,7 +106,14 @@ fn print_version() {
 }
 
 fn read_token_file(path: &str) -> anyhow::Result<String> {
-    let contents = std::fs::read_to_string(path)?;
+    use std::io::Read;
+    let mut contents = String::new();
+    std::fs::File::open(path)?
+        .take(65_537)
+        .read_to_string(&mut contents)?;
+    if contents.len() > 65_536 {
+        anyhow::bail!("token file exceeds the credential size limit");
+    }
     let token = contents.trim();
     if token.is_empty() {
         anyhow::bail!("token file is empty: {}", path);
@@ -177,4 +152,9 @@ pub(crate) fn find_field<'a>(payload: &'a EncryptedPayload, key: &str) -> Option
 }
 
 #[cfg(test)]
+#[path = "../tests/unit/config.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../tests/support/mod.rs"]
+mod test_support;

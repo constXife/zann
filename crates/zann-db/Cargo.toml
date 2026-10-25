@@ -23,6 +23,6 @@ zann-crypto = { path = "../zann-crypto" }
 
 [features]
 default = []
-postgres = ["dep:sqlx-postgres", "zann-core/postgres"]
-sqlite = ["dep:same-file", "dep:sqlx-sqlite", "zann-core/sqlite"]
+postgres = ["dep:sqlx-postgres"]
+sqlite = ["dep:same-file", "dep:sqlx-sqlite"]
 postgres-tests = []

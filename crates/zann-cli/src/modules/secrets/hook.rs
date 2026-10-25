@@ -14,7 +14,7 @@ use super::actions::{secrets_client, should_refresh};
 use super::args::RotationHookArgs;
 use super::get_with_refresh;
 use crate::modules::shared::resolve_vault_arg;
-use crate::modules::system::http::refresh_service_account_access_token;
+use crate::modules::system::authentication::refresh_service_account_access_token;
 use crate::modules::system::CommandContext;
 
 const COMMIT_SAFETY_MARGIN: Duration = Duration::from_secs(15);

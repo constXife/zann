@@ -6,7 +6,6 @@
     "apps/desktop/src-tauri/Cargo.toml"
   ],
   "internal_packages": [
-    "zann-app",
     "zann-cli",
     "zann-client",
     "zann-client-sqlite",
@@ -21,22 +20,20 @@
     "zann-ui-core"
   ],
   "allowed_internal_dependencies": {
-    "zann-app": ["zann-core", "zann-db"],
     "zann-cli": ["zann-client", "zann-core", "zann-ui-core"],
     "zann-client": ["zann-core", "zann-crypto", "zann-keystore"],
-    "zann-client-sqlite": ["tokio", "zann-client", "zann-core", "zann-crypto", "zann-db"],
+    "zann-client-sqlite": ["tokio", "zann-client", "zann-core", "zann-crypto", "zann-db", "zann-keystore"],
     "zann-core": ["zann-crypto"],
     "zann-cosmic": ["zann-client", "zann-client-sqlite", "zann-core", "zann-ui-core"],
     "zann-crypto": [],
     "zann-db": ["zann-core", "zann-crypto"],
-      "zann-desktop": ["zann-app", "zann-client", "zann-client-sqlite", "zann-core", "zann-ui-core"],
-    "zann-ffi": ["zann-app", "zann-client", "zann-client-sqlite", "zann-core", "zann-ui-core"],
+      "zann-desktop": ["zann-client", "zann-client-sqlite", "zann-core", "zann-ui-core"],
+    "zann-ffi": ["zann-client", "zann-client-sqlite", "zann-ui-core"],
     "zann-keystore": ["zann-crypto"],
     "zann-server": ["zann-core", "zann-crypto", "zann-db"],
     "zann-ui-core": ["zann-core"]
   },
   "shared_packages": [
-    "zann-app",
     "zann-client",
     "zann-client-sqlite",
     "zann-core",
@@ -47,10 +44,9 @@
   ],
   "forbidden_shared_dependencies": ["clap", "libcosmic", "tauri"],
   "forbidden_direct_dependencies": {
-    "zann-app": ["argon2", "dirs", "keyring", "reqwest", "zann-client", "zann-client-sqlite", "zann-keystore"],
     "zann-cli": ["argon2", "keyring", "reqwest", "zann-crypto", "zann-db", "zann-ffi"],
     "zann-client": ["argon2"],
-    "zann-client-sqlite": ["argon2", "dirs", "keyring", "reqwest", "sqlx-core", "sqlx-postgres", "sqlx-sqlite", "zann-keystore"],
+    "zann-client-sqlite": ["argon2", "dirs", "keyring", "reqwest", "sqlx-core", "sqlx-postgres", "sqlx-sqlite"],
     "zann-core": ["argon2", "sqlx-core", "sqlx-postgres", "sqlx-sqlite"],
     "zann-cosmic": ["argon2", "keyring", "reqwest", "zann-crypto", "zann-db", "zann-ffi", "zann-keystore"],
     "zann-desktop": ["argon2", "keyring", "reqwest", "zann-crypto", "zann-db", "zann-ffi", "zann-keystore"],
@@ -67,13 +63,6 @@
       "grandfathered": true,
       "review_on": "2026-11-16",
       "removal_condition": "Tauri uses zann-client remote/auth/sync and its fork is deleted"
-    },
-    "MIG-002": {
-      "owner": "@constXife",
-      "tracking": "ADR-0001 phase 3",
-      "grandfathered": true,
-      "review_on": "2026-11-16",
-      "removal_condition": "CLI uses remote-only zann-client and zann-client local storage is optional"
     },
     "MIG-003": {
       "owner": "@constXife",
@@ -102,41 +91,37 @@
       "grandfathered": true,
       "review_on": "2026-11-16",
       "removal_condition": "All clients consume zann-flows and canonical zann-ui-core presentation policy"
-    },
-    "MIG-007": {
-      "owner": "@constXife",
-      "tracking": "ADR-0001 phase 5",
-      "grandfathered": true,
-      "review_on": "2026-11-16",
-      "removal_condition": "SQLx row mapping and features move from zann-core to zann-db"
-    },
-    "MIG-008": {
-      "owner": "@constXife",
-      "tracking": "ADR-0001 phase 7",
-      "grandfathered": true,
-      "review_on": "2026-11-16",
-      "removal_condition": "Backup, snapshot and verification use cases are exposed through zann-client::app ports and the transitional zann-app package is removed"
     }
   },
   "dependency_exceptions": [
-    {"id": "MIG-002", "package": "zann-cli", "dependency": "keyring"},
-    {"id": "MIG-002", "package": "zann-cli", "dependency": "reqwest"},
-    {"id": "MIG-007", "package": "zann-core", "dependency": "sqlx-core"},
-    {"id": "MIG-007", "package": "zann-core", "dependency": "sqlx-postgres"},
-    {"id": "MIG-007", "package": "zann-core", "dependency": "sqlx-sqlite"},
-    {"id": "MIG-004", "package": "zann-cosmic", "dependency": "zann-crypto"},
-    {"id": "MIG-003", "package": "zann-cosmic", "dependency": "zann-db"},
-    {"id": "MIG-003", "package": "zann-cosmic", "dependency": "zann-ffi"},
     {"id": "MIG-005", "package": "zann-desktop", "dependency": "keyring"},
     {"id": "MIG-001", "package": "zann-desktop", "dependency": "reqwest"},
     {"id": "MIG-003", "package": "zann-desktop", "dependency": "zann-db"},
-    {"id": "MIG-003", "package": "zann-desktop", "dependency": "zann-keystore"},
-    {"id": "MIG-004", "package": "zann-ffi", "dependency": "zann-crypto"},
-    {"id": "MIG-003", "package": "zann-ffi", "dependency": "zann-db"},
-    {"id": "MIG-003", "package": "zann-ffi", "dependency": "zann-keystore"}
+    {"id": "MIG-003", "package": "zann-desktop", "dependency": "zann-keystore"}
   ],
   "feature_exceptions": [],
   "feature_contracts": [
+    {
+      "package": "zann-cli",
+      "feature": "default",
+      "required_members": [],
+      "forbidden_members": [],
+      "forbidden_packages": ["zann-db", "zann-client-sqlite", "sqlx-core", "sqlx-sqlite", "libsqlite3-sys", "zann-ffi", "tauri", "libcosmic"]
+    },
+    {
+      "package": "zann-client-sqlite",
+      "feature": "default",
+      "required_members": [],
+      "forbidden_members": ["local-vault", "dep:zann-keystore", "zann-client/os-credentials"],
+      "forbidden_packages": ["zann-keystore", "keyring", "ctap-hid-fido2", "hidapi"]
+    },
+    {
+      "package": "zann-core",
+      "feature": "default",
+      "required_members": [],
+      "forbidden_members": ["dep:sqlx-core", "dep:sqlx-postgres", "dep:sqlx-sqlite"],
+      "forbidden_packages": ["sqlx-core", "sqlx-postgres", "sqlx-sqlite", "libsqlite3-sys", "zann-db"]
+    },
     {
       "package": "zann-client",
       "feature": "delivery",
@@ -264,22 +249,6 @@
   ],
   "source_rules": [
     {
-      "name": "transitional-zann-app-module-surface",
-      "exception_ids": ["MIG-008"],
-      "pattern": "pub mod [a-z_][a-z_0-9]*[;{]",
-      "roots": ["crates/zann-app/src"],
-      "max_matches": 4,
-      "allowed_files": ["crates/zann-app/src/lib.rs"]
-    },
-    {
-      "name": "transitional-zann-app-no-canonical-capabilities",
-      "exception_ids": [],
-      "pattern": "pub (async )?fn (auth|login|logout|refresh|sync|items?|vaults?|storages?|connect|unlock|lock)[_A-Za-z0-9]*[(]|pub mod (auth|session|sync|items?|vaults?|storages?|flows)[;{]",
-      "roots": ["crates/zann-app/src"],
-      "max_matches": 0,
-      "allowed_files": []
-    },
-    {
       "name": "clean-client-no-legacy-api",
       "exception_ids": [],
       "pattern": "pub mod (auth|auth_oidc|auth_password|crypto|http|remote|state|sync_helpers|tokens|types|util)[;{]|pub use .*?(CliConfig|CliContext|ClientState|PendingLogin|TokenEntry)",
@@ -289,22 +258,11 @@
     },
     {
       "name": "cli-low-level-capabilities",
-      "exception_ids": ["MIG-002"],
+      "exception_ids": [],
       "pattern": "(zann_db|zann_crypto|reqwest|keyring|argon2)::|[.]bearer_auth[(]",
       "roots": ["crates/zann-cli/src"],
-      "max_matches": 41,
-      "allowed_files": [
-        "crates/zann-cli/src/cli_command.rs",
-        "crates/zann-cli/src/main.rs",
-        "crates/zann-cli/src/modules/auth/http.rs",
-        "crates/zann-cli/src/modules/shared/fetch.rs",
-        "crates/zann-cli/src/modules/shared/http.rs",
-        "crates/zann-cli/src/modules/shared/render_fs.rs",
-        "crates/zann-cli/src/modules/shared/resolve.rs",
-        "crates/zann-cli/src/modules/system/actions.rs",
-        "crates/zann-cli/src/modules/system/http.rs",
-        "crates/zann-cli/src/modules/system/types.rs"
-      ]
+      "max_matches": 0,
+      "allowed_files": []
     },
     {
       "name": "desktop-low-level-capabilities",
@@ -334,37 +292,27 @@
     },
     {
       "name": "cosmic-low-level-capabilities",
-      "exception_ids": ["MIG-003", "MIG-004"],
+      "exception_ids": [],
       "pattern": "(zann_db|zann_crypto|reqwest|keyring|argon2)::|[.]bearer_auth[(]",
       "roots": ["apps/cosmic/src"],
-      "max_matches": 2,
-      "allowed_files": [
-        "apps/cosmic/src/backend/remote.rs",
-        "apps/cosmic/src/screens/detail.rs"
-      ]
+      "max_matches": 0,
+      "allowed_files": []
     },
     {
       "name": "ffi-low-level-capabilities",
-      "exception_ids": ["MIG-003", "MIG-004"],
+      "exception_ids": [],
       "pattern": "(zann_db|zann_crypto|reqwest|keyring|argon2)::|[.]bearer_auth[(]",
       "roots": ["crates/zann-ffi/src"],
-      "max_matches": 8,
-      "allowed_files": ["crates/zann-ffi/src/lib.rs"]
+      "max_matches": 0,
+      "allowed_files": []
     },
     {
       "name": "cli-route-literals",
-      "exception_ids": ["MIG-002"],
+      "exception_ids": [],
       "pattern": "/v[0-9]+/",
       "roots": ["crates/zann-cli/src"],
-      "max_matches": 12,
-      "allowed_files": [
-        "crates/zann-cli/src/cli_command.rs",
-        "crates/zann-cli/src/modules/auth/http.rs",
-        "crates/zann-cli/src/modules/shared/fetch.rs",
-        "crates/zann-cli/src/modules/shared/http.rs",
-        "crates/zann-cli/src/modules/shared/render_fs.rs",
-        "crates/zann-cli/src/modules/system/http.rs"
-      ]
+      "max_matches": 0,
+      "allowed_files": []
     },
     {
       "name": "desktop-route-literals",
@@ -385,14 +333,11 @@
     },
     {
       "name": "cli-config-ownership",
-      "exception_ids": ["MIG-005"],
-      "pattern": "struct (CliConfig|CliContext|TokenEntry)|CONFIG_FILENAME|[.]join[(]\"[.]zann\"|\"config[.]json\"",
+      "exception_ids": [],
+      "pattern": "struct (CliConfig|CliContext|TokenEntry)|CONFIG_FILENAME|\"config[.]json\"",
       "roots": ["crates/zann-cli/src"],
-      "max_matches": 7,
-      "allowed_files": [
-        "crates/zann-cli/src/modules/system/config.rs",
-        "crates/zann-cli/src/modules/system/types.rs"
-      ]
+      "max_matches": 0,
+      "allowed_files": []
     },
     {
       "name": "desktop-config-ownership",
@@ -418,11 +363,13 @@
     },
     {
       "name": "ffi-config-ownership",
-      "exception_ids": ["MIG-003", "MIG-005"],
+      "exception_ids": [],
       "pattern": "struct (CliConfig|CliContext|TokenEntry)|CONFIG_FILENAME|[.]join[(]\"[.]zann\"|\"config[.]json\"",
-      "roots": ["crates/zann-ffi/src"],
-      "max_matches": 1,
-      "allowed_files": ["crates/zann-ffi/src/lib.rs"]
+      "roots": [
+        "crates/zann-ffi/src"
+      ],
+      "max_matches": 0,
+      "allowed_files": []
     },
     {
       "name": "auth-wire-dto-ownership",
@@ -482,19 +429,10 @@
     {
       "name": "app-client-only-in-native-composition-roots",
       "exception_ids": [],
-      "pattern": "AppClient|AppSession|SyncEngine|zann_client::(app|session|sync)",
-      "roots": [
-        "crates/zann-cli/src",
-        "apps/desktop/src-tauri/src",
-        "apps/cosmic/src",
-        "crates/zann-ffi/src"
-      ],
-      "max_matches": 15,
-      "allowed_files": [
-        "apps/cosmic/src/backend/remote.rs",
-        "apps/desktop/src-tauri/src/infra/sync_client.rs",
-        "crates/zann-ffi/src/lib.rs"
-      ]
+      "pattern": "AppClient|AppSession|SyncEngine|zann_client::(app::(AppClient|spi)|session|sync)",
+      "roots": ["crates/zann-cli/src", "apps/desktop/src-tauri/src", "apps/cosmic/src", "crates/zann-ffi/src", "crates/zann-client-sqlite/src"],
+      "max_matches": 11,
+      "allowed_files": ["apps/cosmic/src/backend/remote.rs", "apps/desktop/src-tauri/src/infra/sync_client.rs", "crates/zann-client-sqlite/src/local_vault.rs"]
     },
     {
       "name": "application-owner-construction-is-sealed",
@@ -516,7 +454,7 @@
       "name": "config-v2-no-raw-writers",
       "exception_ids": [],
       "pattern": "serde_json::Value|pub fn (save|update_client_namespace)[(]|pub (extensions|credential_profiles|active_credential):",
-      "roots": ["crates/zann-client/src/config/v2.rs"],
+      "roots": ["crates/zann-client/src/config/v2.rs", "crates/zann-client/src/config/v2"],
       "max_matches": 0,
       "allowed_files": []
     },
@@ -524,7 +462,7 @@
       "name": "sqlite-adapter-no-legacy-or-ambient-path",
       "exception_ids": [],
       "pattern": "zann_client_legacy|dirs::|home_dir|sqlite://|connect_sqlite[(]",
-      "roots": ["crates/zann-client-sqlite/src"],
+      "roots": ["crates/zann-client-sqlite/src/lib.rs"],
       "max_matches": 0,
       "allowed_files": []
     },

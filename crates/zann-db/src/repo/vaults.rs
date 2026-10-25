@@ -8,7 +8,7 @@ pub struct VaultCatalogEntry {
     pub slug: Option<String>,
     pub name: Option<String>,
     pub cache_policy: i16,
-    pub tags: Option<SqlxJson<Vec<String>>>,
+    pub tags: Option<Vec<String>>,
 }
 
 #[derive(Debug)]
@@ -17,20 +17,22 @@ pub struct VaultKeyMaterialEntry {
     pub vault_key_enc: Option<Vec<u8>>,
 }
 
-impl<'row> sqlx_core::from_row::FromRow<'row, sqlx_postgres::PgRow> for VaultCatalogEntry {
-    fn from_row(row: &'row sqlx_postgres::PgRow) -> Result<Self, sqlx_core::Error> {
+impl crate::domain_row::FromDbRow<sqlx_postgres::PgRow> for VaultCatalogEntry {
+    fn from_db_row(row: &sqlx_postgres::PgRow) -> Result<Self, sqlx_core::Error> {
         Ok(Self {
             id: row.try_get("id")?,
             slug: row.try_get("slug")?,
             name: row.try_get("name")?,
             cache_policy: row.try_get("cache_policy")?,
-            tags: row.try_get("tags")?,
+            tags: row
+                .try_get::<Option<SqlxJson<Vec<String>>>, _>("tags")?
+                .map(|tags| tags.0),
         })
     }
 }
 
-impl<'row> sqlx_core::from_row::FromRow<'row, sqlx_postgres::PgRow> for VaultKeyMaterialEntry {
-    fn from_row(row: &'row sqlx_postgres::PgRow) -> Result<Self, sqlx_core::Error> {
+impl crate::domain_row::FromDbRow<sqlx_postgres::PgRow> for VaultKeyMaterialEntry {
+    fn from_db_row(row: &sqlx_postgres::PgRow) -> Result<Self, sqlx_core::Error> {
         Ok(Self {
             id: row.try_get("id")?,
             vault_key_enc: row.try_get("vault_key_enc")?,
@@ -67,10 +69,7 @@ impl<'a> VaultRepo<'a> {
         )
     )]
     pub async fn create(&self, vault: &Vault) -> Result<(), sqlx_core::Error> {
-        let tags = vault
-            .tags
-            .clone()
-            .unwrap_or_else(|| sqlx_core::types::Json(Vec::new()));
+        let tags = vault.tags.clone().unwrap_or_default();
         query!(
             r#"
             INSERT INTO vaults (
@@ -86,7 +85,7 @@ impl<'a> VaultRepo<'a> {
             vault.encryption_type.as_i32(),
             &vault.vault_key_enc,
             vault.cache_policy.as_i32(),
-            &tags,
+            SqlxJson(&tags),
             vault.deleted_at,
             vault.deleted_by_user_id,
             vault.deleted_by_device_id,

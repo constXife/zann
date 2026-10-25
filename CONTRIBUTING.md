@@ -180,3 +180,8 @@ Do **not** open a public issue. Report privately via the security contact (TBD).
 ## License
 
 By contributing, you agree your contributions are licensed under `LICENSE`.
+
+Local vault port and maintenance ownership: `crates/zann-client/src/app/local/**`,
+`crates/zann-client-sqlite/src/local_vault/**`, and SQLite maintenance/row decoding
+under `crates/zann-db/src/{domain_row.rs,local/maintenance.rs,local/sync_repo/**}`
+are included in the sensitive review surface.

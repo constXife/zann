@@ -1,3 +1,4 @@
+mod support;
 use assert_cmd::Command;
 use mockito::{Matcher, Server};
 use predicates::prelude::*;
@@ -20,6 +21,7 @@ fn base_cmd(home: &Path) -> Command {
     ] {
         cmd.env_remove(name);
     }
+    cmd.env("ZANN_SERVER_FINGERPRINT", support::FINGERPRINT);
     cmd
 }
 
@@ -81,28 +83,14 @@ fn legacy_secret_payload(value: &str) -> serde_json::Value {
 }
 
 fn system_info_body(server_fingerprint: &str) -> serde_json::Value {
-    json!({
-        "version": "1.0.0",
-        "build_commit": null,
-        "server_id": "server-id",
-        "identity": {
-            "public_key": "public-key",
-            "timestamp": 1_700_000_000,
-            "signature": "signature"
-        },
-        "server_name": "Test server",
-        "server_fingerprint": server_fingerprint,
-        "auth_methods": [1, 99],
-        "personal_vaults_enabled": true,
-        "internal_users_present": true,
-        "future_metadata": {"accepted": true}
-    })
+    support::system_info(server_fingerprint)
 }
 
 #[test]
 fn server_info_command_fetches_info() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
 
     let info_body = system_info_body("sha256:test");
     server
@@ -150,6 +138,7 @@ fn context_token_value_flag_is_rejected_without_echoing_value() {
 fn secret_get_prints_only_the_value_by_default() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("GET", "/v1/vaults/infra/secrets/services/api/database")
         .match_header("authorization", "Bearer token")
@@ -187,6 +176,7 @@ fn secret_get_prints_only_the_value_by_default() {
 fn secret_get_previous_uses_the_explicit_grace_selector() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("GET", "/v1/vaults/infra/secrets/services/api/database")
         .match_query(Matcher::UrlEncoded("version".into(), "previous".into()))
@@ -223,6 +213,7 @@ fn secret_get_previous_uses_the_explicit_grace_selector() {
 fn secret_list_prints_paginated_metadata_without_values() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("GET", "/v1/vaults/infra/secrets")
         .match_header("authorization", "Bearer token")
@@ -275,6 +266,7 @@ fn secret_list_prints_paginated_metadata_without_values() {
 fn secret_ensure_uses_policy_and_can_print_json() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("POST", "/v1/vaults/infra/secrets/ensure")
         .match_header("authorization", "Bearer token")
@@ -325,6 +317,7 @@ fn secret_set_reads_the_exact_value_from_a_file() {
     let value_file = home_dir.path().join("new-secret");
     fs::write(&value_file, "line one\nline two\n").expect("secret value file");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("PUT", "/v1/vaults/infra/secrets/services/api/database")
         .match_header("authorization", "Bearer token")
@@ -372,6 +365,7 @@ fn secret_set_reads_the_exact_value_from_a_file() {
 fn secret_set_reads_the_exact_value_from_stdin() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("PUT", "/v1/vaults/infra/secrets/services/api/key")
         .match_header("authorization", "Bearer token")
@@ -446,6 +440,7 @@ fn secret_set_requires_exactly_one_non_argv_value_source() {
 fn secret_rotate_reports_previous_and_new_versions() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("POST", "/v1/vaults/infra/secrets/rotate")
         .match_header("authorization", "Bearer token")
@@ -505,6 +500,7 @@ fn coordinated_rotation_passes_values_on_stdin_then_commits() {
     let item_id = "00000000-0000-0000-0000-000000000001";
     let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(60)).to_rfc3339();
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("GET", "/v1/vaults/infra/secrets/services/api/database")
         .with_status(200)
@@ -589,6 +585,7 @@ fn coordinated_rotation_aborts_on_hook_failure_without_echoing_values() {
     let item_id = "00000000-0000-0000-0000-000000000001";
     let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(60)).to_rfc3339();
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("GET", "/v1/vaults/infra/secrets/services/api/database")
         .with_status(200)
@@ -675,6 +672,7 @@ fn coordinated_rotation_keeps_candidate_recoverable_when_commit_fails() {
     );
     let expires_at = (chrono::Utc::now() + chrono::Duration::seconds(60)).to_rfc3339();
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("GET", "/v1/vaults/infra/secrets/services/api/database")
         .with_status(200)
@@ -745,6 +743,7 @@ fn coordinated_rotation_keeps_candidate_recoverable_when_commit_fails() {
 fn secret_command_does_not_echo_untrusted_error_bodies() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     let sentinel = "must-not-appear-from-server-body";
     server
         .mock("GET", "/v1/vaults/infra/secrets/services/api")
@@ -773,10 +772,13 @@ fn secret_command_does_not_echo_untrusted_error_bodies() {
 fn whoami_command_uses_access_token() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
 
     let whoami_body = json!({
-        "id": "user-1",
-        "email": "user@example.com"
+        "user_id": "00000000-0000-0000-0000-000000000001",
+        "email": "user@example.com", "display_name":"User", "avatar_url":null,
+        "avatar_initials":"U", "groups":[], "source":{"type":"internal"},
+        "device_id":null,"service_account_id":null
     });
     server
         .mock("GET", "/v1/users/me")
@@ -796,6 +798,7 @@ fn whoami_command_uses_access_token() {
 fn list_command_returns_items() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
 
     let list_body = json!({
         "items": [{
@@ -846,6 +849,7 @@ fn list_command_returns_items() {
 fn get_command_returns_payload() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     let item_id = "00000000-0000-0000-0000-000000000001";
 
     let payload = shared_payload("secret");
@@ -899,6 +903,7 @@ fn get_command_returns_payload() {
 fn get_command_supports_legacy_secret_payload_shape() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     let item_id = "00000000-0000-0000-0000-000000000001";
 
     let list_body = json!({
@@ -949,11 +954,14 @@ fn get_command_supports_legacy_secret_payload_shape() {
 fn set_password_command_uses_secret_endpoint() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
 
     server
         .mock("PUT", "/v1/vaults/vault-1/secrets/alpha/one")
         .match_header("authorization", "Bearer token")
-        .match_body(Matcher::Json(json!({ "value": "secret-value" })))
+        .match_body(Matcher::Json(
+            json!({ "value": "secret-value", "policy":null, "meta":null }),
+        ))
         .with_status(200)
         .with_body(
             json!({
@@ -992,6 +1000,7 @@ fn set_password_command_uses_secret_endpoint() {
 fn list_command_supports_legacy_secret_payload_shape() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
 
     let list_body = json!({
         "items": [{
@@ -1044,6 +1053,7 @@ fn list_command_supports_legacy_secret_payload_shape() {
 fn set_non_password_command_uses_shared_item_flow() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
 
     server
         .mock("GET", "/v1/vaults/vault-1/items")
@@ -1147,6 +1157,7 @@ fn materialize_command_accepts_only_machine_secret_value_field() {
 fn materialize_command_writes_files() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
 
     let list_body = json!({
         "secrets": [{
@@ -1210,6 +1221,7 @@ fn materialize_command_writes_files() {
 fn materialize_command_fails_closed_on_partial_batch_error() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
 
     let list_body = json!({
         "secrets": [{
@@ -1285,6 +1297,7 @@ fn materialize_command_fails_closed_on_partial_batch_error() {
 fn materialize_command_chunks_batch_reads_at_sixty_four() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     let paths = (0..65)
         .map(|index| format!("batch/item-{index:03}"))
         .collect::<Vec<_>>();
@@ -1366,6 +1379,7 @@ fn materialize_command_chunks_batch_reads_at_sixty_four() {
 fn delivery_apply_publishes_one_complete_generation() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("POST", "/v1/vaults/infra/secrets/batch/get")
         .match_header("authorization", "Bearer token")
@@ -1452,6 +1466,7 @@ fn delivery_apply_publishes_one_complete_generation() {
 fn delivery_apply_fails_before_publication_on_partial_batch_error() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("POST", "/v1/vaults/infra/secrets/batch/get")
         .with_status(200)
@@ -1506,6 +1521,7 @@ fn delivery_apply_fails_before_publication_on_partial_batch_error() {
 fn delivery_apply_enforces_sink_capacity_before_publication() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     server
         .mock("POST", "/v1/vaults/infra/secrets/batch/get")
         .with_status(200)
@@ -1556,6 +1572,7 @@ fn delivery_apply_enforces_sink_capacity_before_publication() {
 fn render_command_renders_template() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     let item_id = "00000000-0000-0000-0000-000000000001";
 
     let list_body = json!({
@@ -1616,6 +1633,7 @@ fn render_command_renders_template() {
 fn render_command_supports_legacy_secret_payload_shape() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     let item_id = "00000000-0000-0000-0000-000000000001";
 
     let list_body = json!({
@@ -1676,6 +1694,7 @@ fn render_command_supports_legacy_secret_payload_shape() {
 fn run_command_passes_secret_to_process() {
     let home_dir = tempdir().expect("tempdir");
     let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
     let item_id = "00000000-0000-0000-0000-000000000001";
 
     let info_body = system_info_body("sha256:run");
@@ -1781,4 +1800,50 @@ fn reads_a_config_written_by_the_facade() {
         .args(["config", "current-context"])
         .assert()
         .success();
+}
+
+#[test]
+fn invalid_signed_identity_stops_bearer_dispatch() {
+    let home = tempdir().expect("home");
+    let mut server = Server::new();
+    let mut info = support::system_info(support::FINGERPRINT);
+    info["identity"]["signature"] = "invalid-signature".into();
+    let _identity = server
+        .mock("GET", "/v1/system/info")
+        .with_status(200)
+        .with_body(info.to_string())
+        .create();
+    let protected = server.mock("GET", "/v1/users/me").expect(0).create();
+    authenticated_cmd(home.path())
+        .args(["--addr", &server.url(), "--insecure", "whoami"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("server identity proof rejected"));
+    protected.assert();
+}
+
+#[test]
+fn oversized_shared_response_is_rejected_without_echoing_body() {
+    let home = tempdir().expect("home");
+    let mut server = Server::new();
+    let _identity = support::mock_identity(&mut server);
+    let sentinel = "untrusted-reflected-body";
+    let _list = server
+        .mock("GET", "/v1/vaults/vault-1/items")
+        .with_status(200)
+        .with_body(sentinel.repeat(100_000))
+        .create();
+    authenticated_cmd(home.path())
+        .args([
+            "--addr",
+            &server.url(),
+            "--insecure",
+            "list",
+            "--vault",
+            "vault-1",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("body_too_large"))
+        .stderr(predicate::str::contains(sentinel).not());
 }

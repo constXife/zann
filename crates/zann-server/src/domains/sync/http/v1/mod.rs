@@ -12,9 +12,9 @@ macro_rules! query {
 macro_rules! query_as {
     ($ty:ty, $sql:expr $(, $arg:expr)* $(,)?) => {{
         #[allow(unused_mut)]
-        let mut q = sqlx_core::query_as::query_as::<sqlx_postgres::Postgres, $ty>($sql);
+        let mut q = sqlx_core::query::query::<sqlx_postgres::Postgres>($sql);
         $(q = q.bind($arg);)*
-        q
+        q.try_map(|row| <$ty as zann_db::domain_row::FromDbRow<_>>::from_db_row(&row))
     }};
 }
 

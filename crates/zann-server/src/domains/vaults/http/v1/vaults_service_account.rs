@@ -56,7 +56,7 @@ pub(super) async fn list_service_account_vaults(
         }
     };
 
-    let filter = service_account_catalog_filter(&account.scopes.0);
+    let filter = service_account_catalog_filter(&account.scopes);
     let repo = VaultRepo::new(&state.db);
     let Ok(entries) = repo
         .list_service_account_catalog(&filter, CATALOG_LOOKAHEAD_LIMIT)
@@ -92,7 +92,7 @@ pub(super) async fn list_service_account_vaults(
             name,
             kind: VaultKind::Shared,
             cache_policy,
-            tags: Some(tags.0),
+            tags: Some(tags),
         });
     }
     let body = zann_core::api::vaults::VaultListResponse { vaults };

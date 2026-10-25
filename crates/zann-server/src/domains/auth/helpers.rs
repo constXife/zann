@@ -88,7 +88,7 @@ pub(crate) async fn ensure_personal_vault_tx(
     }
 
     let vault_id = Uuid::now_v7();
-    let tags = sqlx_core::types::Json(Vec::<String>::new());
+    let tags = Vec::<String>::new();
     if let Err(err) = query::<Postgres>(
         r#"
         INSERT INTO vaults (
@@ -105,7 +105,7 @@ pub(crate) async fn ensure_personal_vault_tx(
     .bind(VaultEncryptionType::Client.as_i32())
     .bind(Vec::<u8>::new())
     .bind(CachePolicy::Full.as_i32())
-    .bind(&tags)
+    .bind(sqlx_core::types::Json(&tags))
     .bind(None::<DateTime<Utc>>)
     .bind(None::<Uuid>)
     .bind(None::<Uuid>)

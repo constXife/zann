@@ -1229,7 +1229,7 @@ async fn service_account_scopes(state: &AppState, service_account_id: Uuid) -> O
         .await
         .ok()
         .flatten()
-        .map(|account| account.scopes.0)
+        .map(|account| account.scopes)
 }
 
 async fn service_account_allows_path(

@@ -13,7 +13,7 @@ use crate::modules::secrets::args::{
     SecretListOutputFormat, SecretOutputFormat, SecretRotateArgs, SecretSetArgs,
 };
 use crate::modules::shared::resolve_vault_arg;
-use crate::modules::system::http::refresh_service_account_access_token;
+use crate::modules::system::authentication::refresh_service_account_access_token;
 use crate::modules::system::CommandContext;
 
 pub(crate) async fn handle_secret_command(
@@ -190,7 +190,7 @@ pub(crate) fn secrets_client(
     } else {
         SecretsTransportSecurity::RequireTls
     };
-    SecretsClient::new(ctx.addr, ctx.access_token.clone(), security)
+    SecretsClient::new(ctx.addr, ctx.access_token.to_string(), security)
 }
 
 pub(crate) fn should_refresh(error: &SecretsClientError) -> bool {

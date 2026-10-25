@@ -1,7 +1,6 @@
 use chrono::{DateTime, Utc};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use sqlx_core::types::Json;
 use uuid::Uuid;
 
 use super::enums::{
@@ -86,8 +85,8 @@ pub struct ServiceAccount {
     pub description: Option<String>,
     pub token_hash: String,
     pub token_prefix: String,
-    pub scopes: Json<Vec<String>>,
-    pub allowed_ips: Option<Json<Vec<String>>>,
+    pub scopes: Vec<String>,
+    pub allowed_ips: Option<Vec<String>>,
     pub expires_at: Option<DateTime<Utc>>,
     pub last_used_at: Option<DateTime<Utc>>,
     pub last_used_ip: Option<String>,
@@ -127,7 +126,7 @@ pub struct Vault {
     pub encryption_type: VaultEncryptionType,
     pub vault_key_enc: Vec<u8>,
     pub cache_policy: CachePolicy,
-    pub tags: Option<Json<Vec<String>>>,
+    pub tags: Option<Vec<String>>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub deleted_by_user_id: Option<Uuid>,
     pub deleted_by_device_id: Option<Uuid>,
@@ -150,7 +149,7 @@ pub struct Item {
     pub path: String,
     pub name: String,
     pub type_id: String,
-    pub tags: Option<Json<Vec<String>>>,
+    pub tags: Option<Vec<String>>,
     pub favorite: bool,
     pub payload_enc: Vec<u8>,
     pub checksum: String,
@@ -188,7 +187,7 @@ pub struct ItemHistory {
     pub checksum: String,
     pub version: i64,
     pub change_type: ChangeType,
-    pub fields_changed: Option<Json<FieldsChanged>>,
+    pub fields_changed: Option<FieldsChanged>,
     pub changed_by_user_id: Uuid,
     pub changed_by_email: String,
     pub changed_by_name: Option<String>,

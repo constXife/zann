@@ -182,7 +182,7 @@ pub(crate) async fn run(
                 path: item.path,
                 name: item.name,
                 type_id: item.type_id,
-                tags: item.tags.map(|tags| tags.0),
+                tags: item.tags,
                 favorite: item.favorite,
                 payload,
                 checksum: item.checksum,

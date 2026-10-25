@@ -361,7 +361,7 @@ impl AppClient {
                 connection_id,
                 connection_name.to_string(),
                 verified.binding(),
-                storage_id,
+                Some(storage_id),
             )
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
         Ok(PrepareConnectionOutcome::Ready(prepared))
@@ -1279,3 +1279,6 @@ mod tests {
         assert!(pending_factory.dropped.load(Ordering::Acquire));
     }
 }
+
+/// Local vault services, independent of SQLite and native adapters.
+pub mod local;

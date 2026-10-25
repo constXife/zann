@@ -5,7 +5,6 @@ use axum::{
     Extension, Json,
 };
 use chrono::Utc;
-use sqlx_core::types::Json as SqlxJson;
 use uuid::Uuid;
 use zann_core::{Change, ChangeOp, ChangeType, Identity, Item, ItemHistory, SyncStatus};
 use zann_crypto::vault_crypto as core_crypto;
@@ -212,7 +211,7 @@ pub(crate) async fn list_shared_items(
             path: item.path.clone(),
             name: item.name.clone(),
             type_id: item.type_id.clone(),
-            tags: item.tags.as_ref().map(|tags| tags.0.clone()),
+            tags: item.tags.as_ref().cloned(),
             favorite: item.favorite,
             payload,
             checksum: item.checksum.clone(),
@@ -333,7 +332,7 @@ pub(crate) async fn get_shared_item(
             path: item.path,
             name: item.name,
             type_id: item.type_id,
-            tags: item.tags.map(|tags| tags.0),
+            tags: item.tags,
             favorite: item.favorite,
             payload,
             checksum: item.checksum,
@@ -771,7 +770,7 @@ pub(crate) async fn create_shared_item(
         path: path.clone(),
         name: name.clone(),
         type_id: type_id.clone(),
-        tags: tags.clone().map(SqlxJson),
+        tags: tags.clone(),
         favorite: req.favorite.unwrap_or(false),
         payload_enc: payload_enc.clone(),
         checksum: checksum.clone(),
@@ -1009,11 +1008,7 @@ pub(crate) async fn update_shared_item(
             .filter(|t| !t.trim().is_empty())
             .take(crate::domains::items::service::MAX_TAGS)
             .collect();
-        item.tags = if tags.is_empty() {
-            None
-        } else {
-            Some(SqlxJson(tags))
-        };
+        item.tags = if tags.is_empty() { None } else { Some(tags) };
     }
 
     // Update favorite
@@ -1230,7 +1225,7 @@ pub(crate) async fn update_shared_item(
             path: item.path,
             name: item.name,
             type_id: item.type_id,
-            tags: item.tags.map(|t| t.0),
+            tags: item.tags,
             favorite: item.favorite,
             payload: req.payload,
             checksum: item.checksum,

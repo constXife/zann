@@ -2,7 +2,6 @@
 
 use chrono::{Timelike, Utc};
 use sqlx_core::pool::PoolOptions;
-use sqlx_core::types::Json as SqlxJson;
 use sqlx_postgres::{PgConnectOptions, Postgres};
 use std::env;
 use std::str::FromStr;
@@ -270,8 +269,8 @@ async fn service_account_repo_crud() {
         description: Some("CI token".to_string()),
         token_hash: "hash".to_string(),
         token_prefix: "zann_sa_abc".to_string(),
-        scopes: SqlxJson(vec!["vault:read".to_string()]),
-        allowed_ips: Some(SqlxJson(vec!["10.0.0.0/8".to_string()])),
+        scopes: vec!["vault:read".to_string()],
+        allowed_ips: Some(vec!["10.0.0.0/8".to_string()]),
         expires_at: None,
         last_used_at: None,
         last_used_ip: None,
@@ -367,7 +366,7 @@ async fn service_account_repo_crud() {
         description: Some("Expired CI token".to_string()),
         token_hash: "expired_hash".to_string(),
         token_prefix: "zann_sa_exp".to_string(),
-        scopes: SqlxJson(vec!["vault:read".to_string()]),
+        scopes: vec!["vault:read".to_string()],
         allowed_ips: None,
         expires_at: Some(now - chrono::Duration::hours(1)),
         last_used_at: None,
@@ -459,10 +458,10 @@ async fn vault_and_item_repos_workflow() {
         path: "db/postgres".to_string(),
         name: "postgres".to_string(),
         type_id: "secret".to_string(),
-        tags: Some(SqlxJson(vec!["db".to_string()])),
+        tags: Some(vec!["db".to_string()]),
         favorite: false,
         payload_enc: vec![9, 9, 9],
-        checksum: "checksum".to_string(),
+        checksum: zann_core::payload_checksum(&[9, 9, 9]),
         version: 1,
         row_version: 1,
         device_id: device.id,
@@ -484,7 +483,7 @@ async fn vault_and_item_repos_workflow() {
     let mut updated_item = item.clone();
     updated_item.version = 2;
     updated_item.payload_enc = vec![8, 8, 8];
-    updated_item.checksum = "checksum-updated".to_string();
+    updated_item.checksum = zann_core::payload_checksum(&updated_item.payload_enc);
     updated_item.updated_at = Utc::now()
         .with_nanosecond(123_456_789)
         .expect("valid sub-microsecond timestamp");

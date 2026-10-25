@@ -218,11 +218,14 @@ impl<'a> UserRepo<'a> {
             order_by,
             where_clause = where_clause
         );
-        let mut query = query_as!(User, &query, limit, offset);
+        let mut query = query!(&query, limit, offset);
         if let Some(status) = status {
             query = query.bind(status.as_i32());
         }
-        query.fetch_all(self.pool).await
+        query
+            .try_map(|row| <User as crate::domain_row::FromDbRow<_>>::from_db_row(&row))
+            .fetch_all(self.pool)
+            .await
     }
 
     pub async fn update_status(

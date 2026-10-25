@@ -1,5 +1,4 @@
 use chrono::Utc;
-use sqlx_core::types::Json as SqlxJson;
 use uuid::Uuid;
 use zann_core::api::vaults::VaultSummary;
 use zann_core::{CachePolicy, Identity, Vault, VaultEncryptionType, VaultKind};
@@ -123,7 +122,7 @@ pub async fn list_vault_summaries(
             name: vault.name,
             kind: vault.kind,
             cache_policy: vault.cache_policy,
-            tags: vault.tags.map(|tags| tags.0),
+            tags: vault.tags,
         })
         .collect())
 }
@@ -202,8 +201,7 @@ pub async fn create_vault(
                 .take(crate::domains::items::service::MAX_TAGS)
                 .collect::<Vec<String>>()
         })
-        .filter(|tags| !tags.is_empty())
-        .map(SqlxJson);
+        .filter(|tags| !tags.is_empty());
 
     let (encryption_type, vault_key_enc) = match kind {
         VaultKind::Shared => {

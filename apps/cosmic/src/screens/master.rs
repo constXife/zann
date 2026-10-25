@@ -8,7 +8,7 @@ use crate::backend::local::{self, ItemsPage};
 use crate::backend::off_thread;
 use crate::i18n::t;
 use crate::session::Session;
-use zann_ffi::RememberedUnlockFfi;
+use zann_client::app::local::RememberedUnlock;
 
 /// Whether the screen creates a vault or opens one that already exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub struct State {
     mode: Mode,
     /// Whether this device can open the vault without the master password, and
     /// with what. Absent until the shell has asked the facade.
-    remembered: Option<RememberedUnlockFfi>,
+    remembered: Option<RememberedUnlock>,
     password: String,
     hidden: bool,
     busy: bool,
@@ -37,7 +37,7 @@ pub struct State {
 #[derive(Clone, Debug)]
 pub enum Message {
     /// What this device remembers, answered by the shell on the way in.
-    Remembered(RememberedUnlockFfi),
+    Remembered(RememberedUnlock),
     /// Unlock with the remembered source instead of the password. Waits on a
     /// touch when that source is a hardware key.
     UseRemembered,

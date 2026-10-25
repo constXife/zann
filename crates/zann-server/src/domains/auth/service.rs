@@ -1133,7 +1133,7 @@ pub(crate) async fn login_service_account(
             metrics::auth_login("ip_denied", "service_account");
             return Err(AuthError::Forbidden("ip_not_allowed"));
         };
-        if !allowed_ips.0.iter().any(|ip| ip == client_ip) {
+        if !allowed_ips.iter().any(|ip| ip == client_ip) {
             metrics::auth_login("ip_denied", "service_account");
             return Err(AuthError::Forbidden("ip_not_allowed"));
         }
@@ -1231,7 +1231,7 @@ async fn service_account_vault_keys(
         return Err("smk_missing");
     };
     let vault_repo = VaultRepo::new(&state.db);
-    let filter = crate::domains::vaults::service::service_account_catalog_filter(&account.scopes.0);
+    let filter = crate::domains::vaults::service::service_account_catalog_filter(&account.scopes);
     let vaults = vault_repo
         .list_service_account_key_material(&filter, SERVICE_ACCOUNT_VAULT_KEY_LOOKAHEAD)
         .await

@@ -18,7 +18,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use cosmic::iced::futures::channel::oneshot;
-use zann_ffi::SqliteFileLocation;
+use zann_client_sqlite::SqliteFileLocation;
 
 const LOCAL_DB_FILENAME: &str = "local.sqlite";
 

@@ -4,7 +4,7 @@
 //! an `Option<Facade>` or guess what to do without one — the shell shows
 //! [`crate::Shell::Blocked`] instead.
 
-use zann_ffi::AppStatusFfi;
+use zann_client::app::local::AppStatus;
 
 use crate::backend::local::{self, Facade};
 use crate::backend::{activate_database, ActiveDatabaseGuard, DatabaseLocation};
@@ -16,12 +16,12 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn open() -> Result<(Self, AppStatusFfi), String> {
+    pub fn open() -> Result<(Self, AppStatus), String> {
         Self::open_at(DatabaseLocation::resolve_default()?)
     }
 
     /// Opens a database location already resolved by the composition root.
-    pub fn open_at<L>(location: L) -> Result<(Self, AppStatusFfi), String>
+    pub fn open_at<L>(location: L) -> Result<(Self, AppStatus), String>
     where
         L: TryInto<DatabaseLocation>,
         L::Error: ToString,

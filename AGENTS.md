@@ -6,7 +6,7 @@ document below, the canonical document wins.
 
 ## Source of Truth (Read in This Order)
 
-1. [`docs/Architecture.md`](docs/Architecture.md) & [`docs/architecture/capabilities.md`](docs/architecture/capabilities.md) — client architecture, single-owner capability map, allowed dependencies, and the `MIG-001`..`MIG-008` exception ledger.
+1. [`docs/Architecture.md`](docs/Architecture.md) & [`docs/architecture/capabilities.md`](docs/architecture/capabilities.md) — client architecture, single-owner capability map, allowed dependencies, and the active `MIG-*` exception ledger.
 2. [`config/architecture-boundaries.json`](config/architecture-boundaries.json) — machine-enforced package graph, feature contracts, and source rules checked by `./scripts/check-client-architecture.sh`.
 3. [`docs/adr/`](docs/adr/) — architectural decisions:
    - [ADR 0001](docs/adr/0001-shared-client-core.md): shared client core & thin interface shells;
@@ -32,7 +32,7 @@ Zann is currently **Pre-GA (experimental prior to `v0.Y`)**.
 - **Pre-GA proportionality (avoid premature ceremony):**
   - **No fallback or dual-write by default:** When all consumers of an internal API or crate live in this repository, perform a direct cutover in-place and delete the superseded code in the same change.
   - **Compatibility paths require explicit bounds:** Any temporary migration shim must be recorded in [`docs/architecture/capabilities.md`](docs/architecture/capabilities.md) and [`config/architecture-boundaries.json`](config/architecture-boundaries.json) with an owner, compensating test, and measurable removal condition.
-  - **Subtractive balance:** Touching a legacy path under `MIG-001`..`MIG-008` must narrow or remove the exception rather than expanding it.
+  - **Subtractive balance:** Touching a legacy path under an active `MIG-*` exception must narrow or remove the exception rather than expanding it.
 
 ---
 
@@ -43,10 +43,9 @@ Dependencies point strictly downward (`[SHELL]` → `[PRESENTATION]` → `[CORE]
 ### 1. `[CORE]` — Domain, Crypto, Storage, Transport & Application Services
 - `crates/zann-core`: domain models, vault/item invariants, pure policies, wire DTOs (`zann-core::api`).
 - `crates/zann-crypto`: sole owner of Argon2id KDF, ChaCha20-Poly1305 envelopes, payload checksums, and secret key types.
-- `crates/zann-db` & `crates/zann-client-sqlite`: database repositories, migrations, and the production SQLite sync store adapter.
+- `crates/zann-db` & `crates/zann-client-sqlite`: database repositories, migrations, and the production SQLite sync store adapter. The opt-in `zann-client-sqlite/local-vault` feature implements local vault operations and maintenance behind `zann-client::app::local`.
 - `crates/zann-keystore`: OS secret-store (`keyring`) and FIDO2 hardware-key (`hmac-secret`) unlocking.
-- `crates/zann-client`: canonical client crate (`remote`, `config`, `session`, `sync`, `delivery`, and the canonical `zann-client::app::AppClient` facade).
-- `crates/zann-app`: **frozen** transitional package for backup, snapshot, and verify until moved behind `zann-client::app` ports (`MIG-008`). Do not add new modules or capabilities here.
+- `crates/zann-client`: canonical client crate (`remote`, `config`, `session`, `sync`, `delivery`, the canonical `zann-client::app::AppClient` facade, the local-vault port, and bounded server-oriented remote capabilities).
 - **Portability rule:** Shared core crates must remain cross-compilable to `aarch64-apple-ios`, `aarch64-apple-darwin`, `aarch64-linux-android`, and Linux without implicit `$HOME` lookups or desktop-only C dependencies in default feature sets.
 
 ### 2. `[PRESENTATION]` — Toolkit-Neutral View Models & Flows
@@ -56,7 +55,7 @@ Dependencies point strictly downward (`[SHELL]` → `[PRESENTATION]` → `[CORE]
 ### 3. `[SHELL]` — Native Interfaces & Edge Adapters
 - `apps/cosmic`: COSMIC-native (`libcosmic` / Iced) reference desktop client for Linux. Links `[CORE]` and `[PRESENTATION]` directly in Rust.
 - `apps/desktop`: Tauri desktop app (`src/` Vue 3 + TypeScript frontend, `src-tauri/` Rust backend).
-- `crates/zann-cli`: server-oriented CLI (`zann-client` `remote` + `delivery` surfaces, free of SQLite and GUI deps).
+- `crates/zann-cli`: server-oriented CLI (`zann-client` `remote` + Config v2 + `CredentialStore` + `delivery` surfaces, free of SQLite and GUI deps).
 - `crates/zann-ffi`: UniFFI edge adapter projecting `[CORE]` and `[PRESENTATION]` to non-Rust clients (`apps/apple` SwiftUI for macOS/iOS/iPadOS and `apps/android` Jetpack Compose). Rust clients must not use `zann-ffi` for new capabilities (`MIG-003`).
 - **Shell rule:** Shells own only widgets, layout, navigation, CLI I/O, and OS capability adapters (clipboard, tray, biometrics, file dialogs, browser launch, autofill extensions). Never implement crypto, HTTP routes, sync merge rules, or category/masking logic in a shell.
 

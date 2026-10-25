@@ -2,11 +2,11 @@ use uuid::Uuid;
 
 use crate::modules::shared::parse_selector_if_present;
 use crate::modules::shared::{fetch_shared_items, fetch_vaults};
-use crate::modules::system::CliConfig;
+use crate::modules::system::CliState;
 use crate::modules::system::CommandContext;
 
 pub(crate) async fn resolve_shared_item_id(
-    client: &reqwest::Client,
+    client: &zann_client::server::ServerClient,
     addr: &str,
     access_token: &str,
     vault_id: &str,
@@ -23,8 +23,8 @@ pub(crate) async fn resolve_shared_item_id(
 pub(crate) async fn resolve_vault_for_context(
     vault: Option<String>,
     context_name: Option<&str>,
-    config: &CliConfig,
-    client: &reqwest::Client,
+    config: &CliState,
+    client: &zann_client::server::ServerClient,
     addr: &str,
     access_token: &str,
 ) -> anyhow::Result<String> {
@@ -40,7 +40,7 @@ pub(crate) async fn resolve_vault_for_context(
     }
     let vaults = fetch_vaults(client, addr, access_token).await?;
     if vaults.vaults.len() == 1 {
-        return Ok(vaults.vaults[0].id.clone());
+        return Ok(vaults.vaults[0].id.to_string());
     }
     anyhow::bail!("vault not set: pass --vault or set context vault")
 }
@@ -81,8 +81,8 @@ pub(crate) async fn resolve_path_for_context(
     path: &str,
     vault: Option<String>,
     context_name: Option<&str>,
-    config: &CliConfig,
-    client: &reqwest::Client,
+    config: &CliState,
+    client: &zann_client::server::ServerClient,
     addr: &str,
     access_token: &str,
 ) -> anyhow::Result<(String, String)> {
@@ -95,7 +95,7 @@ pub(crate) async fn resolve_path_for_context(
 }
 
 async fn resolve_shared_item_id_by_path(
-    client: &reqwest::Client,
+    client: &zann_client::server::ServerClient,
     addr: &str,
     access_token: &str,
     vault_id: &str,

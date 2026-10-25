@@ -12,9 +12,9 @@ use zann_client::app::{
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_client::oidc::OidcBrowserErrorKind;
+use zann_client_sqlite::local_vault::initialize_database;
 use zann_client_sqlite::SqliteSyncStoreFactory;
 use zann_core::AuthMethod;
-use zann_db::{connect_sqlite_file_with_max, migrate_local};
 
 use super::active_database_location;
 
@@ -87,11 +87,8 @@ impl Remote {
                 .map_err(|err| err.to_string())?;
         }
         let runtime = Runtime::new().map_err(|err| err.to_string())?;
-        let pool = runtime
-            .block_on(connect_sqlite_file_with_max(location.file_location(), 5))
-            .map_err(|err| err.to_string())?;
         runtime
-            .block_on(migrate_local(&pool))
+            .block_on(initialize_database(location.file_location()))
             .map_err(|err| err.to_string())?;
 
         let credentials = Arc::new(OsCredentialStore::system_default());

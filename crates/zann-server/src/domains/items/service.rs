@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use sqlx_core::row::Row;
-use sqlx_core::types::Json as SqlxJson;
 use uuid::Uuid;
 use zann_core::{
     Attachment, Change, ChangeOp, ChangeType, FieldsChanged, Identity, Item, ItemHistory,
@@ -57,7 +56,7 @@ pub(crate) struct ItemListEntry {
     pub(crate) path: String,
     pub(crate) name: String,
     pub(crate) type_id: String,
-    pub(crate) tags: Option<SqlxJson<Vec<String>>>,
+    pub(crate) tags: Option<Vec<String>>,
     pub(crate) favorite: bool,
     pub(crate) checksum: String,
     pub(crate) version: i64,
@@ -262,7 +261,10 @@ pub(crate) async fn fetch_item_list_page(
             path: row.try_get("path").map_err(|_| ItemsError::DbError)?,
             name: row.try_get("name").map_err(|_| ItemsError::DbError)?,
             type_id: row.try_get("type_id").map_err(|_| ItemsError::DbError)?,
-            tags: row.try_get("tags").map_err(|_| ItemsError::DbError)?,
+            tags: row
+                .try_get::<Option<sqlx_core::types::Json<Vec<String>>>, _>("tags")
+                .map_err(|_| ItemsError::DbError)?
+                .map(|tags| tags.0),
             favorite: row.try_get("favorite").map_err(|_| ItemsError::DbError)?,
             checksum: row.try_get("checksum").map_err(|_| ItemsError::DbError)?,
             version: row.try_get("version").map_err(|_| ItemsError::DbError)?,
@@ -909,7 +911,7 @@ pub async fn create_item(
         path,
         name,
         type_id,
-        tags: tags.map(SqlxJson),
+        tags,
         favorite: command.favorite.unwrap_or(false),
         payload_enc,
         checksum,
@@ -932,7 +934,7 @@ pub async fn create_item(
         checksum: item.checksum.clone(),
         version: item.version,
         change_type: ChangeType::Create,
-        fields_changed: command.fields_changed.map(SqlxJson),
+        fields_changed: command.fields_changed,
         changed_by_user_id: identity.user_id,
         changed_by_email: actor.email,
         changed_by_name: actor.name,
@@ -1124,8 +1126,8 @@ pub async fn update_item(
             .take(MAX_TAGS)
             .collect();
         let tags = if tags.is_empty() { None } else { Some(tags) };
-        if item.tags.as_ref().map(|t| t.0.clone()) != tags {
-            item.tags = tags.map(SqlxJson);
+        if item.tags.as_ref().cloned() != tags {
+            item.tags = tags;
             updated = true;
         }
     }
@@ -1153,7 +1155,7 @@ pub async fn update_item(
         checksum: previous_checksum,
         version: previous_version,
         change_type: ChangeType::Update,
-        fields_changed: fields_changed.map(SqlxJson),
+        fields_changed,
         changed_by_user_id: identity.user_id,
         changed_by_email: actor.email,
         changed_by_name: actor.name,
@@ -1677,7 +1679,7 @@ async fn service_account_scopes(state: &AppState, service_account_id: Uuid) -> O
         .await
         .ok()
         .flatten()
-        .map(|account| account.scopes.0)
+        .map(|account| account.scopes)
 }
 
 async fn service_account_allows_path(

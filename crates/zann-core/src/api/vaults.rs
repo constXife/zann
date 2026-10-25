@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::{CachePolicy, VaultKind};
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VaultSummary {
     pub id: Uuid,
     pub slug: String,
@@ -14,7 +14,7 @@ pub struct VaultSummary {
     pub tags: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct VaultListResponse {
     pub vaults: Vec<VaultSummary>,
 }

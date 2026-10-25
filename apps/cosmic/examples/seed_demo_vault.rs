@@ -12,7 +12,8 @@
 //! at a directory of its own. Both variables are required: this creates a real
 //! vault, and a vault whose master password ships in the repository is not one.
 
-use zann_ffi::{create_core, ItemUpdate};
+use zann_client::app::local::ItemUpdate;
+use zann_client_sqlite::local_vault::open_vault;
 
 const DEMO_ITEMS: &[(&str, &str, &str)] = &[
     ("work/aws/root", "access_key", "AKIA0000000000000000"),
@@ -42,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let password = std::env::var("ZANN_DEMO_PASSWORD")
         .map_err(|_| "set ZANN_DEMO_PASSWORD to the master password for the demo vault")?;
 
-    let core = create_core(db_url.clone())?;
+    let core = open_vault(db_url.clone())?;
     if core.app_status()?.initialized {
         core.unlock(password)?;
         println!("{db_url} already initialized, adding items to the existing vault");

@@ -2,12 +2,12 @@
 //! compositor. Anything that needs a real server (probing, logging in) stops at
 //! the message boundary: the response is fed in as a message.
 
+use zann_client::app::local::{ItemCreate, ItemSummary, ItemUpdate, VaultSummary};
 use zann_cosmic::backend::local;
 use zann_cosmic::backend::remote::{LoginOutcome, Method, Remote, ServerProbe};
 use zann_cosmic::screens::detail::Detail;
 use zann_cosmic::screens::{connect, master, vault};
 use zann_cosmic::session::Session;
-use zann_ffi::{ItemSummary, ItemUpdate, VaultSummaryFfi};
 use zann_ui_core::ItemCounts;
 
 static DB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -204,6 +204,70 @@ fn detail_masks_secrets_and_reads_totp() {
 }
 
 #[test]
+fn facade_creates_and_edits_items_for_cosmic() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (session, status) =
+        Session::open_at(dir.path().join("local.sqlite")).expect("open session");
+    assert!(!status.initialized);
+    let facade = session.facade();
+    local::initialize_master_password(&facade, "demo-password".to_string()).expect("initialize");
+
+    let created = local::item_create(
+        &facade,
+        ItemCreate {
+            title: "service".to_string(),
+            path: "work/service".to_string(),
+            type_id: "api".to_string(),
+            payload_json:
+                r#"{"v":1,"typeId":"wrong","fields":{"token":{"kind":"password","value":"first"}}}"#
+                    .to_string(),
+        },
+    )
+    .expect("create item");
+    assert_eq!(created.title, "service");
+    assert_eq!(created.type_id, "api");
+    let created_payload: serde_json::Value =
+        serde_json::from_str(&created.payload_json).expect("created payload");
+    assert_eq!(created_payload["typeId"], "api");
+    assert_eq!(created_payload["fields"]["token"]["value"], "first");
+
+    let updated = local::item_update(
+        &facade,
+        created.id,
+        ItemUpdate {
+            title: "renamed".to_string(),
+            path: "work/renamed".to_string(),
+            type_id: "login".to_string(),
+            payload_json: r#"{"v":1,"typeId":"stale","fields":{"password":{"kind":"password","value":"second"}}}"#
+                .to_string(),
+        },
+    )
+    .expect("update item");
+    assert_eq!(updated.title, "renamed");
+    assert_eq!(updated.path, "work/renamed");
+    assert_eq!(updated.type_id, "login");
+    let updated_payload: serde_json::Value =
+        serde_json::from_str(&updated.payload_json).expect("updated payload");
+    assert_eq!(updated_payload["typeId"], "login");
+    assert_eq!(updated_payload["fields"]["password"]["value"], "second");
+
+    let history = local::item_history(&facade, updated.id.clone()).expect("list history");
+    assert!(!history.is_empty());
+    assert_eq!(history[0].version, 1);
+    let previous = local::item_history_get(&facade, updated.id.clone(), history[0].version)
+        .expect("get history version");
+    let previous_payload: serde_json::Value =
+        serde_json::from_str(&previous.payload_json).expect("history payload");
+    assert_eq!(previous_payload["fields"]["token"]["value"], "first");
+
+    let restored = local::item_history_restore(&facade, updated.id, history[0].version)
+        .expect("restore history version");
+    let restored_payload: serde_json::Value =
+        serde_json::from_str(&restored.payload_json).expect("restored payload");
+    assert_eq!(restored_payload["fields"]["token"]["value"], "first");
+}
+
+#[test]
 fn vault_context_exposes_the_active_personal_vault() {
     let (_dir, session) = vault_with_items();
     let facade = session.facade();
@@ -325,7 +389,7 @@ fn infinite_scroll_prefetches_and_caps_the_summary_cache() {
 
 #[test]
 fn detail_reads_otpauth_uri_parameters() {
-    let params = Detail::parse(zann_ffi::ItemDetail {
+    let params = Detail::parse(zann_client::app::local::ItemDetail {
         id: "id".to_string(),
         title: "t".to_string(),
         path: "p".to_string(),
@@ -412,14 +476,14 @@ fn vault_selector_only_reserves_sidebar_space_for_multiple_vaults() {
         vault::Message::VaultsLoaded(Ok(local::VaultContext {
             current_vault_id: Some("personal".to_string()),
             vaults: vec![
-                VaultSummaryFfi {
+                VaultSummary {
                     id: "personal".to_string(),
                     name: "Personal".to_string(),
                     kind: "personal".to_string(),
                     is_default: false,
                     item_count: 399,
                 },
-                VaultSummaryFfi {
+                VaultSummary {
                     id: "shared".to_string(),
                     name: "infra".to_string(),
                     kind: "shared".to_string(),
@@ -525,4 +589,18 @@ fn cancelling_connect_returns_to_the_shell() {
         state.update(connect::Message::Cancel),
         connect::Outcome::Cancelled
     ));
+}
+
+#[test]
+fn detail_and_copy_diagnostics_redact_payloads() {
+    let sentinel = "sentinel-private-payload";
+    let detail = Detail::parse(zann_client::app::local::ItemDetail {
+        id: "id".into(), title: "title".into(), path: "path".into(), type_id: "login".into(),
+        payload_json: format!(r#"{{"v":1,"typeId":"login","fields":{{"password":{{"kind":"password","value":"{sentinel}"}}}}}}"#),
+    }).expect("parse");
+    let message = zann_cosmic::screens::detail::Message::Copy {
+        index: 0,
+        value: sentinel.into(),
+    };
+    assert!(!format!("{detail:?} {:?} {message:?}", detail.fields).contains(sentinel));
 }

@@ -21,7 +21,7 @@ pub fn save_config(root: &Path, config: &CliConfig) -> Result<(), anyhow::Error>
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    zann_app::secure_file::write_private(&path, contents.as_bytes())?;
+    zann_client_sqlite::maintenance::secure_file::write_private(&path, contents.as_bytes())?;
     Ok(())
 }
 
@@ -63,7 +63,7 @@ pub fn save_settings(root: &Path, settings: DesktopSettings) -> Result<(), anyho
             map.remove(key);
         }
     }
-    zann_app::secure_file::write_private(
+    zann_client_sqlite::maintenance::secure_file::write_private(
         &root.join(SETTINGS_FILENAME),
         serde_json::to_string_pretty(&value)?.as_bytes(),
     )?;

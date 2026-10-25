@@ -7570,25 +7570,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zann-app"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "csv",
- "percent-encoding",
- "serde",
- "serde_json",
- "sqlx-core",
- "thiserror 1.0.69",
- "tokio",
- "url",
- "uuid",
- "zann-core",
- "zann-db",
-]
-
-[[package]]
 name = "zann-client"
 version = "0.1.0"
 dependencies = [
@@ -7618,12 +7599,22 @@ dependencies = [
 name = "zann-client-sqlite"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "csv",
+ "percent-encoding",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
  "tokio",
+ "url",
  "uuid",
  "zann-client",
  "zann-core",
  "zann-crypto",
  "zann-db",
+ "zann-keystore",
 ]
 
 [[package]]
@@ -7636,8 +7627,6 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
- "sqlx-core",
- "sqlx-sqlite",
  "tracing",
  "uuid",
  "zann-crypto",
@@ -7713,7 +7702,6 @@ dependencies = [
  "tokio",
  "url",
  "uuid",
- "zann-app",
  "zann-client",
  "zann-client-sqlite",
  "zann-core",
@@ -7747,6 +7735,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "totp-rs",
+ "zann-core",
 ]
 
 [[package]]
