@@ -52,17 +52,7 @@ pub fn project_item_fields(payload_json: &str) -> Result<Vec<ItemDetailField>, P
         })
         .collect();
 
-    let rank = |key: &str| {
-        FIELD_ORDER
-            .iter()
-            .position(|known| *known == key)
-            .unwrap_or(FIELD_ORDER.len())
-    };
-    fields.sort_by(|left, right| {
-        rank(&left.key)
-            .cmp(&rank(&right.key))
-            .then_with(|| left.key.cmp(&right.key))
-    });
+    fields.sort_by(|left, right| compare_field_keys(&left.key, &right.key));
     Ok(fields)
 }
 
@@ -100,4 +90,21 @@ fn totp_params(value: &str, payload: &EncryptedPayload) -> TotpParams {
     }
 
     params
+}
+
+pub(crate) fn compare_field_keys(left: &str, right: &str) -> std::cmp::Ordering {
+    let rank = |key: &str| {
+        FIELD_ORDER
+            .iter()
+            .position(|known| *known == key)
+            .unwrap_or(FIELD_ORDER.len())
+    };
+    rank(left).cmp(&rank(right)).then_with(|| left.cmp(right))
+}
+
+/// Project the type from the validated payload, including for historical items.
+pub fn payload_type_id(payload_json: &str) -> Result<String, PayloadError> {
+    Ok(EncryptedPayload::from_bytes(payload_json.as_bytes())?
+        .type_id
+        .clone())
 }

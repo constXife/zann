@@ -28,6 +28,7 @@ const SOURCE_URL: &str = "https://github.com/constxife/zann";
 pub struct State {
     section: SettingsSection,
     preferences: DevicePreferences,
+    close_to_tray: bool,
     remembered: Option<RememberedUnlock>,
     storages: Vec<StorageSummary>,
     data_root: PathBuf,
@@ -116,10 +117,11 @@ pub enum Outcome {
 }
 
 impl State {
-    pub fn new(preferences: DevicePreferences, data_root: PathBuf) -> Self {
+    pub fn new(preferences: DevicePreferences, close_to_tray: bool, data_root: PathBuf) -> Self {
         Self {
             section: SettingsSection::General,
             preferences,
+            close_to_tray,
             remembered: None,
             storages: Vec::new(),
             data_root,
@@ -164,6 +166,10 @@ impl State {
 
     pub fn preferences_changed(&mut self, preferences: DevicePreferences) {
         self.preferences = preferences;
+    }
+
+    pub fn close_to_tray_changed(&mut self, close_to_tray: bool) {
+        self.close_to_tray = close_to_tray;
     }
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {

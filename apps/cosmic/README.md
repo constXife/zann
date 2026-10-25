@@ -8,8 +8,9 @@ server key) or set up a local vault, unlock it with the master password, browse
 the items (nav categories, search, paging) and read a secret — masked fields
 with a reveal toggle, one-time codes and copy-to-clipboard.
 
-Not covered: creating or editing items, folders, attachments, and anything the
-other clients do beyond reading.
+Creating/editing items and browsing/restoring history use the native local
+vault port. Closing to tray is configurable; a missing tray host leaves the
+window reachable. Folder mutation and attachments are not covered.
 
 The crate is excluded from the root workspace: libcosmic is a git dependency and
 the root `Cargo.lock` must stay free of git sources (the Nix package derives its
@@ -22,7 +23,7 @@ routing between screens. Everything else lives in the library next to it, which
 is what lets `tests/flows.rs` drive the flows without a compositor.
 
 ```
-src/backend/local.rs    the vault on this machine (zann-ffi)
+src/backend/local.rs    the vault on this machine (zann-client-sqlite)
 src/backend/remote.rs   logging in against a server (zann-client)
 src/session.rs          the open database, owned for the app's lifetime
 src/screens/*.rs        one module per screen

@@ -12,3 +12,4 @@ pub mod i18n;
 pub mod preferences;
 pub mod screens;
 pub mod session;
+pub mod tray;

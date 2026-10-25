@@ -378,7 +378,7 @@ impl Default for DesktopSettings {
             auto_hide_reveal_seconds: 20,
             require_os_auth: true,
             trash_auto_purge_days: 90,
-            close_to_tray: true,
+            close_to_tray: zann_ui_core::settings::CLOSE_TO_TRAY_DEFAULT,
             close_to_tray_notice_shown: false,
         }
     }

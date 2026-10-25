@@ -6,7 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use cosmic::iced::{event, mouse, Alignment, Event, Length, Subscription, Task};
+use cosmic::iced::{event, keyboard, mouse, Alignment, Event, Length, Subscription, Task};
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
 use cosmic::{theme, widget, Element};
@@ -16,9 +16,11 @@ use zann_ui_core::{
 };
 
 use super::detail::{self, Detail};
+use super::editor::{self, SaveRequest};
+use super::history;
 use crate::backend::local::{self, ItemsPage};
 use crate::backend::off_thread;
-use crate::i18n::{has, t, t_args};
+use crate::i18n::{t, t_args};
 use crate::session::Session;
 
 /// Schema icon names mapped onto the freedesktop names COSMIC ships.
@@ -84,6 +86,7 @@ pub struct State {
     next_cursor: Option<String>,
     total: u64,
     query: String,
+    search_id: cosmic::iced::widget::Id,
     /// The query that produced `items`. While a newer query is waiting for the
     /// backend, the old page is narrowed locally for responsive typing.
     applied_query: String,
@@ -91,6 +94,9 @@ pub struct State {
     searching: bool,
     nav: nav_bar::Model,
     detail: Option<Detail>,
+    editor: Option<editor::State>,
+    history: Option<history::State>,
+    editing_generation: u64,
     busy: bool,
     error: Option<String>,
     last_activity: Instant,
@@ -121,6 +127,7 @@ pub enum Message {
     },
     QueryInput(String),
     ClearQuery,
+    EscapeClearQuery,
     ListScrolled {
         remaining: f32,
         viewport_height: f32,
@@ -139,6 +146,14 @@ pub enum Message {
     Select(String),
     Loaded(Result<Detail, String>),
     Detail(detail::Message),
+    OpenCreate,
+    OpenEdit,
+    Editor(editor::Message),
+    OpenHistory,
+    History(history::Message),
+    HistoryResponse(u64, history::Message),
+    Saved(u64, Result<Detail, String>),
+    RefreshedAfterSave(u64, u64, Result<ItemsPage, String>),
     ClearCopied(u64),
     HideRevealed(u64),
     /// The idle timer expired; whether that locks depends on the answer below.
@@ -172,11 +187,15 @@ impl State {
             next_cursor: None,
             total: 0,
             query: String::new(),
+            search_id: cosmic::iced::widget::Id::unique(),
             applied_query: String::new(),
             list_generation: 0,
             searching: false,
             nav: nav_bar::Model::default(),
             detail: None,
+            editor: None,
+            history: None,
+            editing_generation: 0,
             busy: false,
             error: sync_error.map(|err| t_args("items.syncFailed", &[("error", &err)])),
             last_activity: Instant::now(),
@@ -251,6 +270,12 @@ impl State {
         self.temporary_reveal = held;
     }
 
+    pub fn hide_editor_revealed(&mut self) {
+        if let Some(editor) = self.editor.as_mut() {
+            editor.hide_revealed();
+        }
+    }
+
     pub fn record_activity(&mut self) {
         self.last_activity = Instant::now();
     }
@@ -267,6 +292,9 @@ impl State {
         self.query.clear();
         self.applied_query.clear();
         self.detail = None;
+        self.editor = None;
+        self.history = None;
+        self.editing_generation = crate::backend::next_view_request();
         self.apply_page(page, true);
         self.rebuild_nav();
     }
@@ -291,6 +319,14 @@ impl State {
         .collect()
     }
 
+    pub fn editing_request_id(&self) -> u64 {
+        self.editing_generation
+    }
+
+    pub fn history(&self) -> Option<&history::State> {
+        self.history.as_ref()
+    }
+
     pub fn detail(&self) -> Option<&Detail> {
         self.detail.as_ref()
     }
@@ -304,16 +340,28 @@ impl State {
     }
 
     pub fn subscription(&self) -> Subscription<Message> {
-        let mut subscriptions = Vec::with_capacity(3);
+        let mut subscriptions = Vec::with_capacity(4);
         if self.auto_lock_minutes > 0 {
             subscriptions.push(cosmic::iced::time::every(IDLE_TICK).map(|_| Message::IdleCheck));
         }
 
         // One-time codes roll over every period, so a shown one redraws each
         // second while the detail column is populated.
-        if self.detail.as_ref().is_some_and(Detail::has_totp) {
+        if self.detail.as_ref().is_some_and(Detail::has_totp)
+            || self.history.as_ref().is_some_and(history::State::has_totp)
+        {
             subscriptions
                 .push(cosmic::iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick));
+        }
+
+        if !self.query.is_empty() && self.editor.is_none() && self.history.is_none() {
+            subscriptions.push(event::listen_with(|event, _, _| match event {
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                    ..
+                }) => Some(Message::EscapeClearQuery),
+                _ => None,
+            }));
         }
 
         // Keep tracking after the pointer leaves the five-pixel handle.
@@ -341,6 +389,13 @@ impl State {
                 | Message::SearchReady(_)
                 | Message::SearchLoaded { .. }
                 | Message::MoreLoaded { .. }
+                | Message::RefreshedAfterSave(..)
+                | Message::HistoryResponse(..)
+                | Message::History(
+                    history::Message::EntriesLoaded(_)
+                        | history::Message::VersionLoaded { .. }
+                        | history::Message::Restored(_),
+                )
                 | Message::ListScrolled { .. }
                 | Message::IdleCheck
                 | Message::KeyPresent(_)
@@ -361,7 +416,7 @@ impl State {
             Message::VaultsLoaded(Err(err)) => self.error = Some(err),
 
             Message::SelectVault(index) => {
-                if self.busy || self.searching {
+                if self.busy || self.searching || self.editor.is_some() || self.history.is_some() {
                     return Outcome::None;
                 }
                 let Some(vault) = self.vaults.get(index) else {
@@ -397,6 +452,15 @@ impl State {
             Message::QueryInput(value) => return self.schedule_search(value),
 
             Message::ClearQuery => return self.schedule_search(String::new()),
+
+            Message::EscapeClearQuery => {
+                let search = self.schedule_search(String::new());
+                let focus = widget::text_input::focus(self.search_id.clone());
+                return match search {
+                    Outcome::Task(task) => Outcome::Task(Task::batch([task, focus])),
+                    _ => Outcome::Task(focus),
+                };
+            }
 
             Message::ListScrolled {
                 remaining,
@@ -473,6 +537,9 @@ impl State {
             }
 
             Message::Select(id) => {
+                if self.editor.is_some() || self.history.is_some() {
+                    return Outcome::None;
+                }
                 let facade = session.facade();
                 return Outcome::Task(cosmic::task::future(async move {
                     Message::Loaded(
@@ -485,6 +552,17 @@ impl State {
             Message::Loaded(Ok(detail)) => self.detail = Some(detail),
 
             Message::Loaded(Err(err)) => self.error = Some(err),
+
+            message @ (Message::OpenCreate
+            | Message::OpenEdit
+            | Message::OpenHistory
+            | Message::Editor(_)
+            | Message::History(_)
+            | Message::HistoryResponse(..)
+            | Message::Saved(..)
+            | Message::RefreshedAfterSave(..)) => {
+                return self.update_editing(message, session);
+            }
 
             Message::Detail(detail::Message::Copy { index, value }) => {
                 if let Some(detail) = self.detail.as_mut() {
@@ -540,6 +618,10 @@ impl State {
                         field.revealed = false;
                     }
                 }
+                if let Some(history) = self.history.as_mut() {
+                    history.hide_revealed();
+                }
+                self.hide_editor_revealed();
             }
 
             Message::IdleCheck => {
@@ -656,7 +738,7 @@ impl State {
     }
 
     fn schedule_search(&mut self, value: String) -> Outcome {
-        if self.busy || value == self.query {
+        if self.busy || self.editor.is_some() || self.history.is_some() || value == self.query {
             return Outcome::None;
         }
         self.query = value;
@@ -681,6 +763,8 @@ impl State {
         self.next_cursor.is_some()
             && !self.busy
             && !self.searching
+            && self.editor.is_none()
+            && self.history.is_none()
             && self.items.len() < ITEM_CACHE_LIMIT
     }
 
@@ -715,6 +799,16 @@ impl State {
                 }
             })
     }
+
+    fn preferred_create_type(&self) -> String {
+        let selected = self.selected_category();
+        category_views(&self.counts, self.vault_scope())
+            .into_iter()
+            .find(|view| selected.as_deref() == Some(view.id.as_str()))
+            .and_then(|view| view.filter.and_then(|filter| filter.type_ids))
+            .and_then(|types| types.into_iter().next())
+            .unwrap_or_else(|| "login".to_string())
+    }
 }
 
 mod view;
@@ -735,3 +829,5 @@ impl zann_ui_core::ItemLike for ItemSummaryView<'_> {
         self.0.deleted
     }
 }
+
+mod editing;

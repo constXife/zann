@@ -84,7 +84,16 @@ impl State {
                     }),
                 ),
             );
-        widget::settings::view_column(vec![appearance.into()]).into()
+        let behavior = widget::settings::section()
+            .title(t("settings.general.behavior"))
+            .add(
+                widget::settings::item::builder(t("settings.general.closeToTray"))
+                    .description(t("settings.general.closeToTrayHelp"))
+                    .toggler(self.close_to_tray, |value| {
+                        Message::Set(Change::CloseToTray(value))
+                    }),
+            );
+        widget::settings::view_column(vec![appearance.into(), behavior.into()]).into()
     }
 
     fn security(&self) -> Element<'_, Message> {
