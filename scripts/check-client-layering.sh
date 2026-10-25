@@ -51,7 +51,7 @@ in_list() {
 
 failed=0
 pattern=$(printf '%s::|' "${forbidden[@]}")
-pattern="zann_client::(?!app::local::)|(${pattern%|})"
+pattern="zann_client::|(${pattern%|})"
 
 # ---- rule 1: no reaching past the facade -----------------------------------
 seen_imports=()
@@ -61,11 +61,13 @@ while IFS= read -r file; do
   # Not `grep -q` here: it exits on the first match, the upstream grep takes a
   # SIGPIPE, and `set -o pipefail` then reports the whole pipeline as failed —
   # which reads as "no violation" and lets real ones through.
-  if grep -vE '^\s*(//|\*)' "$file" | rg --pcre2 "$pattern" >/dev/null; then
+  # Remove only the canonical data/port prefix; another forbidden import on
+  # the same line must still be detected. No additional runner tools required.
+  if grep -vE '^\s*(//|\*)' "$file" | sed 's/zann_client::app::local:://g' | grep -E "$pattern" >/dev/null; then
     seen_imports+=("$file")
     if ! in_list "$file" "${allow_imports[@]}"; then
       echo "error: $file reaches beyond an application port" >&2
-      grep -nvE '^\s*(//|\*)' "$file" | rg --pcre2 "$pattern" | head -3 >&2
+      grep -nvE '^\s*(//|\*)' "$file" | sed 's/zann_client::app::local:://g' | grep -E "$pattern" | head -3 >&2
       failed=1
     fi
   fi
