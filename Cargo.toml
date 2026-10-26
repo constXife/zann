@@ -17,3 +17,21 @@ exclude = [
   "tools/mock-server",
 ]
 resolver = "2"
+
+# Full debuginfo for ten crates and their dependency tree means tens of
+# gigabytes in target/debug/deps and extra linker work on every rebuild.
+# line-tables-only keeps readable backtraces (file + line) but drops type and
+# variable descriptions: a debugger shows less, a panic shows the same. For
+# step-by-step debugging, temporarily switch back to debug = true.
+[profile.dev]
+debug = "line-tables-only"
+# Debug sections stay in the neighbouring .o files instead of being copied
+# into the final binary: the linker has nothing to copy, which is much cheaper.
+split-debuginfo = "unpacked"
+
+# Dependencies are rarely rebuilt, so keeping them optimized is cheap: tests
+# and dev builds run third-party code (crypto, sqlite, tokio) at normal speed
+# instead of debug speed. The cost is one full rebuild when this is introduced.
+[profile.dev.package."*"]
+opt-level = 2
+debug = false
