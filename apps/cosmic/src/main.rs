@@ -93,6 +93,7 @@ enum Message {
     OpenSettings,
     Quit,
     CloseRequested,
+    WindowClosed(window::Id),
     Tray(tray::Event),
     ShowWindow(Option<String>),
     Unfocused,
@@ -447,6 +448,18 @@ impl cosmic::Application for App {
         cosmic::task::message(Message::ShowWindow(message.activation_token))
     }
 
+    fn on_close_requested(&self, id: window::Id) -> Option<Self::Message> {
+        // In this libcosmic revision, SurfaceClosed calls this hook after
+        // Iced removes the window, despite the hook's name.
+        Some(Message::WindowClosed(id))
+    }
+
+    fn on_app_exit(&mut self) -> Option<Self::Message> {
+        // The COSMIC header close button calls this hook directly; it does
+        // not emit the compositor's Window::CloseRequested event.
+        Some(Message::CloseRequested)
+    }
+
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
         // Effects and policies that leave a screen are the shell's, whoever
         // asked for them.
@@ -467,6 +480,12 @@ impl cosmic::Application for App {
                 } else {
                     self.quit()
                 };
+            }
+            Message::WindowClosed(id) => {
+                if self.core.main_window_id() == Some(id) {
+                    self.core.set_main_window_id(None);
+                }
+                return Task::none();
             }
             Message::Tray(tray::Event::Ready) => {
                 self.tray_available = true;
@@ -660,6 +679,7 @@ impl cosmic::Application for App {
                 | Message::OpenSettings
                 | Message::Quit
                 | Message::CloseRequested
+                | Message::WindowClosed(_)
                 | Message::Tray(_)
                 | Message::ShowWindow(_)
                 | Message::Unfocused
