@@ -196,7 +196,21 @@ pub use remembered::{HardwareKeyEntry, RememberedUnlock, UnlockError, UnlockSour
 pub use keyring_store::{KeyringKeystore, KeyringLegacySecretSource, KeyringSecretStore};
 pub use unsupported::UnsupportedKeystore;
 
+#[cfg(any(
+    test,
+    all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    )
+))]
 const DWK_SERVICE: &str = "zann";
+#[cfg(any(
+    test,
+    all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    )
+))]
 const DWK_ACCOUNT: &str = "dwk";
 
 /// Select the generic OS secret-store backend for the current platform.
