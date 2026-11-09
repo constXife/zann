@@ -14,3 +14,6 @@ mod remote_master_password;
 mod snapshots;
 #[path = "local_vault/verify.rs"]
 mod verify;
+
+#[path = "local_vault/hardware_unlock.rs"]
+mod hardware_unlock;

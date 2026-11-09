@@ -38,6 +38,7 @@ does not authorize another temporary implementation.
 | KDF, encryption and payload integrity | `zann-crypto` | server and application services | reviewed algorithms and versioned parameter types | implementations or algorithm wrappers in CLI, Tauri, COSMIC, `zann-client`, `zann-ffi` or `zann-db` |
 | Database persistence | `zann-db` | local application/session services | repository transactions, migrations, streaming readers/writers | SQL and database rows in shells, flows, presentation or protocol |
 | Credential storage implementation | `zann-keystore` | `CredentialStore` adapter | platform keystore backends | direct keyring calls in shells; credentials in config or logs |
+| Device unlock ports and hardware enrollment | `zann-keystore` | `zann-client-sqlite::local_vault` via injected `Keystore` and `HardwareAuthenticator` | platform adapters; opt-in test fake | raw HID calls or unlock policy in shells |
 | Credential lifecycle and port | `zann-client::credentials` | remote auth and application session | injected `CredentialStore`, clock and revocation policy | token refresh/selection/serialization in CLI, Tauri, COSMIC or FFI |
 | Paths and persisted client config | `zann-client::config` | all client shells and application services | injected `ClientPaths`, storage backend, versioned migration | independent writers for shared config; implicit home lookup below the composition root |
 | Server wire contracts | `zann-core::api` **(interim)**; `zann-protocol` **(planned)** | server handlers and the private `zann-client` transport | additive/versioned serde DTOs and explicit compatibility adapters | local wire DTOs, route strings or response decoding in client shells; transport or persistence in protocol types |
@@ -620,6 +621,16 @@ SQLx row decoding and JSON column envelopes are owned by `zann-db`. The local
 vault port is `zann-client::app::local::LocalVaultService`; its SQLite/native
 implementation is `zann-client-sqlite::local_vault`. The optional `local-vault`
 feature composes keystore unlocking and backup/snapshot/verify implementations.
+`LocalVault::open` requires explicit `Arc<dyn Keystore>` and
+`Arc<dyn HardwareAuthenticator>` ports. The native URI/path open factories
+compose desktop defaults once; unlock operations never select backends.
+`zann-keystore/remembered` and `fido` are platform-neutral; `secret-store` and
+`ctap-hid` select the OS implementations. `test-support` exposes a deterministic
+fake and is never selected by production composition. Enrollment creates a
+non-serializable pending credential (Touch 1), then derives and verifies its
+DWK before wrapping the master key (Touch 2). The local service and FFI expose
+an inter-touch progress callback. `LocalError::Unlock` preserves `{ kind,
+message }` and its source; FFI projects the two fields without parsing text.
 The default sync adapter remains free of keystore, keyring and FIDO dependencies,
 with a dependency-closure contract guarding that boundary. COSMIC has no direct
 FFI or database dependency; UniFFI converts records and forwards the same port.

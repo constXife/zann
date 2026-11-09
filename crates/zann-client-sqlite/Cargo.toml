@@ -33,6 +33,7 @@ local-vault = [
 ]
 
 [dev-dependencies]
+zann-keystore = { path = "../zann-keystore", default-features = false, features = ["test-support"] }
 chrono = "0.4"
 serde_json = "1"
 tempfile = "3"

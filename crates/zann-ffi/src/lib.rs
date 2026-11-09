@@ -17,6 +17,8 @@ pub enum CoreError {
     Service(String),
     #[error("unimplemented: {0}")]
     Unimplemented(String),
+    #[error("unlock {kind}: {message}")]
+    Unlock { kind: String, message: String },
     #[error("sync {kind}: {message}")]
     Sync { kind: String, message: String },
 }
@@ -32,10 +34,17 @@ impl From<zann_client::app::local::LocalError> for CoreError {
             LocalError::InvalidArgument(message) => Self::InvalidArgument(message),
             LocalError::Service(message) => Self::Service(message),
             LocalError::Unimplemented(message) => Self::Unimplemented(message),
+            LocalError::Unlock { kind, message, .. } => Self::Unlock { kind, message },
             LocalError::Sync { kind, message } => Self::Sync { kind, message },
         }
     }
 }
+/// Delivered between Touch 1 and Touch 2 on the blocking caller thread.
+#[uniffi::export(callback_interface)]
+pub trait HardwareEnrollmentProgress: Send + Sync {
+    fn credential_created(&self);
+}
+
 #[derive(uniffi::Object)]
 pub struct CoreFacade {
     inner: Arc<dyn LocalVaultService>,
@@ -66,9 +75,13 @@ impl CoreFacade {
     pub fn hardware_key_present(&self) -> CoreResult<bool> {
         self.inner.hardware_key_present().map_err(Into::into)
     }
-    pub fn enroll_hardware_key(&self, label: String) -> CoreResult<HardwareKeyFfi> {
+    pub fn enroll_hardware_key(
+        &self,
+        label: String,
+        progress: Box<dyn HardwareEnrollmentProgress>,
+    ) -> CoreResult<HardwareKeyFfi> {
         self.inner
-            .enroll_hardware_key(label)
+            .enroll_hardware_key(label, &|| progress.credential_created())
             .map(|value| value.into())
             .map_err(Into::into)
     }

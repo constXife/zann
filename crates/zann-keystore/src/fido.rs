@@ -10,13 +10,13 @@
 //! password, so a PIN on every unlock is the wrong trade. The token's own
 //! discoverable-credential slots stay free for other uses.
 
+use crate::{AuthenticatorInfo, FidoError, HardwareAuthenticator, HardwareCredential};
 use ctap_hid_fido2::fidokey::{
     get_assertion::get_assertion_params::{Extension as Aext, GetAssertionArgsBuilder},
     make_credential::make_credential_params::{Extension as Mext, MakeCredentialArgsBuilder},
     FidoKeyHid,
 };
 use ctap_hid_fido2::{Cfg, FidoKeyHidFactory};
-use serde::{Deserialize, Serialize};
 
 /// Relying party the credentials are scoped to. Changing this orphans every
 /// enrolled key, so it is deliberately not configurable.
@@ -29,48 +29,6 @@ const DWK_CONTEXT: &str = "zann 2026-08-08 fido2 device wrapping key";
 /// UI timeout has to be at least this generous.
 pub const TOUCH_TIMEOUT_SECS: u64 = 30;
 
-/// What has to be remembered to derive a DWK again. Not secret.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct HardwareCredential {
-    pub credential_id: Vec<u8>,
-    pub salt: [u8; 32],
-}
-
-#[derive(thiserror::Error, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum FidoError {
-    #[error("no authenticator connected")]
-    NoDevice,
-    #[error("the connected authenticator is not enrolled for this vault")]
-    NotEnrolled,
-    #[error("no touch received")]
-    Timeout,
-    #[error("the authenticator is in use by another application")]
-    Busy,
-    #[error("this authenticator does not support hmac-secret")]
-    NoHmacSecret,
-    #[error("the authenticator is connected but not accessible; check the udev rules")]
-    NotAccessible,
-    #[error("authenticator error: {message}")]
-    Internal { message: String },
-}
-
-impl FidoError {
-    /// Stable identifier for the UI to translate; the variants map one-to-one
-    /// onto the states a user can actually act on.
-    #[must_use]
-    pub const fn kind(&self) -> &'static str {
-        match self {
-            Self::NoDevice => "hardware_key_absent",
-            Self::NotEnrolled => "hardware_key_not_enrolled",
-            Self::Timeout => "hardware_key_timeout",
-            Self::Busy => "hardware_key_busy",
-            Self::NoHmacSecret => "hardware_key_unsupported",
-            Self::NotAccessible => "hardware_key_not_accessible",
-            Self::Internal { .. } => "hardware_key_error",
-        }
-    }
-}
-
 fn cfg() -> Cfg {
     let mut cfg = Cfg::init();
     // The crate otherwise prints "- Touch the sensor..." straight to stdout.
@@ -81,7 +39,15 @@ fn cfg() -> Cfg {
 }
 
 fn open() -> Result<FidoKeyHid, FidoError> {
-    FidoKeyHidFactory::create(&cfg()).map_err(|err| classify(&err.to_string()))
+    FidoKeyHidFactory::create(&cfg()).map_err(backend_error)
+}
+
+fn backend_error(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> FidoError {
+    let source = error.into();
+    FidoError::Backend {
+        kind: classify(&source.to_string()).kind(),
+        source,
+    }
 }
 
 /// The crate surfaces CTAP status codes only inside formatted messages, so the
@@ -110,43 +76,77 @@ fn classify(message: &str) -> FidoError {
     }
 }
 
-/// Whether any authenticator is reachable at all. Distinguishes "nothing
-/// plugged in" from "plugged in but the process cannot open it", which are
-/// different problems with different fixes.
-pub fn authenticator_status() -> Result<(), FidoError> {
-    if ctap_hid_fido2::get_fidokey_devices().is_empty() {
-        return Err(FidoError::NoDevice);
+/// Raw HID adapter. The port and its DTOs are available on every platform.
+pub struct CtapHidAuthenticator;
+
+impl HardwareAuthenticator for CtapHidAuthenticator {
+    fn supported(&self) -> bool {
+        true
     }
-    open().map(|_| ())
-}
 
-/// Create a credential on the connected authenticator and return it together
-/// with the key it derives. Costs two touches: one to create, one to prove the
-/// authenticator really honours `hmac-secret`, so a token that silently ignored
-/// the extension fails here rather than at the first unlock.
-pub fn enroll(salt: [u8; 32]) -> Result<(HardwareCredential, [u8; 32]), FidoError> {
-    let device = open()?;
-    let args = MakeCredentialArgsBuilder::new(RP_ID, &challenge())
-        .without_pin_and_uv()
-        .extensions(&[Mext::HmacSecret(Some(true))])
-        .build();
-    let attestation = device
-        .make_credential_with_args(&args)
-        .map_err(|err| classify(&err.to_string()))?;
+    fn status(&self) -> Result<AuthenticatorInfo, FidoError> {
+        let devices = ctap_hid_fido2::get_fidokey_devices();
+        let device = match devices.as_slice() {
+            [] => return Err(FidoError::NoDevice),
+            [device] => device,
+            _ => {
+                return Err(FidoError::Internal {
+                    message: "multiple authenticators connected".into(),
+                })
+            }
+        };
+        let key = FidoKeyHidFactory::create_by_params(std::slice::from_ref(&device.param), &cfg())
+            .map_err(backend_error)?;
+        let info = key.get_info().map_err(backend_error)?;
+        Ok(AuthenticatorInfo {
+            product_name: (!device.product_string.trim().is_empty())
+                .then(|| device.product_string.clone()),
+            hmac_secret: info
+                .extensions
+                .iter()
+                .any(|extension| extension == "hmac-secret"),
+        })
+    }
 
-    let credential = HardwareCredential {
-        credential_id: attestation.credential_descriptor.id.clone(),
-        salt,
-    };
+    /// Touch 1: create a credential. Confirmation is a separate derivation.
+    fn create_credential(&self, salt: [u8; 32]) -> Result<HardwareCredential, FidoError> {
+        let device = open()?;
+        let args = MakeCredentialArgsBuilder::new(RP_ID, &challenge())
+            .without_pin_and_uv()
+            .extensions(&[Mext::HmacSecret(Some(true))])
+            .build();
+        let attestation = device
+            .make_credential_with_args(&args)
+            .map_err(backend_error)?;
 
-    let dwk = derive_dwk_with(&device, &credential)?;
-    Ok((credential, dwk))
-}
+        let credential = HardwareCredential {
+            credential_id: attestation.credential_descriptor.id.clone(),
+            salt,
+        };
 
-/// Derive the device wrapping key. Requires a touch.
-pub fn derive_dwk(credential: &HardwareCredential) -> Result<[u8; 32], FidoError> {
-    let device = open()?;
-    derive_dwk_with(&device, credential)
+        Ok(credential)
+    }
+
+    /// Derive the device wrapping key. Requires a touch.
+    fn derive_dwk(&self, credential: &HardwareCredential) -> Result<[u8; 32], FidoError> {
+        let device = open()?;
+        derive_dwk_with(&device, credential)
+    }
+
+    /// Whether *this* credential's authenticator is connected, without asking the
+    /// user for anything. A silent assertion answers in ~170ms and, unlike probing
+    /// for any FIDO device, cannot be satisfied by some unrelated token.
+    fn is_present(&self, credential: &HardwareCredential) -> bool {
+        let Ok(device) = open() else {
+            return false;
+        };
+        let args = GetAssertionArgsBuilder::new(RP_ID, &challenge())
+            .without_pin_and_uv()
+            .without_up()
+            .credential_id(&credential.credential_id)
+            .build();
+        device.get_assertion_with_args(&args).is_ok()
+    }
 }
 
 fn derive_dwk_with(
@@ -160,7 +160,7 @@ fn derive_dwk_with(
         .build();
     let assertions = device
         .get_assertion_with_args(&args)
-        .map_err(|err| classify(&err.to_string()))?;
+        .map_err(backend_error)?;
 
     let output = assertions
         .iter()
@@ -172,22 +172,6 @@ fn derive_dwk_with(
         .ok_or(FidoError::NoHmacSecret)?;
 
     Ok(derive_key(&output))
-}
-
-/// Whether *this* credential's authenticator is connected, without asking the
-/// user for anything. A silent assertion answers in ~170ms and, unlike probing
-/// for any FIDO device, cannot be satisfied by some unrelated token.
-#[must_use]
-pub fn is_present(credential: &HardwareCredential) -> bool {
-    let Ok(device) = open() else {
-        return false;
-    };
-    let args = GetAssertionArgsBuilder::new(RP_ID, &challenge())
-        .without_pin_and_uv()
-        .without_up()
-        .credential_id(&credential.credential_id)
-        .build();
-    device.get_assertion_with_args(&args).is_ok()
 }
 
 /// The authenticator signs this, and nobody verifies the signature: the secret
@@ -208,21 +192,31 @@ mod tests {
     #[test]
     fn ctap_status_codes_map_to_actionable_errors() {
         assert_eq!(
-            classify("response_status err = 0x2E CTAP2_ERR_NO_CREDENTIALS"),
-            FidoError::NotEnrolled
+            classify("response_status err = 0x2E CTAP2_ERR_NO_CREDENTIALS").kind(),
+            FidoError::NotEnrolled.kind()
         );
         assert_eq!(
-            classify("response_status err = 0x27 CTAP2_ERR_OPERATION_DENIED"),
-            FidoError::Timeout
+            classify("response_status err = 0x27 CTAP2_ERR_OPERATION_DENIED").kind(),
+            FidoError::Timeout.kind()
         );
         assert_eq!(
-            classify("response_status err = 0x33 CTAP2_ERR_UNSUPPORTED_EXTENSION"),
-            FidoError::NoHmacSecret
+            classify("response_status err = 0x33 CTAP2_ERR_UNSUPPORTED_EXTENSION").kind(),
+            FidoError::NoHmacSecret.kind()
         );
         assert!(matches!(
             classify("something we have never seen"),
             FidoError::Internal { .. }
         ));
+    }
+
+    #[test]
+    fn classified_backend_errors_keep_the_original_cause() {
+        let error = backend_error(std::io::Error::other(
+            "response_status err = 0x27 CTAP2_ERR_OPERATION_DENIED",
+        ));
+        assert_eq!(error.kind(), "hardware_key_timeout");
+        let source = std::error::Error::source(&error).expect("original cause");
+        assert!(source.downcast_ref::<std::io::Error>().is_some());
     }
 
     #[test]

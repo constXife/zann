@@ -102,6 +102,20 @@
   "feature_exceptions": [],
   "feature_contracts": [
     {
+      "package": "zann-keystore",
+      "feature": "fido",
+      "required_members": [],
+      "forbidden_members": ["ctap-hid", "secret-store"],
+      "forbidden_packages": ["keyring", "ctap-hid-fido2", "hidapi"]
+    },
+    {
+      "package": "zann-keystore",
+      "feature": "remembered",
+      "required_members": ["fido", "dep:zann-crypto"],
+      "forbidden_members": ["ctap-hid", "secret-store"],
+      "forbidden_packages": ["keyring", "ctap-hid-fido2", "hidapi"]
+    },
+    {
       "package": "zann-cli",
       "feature": "default",
       "required_members": [],
