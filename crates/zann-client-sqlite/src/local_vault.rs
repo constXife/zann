@@ -26,12 +26,15 @@ use zann_db::services::LocalServices;
 use zann_db::SqliteFileLocation;
 use zann_db::{connect_sqlite_file_with_max, migrate_local, SqlitePool};
 use zann_keystore::{
-    default_keystore, RememberedUnlock as RememberedUnlockStore, UnlockError, UnlockSource,
+    default_authenticator, default_keystore, HardwareAuthenticator, Keystore,
+    RememberedUnlock as RememberedUnlockStore, UnlockError, UnlockSource,
 };
 
 use zann_client::app::local::*;
 
 pub struct LocalVault {
+    keystore: Arc<dyn Keystore>,
+    authenticator: Arc<dyn HardwareAuthenticator>,
     runtime: Runtime,
     /// Behind a lock because a snapshot restore replaces the database under it.
     /// `SqlitePool` is a handle, so reads take a clone rather than hold the lock
@@ -247,28 +250,47 @@ pub fn open_vault_at_file_location(location: &SqliteFileLocation) -> LocalResult
     open_vault_at_location(location.clone())
 }
 
+// Desktop composition used by the URI/path convenience entry points above.
 fn open_vault_at_location(location: SqliteFileLocation) -> LocalResult<Arc<LocalVault>> {
-    let runtime = Runtime::new().map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
-    let root = location.root().to_path_buf();
-    let database_path = location.path().to_path_buf();
-    let pool = runtime
-        .block_on(connect_sqlite_file_with_max(&location, 5))
-        .map_err(|err| LocalError::Service(err.to_string()))?;
-    runtime
-        .block_on(migrate_local(&pool))
-        .map_err(|err| LocalError::Service(err.to_string()))?;
-    let identity = load_or_create_identity_config(&root)?;
-    let storage_id = resolve_storage_id(&runtime, &pool)?;
-    Ok(Arc::new(LocalVault {
-        runtime,
-        pool: Mutex::new(pool),
-        database_path,
-        storage_id: Mutex::new(storage_id),
-        vault_id: Mutex::new(None),
-        master_key: Mutex::new(None),
-        identity: Mutex::new(identity),
-        root,
-    }))
+    LocalVault::open(
+        location,
+        default_keystore().into(),
+        default_authenticator().into(),
+    )
+}
+
+impl LocalVault {
+    /// Compose a vault with platform-provided ports. No hardware or OS-store
+    /// discovery occurs during construction.
+    pub fn open(
+        location: SqliteFileLocation,
+        keystore: Arc<dyn Keystore>,
+        authenticator: Arc<dyn HardwareAuthenticator>,
+    ) -> LocalResult<Arc<Self>> {
+        let runtime = Runtime::new().map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
+        let root = location.root().to_path_buf();
+        let database_path = location.path().to_path_buf();
+        let pool = runtime
+            .block_on(connect_sqlite_file_with_max(&location, 5))
+            .map_err(|err| LocalError::Service(err.to_string()))?;
+        runtime
+            .block_on(migrate_local(&pool))
+            .map_err(|err| LocalError::Service(err.to_string()))?;
+        let identity = load_or_create_identity_config(&root)?;
+        let storage_id = resolve_storage_id(&runtime, &pool)?;
+        Ok(Arc::new(LocalVault {
+            keystore,
+            authenticator,
+            runtime,
+            pool: Mutex::new(pool),
+            database_path,
+            storage_id: Mutex::new(storage_id),
+            vault_id: Mutex::new(None),
+            master_key: Mutex::new(None),
+            identity: Mutex::new(identity),
+            root,
+        }))
+    }
 }
 
 fn chrono_datetime_from_rfc3339(
@@ -280,9 +302,10 @@ fn chrono_datetime_from_rfc3339(
 }
 
 fn unlock_error(err: UnlockError) -> LocalError {
-    match err {
-        UnlockError::NotRemembered => LocalError::InvalidArgument(err.kind().to_string()),
-        other => LocalError::Service(format!("{}: {other}", other.kind())),
+    LocalError::Unlock {
+        kind: err.kind().to_string(),
+        message: err.to_string(),
+        source: Box::new(err),
     }
 }
 
@@ -370,6 +393,7 @@ impl From<Retention> for crate::maintenance::RetentionPolicy {
     }
 }
 
+mod enrollment;
 mod unlock;
 
 mod session;
@@ -407,8 +431,12 @@ impl LocalVaultService for LocalVault {
     fn hardware_key_present(&self) -> LocalResult<bool> {
         LocalVault::hardware_key_present(self)
     }
-    fn enroll_hardware_key(&self, label: String) -> LocalResult<HardwareKey> {
-        LocalVault::enroll_hardware_key(self, label)
+    fn enroll_hardware_key(
+        &self,
+        label: String,
+        on_credential_created: &dyn Fn(),
+    ) -> LocalResult<HardwareKey> {
+        LocalVault::enroll_hardware_key(self, label, on_credential_created)
     }
     fn remove_hardware_key(&self, credential_id: String) -> LocalResult<()> {
         LocalVault::remove_hardware_key(self, credential_id)

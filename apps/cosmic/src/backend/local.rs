@@ -223,7 +223,7 @@ pub fn hardware_key_present(facade: &Facade) -> Result<bool, String> {
 /// Two touches: create the credential, then prove it yields a secret.
 pub fn enroll_hardware_key(facade: &Facade, label: String) -> Result<HardwareKey, String> {
     facade
-        .enroll_hardware_key(label)
+        .enroll_hardware_key(label, &|| {})
         .map_err(|err| err.to_string())
 }
 

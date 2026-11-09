@@ -7,14 +7,16 @@ license = "MIT"
 [features]
 default = ["full"]
 # The complete device-unlock surface used by the existing desktop and FFI
-# consumers. Keep this as the default for backwards compatibility.
-full = ["remembered"]
+# composition roots. Portable consumers select remembered without defaults.
+full = ["remembered", "secret-store", "ctap-hid"]
 # Generic OS credential storage plus the legacy DWK compatibility adapter.
 # This deliberately excludes remembered-unlock and raw-HID/FIDO support.
 secret-store = ["dep:base64", "dep:keyring"]
-fido = ["dep:blake3", "dep:ctap-hid-fido2"]
+fido = []
+ctap-hid = ["fido", "dep:blake3", "dep:ctap-hid-fido2"]
+test-support = ["fido", "dep:blake3"]
 remembered = [
-  "secret-store",
+  "dep:base64",
   "fido",
   "dep:rand",
   "dep:serde_json",
@@ -40,5 +42,6 @@ ctap-hid-fido2 = { version = "3.5", optional = true }
 keyring = { version = "2", optional = true }
 
 [dev-dependencies]
+blake3 = "1"
 rand = "0.8"
 serde_json = "1"

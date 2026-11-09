@@ -8,6 +8,10 @@ fn ffi_projects_local_commands_results_and_errors() {
         core.item_get("invalid".into()),
         Err(CoreError::Locked)
     ));
+    assert!(matches!(
+        core.unlock_remembered(),
+        Err(CoreError::Unlock { kind, .. }) if kind == "keystore_not_found"
+    ));
     core.initialize_master_password("adapter-test-password".into())
         .expect("initialize");
     let payload = r#"{"v":1,"typeId":"login","fields":{"password":{"kind":"password","value":"test-secret"}}}"#;

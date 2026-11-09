@@ -18,6 +18,9 @@ use zann_crypto::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
 
 use crate::{Keystore, KeystoreError};
 
+mod hardware;
+pub use hardware::PendingHardwareKey;
+
 /// The remembered unlock lives in its own file, not in `config.json`, because
 /// that one is written by several typed structs (the CLI, the client, the
 /// desktop) and serde drops fields none of them model — an enrolment made by
@@ -62,19 +65,16 @@ pub struct RememberedUnlock {
     pub wrapped_master_key: Option<String>,
 }
 
-#[derive(thiserror::Error, Debug, Clone)]
+#[derive(thiserror::Error, Debug)]
 pub enum UnlockError {
     #[error("no remembered unlock on this device")]
     NotRemembered,
     #[error("keystore: {0}")]
     Keystore(#[from] KeystoreError),
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[error("hardware key: {0}")]
-    HardwareKey(#[from] crate::fido::FidoError),
+    HardwareKey(#[from] crate::FidoError),
     #[error("stored unlock data is corrupt: {message}")]
     Corrupt { message: String },
-    #[error("hardware keys are not supported on this platform yet")]
-    UnsupportedPlatform,
 }
 
 impl UnlockError {
@@ -92,10 +92,8 @@ impl UnlockError {
                 KeystoreError::SecretTooLarge { .. } => "keystore_secret_too_large",
                 KeystoreError::Internal { .. } => "keystore_unavailable",
             },
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
             Self::HardwareKey(err) => err.kind(),
             Self::Corrupt { .. } => "keystore_error",
-            Self::UnsupportedPlatform => "hardware_key_unsupported_platform",
         }
     }
 }
@@ -243,106 +241,6 @@ impl RememberedUnlock {
             self.unlock_source = UnlockSource::Keystore;
         }
     }
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-impl RememberedUnlock {
-    /// Enrol the connected authenticator. Two touches; see [`crate::fido`].
-    /// `enrolled_at` is passed in so this crate needs no clock.
-    pub fn enroll_hardware_key(
-        &mut self,
-        master_key: &[u8; 32],
-        label: &str,
-        enrolled_at: String,
-    ) -> Result<HardwareKeyEntry, UnlockError> {
-        use base64::Engine;
-
-        // A fresh salt per enrolment: the same authenticator then derives a
-        // different key for every vault it is enrolled in.
-        let salt: [u8; 32] = rand::random();
-
-        let (credential, dwk) = crate::fido::enroll(salt)?;
-        let entry = HardwareKeyEntry {
-            label: if label.trim().is_empty() {
-                "Hardware key".to_string()
-            } else {
-                label.trim().to_string()
-            },
-            credential_id: b64().encode(&credential.credential_id),
-            salt: b64().encode(credential.salt),
-            wrapped_master_key: wrap(&dwk, master_key)?,
-            enrolled_at,
-        };
-
-        // Re-enrolling a token replaces its entry rather than piling up copies
-        // that all open the same door.
-        self.hardware_keys
-            .retain(|existing| existing.credential_id != entry.credential_id);
-        self.hardware_keys.push(entry.clone());
-        Ok(entry)
-    }
-
-    /// The enrolled entry whose authenticator is plugged in, if any. Silent: no
-    /// touch, so this is safe to poll for auto-lock.
-    #[must_use]
-    pub fn connected_hardware_key(&self) -> Option<&HardwareKeyEntry> {
-        self.hardware_keys.iter().find(|entry| {
-            credential(entry)
-                .map(|credential| crate::fido::is_present(&credential))
-                .unwrap_or(false)
-        })
-    }
-
-    /// One touch, on whichever enrolled token is connected.
-    pub fn unlock_with_hardware_key(&self) -> Result<[u8; 32], UnlockError> {
-        if self.hardware_keys.is_empty() {
-            return Err(UnlockError::NotRemembered);
-        }
-        let entry = self
-            .connected_hardware_key()
-            .ok_or(UnlockError::HardwareKey(crate::fido::FidoError::NoDevice))?;
-        let dwk = crate::fido::derive_dwk(&credential(entry)?)?;
-        unwrap(&dwk, &entry.wrapped_master_key)
-    }
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-impl RememberedUnlock {
-    pub fn enroll_hardware_key(
-        &mut self,
-        _master_key: &[u8; 32],
-        _label: &str,
-        _enrolled_at: String,
-    ) -> Result<HardwareKeyEntry, UnlockError> {
-        Err(UnlockError::UnsupportedPlatform)
-    }
-
-    #[must_use]
-    pub fn connected_hardware_key(&self) -> Option<&HardwareKeyEntry> {
-        None
-    }
-
-    pub fn unlock_with_hardware_key(&self) -> Result<[u8; 32], UnlockError> {
-        Err(UnlockError::UnsupportedPlatform)
-    }
-}
-
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-fn credential(entry: &HardwareKeyEntry) -> Result<crate::fido::HardwareCredential, UnlockError> {
-    use base64::Engine;
-    let credential_id = b64()
-        .decode(&entry.credential_id)
-        .map_err(|err| corrupt(err.to_string()))?;
-    let salt: [u8; 32] = b64()
-        .decode(&entry.salt)
-        .map_err(|err| corrupt(err.to_string()))?
-        .as_slice()
-        .try_into()
-        .map_err(|_| corrupt("stored salt has the wrong length"))?;
-    Ok(crate::fido::HardwareCredential {
-        credential_id,
-        salt,
-    })
 }
 
 #[cfg(test)]

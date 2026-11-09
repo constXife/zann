@@ -167,8 +167,16 @@ pub trait Keystore: Send + Sync {
     fn delete_dwk(&self) -> Result<(), KeystoreError>;
 }
 
-#[cfg(all(feature = "fido", any(target_os = "linux", target_os = "macos")))]
+#[cfg(all(feature = "ctap-hid", any(target_os = "linux", target_os = "macos")))]
 pub mod fido;
+#[cfg(feature = "fido")]
+mod hardware;
+#[cfg(feature = "fido")]
+pub use hardware::*;
+#[cfg(all(feature = "fido", any(test, feature = "test-support")))]
+mod fake_hardware;
+#[cfg(all(feature = "fido", any(test, feature = "test-support")))]
+pub use fake_hardware::FakeHardwareAuthenticator;
 #[cfg(all(
     feature = "secret-store",
     any(target_os = "macos", target_os = "windows", target_os = "linux")
@@ -188,7 +196,21 @@ pub use remembered::{HardwareKeyEntry, RememberedUnlock, UnlockError, UnlockSour
 pub use keyring_store::{KeyringKeystore, KeyringLegacySecretSource, KeyringSecretStore};
 pub use unsupported::UnsupportedKeystore;
 
+#[cfg(any(
+    test,
+    all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    )
+))]
 const DWK_SERVICE: &str = "zann";
+#[cfg(any(
+    test,
+    all(
+        feature = "secret-store",
+        any(target_os = "macos", target_os = "windows", target_os = "linux")
+    )
+))]
 const DWK_ACCOUNT: &str = "dwk";
 
 /// Select the generic OS secret-store backend for the current platform.
@@ -280,3 +302,6 @@ mod tests {
         assert_eq!(DWK_ACCOUNT, "dwk");
     }
 }
+
+#[cfg(all(test, feature = "remembered"))]
+mod hardware_tests;

@@ -21,7 +21,7 @@ use zann_core::{AppService, StorageKind, VaultKind};
 use zann_db::local::LocalVault;
 use zann_db::local::{KeyWrapType, LocalItemRepo, LocalStorageRepo, LocalVaultRepo, MetadataRepo};
 use zann_db::services::LocalServices;
-use zann_keystore::{default_keystore, Keystore, KeystoreError};
+use zann_keystore::{default_authenticator, default_keystore, Keystore, KeystoreError};
 
 fn default_local_kdf_params() -> zann_core::api::auth::KdfParams {
     zann_core::api::auth::KdfParams {
@@ -835,10 +835,7 @@ mod tests {
 
 /// Whether hardware keys can be used on this platform at all.
 pub async fn hardware_key_supported() -> Result<ApiResponse<bool>, String> {
-    Ok(ApiResponse::ok(cfg!(any(
-        target_os = "linux",
-        target_os = "macos"
-    ))))
+    Ok(ApiResponse::ok(default_authenticator().supported()))
 }
 
 /// Whether an enrolled authenticator is connected. Drives auto-lock, so it must
@@ -846,7 +843,10 @@ pub async fn hardware_key_supported() -> Result<ApiResponse<bool>, String> {
 pub async fn hardware_key_present(state: State<'_, AppState>) -> Result<ApiResponse<bool>, String> {
     let settings = state.settings.read().await.clone();
     Ok(ApiResponse::ok(
-        settings.remembered.connected_hardware_key().is_some(),
+        settings
+            .remembered
+            .connected_hardware_key(default_authenticator().as_ref())
+            .is_some(),
     ))
 }
 
@@ -859,9 +859,16 @@ pub async fn hardware_key_enroll(
     };
 
     let mut settings = state.settings.read().await.clone();
-    let entry = match settings.remembered.enroll_hardware_key(
+    let authenticator = default_authenticator();
+    let pending =
+        match zann_keystore::RememberedUnlock::begin_enroll(authenticator.as_ref(), &label) {
+            Ok(pending) => pending,
+            Err(err) => return Ok(ApiResponse::err(err.kind(), &err.to_string())),
+        };
+    let entry = match settings.remembered.confirm_enroll(
+        authenticator.as_ref(),
+        pending,
         master_key.as_bytes(),
-        &label,
         chrono::Utc::now().to_rfc3339(),
     ) {
         Ok(entry) => entry,
@@ -897,7 +904,10 @@ pub async fn session_unlock_with_hardware_key(
     state: State<'_, AppState>,
 ) -> Result<ApiResponse<()>, String> {
     let settings = state.settings.read().await.clone();
-    let master_key = match settings.remembered.unlock_with_hardware_key() {
+    let master_key = match settings
+        .remembered
+        .unlock_with_hardware_key(default_authenticator().as_ref())
+    {
         Ok(key) => std::sync::Arc::new(SecretKey::from_bytes(key)),
         Err(err) => return Ok(ApiResponse::err(err.kind(), &err.to_string())),
     };

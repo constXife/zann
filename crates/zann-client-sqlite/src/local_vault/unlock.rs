@@ -27,7 +27,7 @@ impl LocalVault {
                     enrolled_at: entry.enrolled_at.clone(),
                 })
                 .collect(),
-            hardware_supported: cfg!(any(target_os = "linux", target_os = "macos")),
+            hardware_supported: self.authenticator.supported(),
         })
     }
 
@@ -36,8 +36,10 @@ impl LocalVault {
     pub fn unlock_remembered(&self) -> LocalResult<VaultStatus> {
         let remembered = self.load_remembered()?;
         let master_key = match remembered.unlock_source {
-            UnlockSource::Keystore => remembered.unlock_with_keystore(default_keystore().as_ref()),
-            UnlockSource::HardwareKey => remembered.unlock_with_hardware_key(),
+            UnlockSource::Keystore => remembered.unlock_with_keystore(self.keystore.as_ref()),
+            UnlockSource::HardwareKey => {
+                remembered.unlock_with_hardware_key(self.authenticator.as_ref())
+            }
         }
         .map_err(unlock_error)?;
         self.finish_unlock(Arc::new(SecretKey::from_bytes(master_key)))
@@ -46,29 +48,10 @@ impl LocalVault {
     /// Whether an enrolled authenticator is connected. Silent: no touch, so
     /// this is safe to poll for auto-lock.
     pub fn hardware_key_present(&self) -> LocalResult<bool> {
-        Ok(self.load_remembered()?.connected_hardware_key().is_some())
-    }
-
-    /// Enrol the connected authenticator against the open vault. Two touches.
-    pub fn enroll_hardware_key(&self, label: String) -> LocalResult<HardwareKey> {
-        let master_key = self.master_key()?;
-        let mut remembered = self.load_remembered()?;
-        // The policy crate stays clock-free, so the timestamp is stamped here
-        // rather than trusted from a caller.
-        let entry = remembered
-            .enroll_hardware_key(
-                master_key.as_bytes(),
-                &label,
-                chrono::Utc::now().to_rfc3339(),
-            )
-            .map_err(unlock_error)?;
-        remembered.unlock_source = UnlockSource::HardwareKey;
-        self.save_remembered(&remembered)?;
-        Ok(HardwareKey {
-            label: entry.label,
-            credential_id: entry.credential_id,
-            enrolled_at: entry.enrolled_at,
-        })
+        Ok(self
+            .load_remembered()?
+            .connected_hardware_key(self.authenticator.as_ref())
+            .is_some())
     }
 
     pub fn remove_hardware_key(&self, credential_id: String) -> LocalResult<()> {
@@ -82,7 +65,7 @@ impl LocalVault {
         let master_key = self.master_key()?;
         let mut remembered = self.load_remembered()?;
         remembered
-            .remember_with_keystore(default_keystore().as_ref(), master_key.as_bytes())
+            .remember_with_keystore(self.keystore.as_ref(), master_key.as_bytes())
             .map_err(unlock_error)?;
         self.save_remembered(&remembered)
     }
@@ -92,7 +75,7 @@ impl LocalVault {
     pub fn forget_remembered(&self) -> LocalResult<()> {
         let mut remembered = self.load_remembered()?;
         remembered
-            .forget_keystore(default_keystore().as_ref())
+            .forget_keystore(self.keystore.as_ref())
             .map_err(unlock_error)?;
         self.save_remembered(&remembered)
     }

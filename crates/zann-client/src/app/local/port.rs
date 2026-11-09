@@ -12,7 +12,12 @@ pub trait LocalVaultService: Send + Sync {
     fn remembered_unlock(&self) -> LocalResult<RememberedUnlock>;
     fn unlock_remembered(&self) -> LocalResult<VaultStatus>;
     fn hardware_key_present(&self) -> LocalResult<bool>;
-    fn enroll_hardware_key(&self, label: String) -> LocalResult<HardwareKey>;
+    /// Reports completion of Touch 1 before blocking for Touch 2.
+    fn enroll_hardware_key(
+        &self,
+        label: String,
+        on_credential_created: &dyn Fn(),
+    ) -> LocalResult<HardwareKey>;
     fn remove_hardware_key(&self, credential_id: String) -> LocalResult<()>;
     fn remember_with_keystore(&self) -> LocalResult<()>;
     fn forget_remembered(&self) -> LocalResult<()>;

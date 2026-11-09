@@ -12,6 +12,13 @@ pub enum LocalError {
     Service(String),
     #[error("unimplemented: {0}")]
     Unimplemented(String),
+    #[error("unlock {kind}: {message}")]
+    Unlock {
+        kind: String,
+        message: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("sync {kind}: {message}")]
     Sync { kind: String, message: String },
 }
