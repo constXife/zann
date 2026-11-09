@@ -29,16 +29,16 @@ fn enrols_derives_and_detects_the_authenticator() {
 
     eprintln!("touch the key to derive");
     let first = authenticator.derive_dwk(&credential).expect("derive");
-    assert_eq!(
-        first, enrolled_key,
+    assert!(
+        first == enrolled_key,
         "enrolment must hand back the same key a later unlock derives"
     );
 
     eprintln!("touch the key to derive again");
     let second = authenticator.derive_dwk(&credential).expect("derive again");
-    assert_eq!(first, second, "the DWK must be reproducible");
+    assert!(first == second, "the DWK must be reproducible");
 
-    // No touch from here on.
+    // These presence probes require no touch.
     assert!(
         authenticator.is_present(&credential),
         "the enrolled authenticator is connected, so presence must be detected"
@@ -63,5 +63,8 @@ fn enrols_derives_and_detects_the_authenticator() {
     let derived = authenticator
         .derive_dwk(&other_salt)
         .expect("derive with another salt");
-    assert_ne!(first, derived);
+    assert!(
+        first != derived,
+        "different salts must derive different DWKs"
+    );
 }
