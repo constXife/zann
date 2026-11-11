@@ -5,9 +5,8 @@ import ZannCoreKit
 struct ZannApp: App {
     @StateObject private var model = AppModel(
         opening: AppModel.openDefaultCore,
-        language: Locale.preferredLanguages.first ?? Locale.current.identifier,
-        // zann-ui-core's defaults until the shell persists device preferences.
-        preferences: devicePreferencesDefault()
+        preferences: AppModel.defaultPreferencesFile,
+        systemLanguage: Locale.preferredLanguages.first ?? Locale.current.identifier
     )
 
     var body: some Scene {
@@ -35,6 +34,9 @@ struct ZannApp: App {
                     .keyboardShortcut("l", modifiers: .command)
                     .disabled(!model.isUnlocked)
             }
+        }
+        Settings {
+            SettingsView().environmentObject(model)
         }
     }
 }

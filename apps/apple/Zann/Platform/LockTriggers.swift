@@ -2,9 +2,9 @@ import AppKit
 import Combine
 
 /// Feeds the macOS events behind the automatic locks into `AppModel`, which
-/// decides from `DevicePreferences` whether each one locks: input in the
-/// app's windows as activity, a periodic idle check, losing focus, and the
-/// app being hidden or its window minimized.
+/// decides from `DevicePreferences` whether each one acts: input in the app's
+/// windows as activity, a periodic idle check, losing focus, the app being
+/// hidden or its window minimized, and quitting (the clipboard clear on exit).
 @MainActor
 final class LockTriggers {
     /// How often the idle lock is checked, as in COSMIC.
@@ -30,6 +30,9 @@ final class LockTriggers {
                 .sink { [weak model] _ in Task { await model?.appHidden() } },
             center.publisher(for: NSWindow.didMiniaturizeNotification)
                 .sink { [weak model] _ in Task { await model?.appHidden() } },
+            // Synchronous: the process exits before a scheduled task would run.
+            center.publisher(for: NSApplication.willTerminateNotification)
+                .sink { [weak model] _ in model?.appWillTerminate() },
         ]
         idleTask = Task { [weak model] in
             while !Task.isCancelled {

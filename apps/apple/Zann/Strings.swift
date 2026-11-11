@@ -17,4 +17,12 @@ struct Strings {
     func fieldLabel(_ key: String) -> String {
         catalogue.fieldLabel(key: key)
     }
+
+    func minutesLabel(_ minutes: UInt32) -> String {
+        catalogue.minutesLabel(minutes: minutes)
+    }
+
+    func secondsLabel(_ seconds: UInt32) -> String {
+        catalogue.secondsLabel(seconds: seconds)
+    }
 }
