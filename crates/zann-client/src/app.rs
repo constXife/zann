@@ -8,7 +8,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use uuid::Uuid;
-use zann_core::AuthMethod;
+pub use zann_core::AuthMethod;
 
 pub use zann_crypto::SecretKey;
 

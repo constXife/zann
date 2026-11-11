@@ -73,4 +73,7 @@ pub trait LocalVaultService: Send + Sync {
         refresh_token: String,
         access_expires_at: Option<String>,
     ) -> LocalResult<()>;
+    /// The remote application facade bound to this vault's client root and
+    /// sync store, so login, sync and logout share one composition.
+    fn remote_client(&self) -> LocalResult<crate::app::AppClient>;
 }
