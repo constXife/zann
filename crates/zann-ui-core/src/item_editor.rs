@@ -82,6 +82,19 @@ impl std::fmt::Debug for ItemDraft {
         f.write_str("ItemDraft(<redacted>)")
     }
 }
+/// What saving a draft writes: the trimmed path, the title taken from its
+/// last non-empty segment, the type and the validated canonical payload.
+pub struct ItemSave {
+    pub title: String,
+    pub path: String,
+    pub type_id: String,
+    pub payload_json: String,
+}
+impl std::fmt::Debug for ItemSave {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ItemSave(<redacted>)")
+    }
+}
 #[derive(Debug, thiserror::Error)]
 pub enum DraftError {
     #[error("invalid item payload: {0}")]
@@ -180,6 +193,22 @@ impl ItemDraft {
             self.fields = fields;
         }
         Ok(replace)
+    }
+    pub fn save(&self) -> Result<ItemSave, DraftError> {
+        let payload_json = self.payload_json()?;
+        let path = self.path.trim();
+        let title = path
+            .rsplit('/')
+            .find(|segment| !segment.trim().is_empty())
+            .unwrap_or(path)
+            .trim()
+            .to_string();
+        Ok(ItemSave {
+            title,
+            path: path.to_string(),
+            type_id: self.type_id.clone(),
+            payload_json,
+        })
     }
     pub fn payload_json(&self) -> Result<String, DraftError> {
         if self.path.trim().is_empty() {
