@@ -1,0 +1,134 @@
+import Foundation
+import ZannCoreKit
+
+/// First page only; paging arrives with the three-pane vault view.
+private let itemsPageLimit: UInt32 = 200
+
+/// Screen state for the macOS shell. Every core call blocks (the KDF alone
+/// takes about a second), so it runs off the main actor; this type only
+/// sequences calls and publishes their results.
+@MainActor
+final class AppModel: ObservableObject {
+    enum Screen: Equatable {
+        case failed(String)
+        case welcome
+        case master(MasterMode)
+        case vault
+    }
+
+    enum MasterMode {
+        case create
+        case unlock
+    }
+
+    @Published private(set) var screen: Screen
+    @Published private(set) var items: [ItemSummary] = []
+    @Published private(set) var busy = false
+    @Published private(set) var error: String?
+
+    private let core: CoreFacade?
+
+    /// `open` is the composition root: the app passes `openDefaultCore`,
+    /// tests a core over a temporary database and in-memory ports.
+    init(opening open: () throws -> CoreFacade) {
+        var opened: CoreFacade?
+        do {
+            let core = try open()
+            screen = try core.appStatus().initialized ? .master(.unlock) : .welcome
+            opened = core
+        } catch {
+            screen = .failed(describe(error))
+        }
+        core = opened
+    }
+
+    var isUnlocked: Bool {
+        screen == .vault
+    }
+
+    func startCreatingVault() {
+        error = nil
+        screen = .master(.create)
+    }
+
+    func submit(password: String, mode: MasterMode) async {
+        guard let core, !busy, !password.isEmpty else { return }
+        let page = await perform {
+            switch mode {
+            case .create: _ = try core.initializeMasterPassword(password: password)
+            case .unlock: _ = try core.unlock(password: password)
+            }
+            return try Self.firstPage(core)
+        }
+        guard let page else { return }
+        items = page.items
+        screen = .vault
+    }
+
+    func lock() async {
+        guard let core, isUnlocked, !busy else { return }
+        guard await perform({ _ = try core.lock() }) != nil else { return }
+        items = []
+        screen = .master(.unlock)
+    }
+
+    /// Runs `work` off the main actor; a failure lands in `error` as `nil`.
+    private func perform<T>(_ work: @escaping () throws -> T) async -> T? {
+        busy = true
+        error = nil
+        defer { busy = false }
+        let result = await Task.detached(priority: .userInitiated) {
+            Result(catching: work)
+        }.value
+        switch result {
+        case .success(let value):
+            return value
+        case .failure(let failure):
+            error = describe(failure)
+            return nil
+        }
+    }
+
+    private nonisolated static func firstPage(_ core: CoreFacade) throws -> ItemPage {
+        try core.itemsList(
+            filter: ItemsFilter(query: nil, includeDeleted: false),
+            page: Page(limit: itemsPageLimit, cursor: nil)
+        )
+    }
+
+    /// The database lives under Application Support in a directory named after
+    /// the bundle, apart from the Tauri desktop app's.
+    static func openDefaultCore() throws -> CoreFacade {
+        guard let bundleID = Bundle.main.bundleIdentifier else {
+            throw CoreError.InvalidArgument("the app bundle has no identifier")
+        }
+        let support = try FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask,
+            appropriateFor: nil, create: true
+        )
+        let database = support.appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("local.sqlite")
+        return try createCore(
+            dbPath: database.path,
+            keystore: KeychainKeystore(service: bundleID),
+            secretStore: KeychainSecretStore()
+        )
+    }
+}
+
+/// The core's own message for an error, without the enum wrapping.
+func describe(_ error: Error) -> String {
+    guard let error = error as? CoreError else {
+        return error.localizedDescription
+    }
+    switch error {
+    case .Locked:
+        return "The vault is locked."
+    case .InvalidArgument(let message), .Service(let message), .Unimplemented(let message):
+        return message
+    case .Unlock(_, let message), .Sync(_, let message):
+        return message
+    case .Session(_, let message), .Oidc(_, let message), .Draft(_, _, let message):
+        return message
+    }
+}

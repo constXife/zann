@@ -31,3 +31,5 @@ compose.loadtest.yaml
 apps/apple/ZannCoreKit/Generated/
 apps/apple/ZannCoreKit/.build/
 apps/apple/ZannCoreKit/.swiftpm/
+apps/apple/Zann.xcodeproj/
+apps/apple/build/
