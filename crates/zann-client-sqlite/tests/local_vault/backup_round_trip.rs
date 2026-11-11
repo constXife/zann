@@ -4,6 +4,8 @@
 //! `Unimplemented` stubs, which meant a client reaching the vault only through
 //! `zann-ffi` — COSMIC — had no way to get its own data out. These tests are
 //! the proof that it does now, and that what comes out goes back in.
+
+use crate::support::CanonicalTempDir;
 use zann_client_sqlite::local_vault::open_vault as create_core;
 
 use std::fs;
@@ -12,19 +14,13 @@ use std::path::PathBuf;
 use uuid::Uuid;
 use zann_client::app::local::{BackupImportOptions, ItemsFilter, Page};
 
-fn temp_root(tag: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("zann-ffi-backup-{}-{}", tag, Uuid::now_v7()));
-    fs::create_dir_all(&root).expect("create temp dir");
-    root
-}
-
 fn db_url(root: &std::path::Path) -> String {
     format!("sqlite://{}", root.join("local.sqlite").display())
 }
 
 #[test]
 fn exports_a_vault_to_an_explicit_path() {
-    let root = temp_root("export");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -44,15 +40,13 @@ fn exports_a_vault_to_an_explicit_path() {
         fs::metadata(&target).expect("stat export").len() > 0,
         "the export file is empty"
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// The case that matters for a client with no file picker: hand it nothing and
 /// it still lands somewhere sensible under the vault directory.
 #[test]
 fn an_empty_path_falls_back_to_the_vault_directory() {
-    let root = temp_root("default");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -69,13 +63,11 @@ fn an_empty_path_falls_back_to_the_vault_directory() {
         root.display(),
         report.path
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn what_is_exported_can_be_imported_into_a_fresh_vault() {
-    let source_root = temp_root("src");
+    let source_root = CanonicalTempDir::new();
     let password = format!("pw-{}", Uuid::now_v7());
 
     let source = create_core(db_url(&source_root)).expect("create source core");
@@ -96,7 +88,7 @@ fn what_is_exported_can_be_imported_into_a_fresh_vault() {
     assert_eq!(exported.items_count, 2);
     drop(source);
 
-    let target_root = temp_root("dst");
+    let target_root = CanonicalTempDir::new();
     let target = create_core(db_url(&target_root)).expect("create target core");
     target
         .initialize_master_password(password)
@@ -113,14 +105,11 @@ fn what_is_exported_can_be_imported_into_a_fresh_vault() {
 
     assert_eq!(report.imported_items, 2);
     assert_eq!(report.skipped_existing, 0);
-
-    let _ = fs::remove_dir_all(&source_root);
-    let _ = fs::remove_dir_all(&target_root);
 }
 
 #[test]
 fn an_empty_import_path_is_rejected_rather_than_guessed() {
-    let root = temp_root("noguess");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -134,13 +123,11 @@ fn an_empty_import_path_is_rejected_rather_than_guessed() {
         )
         .expect_err("an empty import path must not be guessed at");
     assert!(err.to_string().contains("empty"), "unexpected error: {err}");
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn exporting_a_locked_vault_fails() {
-    let root = temp_root("locked");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -148,13 +135,11 @@ fn exporting_a_locked_vault_fails() {
 
     core.backup_export_file(root.join("nope.json").display().to_string())
         .expect_err("a locked vault must not export");
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn apple_passwords_preflight_and_import_keep_distinct_duplicate_titles() {
-    let root = temp_root("apple");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -231,6 +216,4 @@ fn apple_passwords_preflight_and_import_keep_distinct_duplicate_titles() {
         .collect::<Vec<_>>();
     paths.sort();
     assert_eq!(paths, vec!["Mail".to_string(), "Mail (2)".to_string()]);
-
-    let _ = fs::remove_dir_all(&root);
 }

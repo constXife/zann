@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use zann_client_sqlite::local_vault::{open_vault as create_core, LocalVault};
 
-use tempfile::tempdir;
+use crate::support::CanonicalTempDir;
 use zann_client::app::{
     AppClient, ClientId, ClientPaths, LoginPassword, PasswordLoginRequest,
     PasswordRegistrationRequest, PrepareConnectionOutcome, SessionClient, SessionOperation,
@@ -47,7 +47,7 @@ fn remote_login_create_master_then_relogin_unlock() {
         None => return,
     };
 
-    let dir = tempdir().expect("tempdir");
+    let dir = CanonicalTempDir::new();
     let root = dir.path().to_path_buf();
     let db_url = make_db_url(&root);
 
@@ -157,7 +157,7 @@ fn second_device_unlocks_the_synced_personal_vault() {
     };
     let operation = || SessionOperation::new(Instant::now() + Duration::from_secs(60)).0;
 
-    let device_a = tempdir().expect("device A root");
+    let device_a = CanonicalTempDir::new();
     let core = create_core(make_db_url(device_a.path())).expect("open device A");
     let (client, prepared) = connect(device_a.path());
     let request = PasswordRegistrationRequest::new(
@@ -192,7 +192,7 @@ fn second_device_unlocks_the_synced_personal_vault() {
         .expect("device A has nothing left to push");
     drop(core);
 
-    let device_b = tempdir().expect("device B root");
+    let device_b = CanonicalTempDir::new();
     let core = create_core(make_db_url(device_b.path())).expect("open device B");
     let (client, prepared) = connect(device_b.path());
     let request = PasswordLoginRequest::new(

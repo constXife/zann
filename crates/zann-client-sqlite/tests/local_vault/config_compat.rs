@@ -1,7 +1,7 @@
 use std::fs;
 use zann_client_sqlite::local_vault::open_vault as create_core;
 
-use tempfile::TempDir;
+use crate::support::CanonicalTempDir;
 
 fn fixture(name: &str) -> &'static [u8] {
     match name {
@@ -17,19 +17,19 @@ fn fixture(name: &str) -> &'static [u8] {
     }
 }
 
-fn root_with_fixture(name: &str) -> TempDir {
-    let root = tempfile::tempdir().expect("tempdir");
+fn root_with_fixture(name: &str) -> CanonicalTempDir {
+    let root = CanonicalTempDir::new();
     fs::write(root.path().join("config.json"), fixture(name)).expect("write config fixture");
     root
 }
 
-fn open_local(root: &TempDir) {
+fn open_local(root: &CanonicalTempDir) {
     let db_url = format!("sqlite://{}", root.path().join("local.sqlite").display());
     let core = create_core(db_url).expect("FFI/local accepts config");
     drop(core);
 }
 
-fn config_bytes(root: &TempDir) -> Vec<u8> {
+fn config_bytes(root: &CanonicalTempDir) -> Vec<u8> {
     fs::read(root.path().join("config.json")).expect("read config")
 }
 

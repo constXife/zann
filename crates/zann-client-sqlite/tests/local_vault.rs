@@ -1,5 +1,8 @@
 #![cfg(feature = "local-vault")]
 
+#[path = "local_vault/support.rs"]
+mod support;
+
 #[path = "local_vault/backup_round_trip.rs"]
 mod backup_round_trip;
 #[path = "local_vault/config_compat.rs"]

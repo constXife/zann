@@ -17,6 +17,9 @@ pub mod local_vault;
 pub mod maintenance;
 pub use zann_db::SqliteFileLocation;
 
+#[cfg(test)]
+mod test_support;
+
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
@@ -1717,8 +1720,8 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
+    use crate::test_support::CanonicalTempDir;
     use serde_json::json;
-    use tempfile::TempDir;
     use zann_client::config::{
         ClientId, ConnectionMetadata, CredentialActivation, CredentialBundle, CredentialPortError,
         CredentialSecret, CredentialStore, LegacyCredentialLocator, LegacyCredentialSource,
@@ -1779,29 +1782,6 @@ mod tests {
     impl Drop for CurrentDirGuard {
         fn drop(&mut self) {
             std::env::set_current_dir(&self.0).expect("restore adapter test working directory");
-        }
-    }
-
-    /// A temporary directory pinned to its canonical, symlink-free absolute
-    /// path so SQLite location validation observes the real filesystem
-    /// identity even when the platform temp root contains symlinks.
-    struct CanonicalTempDir {
-        _temp: TempDir,
-        canonical: PathBuf,
-    }
-
-    impl CanonicalTempDir {
-        fn new(context: &str) -> Self {
-            let temp = TempDir::new().expect(context);
-            let canonical = fs::canonicalize(temp.path()).expect("canonical temporary directory");
-            Self {
-                _temp: temp,
-                canonical,
-            }
-        }
-
-        fn path(&self) -> &Path {
-            &self.canonical
         }
     }
 
