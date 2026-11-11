@@ -614,6 +614,7 @@
     "name_invalid_chars": "Use only letters, numbers, underscores, or hyphens.",
     "field_key_invalid": "Use only letters, numbers, underscores, or hyphens in field names.",
     "field_key_duplicate": "Field names must be unique.",
+    "invalid_payload": "The item data could not be read.",
     "vault_remote_unsupported": "Creating remote vaults is not supported yet",
     "vault_server_encrypted_unsupported": "Server-encrypted vaults are not supported on desktop",
     "vault_required": "Select a vault",

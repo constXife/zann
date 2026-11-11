@@ -1,9 +1,6 @@
 import Foundation
 import ZannCoreKit
 
-/// First page only; paging and server-side search come in a later slice.
-private let itemsPageLimit: UInt32 = 200
-
 /// Screen state for the macOS shell. Every core call blocks (the KDF alone
 /// takes about a second), so it runs off the main actor; this type only
 /// sequences calls and publishes their results.
@@ -63,7 +60,7 @@ final class AppModel: ObservableObject {
             case .create: _ = try core.initializeMasterPassword(password: password)
             case .unlock: _ = try core.unlock(password: password)
             }
-            return try Self.firstPage(core)
+            return try VaultModel.loadPage(core)
         }
         guard let page else { return }
         vault = VaultModel(core: core, page: page)
@@ -95,14 +92,6 @@ final class AppModel: ObservableObject {
             error = describe(failure)
             return nil
         }
-    }
-
-    private nonisolated static func firstPage(_ core: CoreFacade) throws -> ItemPage {
-        try core.itemsList(
-            // The trash category filters client-side, so deleted items load too.
-            filter: ItemsFilter(query: nil, includeDeleted: true),
-            page: Page(limit: itemsPageLimit, cursor: nil)
-        )
     }
 
     /// The database lives under Application Support in a directory named after

@@ -12,7 +12,8 @@ use cosmic::widget::nav_bar;
 use cosmic::{theme, widget, Element};
 use zann_client::app::local::{ItemSummary, VaultSummary};
 use zann_ui_core::{
-    category_views, filtered_indices, FolderFilter, ItemCounts, ItemFilter, VaultScope,
+    category_views, create_type_for, filtered_indices, FolderFilter, ItemCounts, ItemFilter,
+    VaultScope,
 };
 
 use super::detail::{self, Detail};
@@ -800,14 +801,8 @@ impl State {
             })
     }
 
-    fn preferred_create_type(&self) -> String {
-        let selected = self.selected_category();
-        category_views(&self.counts, self.vault_scope())
-            .into_iter()
-            .find(|view| selected.as_deref() == Some(view.id.as_str()))
-            .and_then(|view| view.filter.and_then(|filter| filter.type_ids))
-            .and_then(|types| types.into_iter().next())
-            .unwrap_or_else(|| "login".to_string())
+    fn preferred_create_type(&self) -> &'static str {
+        create_type_for(self.selected_category().as_deref())
     }
 }
 

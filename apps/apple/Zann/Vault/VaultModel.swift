@@ -1,6 +1,9 @@
 import Foundation
 import ZannCoreKit
 
+/// First page only; paging and server-side search come in a later slice.
+private let itemsPageLimit: UInt32 = 200
+
 /// One unlocked vault: the loaded page, the sidebar categories, the visible
 /// list and the selected item's projected fields. Categories, filtering and
 /// field projection come from zann-ui-core; this type only holds selection and
@@ -30,6 +33,8 @@ final class VaultModel: ObservableObject {
     }
 
     @Published private(set) var selectedItemID: String?
+    /// The open create or edit form; at most one at a time.
+    @Published private(set) var editor: ItemEditorModel?
 
     private let core: CoreFacade
     private var items: [ItemSummary] = []
@@ -44,8 +49,73 @@ final class VaultModel: ObservableObject {
         apply(page)
     }
 
+    /// The first page of the current vault. The trash category filters
+    /// client-side, so deleted items load too.
+    nonisolated static func loadPage(_ core: CoreFacade) throws -> ItemPage {
+        try core.itemsList(
+            filter: ItemsFilter(query: nil, includeDeleted: true),
+            page: Page(limit: itemsPageLimit, cursor: nil)
+        )
+    }
+
     func select(_ id: String?) {
         guard id != selectedItemID else { return }
+        show(id)
+    }
+
+    /// A new item of `typeID`, or of the type zann-ui-core picks for the
+    /// selected category.
+    func startCreating(typeID: String? = nil) {
+        let type = typeID ?? createTypeForCategory(categoryId: categoryID)
+        open { try ItemEditorModel.create(typeID: type) }
+    }
+
+    func startEditing() async {
+        guard editor == nil, let id = detail?.id else { return }
+        let core = core
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { try core.itemGet(id: id) }
+        }.value
+        open { try ItemEditorModel.edit(try result.get()) }
+    }
+
+    func cancelEditing() {
+        editor = nil
+    }
+
+    /// Saves the open form, then reloads the page and shows the saved item.
+    func saveEditor() async {
+        guard let editor, let item = await editor.save(with: core) else { return }
+        self.editor = nil
+        let core = core
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { try Self.loadPage(core) }
+        }.value
+        switch result {
+        case .success(let page): apply(page)
+        case .failure(let failure):
+            error = describe(failure)
+            return
+        }
+        // A new item can fall outside the current category or search.
+        if !visibleItems.contains(where: { $0.id == item.id }) {
+            query = ""
+            categoryID = "all"
+        }
+        show(item.id)
+    }
+
+    private func open(_ make: () throws -> ItemEditorModel) {
+        do {
+            editor = try make()
+        } catch {
+            self.error = describe(error)
+        }
+    }
+
+    /// Loads `id` into the detail pane even when it is already selected, so a
+    /// save shows the stored version.
+    private func show(_ id: String?) {
         selectedItemID = id
         detail = nil
         error = nil

@@ -1,8 +1,9 @@
 use zann_ffi::{
-    build_folder_tree, category_views, device_preference_options, device_preferences_default,
-    filter_items, generate_totp, item_type_schemas, normalize_server_url, project_item_fields,
-    CoreError, DraftErrorKindFfi, FieldKindFfi, FolderFilterFfi, ItemCountsFfi, ItemDetail,
-    ItemDraftFfi, ItemFilterFfi, ItemSummary, ItemTypeCount, TranslationCatalogue, VaultScopeFfi,
+    build_folder_tree, category_views, create_type_for_category, device_preference_options,
+    device_preferences_default, filter_items, generate_totp, item_type_schemas,
+    normalize_server_url, project_item_fields, CoreError, DraftErrorKindFfi, FieldKindFfi,
+    FolderFilterFfi, ItemCountsFfi, ItemDetail, ItemDraftFfi, ItemFilterFfi, ItemSummary,
+    ItemTypeCount, TranslationCatalogue, VaultScopeFfi,
 };
 
 fn item(title: &str, type_id: &str, path: &str, deleted: bool) -> ItemSummary {
@@ -62,6 +63,8 @@ fn categories_filter_and_folders_follow_ui_core() {
             .map(|view| view.count),
         Some(1)
     );
+    assert_eq!(create_type_for_category(Some("infra".into())), "ssh_key");
+    assert_eq!(create_type_for_category(None), "login");
 
     let items = vec![
         item("AWS root", "login", "work/aws/root", false),

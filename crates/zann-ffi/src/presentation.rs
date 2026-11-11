@@ -166,6 +166,12 @@ pub fn category_views(counts: ItemCountsFfi, scope: VaultScopeFfi) -> Vec<Catego
         .collect()
 }
 
+/// The type a new item takes when created from the selected category.
+#[uniffi::export]
+pub fn create_type_for_category(category_id: Option<String>) -> String {
+    zann_ui_core::create_type_for(category_id.as_deref()).to_string()
+}
+
 #[derive(Debug, Clone, uniffi::Enum)]
 pub enum FolderFilterFfi {
     Any,

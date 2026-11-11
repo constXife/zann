@@ -193,6 +193,15 @@ pub fn fallback_category() -> Option<&'static Category> {
     category(&schema().fallback_category_id)
 }
 
+/// The type a new item takes when created from category `id`: the category's
+/// first type, or a login where it has none (all, trash) or none is selected.
+pub fn create_type_for(category_id: Option<&str>) -> &'static str {
+    category_id
+        .and_then(category)
+        .and_then(|cat| cat.filter.as_ref()?.type_ids.as_ref()?.first())
+        .map_or("login", String::as_str)
+}
+
 /// Every category visible in `scope`, ordered as the schema declares.
 pub fn category_views(counts: &ItemCounts, scope: VaultScope) -> Vec<CategoryView> {
     let mut views: Vec<CategoryView> = schema()
@@ -271,6 +280,16 @@ mod tests {
         assert!(infra.matches(&item("ssh_key", false)));
         assert!(!infra.matches(&item("login", false)));
         assert!(!infra.matches(&item("ssh_key", true)));
+    }
+
+    #[test]
+    fn create_type_is_the_category_first_type_or_login() {
+        assert_eq!(create_type_for(Some("note")), "note");
+        assert_eq!(create_type_for(Some("infra")), "ssh_key");
+        assert_eq!(create_type_for(Some("all")), "login");
+        assert_eq!(create_type_for(Some("trash")), "login");
+        assert_eq!(create_type_for(Some("unknown")), "login");
+        assert_eq!(create_type_for(None), "login");
     }
 
     #[test]
