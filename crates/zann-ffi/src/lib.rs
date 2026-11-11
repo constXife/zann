@@ -6,6 +6,8 @@ use zann_client_sqlite::local_vault as native;
 mod records;
 pub use records::*;
 mod conversions;
+mod session;
+pub use session::*;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {
@@ -21,6 +23,16 @@ pub enum CoreError {
     Unlock { kind: String, message: String },
     #[error("sync {kind}: {message}")]
     Sync { kind: String, message: String },
+    #[error("session {kind:?}: {message}")]
+    Session {
+        kind: SessionErrorKindFfi,
+        message: String,
+    },
+    #[error("oidc {kind:?}: {message}")]
+    Oidc {
+        kind: OidcErrorKindFfi,
+        message: String,
+    },
 }
 
 pub type CoreResult<T> = Result<T, CoreError>;
@@ -273,6 +285,9 @@ impl CoreFacade {
     }
     pub fn sync_reset(&self, storage_id: Option<String>) -> CoreResult<()> {
         self.inner.sync_reset(storage_id).map_err(Into::into)
+    }
+    pub fn remote_session(&self) -> CoreResult<Arc<RemoteSession>> {
+        RemoteSession::new(self.inner.remote_client()?).map(Arc::new)
     }
     #[allow(clippy::too_many_arguments)]
     pub fn import_legacy_account(

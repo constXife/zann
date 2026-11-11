@@ -6292,6 +6292,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "uniffi",
  "zann-client",
  "zann-client-sqlite",
