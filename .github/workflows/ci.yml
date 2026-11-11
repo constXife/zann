@@ -799,7 +799,8 @@ jobs:
       needs.changes.outputs.js == 'true' ||
       needs.changes.outputs.rust == 'true' ||
       needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
+    # Pinned: WebKit WebDriver package names differ between Ubuntu releases.
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -812,6 +813,7 @@ jobs:
       RUST_BACKTRACE: "1"
       TAURI_E2E_LOG_HANDLES: "1"
       TAURI_E2E_FORCE_EXIT: "1"
+      TAURI_E2E_NATIVE_DRIVER: /usr/bin/WebKitWebDriver
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: /home/runner/.cache/sccache
       SCCACHE_LOG: debug
@@ -831,26 +833,8 @@ jobs:
             libxkbcommon-dev \
             libssl-dev \
             libudev-dev \
+            webkitgtk-webdriver \
             xvfb
-          if ! sudo apt-get install -y webkit2gtk-driver; then
-            sudo apt-get install -y webkit2gtk-4.1-driver
-          fi
-      - name: Resolve WebKitWebDriver
-        run: |
-          if command -v WebKitWebDriver >/dev/null 2>&1; then
-            echo "TAURI_E2E_NATIVE_DRIVER=$(command -v WebKitWebDriver)" >> "$GITHUB_ENV"
-          elif [ -x /usr/libexec/webkit2gtk-4.1/WebKitWebDriver ]; then
-            echo "TAURI_E2E_NATIVE_DRIVER=/usr/libexec/webkit2gtk-4.1/WebKitWebDriver" >> "$GITHUB_ENV"
-          elif [ -x /usr/libexec/webkit2gtk-4.0/WebKitWebDriver ]; then
-            echo "TAURI_E2E_NATIVE_DRIVER=/usr/libexec/webkit2gtk-4.0/WebKitWebDriver" >> "$GITHUB_ENV"
-          elif [ -x /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver ]; then
-            echo "TAURI_E2E_NATIVE_DRIVER=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver" >> "$GITHUB_ENV"
-          elif [ -x /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver ]; then
-            echo "TAURI_E2E_NATIVE_DRIVER=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver" >> "$GITHUB_ENV"
-          else
-            echo "WebKitWebDriver not found in expected locations" >&2
-            exit 1
-          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
       - name: Rust cache
