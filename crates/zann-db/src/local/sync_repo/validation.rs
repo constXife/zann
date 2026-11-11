@@ -40,7 +40,16 @@ pub(super) fn validate_pull_change(
         if proof.sync_status != SyncStatus::Synced {
             return invalid("pull may overwrite only an exact clean synced item");
         }
-        if change.item.version <= proof.version {
+        // A push never advances the pull cursor, so the next pull echoes the
+        // revision it confirmed; re-applying that exact revision is a no-op.
+        let echoes = change.item.version == proof.version
+            && change.item.path == proof.path
+            && change.item.name == proof.name
+            && change.item.type_id == proof.type_id
+            && change.item.checksum == proof.checksum
+            && change.item.deleted_at.is_some() == proof.deleted_at.is_some();
+        if change.item.version < proof.version || (change.item.version == proof.version && !echoes)
+        {
             return invalid("pulled item version must advance monotonically");
         }
     }

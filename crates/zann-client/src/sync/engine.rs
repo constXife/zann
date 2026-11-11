@@ -24,7 +24,6 @@ use crate::session::{
     AppSession, OperationCompletion, SessionAccess, SessionError, SessionErrorKind,
     SessionOperation, SessionTarget,
 };
-use zann_core::ChangeType;
 
 const MAX_REQUEST_TIME: Duration = Duration::from_secs(30);
 
@@ -533,7 +532,7 @@ impl SyncEngine {
                     })?;
                     if let Some(proof) = expected.exact_proof() {
                         if proof.sync_status() != SyncStatus::Synced
-                            || proof.projection().seq() >= change.item.seq()
+                            || !proof.projection().accepts_pulled(&change.item)
                         {
                             return Err(SyncError::new(
                                 operation_id,
@@ -850,8 +849,8 @@ fn validate_item_states(
 
 /// Push preparation accepts exactly the durable pending rows the checkpoint
 /// observed: the store must still report each row under the same pending id,
-/// and the projection expectation must match the operation (a create has no
-/// prior row; every other operation rewrites an existing synced projection).
+/// over the exact local projection that row was recorded with. Every local
+/// write, a create included, stores that projection before its pending row.
 /// Anything else means a local edit raced this operation.
 fn validate_item_states_for_push(
     scope: super::model::SyncScope,
@@ -878,11 +877,9 @@ fn validate_item_states_for_push(
                     && durable.item_id() == expected.item_id() => {}
             _ => return Err(SyncErrorKind::ConcurrentLocalChange),
         }
-        let creates_item = matches!(expected.operation(), ChangeType::Create);
-        if creates_item != state.exact_proof().is_none()
-            || state
-                .exact_proof()
-                .is_some_and(|proof| proof.projection().scope() != scope)
+        if state
+            .exact_proof()
+            .is_none_or(|proof| proof.projection().scope() != scope)
             || mapped.insert(item_id, state).is_some()
         {
             return Err(SyncErrorKind::ConcurrentLocalChange);
@@ -1733,6 +1730,85 @@ mod tests {
         assert_eq!(fixture.store.commit_attempts.load(Ordering::SeqCst), 0);
     }
 
+    /// The projection a confirmed push leaves for `change`: synced at its
+    /// server revision while the pull cursor stays behind it.
+    fn pushed_projection(change: &PersonalPullChangeWire) -> StoredProjection {
+        StoredProjection {
+            path: change.path.clone(),
+            name: change.name.clone(),
+            type_id: change.type_id.clone(),
+            payload_enc: change.payload_enc.clone().expect("live change payload"),
+            checksum: crate::sync::ContentChecksum::parse(&change.checksum)
+                .expect("valid checksum"),
+            cache_key_fingerprint: zann_crypto::cache_key_fingerprint(&SecretKey::from_bytes(
+                [7_u8; 32],
+            )),
+            seq: SyncSeq::new(change.seq).expect("valid sequence"),
+            updated_at: chrono::Utc::now(),
+            deleted_at: None,
+            sync_status: SyncStatus::Synced,
+        }
+    }
+
+    /// Pulls one page holding `change` from cursor 4 over `held`.
+    async fn pull_over_pushed(
+        item_id: Uuid,
+        make: impl FnOnce(Uuid) -> (PersonalPullChangeWire, StoredProjection),
+    ) -> (Arc<FakeStore>, Result<SyncOutcome, SyncError>) {
+        let mut held = None;
+        let fixture = fixture_with_vault(VaultPlane::PersonalClient, |vault_id| {
+            let (change, projection) = make(vault_id);
+            held = Some(projection);
+            vec![personal_page(vec![change], 5, false)]
+        });
+        let vault_id = fixture.remote.vaults.first().expect("one vault").0;
+        let scope = SyncScope::new(fixture.store.storage_id, vault_id).expect("valid scope");
+        fixture
+            .store
+            .default_checkpoint
+            .lock()
+            .expect("default checkpoint")
+            .clone_from(&(Some(cursor_string(4)), Some(4)));
+        fixture
+            .store
+            .stored_items
+            .lock()
+            .expect("stored items")
+            .insert((scope, item_id), held.expect("held projection"));
+        let result = fixture
+            .engine
+            .pull(&fixture.target, fixture.operation)
+            .await;
+        (fixture.store, result)
+    }
+
+    #[tokio::test]
+    async fn pull_reapplies_the_exact_revision_a_push_confirmed() {
+        let item_id = Uuid::now_v7();
+        let (store, result) = pull_over_pushed(item_id, |vault_id| {
+            let change = personal_change(vault_id, item_id, 5);
+            let held = pushed_projection(&change);
+            (change, held)
+        })
+        .await;
+        result.expect("an echoed revision is idempotent");
+        assert_eq!(store.commit_attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn pull_rejects_different_content_at_the_held_revision() {
+        let item_id = Uuid::now_v7();
+        let (store, result) = pull_over_pushed(item_id, |vault_id| {
+            // Each call encrypts under a fresh nonce: same seq, other content.
+            let held = pushed_projection(&personal_change(vault_id, item_id, 5));
+            (personal_change(vault_id, item_id, 5), held)
+        })
+        .await;
+        let error = result.expect_err("other content at the held revision is a conflict");
+        assert_eq!(error.kind(), SyncErrorKind::ConcurrentLocalChange);
+        assert_eq!(store.commit_attempts.load(Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn pull_projection_carries_fingerprint_of_the_exact_payload_key() {
         let item_id = Uuid::now_v7();
@@ -2351,6 +2427,43 @@ mod tests {
         .expect("valid pending proof")
     }
 
+    fn pending_create_proof(scope: SyncScope, item_id: Uuid, payload: Vec<u8>) -> PendingProof {
+        PendingProof::new(
+            Uuid::now_v7(),
+            scope,
+            item_id,
+            ChangeType::Create,
+            Some(payload.clone()),
+            Some(
+                crate::sync::ContentChecksum::parse(&zann_crypto::payload_checksum(&payload))
+                    .expect("valid checksum"),
+            ),
+            Some(format!("items/{item_id}")),
+            Some(item_id.to_string()),
+            Some("login".to_string()),
+            None,
+            chrono::Utc::now(),
+        )
+        .expect("valid create proof")
+    }
+
+    /// The local write path stores a created item before its pending row.
+    fn created_projection(item_id: Uuid, payload: Vec<u8>) -> StoredProjection {
+        StoredProjection {
+            path: format!("items/{item_id}"),
+            name: item_id.to_string(),
+            type_id: "login".to_string(),
+            checksum: crate::sync::ContentChecksum::parse(&zann_crypto::payload_checksum(&payload))
+                .expect("valid checksum"),
+            payload_enc: payload,
+            cache_key_fingerprint: "001122aabbcc".to_string(),
+            seq: SyncSeq::new(1).expect("valid sequence"),
+            updated_at: chrono::Utc::now(),
+            deleted_at: None,
+            sync_status: SyncStatus::Modified,
+        }
+    }
+
     fn synced_projection(seq: i64) -> StoredProjection {
         StoredProjection {
             path: "items/synced".to_string(),
@@ -2488,6 +2601,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn push_preparation_requires_the_local_projection_of_a_create() {
+        let scope = SyncScope::new(Uuid::now_v7(), Uuid::now_v7()).expect("valid scope");
+        let item_id = Uuid::now_v7();
+        let create = pending_create_proof(scope, item_id, vec![42]);
+        let proof = created_projection(item_id, vec![42])
+            .proof(scope, item_id)
+            .expect("proof");
+
+        let stored = ItemState::exact(proof).with_pending(create.clone());
+        let states =
+            validate_item_states_for_push(scope, std::slice::from_ref(&create), vec![stored])
+                .expect("a create pushes its stored local projection");
+        assert!(states[&item_id].exact_proof().is_some());
+
+        let missing = ItemState::absent(item_id)
+            .expect("absent state")
+            .with_pending(create.clone());
+        assert_eq!(
+            validate_item_states_for_push(scope, &[create], vec![missing])
+                .expect_err("a create without its local projection raced a local change"),
+            SyncErrorKind::ConcurrentLocalChange
+        );
+    }
+
     #[tokio::test]
     async fn successful_push_applies_creates_and_updates_without_advancing_the_pull_cursor() {
         let fixture = fixture_with_vault(VaultPlane::PersonalClient, |_vault_id| {
@@ -2499,23 +2637,7 @@ mod tests {
         let created_id = Uuid::now_v7();
         let scope = SyncScope::new(fixture.store.storage_id, vault_id).expect("valid scope");
         let update = pending_update_proof(scope, updated_id, 5, vec![7, 8, 9]);
-        let create = PendingProof::new(
-            Uuid::now_v7(),
-            scope,
-            created_id,
-            ChangeType::Create,
-            Some(vec![42]),
-            Some(
-                crate::sync::ContentChecksum::parse(&zann_crypto::payload_checksum(&[42]))
-                    .expect("valid checksum"),
-            ),
-            Some(format!("items/{created_id}")),
-            Some(created_id.to_string()),
-            Some("login".to_string()),
-            None,
-            chrono::Utc::now(),
-        )
-        .expect("valid create proof");
+        let create = pending_create_proof(scope, created_id, vec![42]);
         fixture
             .store
             .default_checkpoint
@@ -2534,6 +2656,15 @@ mod tests {
             .lock()
             .expect("stored items")
             .insert((scope, updated_id), synced_projection(5));
+        fixture
+            .store
+            .stored_items
+            .lock()
+            .expect("stored items")
+            .insert(
+                (scope, created_id),
+                created_projection(created_id, vec![42]),
+            );
         *fixture.remote.push_response.lock().expect("push response") = Some(PushResponseWire {
             applied: vec![updated_id.to_string(), created_id.to_string()],
             applied_changes: vec![
