@@ -80,7 +80,7 @@ fn vault_with_items() -> (tempfile::TempDir, Session) {
 }
 
 #[test]
-fn reload_keeps_the_explicit_database_instead_of_reresolving_the_environment() {
+fn session_keeps_the_explicit_database_instead_of_reresolving_the_environment() {
     let _env = DB_ENV_LOCK.lock().expect("environment lock");
     let explicit = tempfile::tempdir().expect("explicit tempdir");
     let fallback = tempfile::tempdir().expect("fallback tempdir");
@@ -93,20 +93,19 @@ fn reload_keeps_the_explicit_database_instead_of_reresolving_the_environment() {
     let _override = DbUrlOverride::set(fallback_value);
 
     let result = (|| {
-        let (mut session, _) = Session::open_at(explicit_path.clone())?;
+        let (session, _) = Session::open_at(explicit_path.clone())?;
         local::initialize_master_password(&session.facade(), "explicit-password".to_string())?;
-        session.reload()?;
         let status = session
             .facade()
             .app_status()
             .map_err(|err| err.to_string())?;
         if !status.initialized {
-            return Err("reload opened a different database".to_string());
+            return Err("the session opened a different database".to_string());
         }
         Ok::<(), String>(())
     })();
 
-    result.expect("reload explicit session");
+    result.expect("explicit session");
     assert!(
         explicit_path.exists(),
         "literal URI delimiter characters must stay in the filesystem path"

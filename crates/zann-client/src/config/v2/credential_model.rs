@@ -405,6 +405,8 @@ pub enum ConfigError {
     },
     #[error("authenticated identity conflict: {reason}")]
     AuthenticatedIdentityConflict { reason: String },
+    #[error("KDF identity changed since it was read")]
+    IdentityChanged,
     #[error("storage id {storage_id} is already bound to connection {connection_id}")]
     StorageBindingConflict {
         storage_id: String,

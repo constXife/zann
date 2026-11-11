@@ -14,16 +14,18 @@
 //! ## The database alone is not enough
 //!
 //! The master key is derived from the password and the KDF salt, and that salt
-//! lives in `config.json`, not in the database. A copy of `local.sqlite` whose
-//! salt has been lost cannot be opened by any password. So each snapshot is
-//! paired with an `.identity.json` holding just the `identity` block of
-//! `config.json`.
+//! lives in the Config v2 `identity`, not in the database. A copy of
+//! `local.sqlite` whose salt has been lost cannot be opened by any password. So
+//! each snapshot is paired with an `.identity.json` holding just that identity.
 //!
-//! Only that block: `config.json` also carries refresh tokens in the clear, and
-//! duplicating those into a directory of long-lived copies would trade one
-//! recovery problem for a worse disclosure one. The salt is not a secret — it
-//! is useless without the password — while the tokens are, and they can always
-//! be obtained again by logging in.
+//! Only that block: the client config also names credentials, and duplicating
+//! anything session-related into a directory of long-lived copies would trade
+//! one recovery problem for a worse disclosure one. The salt is not a secret —
+//! it is useless without the password.
+//!
+//! This module only moves files. Reading the identity from Config v2 and
+//! committing a restored one back is the caller's job, so the config keeps a
+//! single writer.
 //!
 //! See docs/adr/0002-client-strategy.md on why being able to recover ranks
 //! above features.
@@ -31,6 +33,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use zann_client::app::ConfigIdentity;
 use zann_db::SqlitePool;
 
 /// Snapshot filenames are `local-YYYYMMDD-HHMMSS.sqlite`. The timestamp is part
@@ -80,9 +83,9 @@ impl Default for RetentionPolicy {
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub path: PathBuf,
-    /// The KDF salt this copy needs to be opened. `None` only when the vault
-    /// had no `identity` in its config yet, which means it has never been
-    /// unlocked and there is nothing to recover.
+    /// The KDF salt this copy needs to be opened. `None` only when no identity
+    /// was committed yet, which means the vault was never initialized and there
+    /// is nothing to recover.
     pub identity_path: Option<PathBuf>,
     /// From the filename, as RFC 3339.
     pub created_at: String,
@@ -175,6 +178,7 @@ pub fn prune(root: &Path, policy: &RetentionPolicy) -> Result<Vec<PathBuf>, Snap
 pub async fn create(
     pool: &SqlitePool,
     root: &Path,
+    identity: Option<&ConfigIdentity>,
     policy: &RetentionPolicy,
 ) -> Result<Snapshot, SnapshotError> {
     let dir = snapshots_dir(root);
@@ -201,7 +205,9 @@ pub async fn create(
 
     // Save the salt first: a database copy without it cannot be opened, so
     // failing here has to stop the snapshot rather than produce a useless one.
-    let identity_path = save_identity(root, &dir, &created.format(STAMP).to_string())?;
+    let identity_path = identity
+        .map(|identity| save_identity(identity, &dir, &created.format(STAMP).to_string()))
+        .transpose()?;
 
     // `VACUUM INTO` takes an expression, so the destination binds as a normal
     // parameter — no quoting of a user-supplied path into SQL.
@@ -223,34 +229,18 @@ pub async fn create(
     })
 }
 
-/// Copy the `identity` block of `config.json` next to a snapshot.
-///
-/// Deliberately not the whole file — see the module docs on why the tokens in
-/// it must not be duplicated.
-fn save_identity(root: &Path, dir: &Path, stamp: &str) -> Result<Option<PathBuf>, SnapshotError> {
-    let config_path = root.join("config.json");
-    let contents = match std::fs::read_to_string(&config_path) {
-        Ok(contents) => contents,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => {
-            return Err(SnapshotError::new(
-                "snapshot_identity_failed",
-                err.to_string(),
-            ));
-        }
-    };
-    let config: serde_json::Value = serde_json::from_str(&contents)
-        .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))?;
-    let Some(identity) = config.get("identity").filter(|value| !value.is_null()) else {
-        return Ok(None);
-    };
-
+/// Save the KDF identity next to a snapshot.
+fn save_identity(
+    identity: &ConfigIdentity,
+    dir: &Path,
+    stamp: &str,
+) -> Result<PathBuf, SnapshotError> {
     let path = dir.join(format!("{PREFIX}{stamp}{IDENTITY_SUFFIX}"));
     let body = serde_json::to_string_pretty(identity)
         .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))?;
     std::fs::write(&path, body)
         .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))?;
-    Ok(Some(path))
+    Ok(path)
 }
 
 /// Whether the newest snapshot is older than `max_age`, i.e. whether one is due.
@@ -278,13 +268,14 @@ pub fn is_due(root: &Path, max_age: Duration) -> bool {
 pub async fn create_if_due(
     pool: &SqlitePool,
     root: &Path,
+    identity: Option<&ConfigIdentity>,
     max_age: Duration,
     policy: &RetentionPolicy,
 ) -> Result<Option<Snapshot>, SnapshotError> {
     if !is_due(root, max_age) {
         return Ok(None);
     }
-    create(pool, root, policy).await.map(Some)
+    create(pool, root, identity, policy).await.map(Some)
 }
 
 /// Where a snapshot has to be copied to put it back.
@@ -303,11 +294,10 @@ pub struct RestoreOutcome {
     /// The database that was in place beforehand, kept as a snapshot of its
     /// own. A restore is reversible by restoring this.
     pub replaced_saved_to: PathBuf,
-    /// Whether the KDF salt came back with the snapshot. When it did, the
-    /// password that opens the restored database is the one that was in use
-    /// when the snapshot was taken, and anything derived from the old salt —
-    /// a remembered unlock, above all — is now wrong.
-    pub identity_replaced: bool,
+    /// The KDF identity saved beside the snapshot, for the caller to commit
+    /// to Config v2. The password that opens the restored database is the one
+    /// in use under this identity when the snapshot was taken.
+    pub identity: Option<ConfigIdentity>,
 }
 
 /// Put a snapshot back in place of the live database.
@@ -315,6 +305,9 @@ pub struct RestoreOutcome {
 /// **The caller must not use `pool` afterwards.** This closes it, because the
 /// one thing that reliably turns a working vault into a corrupt one is swapping
 /// the file under an open connection. A client calls this, then reconnects.
+///
+/// `identity` is the one committed now, saved beside the copy of the database
+/// being replaced.
 ///
 /// The order is chosen so that no step can lose data on its own:
 ///
@@ -329,6 +322,7 @@ pub struct RestoreOutcome {
 pub async fn restore(
     pool: SqlitePool,
     root: &Path,
+    identity: Option<&ConfigIdentity>,
     snapshot_path: &Path,
 ) -> Result<RestoreOutcome, SnapshotError> {
     if !snapshot_path.is_file() {
@@ -345,9 +339,9 @@ pub async fn restore(
         ));
     }
     check_readable(snapshot_path).await?;
-    // Read and parse the salt now, while a failure still costs nothing. Only
-    // the write of it happens after the database has moved.
-    let identity = read_identity(snapshot_path)?;
+    // Read and parse the salt now, while a failure still costs nothing. The
+    // caller commits it only after the database has moved.
+    let restored_identity = read_identity(snapshot_path)?;
 
     // Keep what is about to be replaced. Retention is off for this one: the
     // pruning that follows a normal snapshot could delete the file we are in
@@ -355,6 +349,7 @@ pub async fn restore(
     let replaced = create(
         &pool,
         root,
+        identity,
         &RetentionPolicy {
             max_count: None,
             max_age_days: None,
@@ -379,15 +374,10 @@ pub async fn restore(
         let _ = std::fs::remove_file(target.with_extension(sidecar));
     }
 
-    let identity_replaced = match identity {
-        Some(identity) => write_identity(root, identity)?,
-        None => false,
-    };
-
     Ok(RestoreOutcome {
         restored_from: snapshot_path.to_path_buf(),
         replaced_saved_to: replaced.path,
-        identity_replaced,
+        identity: restored_identity,
     })
 }
 
@@ -437,7 +427,7 @@ async fn check_readable(path: &Path) -> Result<(), SnapshotError> {
 /// well be the one it was taken under, and refusing the restore would help
 /// nobody. A file that is there but unreadable *is* an error, and this runs
 /// before anything has been replaced so it can still be reported as one.
-fn read_identity(snapshot_path: &Path) -> Result<Option<serde_json::Value>, SnapshotError> {
+fn read_identity(snapshot_path: &Path) -> Result<Option<ConfigIdentity>, SnapshotError> {
     let identity_path = snapshot_path.with_extension("identity.json");
     let Ok(contents) = std::fs::read_to_string(&identity_path) else {
         return Ok(None);
@@ -445,39 +435,6 @@ fn read_identity(snapshot_path: &Path) -> Result<Option<serde_json::Value>, Snap
     serde_json::from_str(&contents)
         .map(Some)
         .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))
-}
-
-/// Put the snapshot's `identity` block into `config.json`, leaving the rest of
-/// the file — the tokens above all — alone. Returns whether anything changed.
-fn write_identity(root: &Path, identity: serde_json::Value) -> Result<bool, SnapshotError> {
-    let config_path = root.join("config.json");
-    let mut config = match std::fs::read_to_string(&config_path) {
-        Ok(contents) => serde_json::from_str::<serde_json::Value>(&contents)
-            .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))?,
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            serde_json::Value::Object(serde_json::Map::new())
-        }
-        Err(err) => {
-            return Err(SnapshotError::new(
-                "snapshot_identity_failed",
-                err.to_string(),
-            ))
-        }
-    };
-    if config.get("identity") == Some(&identity) {
-        return Ok(false);
-    }
-    match config.as_object_mut() {
-        Some(map) => {
-            map.insert("identity".to_string(), identity);
-        }
-        None => config = serde_json::json!({ "identity": identity }),
-    }
-    let body = serde_json::to_string_pretty(&config)
-        .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))?;
-    crate::maintenance::secure_file::write_private(&config_path, body.as_bytes())
-        .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))?;
-    Ok(true)
 }
 
 #[cfg(test)]

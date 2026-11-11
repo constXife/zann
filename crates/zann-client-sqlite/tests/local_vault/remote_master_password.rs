@@ -1,12 +1,12 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use zann_client_sqlite::local_vault::open_vault as create_core;
+use zann_client_sqlite::local_vault::{open_vault as create_core, LocalVault};
 
 use tempfile::tempdir;
 use zann_client::app::{
     AppClient, ClientId, ClientPaths, LoginPassword, PasswordLoginRequest,
-    PrepareConnectionOutcome, SessionClient, SessionOperation,
+    PasswordRegistrationRequest, PrepareConnectionOutcome, SessionClient, SessionOperation,
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_client_sqlite::SqliteSyncStoreFactory;
@@ -23,7 +23,7 @@ fn env_or_skip(key: &str) -> Option<String> {
 }
 
 fn make_db_url(root: &Path) -> String {
-    let path = root.join("zann.sqlite");
+    let path = root.join("local.sqlite");
     format!("sqlite://{}", path.display())
 }
 
@@ -101,4 +101,119 @@ fn remote_login_create_master_then_relogin_unlock() {
 
     let core = create_core(db_url).expect("create core");
     core.unlock(master_password).expect("unlock after relogin");
+}
+
+fn select_personal_vault(core: &LocalVault, storage_id: &str) {
+    core.set_current_storage(storage_id.to_string())
+        .expect("select the server's storage");
+    let vault = core
+        .list_vaults()
+        .expect("list vaults")
+        .into_iter()
+        .find(|vault| vault.kind == "personal")
+        .expect("the server's personal vault is synced");
+    core.set_current_vault(vault.id)
+        .expect("select the personal vault");
+}
+
+/// One account, two devices. Device A registers and publishes the personal
+/// vault; device B starts from an empty root, logs in, syncs and opens that
+/// vault's key with the same master password. Device B opens its database
+/// before the login, as every client does, so a salt invented at open would
+/// collide with the account's.
+#[test]
+#[ignore]
+fn second_device_unlocks_the_synced_personal_vault() {
+    let server_url = match env_or_skip("ZANN_REMOTE_URL") {
+        Some(value) => value,
+        None => return,
+    };
+    let email = format!("device-{}@example.test", uuid::Uuid::now_v7());
+    let password = format!("account-password-{}", uuid::Uuid::now_v7());
+    let master_password = format!("master-password-{}", uuid::Uuid::now_v7());
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+
+    let connect = |root: &Path| {
+        let database = SqliteFileLocation::from_uri(&make_db_url(root)).expect("location");
+        let client = AppClient::new(
+            ClientPaths::new(root),
+            Arc::new(OsCredentialStore::system_default()),
+            SessionClient::new(ClientId::new("desktop").expect("client id")),
+            Arc::new(SqliteSyncStoreFactory::new(database.path()).expect("sync factory")),
+        );
+        client
+            .initialize(&OsLegacyCredentialSource::system_default())
+            .expect("initialize client");
+        let prepared = match runtime
+            .block_on(client.prepare_connection(&server_url, "Remote", "default"))
+            .expect("prepare connection")
+        {
+            PrepareConnectionOutcome::Ready(prepared) => prepared,
+            PrepareConnectionOutcome::FingerprintChanged(_) => {
+                panic!("test server fingerprint changed")
+            }
+        };
+        (client, prepared)
+    };
+    let operation = || SessionOperation::new(Instant::now() + Duration::from_secs(60)).0;
+
+    let device_a = tempdir().expect("device A root");
+    let core = create_core(make_db_url(device_a.path())).expect("open device A");
+    let (client, prepared) = connect(device_a.path());
+    let request = PasswordRegistrationRequest::new(
+        prepared.target().clone(),
+        email.clone(),
+        LoginPassword::new(password.clone()).expect("password"),
+        None,
+    )
+    .expect("registration request");
+    let access = runtime
+        .block_on(client.password_register(request, operation()))
+        .expect("device A registers");
+    let status = runtime
+        .block_on(client.personal_vault_status(&access))
+        .expect("personal vault status");
+    assert!(!status.personal_key_envelopes_present());
+    let storage_id = prepared.storage_id().to_string();
+    drop(core);
+
+    let core = create_core(make_db_url(device_a.path())).expect("reopen device A");
+    core.initialize_master_password(master_password.clone())
+        .expect("device A creates the vault");
+    core.remote_sync(Some(storage_id))
+        .expect("device A publishes the personal vault");
+    drop(core);
+
+    let device_b = tempdir().expect("device B root");
+    let core = create_core(make_db_url(device_b.path())).expect("open device B");
+    let (client, prepared) = connect(device_b.path());
+    let request = PasswordLoginRequest::new(
+        prepared.target().clone(),
+        email,
+        LoginPassword::new(password).expect("password"),
+    )
+    .expect("login request");
+    let access = runtime
+        .block_on(client.password_login(request, operation()))
+        .expect("device B logs in without an identity conflict");
+    let status = runtime
+        .block_on(client.personal_vault_status(&access))
+        .expect("personal vault status");
+    assert!(status.personal_key_envelopes_present());
+    drop(core);
+
+    let core = create_core(make_db_url(device_b.path())).expect("reopen device B");
+    core.unlock(master_password.clone())
+        .expect("device B derives the account's master key");
+    core.remote_sync(Some(prepared.storage_id().to_string()))
+        .expect("device B syncs");
+    select_personal_vault(&core, prepared.storage_id());
+
+    // Unlocking again checks the derived key against the synced vault key,
+    // which was wrapped on device A.
+    core.lock().expect("lock");
+    core.unlock(format!("wrong-{master_password}"))
+        .expect_err("another password must not open device A's vault");
+    core.unlock(master_password)
+        .expect("device B opens device A's vault key");
 }

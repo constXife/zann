@@ -562,139 +562,114 @@ impl cosmic::Application for App {
             _ => {}
         }
 
-        // The screens borrow `self.shell`, so losing the session is recorded
-        // here and applied once that borrow ends.
-        let mut lost_session = None;
         let content_width = self.content_width();
         let auto_lock_minutes = self.preferences.auto_lock_minutes;
         let reveal_seconds = self.preferences.auto_hide_reveal_seconds;
 
-        let task = {
-            let Shell::Ready { session, screen } = &mut self.shell else {
-                return Task::none();
-            };
-
-            // Each arm reborrows the screen just long enough to run its
-            // update, so the transition afterwards is free to replace it.
-            match message {
-                Message::Welcome(message) => {
-                    if !matches!(screen, Screen::Welcome) {
-                        return Task::none();
-                    }
-                    *screen = match message {
-                        welcome::Message::UseLocalVault => {
-                            Screen::Master(Box::new(master::State::new(master::Mode::Create, None)))
-                        }
-                        welcome::Message::ConnectToServer => Screen::Connect {
-                            state: Box::default(),
-                            return_to: None,
-                        },
-                    };
-                    Task::none()
-                }
-
-                Message::Connect(message) => {
-                    let Screen::Connect { state, return_to } = &mut *screen else {
-                        return Task::none();
-                    };
-                    match state.update(message) {
-                        connect::Outcome::None => Task::none(),
-                        connect::Outcome::Task(task) => lift(task, Message::Connect),
-                        connect::Outcome::Copy(value) => {
-                            cosmic::task::message(Message::Copy(value))
-                        }
-                        connect::Outcome::OpenUrl(url) => {
-                            cosmic::task::message(Message::OpenUrl(url))
-                        }
-                        connect::Outcome::Cancelled => {
-                            *screen = return_to.take().map_or(Screen::Welcome, |screen| *screen);
-                            Task::none()
-                        }
-                        connect::Outcome::Connected {
-                            storage_id,
-                            has_personal_keys,
-                        } => {
-                            // The login rewrote the identity config, so the
-                            // session has to be rebuilt from it before the
-                            // vault is opened.
-                            match session.reload() {
-                                Ok(()) => {
-                                    let mode = if has_personal_keys {
-                                        master::Mode::Unlock
-                                    } else {
-                                        master::Mode::Create
-                                    };
-                                    *screen = Screen::Master(Box::new(master::State::new(
-                                        mode,
-                                        Some(storage_id),
-                                    )));
-                                }
-                                Err(err) => lost_session = Some(err),
-                            }
-                            Task::none()
-                        }
-                    }
-                }
-
-                Message::Master(message) => {
-                    let Screen::Master(state) = &mut *screen else {
-                        return Task::none();
-                    };
-                    match state.update(message, session) {
-                        master::Outcome::None => Task::none(),
-                        master::Outcome::Task(task) => lift(task, Message::Master),
-                        master::Outcome::Opened { page, sync_error } => {
-                            let load_vaults = vault::State::load_vaults(session);
-                            let mut vault = vault::State::new(page, sync_error);
-                            vault.set_content_width(content_width);
-                            vault.set_auto_lock_minutes(auto_lock_minutes);
-                            vault.set_reveal_seconds(reveal_seconds);
-                            *screen = Screen::Vault(Box::new(vault));
-                            lift(load_vaults, Message::Vault)
-                        }
-                    }
-                }
-
-                Message::Vault(message) => {
-                    let (Screen::Vault(state) | Screen::Settings { vault: state, .. }) =
-                        &mut *screen
-                    else {
-                        return Task::none();
-                    };
-                    match state.update(message, session) {
-                        vault::Outcome::None => Task::none(),
-                        vault::Outcome::Task(task) => lift(task, Message::Vault),
-                        vault::Outcome::Copy { value, feedback } => Task::batch([
-                            cosmic::task::message(Message::Copy(value)),
-                            lift(feedback, Message::Vault),
-                        ]),
-                        vault::Outcome::Locked => cosmic::task::message(Message::Lock),
-                    }
-                }
-
-                // Handled above, before the session was borrowed.
-                Message::Copy(_)
-                | Message::OpenUrl(_)
-                | Message::Lock
-                | Message::OpenSettings
-                | Message::Quit
-                | Message::CloseRequested
-                | Message::WindowClosed(_)
-                | Message::Tray(_)
-                | Message::ShowWindow(_)
-                | Message::Unfocused
-                | Message::TemporaryReveal(_)
-                | Message::Activity
-                | Message::ClipboardExpired(_)
-                | Message::ClipboardRead(_)
-                | Message::Settings(_) => Task::none(),
-            }
+        let Shell::Ready { session, screen } = &mut self.shell else {
+            return Task::none();
         };
 
-        if let Some(err) = lost_session {
-            self.shell = Shell::Blocked(err);
+        // Each arm reborrows the screen just long enough to run its
+        // update, so the transition afterwards is free to replace it.
+        match message {
+            Message::Welcome(message) => {
+                if !matches!(screen, Screen::Welcome) {
+                    return Task::none();
+                }
+                *screen = match message {
+                    welcome::Message::UseLocalVault => {
+                        Screen::Master(Box::new(master::State::new(master::Mode::Create, None)))
+                    }
+                    welcome::Message::ConnectToServer => Screen::Connect {
+                        state: Box::default(),
+                        return_to: None,
+                    },
+                };
+                Task::none()
+            }
+
+            Message::Connect(message) => {
+                let Screen::Connect { state, return_to } = &mut *screen else {
+                    return Task::none();
+                };
+                match state.update(message) {
+                    connect::Outcome::None => Task::none(),
+                    connect::Outcome::Task(task) => lift(task, Message::Connect),
+                    connect::Outcome::Copy(value) => cosmic::task::message(Message::Copy(value)),
+                    connect::Outcome::OpenUrl(url) => cosmic::task::message(Message::OpenUrl(url)),
+                    connect::Outcome::Cancelled => {
+                        *screen = return_to.take().map_or(Screen::Welcome, |screen| *screen);
+                        Task::none()
+                    }
+                    connect::Outcome::Connected {
+                        storage_id,
+                        has_personal_keys,
+                    } => {
+                        let mode = if has_personal_keys {
+                            master::Mode::Unlock
+                        } else {
+                            master::Mode::Create
+                        };
+                        *screen =
+                            Screen::Master(Box::new(master::State::new(mode, Some(storage_id))));
+                        Task::none()
+                    }
+                }
+            }
+
+            Message::Master(message) => {
+                let Screen::Master(state) = &mut *screen else {
+                    return Task::none();
+                };
+                match state.update(message, session) {
+                    master::Outcome::None => Task::none(),
+                    master::Outcome::Task(task) => lift(task, Message::Master),
+                    master::Outcome::Opened { page, sync_error } => {
+                        let load_vaults = vault::State::load_vaults(session);
+                        let mut vault = vault::State::new(page, sync_error);
+                        vault.set_content_width(content_width);
+                        vault.set_auto_lock_minutes(auto_lock_minutes);
+                        vault.set_reveal_seconds(reveal_seconds);
+                        *screen = Screen::Vault(Box::new(vault));
+                        lift(load_vaults, Message::Vault)
+                    }
+                }
+            }
+
+            Message::Vault(message) => {
+                let (Screen::Vault(state) | Screen::Settings { vault: state, .. }) = &mut *screen
+                else {
+                    return Task::none();
+                };
+                match state.update(message, session) {
+                    vault::Outcome::None => Task::none(),
+                    vault::Outcome::Task(task) => lift(task, Message::Vault),
+                    vault::Outcome::Copy { value, feedback } => Task::batch([
+                        cosmic::task::message(Message::Copy(value)),
+                        lift(feedback, Message::Vault),
+                    ]),
+                    vault::Outcome::Locked => cosmic::task::message(Message::Lock),
+                }
+            }
+
+            // Handled above, before the session was borrowed.
+            Message::Copy(_)
+            | Message::OpenUrl(_)
+            | Message::Lock
+            | Message::OpenSettings
+            | Message::Quit
+            | Message::CloseRequested
+            | Message::WindowClosed(_)
+            | Message::Tray(_)
+            | Message::ShowWindow(_)
+            | Message::Unfocused
+            | Message::TemporaryReveal(_)
+            | Message::Activity
+            | Message::ClipboardExpired(_)
+            | Message::ClipboardRead(_)
+            | Message::Settings(_) => Task::none(),
         }
-        task
     }
 
     fn view(&self) -> Element<'_, Self::Message> {

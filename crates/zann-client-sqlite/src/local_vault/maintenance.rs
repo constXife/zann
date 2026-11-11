@@ -128,9 +128,11 @@ impl LocalVault {
     /// demanding an unlock would suggest a protection that is not there.
     pub fn snapshot_create(&self, retention: Option<Retention>) -> LocalResult<Snapshot> {
         let policy = retention.map(Into::into).unwrap_or_default();
+        let identity = self.kdf_identity()?;
         let snapshot = self.runtime.block_on(crate::maintenance::snapshot::create(
             &self.pool(),
             &self.root,
+            identity.as_ref(),
             &policy,
         ))?;
         Ok(snapshot.into())
@@ -146,11 +148,13 @@ impl LocalVault {
     ) -> LocalResult<Option<Snapshot>> {
         let policy = retention.map(Into::into).unwrap_or_default();
         let max_age = std::time::Duration::from_secs(u64::from(max_age_hours) * 3600);
+        let identity = self.kdf_identity()?;
         let snapshot = self
             .runtime
             .block_on(crate::maintenance::snapshot::create_if_due(
                 &self.pool(),
                 &self.root,
+                identity.as_ref(),
                 max_age,
                 &policy,
             ))?;
@@ -183,11 +187,16 @@ impl LocalVault {
     /// again afterwards, with the password that was in use when the snapshot was
     /// taken.
     ///
-    /// A remembered unlock is dropped when the salt came back with the snapshot
-    /// — the stored key was derived from the salt that has just been replaced,
-    /// so it would fail every unlock until someone thought to clear it.
+    /// The snapshot's salt is committed to Config v2 when it differs from the
+    /// current one, and a remembered unlock is then dropped — the stored key was
+    /// derived from the salt that has just been replaced, so it would fail every
+    /// unlock until someone thought to clear it.
     pub fn snapshot_restore(&self, path: String) -> LocalResult<SnapshotRestore> {
         let path = PathBuf::from(path);
+        let client = self.app_client()?;
+        let identity = client
+            .kdf_identity()
+            .map_err(|err| LocalError::Service(err.to_string()))?;
         // Lock before anything moves. If the restore fails halfway, a locked
         // vault is recoverable; a key held over a database it does not match is
         // a stream of decryption failures nobody can explain.
@@ -197,6 +206,7 @@ impl LocalVault {
         let outcome = self.runtime.block_on(crate::maintenance::snapshot::restore(
             self.pool(),
             &self.root,
+            identity.as_ref(),
             &path,
         ));
 
@@ -209,14 +219,21 @@ impl LocalVault {
         let outcome = outcome?;
         reopened?;
 
-        if outcome.identity_replaced {
-            let _ = self.forget_remembered();
-        }
+        let identity_replaced = match outcome.identity {
+            Some(restored) if identity.as_ref() != Some(&restored) => {
+                client
+                    .replace_kdf_identity_if_matches(identity.as_ref(), restored)
+                    .map_err(|err| LocalError::Service(err.to_string()))?;
+                let _ = self.forget_remembered();
+                true
+            }
+            _ => false,
+        };
 
         Ok(SnapshotRestore {
             restored_from: outcome.restored_from.display().to_string(),
             replaced_saved_to: outcome.replaced_saved_to.display().to_string(),
-            identity_replaced: outcome.identity_replaced,
+            identity_replaced,
         })
     }
 }

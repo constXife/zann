@@ -168,6 +168,7 @@ mod credential_remove;
 mod credential_transaction;
 mod credentials;
 mod generation;
+mod identity;
 mod intent_recovery;
 mod locks;
 mod login_commit;

@@ -48,13 +48,6 @@ impl Session {
         &self.location
     }
 
-    /// A server login rewrites the identity config, so the facade derived from
-    /// it is stale afterwards.
-    pub fn reload(&mut self) -> Result<(), String> {
-        self.facade = local::reopen_at(&self.location)?;
-        Ok(())
-    }
-
     pub fn lock(&self) {
         let _ = self.facade.lock();
     }

@@ -56,12 +56,6 @@ pub fn open_at(location: &DatabaseLocation) -> Result<(Facade, AppStatus), Strin
     Ok((facade, status))
 }
 
-/// Connecting to a server rewrites the identity config, so the facade has to be
-/// rebuilt from the same explicitly resolved database afterwards.
-pub fn reopen_at(location: &DatabaseLocation) -> Result<Facade, String> {
-    open_core(location)
-}
-
 fn open_core(location: &DatabaseLocation) -> Result<Facade, String> {
     open_vault_at_file_location(location.file_location())
         .map(|service| service as Arc<dyn LocalVaultService>)

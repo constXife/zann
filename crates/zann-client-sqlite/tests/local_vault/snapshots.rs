@@ -53,26 +53,16 @@ fn a_snapshot_is_a_working_copy_that_still_holds_the_data() {
     // The point of a snapshot: put it somewhere fresh and find the data again.
     // The salt travels with it — without that the copy is unopenable, which is
     // the whole reason `identity_path` exists.
+    assert!(
+        snapshot.identity_path.is_some(),
+        "a snapshot of an initialised vault must carry its salt"
+    );
     let restored_root = temp_root("restored");
-    let restored_db = restored_root.join("local.sqlite");
-    fs::copy(&snapshot.path, &restored_db).expect("copy snapshot into place");
-
-    let identity_path = snapshot
-        .identity_path
-        .as_ref()
-        .expect("a snapshot of an initialised vault must carry its salt");
-    let identity: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(identity_path).expect("read identity"))
-            .expect("parse identity");
-    fs::write(
-        restored_root.join("config.json"),
-        serde_json::to_string_pretty(&serde_json::json!({ "identity": identity }))
-            .expect("render config"),
-    )
-    .expect("write config");
-
-    let restored = create_core(format!("sqlite://{}", restored_db.display()))
-        .expect("open the restored vault");
+    let restored = create_core(db_url(&restored_root)).expect("open a fresh vault");
+    let outcome = restored
+        .snapshot_restore(snapshot.path.clone())
+        .expect("restore into the fresh vault");
+    assert!(outcome.identity_replaced, "the salt did not come along");
     restored
         .unlock(password)
         .expect("unlock the restored vault");

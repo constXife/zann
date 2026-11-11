@@ -12,11 +12,11 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use zann_client::config::v2::{ClientNamespace, ConnectionMetadata, DesktopBackupSettings};
 use zann_client::config::{
-    ActiveCredentialAfterRemoval, ClientId, ClientPaths, ConfigError, ConfigRepository, ConfigV2,
-    ConnectionId, CredentialActivation, CredentialBundle, CredentialId, CredentialKind,
-    CredentialPortError, CredentialSecret, CredentialStore, CredentialTransactionWarning,
-    LegacyCredentialAccountSemantics, LegacyCredentialLocator, LegacyCredentialSource,
-    MasterKeyFingerprintBindingOutcome,
+    ActiveCredentialAfterRemoval, ClientId, ClientPaths, ConfigError, ConfigIdentity,
+    ConfigKdfParams, ConfigRepository, ConfigV2, ConnectionId, CredentialActivation,
+    CredentialBundle, CredentialId, CredentialKind, CredentialPortError, CredentialSecret,
+    CredentialStore, CredentialTransactionWarning, LegacyCredentialAccountSemantics,
+    LegacyCredentialLocator, LegacyCredentialSource, MasterKeyFingerprintBindingOutcome,
 };
 
 const EMPTY_V1: &str = include_str!("../../../tests/fixtures/client-config/v1/empty.json");
@@ -789,6 +789,44 @@ fn prepared_restore() -> PreparedRestore {
         target_backup_bytes,
         journal,
     }
+}
+
+fn kdf_identity(salt: &str) -> ConfigIdentity {
+    ConfigIdentity {
+        kdf_salt: salt.to_string(),
+        kdf_params: ConfigKdfParams {
+            algorithm: "argon2id".to_string(),
+            iterations: 3,
+            memory_kb: 65536,
+            parallelism: 4,
+        },
+        salt_fingerprint: None,
+        first_seen_at: None,
+        email: None,
+    }
+}
+
+#[test]
+fn identity_replacement_is_compare_and_swap() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo = repository(&temp);
+    initialize_empty(&repo);
+
+    let local = kdf_identity("local");
+    repo.replace_identity_if_matches(None, local.clone())
+        .expect("first identity on an empty config");
+
+    // A writer that read before the commit must not overwrite it.
+    let stale = repo
+        .replace_identity_if_matches(None, kdf_identity("late"))
+        .expect_err("stale expectation");
+    assert!(matches!(stale, ConfigError::IdentityChanged));
+
+    let restored = kdf_identity("restored");
+    let snapshot = repo
+        .replace_identity_if_matches(Some(&local), restored.clone())
+        .expect("replace the identity that was read");
+    assert_eq!(snapshot.config().identity, Some(restored));
 }
 
 #[test]

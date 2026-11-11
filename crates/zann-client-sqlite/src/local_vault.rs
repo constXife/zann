@@ -3,13 +3,11 @@ use std::sync::{Arc, Mutex};
 
 use crate::SqliteSyncStoreFactory;
 use base64::Engine;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 use zann_client::app::{
-    AppClient, ClientId, ClientPaths, CredentialSecret, LegacySessionImport, SessionClient,
-    SessionOperation,
+    AppClient, ClientId, ClientPaths, ConfigIdentity, ConfigKdfParams, CredentialSecret,
+    LegacySessionImport, SessionClient, SessionOperation,
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_core::{ItemCounts as DomainItemCounts, ItemListParams, ItemsService, VaultsService};
@@ -45,8 +43,6 @@ pub struct LocalVault {
     storage_id: Mutex<Uuid>,
     vault_id: Mutex<Option<Uuid>>,
     master_key: Mutex<Option<Arc<SecretKey>>>,
-    /// The KDF salt in `config.json`, which a restore can also replace.
-    identity: Mutex<IdentityConfig>,
     /// The vault directory. The remembered unlock is persisted there in its own
     /// file, so every client on this machine sees the same enrolments.
     root: PathBuf,
@@ -55,10 +51,6 @@ pub struct LocalVault {
 impl LocalVault {
     fn pool(&self) -> SqlitePool {
         self.pool.lock().expect("lock poisoned").clone()
-    }
-
-    fn identity(&self) -> IdentityConfig {
-        self.identity.lock().expect("lock poisoned").clone()
     }
 
     /// Connect again after the database file was replaced, and re-read what was
@@ -75,7 +67,6 @@ impl LocalVault {
             .map_err(|err| LocalError::Service(err.to_string()))?;
         let storage_id = resolve_storage_id(&self.runtime, &pool)?;
         *self.pool.lock().expect("lock poisoned") = pool;
-        *self.identity.lock().expect("lock poisoned") = load_or_create_identity_config(&self.root)?;
         *self.storage_id.lock().expect("lock poisoned") = storage_id;
         Ok(())
     }
@@ -198,7 +189,7 @@ impl LocalVault {
     }
 }
 impl LocalVault {
-    fn sync_app_client(&self) -> LocalResult<AppClient> {
+    fn app_client(&self) -> LocalResult<AppClient> {
         let credentials = Arc::new(OsCredentialStore::system_default());
         let factory = Arc::new(
             SqliteSyncStoreFactory::new(&self.database_path)
@@ -216,6 +207,13 @@ impl LocalVault {
             .initialize(&OsLegacyCredentialSource::system_default())
             .map_err(|error| LocalError::Service(error.to_string()))?;
         Ok(client)
+    }
+
+    /// The KDF identity in Config v2, the only place it is kept.
+    fn kdf_identity(&self) -> LocalResult<Option<ConfigIdentity>> {
+        self.app_client()?
+            .kdf_identity()
+            .map_err(|error| LocalError::Service(error.to_string()))
     }
 }
 impl LocalVault {
@@ -270,13 +268,16 @@ impl LocalVault {
         let runtime = Runtime::new().map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
         let root = location.root().to_path_buf();
         let database_path = location.path().to_path_buf();
+        // The client root holds the config and credentials journal; the sync
+        // store refuses a database in a directory others can read.
+        crate::maintenance::secure_file::ensure_private_dir(&root)
+            .map_err(|err| LocalError::Service(err.to_string()))?;
         let pool = runtime
             .block_on(connect_sqlite_file_with_max(&location, 5))
             .map_err(|err| LocalError::Service(err.to_string()))?;
         runtime
             .block_on(migrate_local(&pool))
             .map_err(|err| LocalError::Service(err.to_string()))?;
-        let identity = load_or_create_identity_config(&root)?;
         let storage_id = resolve_storage_id(&runtime, &pool)?;
         Ok(Arc::new(LocalVault {
             keystore,
@@ -287,7 +288,6 @@ impl LocalVault {
             storage_id: Mutex::new(storage_id),
             vault_id: Mutex::new(None),
             master_key: Mutex::new(None),
-            identity: Mutex::new(identity),
             root,
         }))
     }
@@ -627,9 +627,9 @@ mod compatibility_tests {
     fn canonical_master_key_kdf_matches_golden_vector() {
         let fixture: Fixture = serde_json::from_str(FIXTURE_JSON).expect("valid crypto fixture");
         assert!(fixture.synthetic_only);
-        let identity = IdentityConfig {
+        let identity = ConfigIdentity {
             kdf_salt: fixture.kdf.salt_base64,
-            kdf_params: zann_core::api::auth::KdfParams {
+            kdf_params: ConfigKdfParams {
                 algorithm: fixture.kdf.params.algorithm,
                 iterations: fixture.kdf.params.iterations,
                 memory_kb: fixture.kdf.params.memory_kb,
@@ -669,8 +669,10 @@ mod compatibility_tests {
 
         assert_eq!(core.root, root);
         assert!(db_path.exists(), "SQLite must create the exact path");
+        core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+            .expect("initialize at exact path");
         assert!(
-            core.root.join(["config", ".json"].concat()).exists(),
+            core.root.join("client-config.json").exists(),
             "identity config must remain adjacent to the exact database path"
         );
     }
@@ -697,7 +699,9 @@ mod compatibility_tests {
             db_path.exists(),
             "URI and config root must name one database"
         );
-        assert!(root.join(["config", ".json"].concat()).exists());
+        core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+            .expect("initialize at encoded path");
+        assert!(root.join("client-config.json").exists());
     }
 
     #[test]
