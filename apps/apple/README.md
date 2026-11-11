@@ -28,9 +28,12 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   come from zann-ui-core; labels read the shared `i18n/` catalogue.
   Create (⌘N) and edit (⌘E) open a sheet over a zann-ui-core `ItemDraftFfi`,
   which owns the type templates, validation and the stored payload.
+  The sidebar's folder section is zann-ui-core's `build_folder_tree`.
 - `Zann/Platform/` holds the macOS adapters: a pasteboard writer that marks
-  values concealed and clears them on the configured timer, and the held
-  Option key that reveals masked values while pressed.
+  values concealed and clears them on the configured timer, the held Option
+  key that reveals masked values while pressed, and the lock triggers (input
+  as activity, the idle tick, focus loss, hiding and minimizing) whose effect
+  `AppModel` decides from `DevicePreferences`.
 
 The database lives in `~/Library/Application Support/com.rlyeh.zann.apple/`,
 apart from the Tauri desktop app's. The build is ad-hoc signed and not

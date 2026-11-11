@@ -1,10 +1,13 @@
 import SwiftUI
+import ZannCoreKit
 
 @main
 struct ZannApp: App {
     @StateObject private var model = AppModel(
         opening: AppModel.openDefaultCore,
-        language: Locale.preferredLanguages.first ?? Locale.current.identifier
+        language: Locale.preferredLanguages.first ?? Locale.current.identifier,
+        // zann-ui-core's defaults until the shell persists device preferences.
+        preferences: devicePreferencesDefault()
     )
 
     var body: some Scene {
@@ -38,8 +41,16 @@ struct ZannApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var lockTriggers: LockTriggers?
 
     var body: some View {
+        screen
+            .onAppear { lockTriggers = lockTriggers ?? LockTriggers(model: model) }
+            // Closing the window keeps the app running, so it counts as hidden.
+            .onDisappear { Task { await model.appHidden() } }
+    }
+
+    @ViewBuilder private var screen: some View {
         switch model.screen {
         case .failed(let message):
             ContentUnavailableNotice(title: "Zann could not open its database", message: message)
