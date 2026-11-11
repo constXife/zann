@@ -61,8 +61,10 @@ listed in the capability map; it must not be copied into a shell.
 Local vault commands and read models are defined by
 `zann-client::app::local::LocalVaultService`. The `zann-client-sqlite/local-vault`
 feature implements the port with explicit native paths, SQLite, remembered
-unlock and maintenance operations. Device-unlock ports are injected into
-`LocalVault::open`; the URI/path desktop factories select platform backends.
+unlock and maintenance operations. Device-unlock and credential ports are injected into
+`LocalVault::open` as `LocalVaultPorts`; the URI and file-location desktop
+factories select platform backends, and native shells supply their own
+through `zann-ffi::create_core`.
 Hardware enrollment reports credential creation before its second-touch
 verification and publishes nothing if verification fails. COSMIC calls the port directly; `zann-ffi`
 only converts records and forwards calls for non-Rust consumers. Backup,
