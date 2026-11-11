@@ -10,6 +10,15 @@ license = "MIT"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
+# The binding generator pulls in clap; it stays out of the library graph that
+# shells link.
+[[bin]]
+name = "uniffi-bindgen"
+required-features = ["bindgen"]
+
+[features]
+bindgen = ["uniffi/cli"]
+
 [dependencies]
 thiserror = "1"
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time"] }

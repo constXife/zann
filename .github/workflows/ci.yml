@@ -26,6 +26,7 @@ jobs:
       audit_surface: ${{ steps.filter.outputs.audit_surface }}
       client_architecture: ${{ steps.filter.outputs.client_architecture }}
       shared_clients: ${{ steps.filter.outputs.shared_clients }}
+      ffi_native: ${{ steps.filter.outputs.ffi_native }}
       cosmic: ${{ steps.filter.outputs.cosmic }}
       nix_module: ${{ steps.filter.outputs.nix_module }}
       ci: ${{ steps.filter.outputs.ci }}
@@ -151,6 +152,22 @@ jobs:
               - 'crates/zann-ui-core/**'
               - 'schemas/**'
               - 'tests/fixtures/**'
+            # Everything compiled into the zann-ffi library that the native
+            # Apple shell links, plus the binding generator.
+            ffi_native:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'crates/zann-client/**'
+              - 'crates/zann-client-sqlite/**'
+              - 'crates/zann-core/**'
+              - 'crates/zann-crypto/**'
+              - 'crates/zann-db/**'
+              - 'crates/zann-ffi/**'
+              - 'crates/zann-keystore/**'
+              - 'crates/zann-ui-core/**'
+              - 'schemas/**'
+              - 'scripts/generate-swift-bindings.sh'
             # Полная Nix-сборка libcosmic с wgpu занимает десятки минут,
             # поэтому здесь только исходники и упаковка COSMIC. Совместимость
             # с crates/** закрывает headless job cosmic-rust-consumer.
@@ -397,6 +414,40 @@ jobs:
         uses: ./.github/actions/rust-cache
       - name: Test portable client process locks
         run: cargo test -p zann-client --no-default-features --features auth-lock --lib config::locking::tests --locked
+
+  # The arm64 macOS host build is the aarch64-apple-darwin check; iOS is
+  # cross-compiled and linked. The Swift smoke links the generated bindings
+  # against the host library, so an export the bindings cannot reach fails here.
+  ffi-native-targets:
+    needs: changes
+    if: needs.changes.outputs.ffi_native == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      # Rust's iOS default (10.0) lacks ___chkstk_darwin, which the blake3 NEON
+      # objects reference, so linking fails. 16.0 is the SwiftUI
+      # NavigationSplitView floor the Apple shell targets.
+      IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          targets: aarch64-apple-ios
+      - name: Rust cache
+        uses: ./.github/actions/rust-cache
+      - name: Build zann-ffi for iOS
+        run: cargo build -p zann-ffi --target aarch64-apple-ios --locked
+      - name: Generate Swift bindings
+        run: ./scripts/generate-swift-bindings.sh target/ffi-bindings
+      - name: Link and run the Swift binding smoke
+        run: |
+          swiftc -I target/ffi-bindings \
+            -Xcc -fmodule-map-file=target/ffi-bindings/zann_ffiFFI.modulemap \
+            target/ffi-bindings/zann_ffi.swift crates/zann-ffi/tests/bindings/main.swift \
+            -L target/debug -lzann_ffi -o target/ffi-bindings/smoke
+          DYLD_LIBRARY_PATH=target/debug target/ffi-bindings/smoke
 
   # Tauri is outside the root workspace, so root tests cannot catch shared API
   # or compatibility changes in its Rust adapter.
@@ -748,7 +799,8 @@ jobs:
       needs.changes.outputs.js == 'true' ||
       needs.changes.outputs.rust == 'true' ||
       needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
+    # Pinned: WebKit WebDriver package names differ between Ubuntu releases.
+    runs-on: ubuntu-26.04
     timeout-minutes: 15
     permissions:
       contents: read
@@ -761,6 +813,7 @@ jobs:
       RUST_BACKTRACE: "1"
       TAURI_E2E_LOG_HANDLES: "1"
       TAURI_E2E_FORCE_EXIT: "1"
+      TAURI_E2E_NATIVE_DRIVER: /usr/bin/WebKitWebDriver
       RUSTC_WRAPPER: sccache
       SCCACHE_DIR: /home/runner/.cache/sccache
       SCCACHE_LOG: debug
@@ -780,26 +833,8 @@ jobs:
             libxkbcommon-dev \
             libssl-dev \
             libudev-dev \
+            webkitgtk-webdriver \
             xvfb
-          if ! sudo apt-get install -y webkit2gtk-driver; then
-            sudo apt-get install -y webkit2gtk-4.1-driver
-          fi
-      - name: Resolve WebKitWebDriver
-        run: |
-          if command -v WebKitWebDriver >/dev/null 2>&1; then
-            echo "TAURI_E2E_NATIVE_DRIVER=$(command -v WebKitWebDriver)" >> "$GITHUB_ENV"
-          elif [ -x /usr/libexec/webkit2gtk-4.1/WebKitWebDriver ]; then
-            echo "TAURI_E2E_NATIVE_DRIVER=/usr/libexec/webkit2gtk-4.1/WebKitWebDriver" >> "$GITHUB_ENV"
-          elif [ -x /usr/libexec/webkit2gtk-4.0/WebKitWebDriver ]; then
-            echo "TAURI_E2E_NATIVE_DRIVER=/usr/libexec/webkit2gtk-4.0/WebKitWebDriver" >> "$GITHUB_ENV"
-          elif [ -x /usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver ]; then
-            echo "TAURI_E2E_NATIVE_DRIVER=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.1/WebKitWebDriver" >> "$GITHUB_ENV"
-          elif [ -x /usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver ]; then
-            echo "TAURI_E2E_NATIVE_DRIVER=/usr/lib/x86_64-linux-gnu/webkit2gtk-4.0/WebKitWebDriver" >> "$GITHUB_ENV"
-          else
-            echo "WebKitWebDriver not found in expected locations" >&2
-            exit 1
-          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
       - name: Rust cache
@@ -919,6 +954,7 @@ jobs:
       - audit-surface
       - client-architecture
       - client-locking-portability
+      - ffi-native-targets
       - desktop-rust-consumer
       - cosmic-rust-consumer
       - cosmic-package
