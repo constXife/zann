@@ -33,3 +33,5 @@ apps/apple/ZannCoreKit/.build/
 apps/apple/ZannCoreKit/.swiftpm/
 apps/apple/Zann.xcodeproj/
 apps/apple/build/
+# Holds the developer's own team ID; see apps/apple/Signing.xcconfig.
+apps/apple/Local.xcconfig
