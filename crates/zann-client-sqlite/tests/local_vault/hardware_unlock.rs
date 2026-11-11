@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::support::CanonicalTempDir;
 use zann_client::app::local::{LocalError, LocalVaultService};
-use zann_client_sqlite::local_vault::LocalVault;
+use zann_client_sqlite::local_vault::{LocalVault, LocalVaultPorts};
 use zann_db::SqliteFileLocation;
 use zann_keystore::{
     FakeHardwareAuthenticator, FidoError, Keystore, KeystoreError, KeystoreStatus,
@@ -15,7 +15,12 @@ fn open(
     auth: Arc<FakeHardwareAuthenticator>,
 ) -> Arc<LocalVault> {
     let location = SqliteFileLocation::from_path(&root.path().join("local.sqlite")).unwrap();
-    LocalVault::open(location, keystore, auth).unwrap()
+    let ports = LocalVaultPorts {
+        keystore,
+        authenticator: auth,
+        ..LocalVaultPorts::system_default()
+    };
+    LocalVault::open(location, ports).unwrap()
 }
 
 fn initialized(root: &CanonicalTempDir, auth: Arc<FakeHardwareAuthenticator>) -> Arc<LocalVault> {

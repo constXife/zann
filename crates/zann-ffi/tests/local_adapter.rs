@@ -1,9 +1,11 @@
-use zann_ffi::{create_core_at_path, CoreError, ItemCreate, ItemsFilter, Page};
+mod support;
+
+use zann_ffi::{CoreError, ItemCreate, ItemsFilter, Page};
 
 #[test]
 fn ffi_projects_local_commands_results_and_errors() {
     let root = tempfile::tempdir().expect("tempdir");
-    let core = create_core_at_path(&root.path().join("local.sqlite")).expect("open");
+    let core = support::open(&root.path().join("local.sqlite"));
     assert!(matches!(
         core.item_get("invalid".into()),
         Err(CoreError::Locked)

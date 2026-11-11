@@ -629,9 +629,16 @@ SQLx row decoding and JSON column envelopes are owned by `zann-db`. The local
 vault port is `zann-client::app::local::LocalVaultService`; its SQLite/native
 implementation is `zann-client-sqlite::local_vault`. The optional `local-vault`
 feature composes keystore unlocking and backup/snapshot/verify implementations.
-`LocalVault::open` requires explicit `Arc<dyn Keystore>` and
-`Arc<dyn HardwareAuthenticator>` ports. The native URI/path open factories
-compose desktop defaults once; unlock operations never select backends.
+`LocalVault::open` requires an explicit `LocalVaultPorts` bundle: `Keystore`,
+`HardwareAuthenticator`, `CredentialStore` and the read-only
+`LegacyCredentialSource`. `LocalVaultPorts::system_default` composes the desktop
+backends once for the URI and file-location factories;
+`LocalVaultPorts::with_platform_secrets` takes a shell's own `Keystore` and
+`SecretStore` and keeps credential account naming in `OsCredentialStore`.
+Unlock and session operations never select backends. `open_vault_at_path`
+takes an absolute native path, creates its parent owner-only and canonicalizes
+it once, so platform symlinks above an app container (`/var` →
+`/private/var`) never reach the symlink-free SQLite location checks.
 `zann-keystore/remembered` and `fido` are platform-neutral; `secret-store` and
 `ctap-hid` select the OS implementations. `test-support` exposes a deterministic
 fake and is never selected by production composition. Enrollment creates a
@@ -642,6 +649,11 @@ message }` and its source; FFI projects the two fields without parsing text.
 The default sync adapter remains free of keystore, keyring and FIDO dependencies,
 with a dependency-closure contract guarding that boundary. COSMIC has no direct
 FFI or database dependency; UniFFI converts records and forwards the same port.
+Its one constructor, `create_core(db_path, keystore, secret_store)`, takes the
+native path and the `PlatformKeystore` / `PlatformSecretStore` foreign
+callback interfaces that Swift and Kotlin shells implement over Keychain
+(`SecAccessControl`) and Android Keystore; adapters wrap received secrets in
+zeroizing values at once.
 The superseded `zann-app` package is deleted.
 
 The CLI uses `ConfigRepository`, `CredentialStore` and `zann-client::server`.

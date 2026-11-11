@@ -1,9 +1,11 @@
-use zann_ffi::{create_core_at_path, CoreError, SessionErrorKindFfi, SessionOperationFfi};
+mod support;
+
+use zann_ffi::{CoreError, SessionErrorKindFfi, SessionOperationFfi};
 
 #[test]
 fn remote_session_projects_typed_session_errors() {
     let root = tempfile::tempdir().expect("tempdir");
-    let core = create_core_at_path(&root.path().join("local.sqlite")).expect("open");
+    let core = support::open(&root.path().join("local.sqlite"));
     let session = core.remote_session().expect("remote session");
 
     let closed_port = std::net::TcpListener::bind("127.0.0.1:0")

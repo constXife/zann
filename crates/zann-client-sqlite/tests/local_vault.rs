@@ -22,3 +22,6 @@ mod verify;
 
 #[path = "local_vault/hardware_unlock.rs"]
 mod hardware_unlock;
+
+#[path = "local_vault/ports.rs"]
+mod ports;
