@@ -23,8 +23,8 @@ pub mod settings;
 pub mod totp;
 
 pub use categories::{
-    category, category_views, fallback_category, CategoriesSchema, Category, CategoryFilter,
-    CategoryView, VaultScope,
+    category, category_views, create_type_for, fallback_category, CategoriesSchema, Category,
+    CategoryFilter, CategoryView, VaultScope,
 };
 pub use counts::ItemCounts;
 pub use filter::{filtered_indices, item_matches, FolderFilter, ItemFilter};
