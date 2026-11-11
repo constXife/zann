@@ -12,6 +12,8 @@ mod item_editor;
 pub use item_editor::*;
 mod presentation;
 pub use presentation::*;
+mod catalogue;
+pub use catalogue::*;
 mod platform;
 pub use platform::*;
 

@@ -1,7 +1,7 @@
 import Foundation
 import ZannCoreKit
 
-/// First page only; paging arrives with the three-pane vault view.
+/// First page only; paging and server-side search come in a later slice.
 private let itemsPageLimit: UInt32 = 200
 
 /// Screen state for the macOS shell. Every core call blocks (the KDF alone
@@ -22,15 +22,20 @@ final class AppModel: ObservableObject {
     }
 
     @Published private(set) var screen: Screen
-    @Published private(set) var items: [ItemSummary] = []
+    /// Present only while unlocked; locking drops it with every secret it holds.
+    @Published private(set) var vault: VaultModel?
     @Published private(set) var busy = false
     @Published private(set) var error: String?
 
+    let strings: Strings
+    /// Defaults until the shell persists device preferences.
+    let preferences = devicePreferencesDefault()
     private let core: CoreFacade?
 
     /// `open` is the composition root: the app passes `openDefaultCore`,
     /// tests a core over a temporary database and in-memory ports.
-    init(opening open: () throws -> CoreFacade) {
+    init(opening open: () throws -> CoreFacade, language: String) {
+        strings = Strings(language: language)
         var opened: CoreFacade?
         do {
             let core = try open()
@@ -61,14 +66,17 @@ final class AppModel: ObservableObject {
             return try Self.firstPage(core)
         }
         guard let page else { return }
-        items = page.items
+        vault = VaultModel(core: core, page: page)
         screen = .vault
     }
 
     func lock() async {
         guard let core, isUnlocked, !busy else { return }
         guard await perform({ _ = try core.lock() }) != nil else { return }
-        items = []
+        vault = nil
+        if preferences.clipboardClearOnLock {
+            Clipboard.clearOwned()
+        }
         screen = .master(.unlock)
     }
 
@@ -91,7 +99,8 @@ final class AppModel: ObservableObject {
 
     private nonisolated static func firstPage(_ core: CoreFacade) throws -> ItemPage {
         try core.itemsList(
-            filter: ItemsFilter(query: nil, includeDeleted: false),
+            // The trash category filters client-side, so deleted items load too.
+            filter: ItemsFilter(query: nil, includeDeleted: true),
             page: Page(limit: itemsPageLimit, cursor: nil)
         )
     }

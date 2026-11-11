@@ -63,6 +63,26 @@ impl Catalogue {
     pub fn has(&self, key: &str) -> bool {
         self.fallback.contains_key(key) || self.strings.contains_key(key)
     }
+
+    /// The label for an item field key: the `fields.*` translation when one
+    /// exists, otherwise the key with underscores spaced and the first letter
+    /// capitalized, so custom fields still read naturally.
+    #[must_use]
+    pub fn field_label(&self, key: &str) -> String {
+        let translated = match key {
+            "otp" | "totp" => "fields.otp".to_string(),
+            named => format!("fields.{named}"),
+        };
+        if self.has(&translated) {
+            return self.get(&translated).to_string();
+        }
+        let spaced = key.replace('_', " ");
+        let mut chars = spaced.chars();
+        match chars.next() {
+            Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            None => spaced,
+        }
+    }
 }
 
 fn flatten(source: &str) -> BTreeMap<String, String> {
@@ -112,5 +132,16 @@ mod tests {
         assert_eq!(catalogue.language(), "en");
         assert_eq!(catalogue.get("settings.title"), "Settings");
         assert_eq!(Catalogue::new("ru_RU").language(), "ru");
+    }
+
+    #[test]
+    fn field_labels_translate_known_keys_and_humanize_custom_ones() {
+        let catalogue = Catalogue::new("en");
+        assert_eq!(catalogue.field_label("username"), "Username");
+        assert_eq!(catalogue.field_label("totp"), "One-time code");
+        assert_eq!(catalogue.field_label("otp"), "One-time code");
+        assert_eq!(catalogue.field_label("recovery_code"), "Recovery code");
+        assert_eq!(catalogue.field_label(""), "");
+        assert_eq!(Catalogue::new("ru").field_label("password"), "Пароль");
     }
 }

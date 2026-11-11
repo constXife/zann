@@ -7,7 +7,7 @@ use cosmic::{theme, widget, Element};
 use zann_client::app::local::ItemDetail;
 use zann_ui_core::{generate_totp, project_item_fields, TotpParams};
 
-use crate::i18n::{has, t};
+use crate::i18n::{field_label, t};
 
 #[derive(Clone)]
 pub enum Message {
@@ -70,7 +70,7 @@ impl Detail {
             .map_err(|err| err.to_string())?
             .into_iter()
             .map(|field| Field {
-                label: label_for(&field.key),
+                label: field_label(&field.key),
                 key: field.key,
                 value: field.value,
                 masked: field.masked,
@@ -157,21 +157,6 @@ impl Field {
             "•".repeat(self.value.chars().count().clamp(4, 24))
         } else {
             self.value.clone()
-        }
-    }
-}
-
-fn label_for(key: &str) -> String {
-    match key {
-        "otp" | "totp" => t("fields.otp"),
-        named if has(&format!("fields.{named}")) => t(&format!("fields.{named}")),
-        other => {
-            let spaced = other.replace('_', " ");
-            let mut chars = spaced.chars();
-            match chars.next() {
-                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
-                None => spaced,
-            }
         }
     }
 }

@@ -22,6 +22,13 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   `PlatformSecretStore` ports with generic-password Keychain items.
 - `Zann/AppModel.swift` sequences blocking core calls off the main actor;
   `ZannTests` drive it against the real core over a temporary database.
+- `Zann/Vault/` is vault home: sidebar categories -> item list -> item
+  detail, as `docs/ux/Layout-Responsive-Spec.md` orders them and COSMIC lays
+  them out. Categories, filtering, field order, masking, field labels and TOTP
+  come from zann-ui-core; labels read the shared `i18n/` catalogue.
+- `Zann/Platform/` holds the macOS adapters: a pasteboard writer that marks
+  values concealed and clears them on the configured timer, and the held
+  Option key that reveals masked values while pressed.
 
 The database lives in `~/Library/Application Support/com.rlyeh.zann.apple/`,
 apart from the Tauri desktop app's. The build is ad-hoc signed and not

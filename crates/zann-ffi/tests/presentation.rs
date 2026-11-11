@@ -2,7 +2,7 @@ use zann_ffi::{
     build_folder_tree, category_views, device_preference_options, device_preferences_default,
     filter_items, generate_totp, item_type_schemas, normalize_server_url, project_item_fields,
     CoreError, DraftErrorKindFfi, FieldKindFfi, FolderFilterFfi, ItemCountsFfi, ItemDetail,
-    ItemDraftFfi, ItemFilterFfi, ItemSummary, ItemTypeCount, VaultScopeFfi,
+    ItemDraftFfi, ItemFilterFfi, ItemSummary, ItemTypeCount, TranslationCatalogue, VaultScopeFfi,
 };
 
 fn item(title: &str, type_id: &str, path: &str, deleted: bool) -> ItemSummary {
@@ -182,4 +182,17 @@ fn shared_defaults_reach_native_shells() {
         .languages
         .iter()
         .any(|language| language.code == "en"));
+}
+
+#[test]
+fn translation_catalogue_resolves_category_and_field_labels() {
+    let catalogue = TranslationCatalogue::new("ru-RU".into());
+    assert_eq!(catalogue.language(), "ru");
+    assert_eq!(catalogue.get("nav.allItems".into()), "Все записи");
+    assert_eq!(catalogue.field_label("password".into()), "Пароль");
+    assert_eq!(catalogue.get("no.such.key".into()), "no.such.key");
+
+    let english = TranslationCatalogue::new("pt-BR".into());
+    assert_eq!(english.language(), "en");
+    assert_eq!(english.field_label("recovery_code".into()), "Recovery code");
 }

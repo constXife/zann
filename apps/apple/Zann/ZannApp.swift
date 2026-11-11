@@ -2,7 +2,10 @@ import SwiftUI
 
 @main
 struct ZannApp: App {
-    @StateObject private var model = AppModel(opening: AppModel.openDefaultCore)
+    @StateObject private var model = AppModel(
+        opening: AppModel.openDefaultCore,
+        language: Locale.preferredLanguages.first ?? Locale.current.identifier
+    )
 
     var body: some Scene {
         WindowGroup {
@@ -32,7 +35,9 @@ struct RootView: View {
         case .master(let mode):
             MasterPasswordView(mode: mode)
         case .vault:
-            VaultView()
+            if let vault = model.vault {
+                VaultView(vault: vault)
+            }
         }
     }
 }

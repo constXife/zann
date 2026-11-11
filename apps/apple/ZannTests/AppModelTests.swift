@@ -21,7 +21,7 @@ final class AppModelTests: XCTestCase {
         let database = directory.appendingPathComponent("local.sqlite").path
         return AppModel(opening: {
             try createCore(dbPath: database, keystore: MemoryKeystore(), secretStore: MemorySecretStore())
-        })
+        }, language: "en")
     }
 
     func testFirstLaunchCreatesVaultThenLocksAndUnlocks() async {
@@ -34,10 +34,11 @@ final class AppModelTests: XCTestCase {
         await model.submit(password: "correct horse battery", mode: .create)
         XCTAssertNil(model.error)
         XCTAssertEqual(model.screen, .vault)
-        XCTAssertTrue(model.items.isEmpty)
+        XCTAssertEqual(model.vault?.visibleItems.isEmpty, true)
 
         await model.lock()
         XCTAssertEqual(model.screen, .master(.unlock))
+        XCTAssertNil(model.vault)
 
         await model.submit(password: "wrong password", mode: .unlock)
         XCTAssertNotNil(model.error)
@@ -60,14 +61,14 @@ final class AppModelTests: XCTestCase {
     func testUnopenableDatabaseShowsFailure() {
         let model = AppModel(opening: {
             try createCore(dbPath: "relative/local.sqlite", keystore: MemoryKeystore(), secretStore: MemorySecretStore())
-        })
+        }, language: "en")
         guard case .failed = model.screen else {
             return XCTFail("expected the failure screen, got \(model.screen)")
         }
     }
 }
 
-private final class MemoryKeystore: PlatformKeystore {
+final class MemoryKeystore: PlatformKeystore {
     private var dwk: Data?
 
     func status() -> PlatformKeystoreStatus {
@@ -79,7 +80,7 @@ private final class MemoryKeystore: PlatformKeystore {
     func deleteDwk() throws { dwk = nil }
 }
 
-private final class MemorySecretStore: PlatformSecretStore {
+final class MemorySecretStore: PlatformSecretStore {
     private var values: [String: String] = [:]
 
     func put(service: String, account: String, secret: String) throws {
