@@ -12,6 +12,8 @@ mod item_editor;
 pub use item_editor::*;
 mod presentation;
 pub use presentation::*;
+mod platform;
+pub use platform::*;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {
@@ -337,20 +339,20 @@ impl CoreFacade {
             .map_err(Into::into)
     }
 }
-pub use zann_client_sqlite::SqliteFileLocation;
+/// Opens the local vault at `db_path`, an absolute native path such as a
+/// file inside the app container, with the shell's own OS secret storage.
+/// The parent directory is created owner-only if missing.
 #[uniffi::export]
-pub fn create_core(db_url: String) -> CoreResult<Arc<CoreFacade>> {
-    native::open_vault(db_url)
-        .map(|inner| Arc::new(CoreFacade { inner }))
-        .map_err(Into::into)
-}
-pub fn create_core_at_path(path: &Path) -> CoreResult<Arc<CoreFacade>> {
-    native::open_vault_at_path(path)
-        .map(|inner| Arc::new(CoreFacade { inner }))
-        .map_err(Into::into)
-}
-pub fn create_core_at_file_location(location: &SqliteFileLocation) -> CoreResult<Arc<CoreFacade>> {
-    native::open_vault_at_file_location(location)
+pub fn create_core(
+    db_path: String,
+    keystore: Arc<dyn PlatformKeystore>,
+    secret_store: Arc<dyn PlatformSecretStore>,
+) -> CoreResult<Arc<CoreFacade>> {
+    let ports = native::LocalVaultPorts::with_platform_secrets(
+        platform::keystore(keystore),
+        platform::secret_store(secret_store),
+    );
+    native::open_vault_at_path(Path::new(&db_path), ports)
         .map(|inner| Arc::new(CoreFacade { inner }))
         .map_err(Into::into)
 }
