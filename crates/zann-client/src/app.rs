@@ -13,8 +13,9 @@ use zann_core::AuthMethod;
 pub use zann_crypto::SecretKey;
 
 pub use crate::config::{
-    ClientId, ClientPaths, ConnectionId, CredentialId, CredentialPortError,
-    CredentialPortErrorKind, CredentialSecret, CredentialStore, LegacyCredentialSource,
+    ClientId, ClientPaths, ConfigIdentity, ConfigKdfParams, ConnectionId, CredentialId,
+    CredentialPortError, CredentialPortErrorKind, CredentialSecret, CredentialStore,
+    LegacyCredentialSource,
 };
 use crate::session::AppSession;
 pub use crate::session::{
@@ -1281,4 +1282,5 @@ mod tests {
 }
 
 /// Local vault services, independent of SQLite and native adapters.
+mod kdf_identity;
 pub mod local;
