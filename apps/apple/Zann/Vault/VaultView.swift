@@ -39,14 +39,12 @@ struct VaultView: View {
                 } primaryAction: {
                     vault.startCreating()
                 }
-                .keyboardShortcut("n", modifiers: .command)
                 .help("\(app.strings("common.create")) (⌘N)")
                 Button {
                     Task { await vault.startEditing() }
                 } label: {
                     Label(app.strings("common.edit"), systemImage: "square.and.pencil")
                 }
-                .keyboardShortcut("e", modifiers: .command)
                 .help("\(app.strings("common.edit")) (⌘E)")
                 .disabled(vault.detail == nil)
                 Button {
@@ -73,22 +71,63 @@ struct VaultSidebar: View {
     @ObservedObject var vault: VaultModel
     let strings: Strings
 
+    /// One selection across both sections: a category clears the folder, a
+    /// folder lists it across every live item.
+    enum Selection: Hashable {
+        case category(String)
+        case folder(FolderFilterFfi)
+    }
+
     var body: some View {
         List(selection: selection) {
             ForEach(vault.categories, id: \.id) { category in
                 Label(strings(category.labelKey), systemImage: Symbols.category(category.icon))
                     .badge(Int(category.count))
-                    .tag(Optional(category.id))
+                    .tag(Selection.category(category.id))
+            }
+            if !vault.folders.tree.isEmpty {
+                Section(strings("nav.folders")) {
+                    OutlineGroup(vault.folders.tree, id: \.path, children: \.subfolders) { node in
+                        Label(node.name, systemImage: "folder")
+                            .badge(Int(node.totalCount))
+                            .tag(Selection.folder(.path(path: node.path)))
+                    }
+                    if vault.folders.itemsWithoutFolder > 0 {
+                        Label(strings("nav.noFolder"), systemImage: "tray")
+                            .badge(Int(vault.folders.itemsWithoutFolder))
+                            .tag(Selection.folder(.withoutFolder))
+                    }
+                }
             }
         }
         .listStyle(.sidebar)
     }
 
-    private var selection: Binding<String?> {
+    private var selection: Binding<Selection?> {
         Binding(
-            get: { vault.categoryID },
-            set: { if let id = $0 { vault.categoryID = id } }
+            get: {
+                vault.folder == .any ? .category(vault.categoryID) : .folder(vault.folder)
+            },
+            set: { selection in
+                switch selection {
+                case .category(let id):
+                    vault.folder = .any
+                    vault.categoryID = id
+                case .folder(let folder):
+                    vault.categoryID = "all"
+                    vault.folder = folder
+                case nil:
+                    break
+                }
+            }
         )
+    }
+}
+
+private extension FolderNodeFfi {
+    /// `OutlineGroup` marks leaves by `nil` children, not an empty list.
+    var subfolders: [FolderNodeFfi]? {
+        children.isEmpty ? nil : children
     }
 }
 
@@ -125,7 +164,13 @@ struct ItemList: View {
     }
 
     private var categoryTitle: String {
-        vault.categories.first { $0.id == vault.categoryID }.map { strings($0.labelKey) } ?? ""
+        switch vault.folder {
+        case .path(let path): return path
+        case .withoutFolder: return strings("nav.noFolder")
+        case .any:
+            return vault.categories.first { $0.id == vault.categoryID }
+                .map { strings($0.labelKey) } ?? ""
+        }
     }
 
     private var selection: Binding<String?> {

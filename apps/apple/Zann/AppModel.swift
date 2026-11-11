@@ -25,14 +25,22 @@ final class AppModel: ObservableObject {
     @Published private(set) var error: String?
 
     let strings: Strings
-    /// Defaults until the shell persists device preferences.
-    let preferences = devicePreferencesDefault()
+    let preferences: DevicePreferencesFfi
     private let core: CoreFacade?
+    /// The last input the app received while unlocked; the idle lock counts
+    /// from here, as COSMIC's does.
+    private var lastActivity = Date()
 
-    /// `open` is the composition root: the app passes `openDefaultCore`,
-    /// tests a core over a temporary database and in-memory ports.
-    init(opening open: () throws -> CoreFacade, language: String) {
+    /// `open` is the composition root: the app passes `openDefaultCore` and
+    /// zann-ui-core's default preferences, tests a core over a temporary
+    /// database and in-memory ports.
+    init(
+        opening open: () throws -> CoreFacade,
+        language: String,
+        preferences: DevicePreferencesFfi
+    ) {
         strings = Strings(language: language)
+        self.preferences = preferences
         var opened: CoreFacade?
         do {
             let core = try open()
@@ -64,7 +72,34 @@ final class AppModel: ObservableObject {
         }
         guard let page else { return }
         vault = VaultModel(core: core, page: page)
+        lastActivity = Date()
         screen = .vault
+    }
+
+    func noteActivity(at now: Date = Date()) {
+        lastActivity = now
+    }
+
+    /// Locks once `auto_lock_minutes` pass without input; `0` disables it.
+    func checkIdle(at now: Date = Date()) async {
+        let minutes = preferences.autoLockMinutes
+        guard isUnlocked, minutes > 0,
+              now.timeIntervalSince(lastActivity) >= TimeInterval(minutes) * 60
+        else { return }
+        await lock()
+    }
+
+    func appResignedActive() async {
+        if preferences.lockOnFocusLoss {
+            await lock()
+        }
+    }
+
+    /// The app was hidden, or its window minimized or closed.
+    func appHidden() async {
+        if preferences.lockOnHidden {
+            await lock()
+        }
     }
 
     func lock() async {

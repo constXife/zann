@@ -19,6 +19,7 @@ final class VaultModel: ObservableObject {
     }
 
     @Published private(set) var categories: [CategoryViewFfi] = []
+    @Published private(set) var folders = FolderTreeFfi(itemsWithoutFolder: 0, tree: [])
     @Published private(set) var visibleItems: [ItemSummary] = []
     @Published private(set) var totalCount: UInt64 = 0
     @Published private(set) var detail: Detail?
@@ -26,6 +27,12 @@ final class VaultModel: ObservableObject {
 
     @Published var categoryID: String {
         didSet { if categoryID != oldValue { refreshVisible() } }
+    }
+
+    /// Narrows the list to a folder and everything below it; the sidebar
+    /// pairs it with the "all" category.
+    @Published var folder = FolderFilterFfi.any {
+        didSet { if folder != oldValue { refreshVisible() } }
     }
 
     @Published var query = "" {
@@ -66,6 +73,7 @@ final class VaultModel: ObservableObject {
     /// A new item of `typeID`, or of the type zann-ui-core picks for the
     /// selected category.
     func startCreating(typeID: String? = nil) {
+        guard editor == nil else { return }
         let type = typeID ?? createTypeForCategory(categoryId: categoryID)
         open { try ItemEditorModel.create(typeID: type) }
     }
@@ -97,9 +105,10 @@ final class VaultModel: ObservableObject {
             error = describe(failure)
             return
         }
-        // A new item can fall outside the current category or search.
+        // A saved item can fall outside the current category, folder or search.
         if !visibleItems.contains(where: { $0.id == item.id }) {
             query = ""
+            folder = .any
             categoryID = "all"
         }
         show(item.id)
@@ -140,11 +149,12 @@ final class VaultModel: ObservableObject {
         counts = page.counts
         totalCount = page.totalCount
         categories = categoryViews(counts: counts, scope: .personal)
+        folders = buildFolderTree(items: items)
         refreshVisible()
     }
 
     private func refreshVisible() {
-        let filter = ItemFilterFfi(categoryId: categoryID, folder: .any, query: query)
+        let filter = ItemFilterFfi(categoryId: categoryID, folder: folder, query: query)
         visibleItems = filterItems(items: items, filter: filter).map { items[Int($0)] }
         if let selectedItemID, !visibleItems.contains(where: { $0.id == selectedItemID }) {
             select(nil)
