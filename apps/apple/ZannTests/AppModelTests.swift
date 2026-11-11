@@ -17,23 +17,22 @@ final class AppModelTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
-    private func makeModel(
-        _ preferences: DevicePreferencesFfi = devicePreferencesDefault(),
-        database name: String = "local"
-    ) -> AppModel {
+    /// `name` picks the database and preferences file, so one test can
+    /// compare several apps.
+    private func makeModel(_ name: String = "local") -> AppModel {
         let database = directory.appendingPathComponent("\(name).sqlite").path
+        let preferences = directory.appendingPathComponent("\(name).preferences.json")
         return AppModel(opening: {
             try createCore(dbPath: database, keystore: MemoryKeystore(), secretStore: MemorySecretStore())
-        }, language: "en", preferences: preferences)
+        }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en")
     }
 
     private func unlockedModel(
-        _ edit: (inout DevicePreferencesFfi) -> Void
+        _ change: (inout DevicePreferencesFfi) -> Void
     ) async -> AppModel {
-        var preferences = devicePreferencesDefault()
-        edit(&preferences)
-        // Each model gets its own vault, so one test can compare several.
-        let model = makeModel(preferences, database: UUID().uuidString)
+        let model = makeModel(UUID().uuidString)
+        model.updatePreferences(change)
+        XCTAssertNil(model.settingsError)
         model.startCreatingVault()
         await model.submit(password: "correct horse battery", mode: .create)
         XCTAssertEqual(model.screen, .vault)
@@ -112,10 +111,41 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(hidden.screen, .master(.unlock))
     }
 
+    func testSettingsPersistAndSwitchTheLanguage() throws {
+        let model = makeModel()
+        XCTAssertEqual(model.preferences, devicePreferencesDefault())
+        XCTAssertEqual(model.strings("nav.allItems"), "All items")
+
+        model.updatePreferences {
+            $0.autoLockMinutes = 30
+            $0.language = "ru"
+        }
+        XCTAssertNil(model.settingsError)
+        XCTAssertEqual(model.strings("nav.allItems"), "Все записи")
+
+        let reopened = makeModel()
+        XCTAssertEqual(reopened.preferences.autoLockMinutes, 30)
+        XCTAssertEqual(reopened.strings("nav.allItems"), "Все записи")
+        let file = directory.appendingPathComponent("local.preferences.json").path
+        let mode = try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? Int
+        XCTAssertEqual(mode, 0o600)
+    }
+
+    func testUnreadablePreferencesShowFailureInsteadOfDefaults() throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(#"{"auto_lock_minutes":"soon"}"#.utf8)
+            .write(to: directory.appendingPathComponent("local.preferences.json"))
+        guard case .failed(let message) = makeModel().screen else {
+            return XCTFail("expected the failure screen")
+        }
+        XCTAssertTrue(message.contains("device preferences"), message)
+    }
+
     func testUnopenableDatabaseShowsFailure() {
+        let preferences = directory.appendingPathComponent("preferences.json")
         let model = AppModel(opening: {
             try createCore(dbPath: "relative/local.sqlite", keystore: MemoryKeystore(), secretStore: MemorySecretStore())
-        }, language: "en", preferences: devicePreferencesDefault())
+        }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en")
         guard case .failed = model.screen else {
             return XCTFail("expected the failure screen, got \(model.screen)")
         }

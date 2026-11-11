@@ -23,33 +23,74 @@ final class AppModel: ObservableObject {
     @Published private(set) var vault: VaultModel?
     @Published private(set) var busy = false
     @Published private(set) var error: String?
+    /// Read from the preferences file; the settings window edits them.
+    @Published private(set) var preferences: DevicePreferencesFfi
+    /// The catalogue in the preferred language, or the system's.
+    @Published private(set) var strings: Strings
+    /// Why the last settings change could not be saved.
+    @Published private(set) var settingsError: String?
 
-    let strings: Strings
-    let preferences: DevicePreferencesFfi
     private let core: CoreFacade?
+    private let preferencesFile: PreferencesFile?
+    private let systemLanguage: String
     /// The last input the app received while unlocked; the idle lock counts
     /// from here, as COSMIC's does.
     private var lastActivity = Date()
 
-    /// `open` is the composition root: the app passes `openDefaultCore` and
-    /// zann-ui-core's default preferences, tests a core over a temporary
-    /// database and in-memory ports.
+    /// The composition root: the app passes `openDefaultCore` and
+    /// `defaultPreferencesFile`, tests a core over a temporary database,
+    /// in-memory ports and a temporary preferences file.
     init(
         opening open: () throws -> CoreFacade,
-        language: String,
-        preferences: DevicePreferencesFfi
+        preferences file: () throws -> PreferencesFile,
+        systemLanguage: String
     ) {
-        strings = Strings(language: language)
-        self.preferences = preferences
+        self.systemLanguage = systemLanguage
         var opened: CoreFacade?
+        var openedFile: PreferencesFile?
+        // Placeholders for the failure screen only; nothing reads them there.
+        var loaded = devicePreferencesDefault()
         do {
+            let preferencesFile = try file()
+            loaded = try preferencesFile.load()
             let core = try open()
             screen = try core.appStatus().initialized ? .master(.unlock) : .welcome
+            openedFile = preferencesFile
             opened = core
         } catch {
             screen = .failed(describe(error))
         }
+        preferences = loaded
+        strings = Strings(language: loaded.language ?? systemLanguage)
+        preferencesFile = openedFile
         core = opened
+    }
+
+    /// Applies one settings change and saves it; the change takes effect only
+    /// once it is on disk.
+    func updatePreferences(_ change: (inout DevicePreferencesFfi) -> Void) {
+        guard let preferencesFile else { return }
+        var next = preferences
+        change(&next)
+        guard next != preferences else { return }
+        do {
+            try preferencesFile.save(next)
+        } catch {
+            settingsError = describe(error)
+            return
+        }
+        settingsError = nil
+        if next.language != preferences.language {
+            strings = Strings(language: next.language ?? systemLanguage)
+        }
+        preferences = next
+    }
+
+    /// The app is quitting; values it put on the clipboard go with it.
+    func appWillTerminate() {
+        if preferences.clipboardClearOnExit {
+            Clipboard.clearOwned()
+        }
     }
 
     var isUnlocked: Bool {
@@ -132,20 +173,32 @@ final class AppModel: ObservableObject {
     /// The database lives under Application Support in a directory named after
     /// the bundle, apart from the Tauri desktop app's.
     static func openDefaultCore() throws -> CoreFacade {
-        guard let bundleID = Bundle.main.bundleIdentifier else {
-            throw CoreError.InvalidArgument("the app bundle has no identifier")
-        }
+        let bundleID = try Self.bundleID()
+        return try createCore(
+            dbPath: try Self.dataDirectory().appendingPathComponent("local.sqlite").path,
+            keystore: KeychainKeystore(service: bundleID),
+            secretStore: KeychainSecretStore()
+        )
+    }
+
+    /// Beside the database, so one directory holds all of this app's state.
+    static func defaultPreferencesFile() throws -> PreferencesFile {
+        PreferencesFile(url: try dataDirectory().appendingPathComponent("preferences.json"))
+    }
+
+    private static func dataDirectory() throws -> URL {
         let support = try FileManager.default.url(
             for: .applicationSupportDirectory, in: .userDomainMask,
             appropriateFor: nil, create: true
         )
-        let database = support.appendingPathComponent(bundleID, isDirectory: true)
-            .appendingPathComponent("local.sqlite")
-        return try createCore(
-            dbPath: database.path,
-            keystore: KeychainKeystore(service: bundleID),
-            secretStore: KeychainSecretStore()
-        )
+        return support.appendingPathComponent(try bundleID(), isDirectory: true)
+    }
+
+    private static func bundleID() throws -> String {
+        guard let bundleID = Bundle.main.bundleIdentifier else {
+            throw CoreError.InvalidArgument("the app bundle has no identifier")
+        }
+        return bundleID
     }
 }
 

@@ -278,9 +278,41 @@ impl From<DevicePreferences> for DevicePreferencesFfi {
     }
 }
 
+impl From<DevicePreferencesFfi> for DevicePreferences {
+    fn from(preferences: DevicePreferencesFfi) -> Self {
+        Self {
+            language: preferences.language,
+            auto_lock_minutes: preferences.auto_lock_minutes,
+            lock_on_focus_loss: preferences.lock_on_focus_loss,
+            lock_on_hidden: preferences.lock_on_hidden,
+            clipboard_clear_seconds: preferences.clipboard_clear_seconds,
+            clipboard_clear_on_lock: preferences.clipboard_clear_on_lock,
+            clipboard_clear_on_exit: preferences.clipboard_clear_on_exit,
+            clipboard_clear_if_unchanged: preferences.clipboard_clear_if_unchanged,
+            auto_hide_reveal_seconds: preferences.auto_hide_reveal_seconds,
+            trash_auto_purge_days: preferences.trash_auto_purge_days,
+        }
+    }
+}
+
 #[uniffi::export]
 pub fn device_preferences_default() -> DevicePreferencesFfi {
     DevicePreferences::default().into()
+}
+
+/// Reads a shell's stored preferences; absent fields take the shared defaults,
+/// so a file written by an older shell still loads.
+#[uniffi::export]
+pub fn device_preferences_from_json(json: String) -> CoreResult<DevicePreferencesFfi> {
+    DevicePreferences::from_json(&json)
+        .map(Into::into)
+        .map_err(|error| CoreError::InvalidArgument(format!("device preferences: {error}")))
+}
+
+/// The stored form of `preferences`, for the shell's own preferences file.
+#[uniffi::export]
+pub fn device_preferences_to_json(preferences: DevicePreferencesFfi) -> String {
+    DevicePreferences::from(preferences).to_json()
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

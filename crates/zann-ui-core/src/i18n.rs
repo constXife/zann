@@ -83,6 +83,30 @@ impl Catalogue {
             None => spaced,
         }
     }
+
+    /// The label for a minutes option in settings, such as the auto-lock
+    /// timeout: never, one hour, or a number of minutes.
+    #[must_use]
+    pub fn minutes_label(&self, minutes: u32) -> String {
+        match minutes {
+            0 => self.get("time.never").to_string(),
+            60 => self.get("time.hour").to_string(),
+            value => format!("{value} {}", self.get("time.minutes")),
+        }
+    }
+
+    /// The label for a seconds option in settings, such as the clipboard
+    /// timeout; whole minutes from two minutes up read as minutes.
+    #[must_use]
+    pub fn seconds_label(&self, seconds: u32) -> String {
+        match seconds {
+            0 => self.get("time.never").to_string(),
+            value if value >= 120 && value % 60 == 0 => {
+                format!("{} {}", value / 60, self.get("time.minutes"))
+            }
+            value => format!("{value} {}", self.get("time.seconds")),
+        }
+    }
 }
 
 fn flatten(source: &str) -> BTreeMap<String, String> {
@@ -117,6 +141,17 @@ fn walk(value: &Value, prefix: &mut String, out: &mut BTreeMap<String, String>) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn duration_options_read_as_never_hours_minutes_or_seconds() {
+        let catalogue = Catalogue::new("en");
+        assert_eq!(catalogue.minutes_label(0), "Never");
+        assert_eq!(catalogue.minutes_label(5), "5 minutes");
+        assert_eq!(catalogue.minutes_label(60), "1 hour");
+        assert_eq!(catalogue.seconds_label(0), "Never");
+        assert_eq!(catalogue.seconds_label(60), "60 seconds");
+        assert_eq!(catalogue.seconds_label(300), "5 minutes");
+    }
 
     #[test]
     fn catalogues_parse_and_agree_on_keys() {

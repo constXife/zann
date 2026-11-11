@@ -35,6 +35,12 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   as activity, the idle tick, focus loss, hiding and minimizing) whose effect
   `AppModel` decides from `DevicePreferences`.
 
-The database lives in `~/Library/Application Support/com.rlyeh.zann.apple/`,
-apart from the Tauri desktop app's. The build is ad-hoc signed and not
+- `Zann/SettingsView.swift` is the Settings window (⌘,) over the shared
+  device preferences. `Zann/PreferencesFile.swift` keeps them in this app's
+  own `preferences.json`, the client-private file docs/Architecture.md
+  allows; zann-ui-core owns the stored form, defaults and option labels.
+
+The database and `preferences.json` live in
+`~/Library/Application Support/com.rlyeh.zann.apple/`, apart from the Tauri
+desktop app's. The build is ad-hoc signed and not
 sandboxed yet, so Keychain items use the login keychain.

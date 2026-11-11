@@ -1,9 +1,9 @@
 use zann_ffi::{
     build_folder_tree, category_views, create_type_for_category, device_preference_options,
-    device_preferences_default, filter_items, generate_totp, item_type_schemas,
-    normalize_server_url, project_item_fields, CoreError, DraftErrorKindFfi, FieldKindFfi,
-    FolderFilterFfi, ItemCountsFfi, ItemDetail, ItemDraftFfi, ItemFilterFfi, ItemSummary,
-    ItemTypeCount, TranslationCatalogue, VaultScopeFfi,
+    device_preferences_default, device_preferences_from_json, device_preferences_to_json,
+    filter_items, generate_totp, item_type_schemas, normalize_server_url, project_item_fields,
+    CoreError, DraftErrorKindFfi, FieldKindFfi, FolderFilterFfi, ItemCountsFfi, ItemDetail,
+    ItemDraftFfi, ItemFilterFfi, ItemSummary, ItemTypeCount, TranslationCatalogue, VaultScopeFfi,
 };
 
 fn item(title: &str, type_id: &str, path: &str, deleted: bool) -> ItemSummary {
@@ -188,12 +188,35 @@ fn shared_defaults_reach_native_shells() {
 }
 
 #[test]
+fn stored_preferences_round_trip_and_fill_shared_defaults() {
+    let mut preferences = device_preferences_default();
+    preferences.lock_on_focus_loss = true;
+    preferences.auto_lock_minutes = 5;
+    let stored = device_preferences_to_json(preferences.clone());
+    assert_eq!(device_preferences_from_json(stored).unwrap(), preferences);
+
+    let partial = device_preferences_from_json(r#"{"auto_lock_minutes":30}"#.into()).unwrap();
+    assert_eq!(partial.auto_lock_minutes, 30);
+    assert_eq!(
+        partial.clipboard_clear_seconds,
+        device_preferences_default().clipboard_clear_seconds
+    );
+
+    assert!(matches!(
+        device_preferences_from_json(r#"{"auto_lock_minutes":"soon"}"#.into()),
+        Err(CoreError::InvalidArgument(_))
+    ));
+}
+
+#[test]
 fn translation_catalogue_resolves_category_and_field_labels() {
     let catalogue = TranslationCatalogue::new("ru-RU".into());
     assert_eq!(catalogue.language(), "ru");
     assert_eq!(catalogue.get("nav.allItems".into()), "Все записи");
     assert_eq!(catalogue.field_label("password".into()), "Пароль");
     assert_eq!(catalogue.get("no.such.key".into()), "no.such.key");
+    assert_eq!(catalogue.minutes_label(60), "1 час");
+    assert_eq!(catalogue.seconds_label(120), "2 мин");
 
     let english = TranslationCatalogue::new("pt-BR".into());
     assert_eq!(english.language(), "en");
