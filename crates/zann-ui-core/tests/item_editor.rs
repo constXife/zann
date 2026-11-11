@@ -68,3 +68,17 @@ fn type_changes_preserve_populated_drafts_and_templates_come_from_shared_schema(
     let json = draft.payload_json().unwrap();
     assert_eq!(project_item_fields(&json).unwrap()[0].key, "username");
 }
+
+#[test]
+fn save_trims_the_path_and_titles_the_item_by_its_last_segment() {
+    let mut draft = ItemDraft::create("login").unwrap();
+    draft.path = "  work/aws/root/  ".into();
+    let save = draft.save().unwrap();
+    assert_eq!(save.path, "work/aws/root/");
+    assert_eq!(save.title, "root");
+    assert_eq!(save.type_id, "login");
+    let saved: serde_json::Value = serde_json::from_str(&save.payload_json).unwrap();
+    assert_eq!(saved["typeId"], "login");
+    draft.path = "   ".into();
+    assert!(matches!(draft.save(), Err(DraftError::Path)));
+}

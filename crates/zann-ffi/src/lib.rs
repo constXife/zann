@@ -8,6 +8,10 @@ pub use records::*;
 mod conversions;
 mod session;
 pub use session::*;
+mod item_editor;
+pub use item_editor::*;
+mod presentation;
+pub use presentation::*;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {
@@ -31,6 +35,12 @@ pub enum CoreError {
     #[error("oidc {kind:?}: {message}")]
     Oidc {
         kind: OidcErrorKindFfi,
+        message: String,
+    },
+    #[error("draft {kind:?}: {message}")]
+    Draft {
+        kind: DraftErrorKindFfi,
+        translation_key: String,
         message: String,
     },
 }

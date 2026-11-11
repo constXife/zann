@@ -217,32 +217,25 @@ impl State {
     }
 
     fn save_request(&self) -> Result<SaveRequest, String> {
-        let path = self.draft.path.trim();
-        let payload_json = self
+        let save = self
             .draft
-            .payload_json()
+            .save()
             .map_err(|error| t(error.translation_key()))?;
-        let title = path
-            .rsplit('/')
-            .find(|segment| !segment.trim().is_empty())
-            .unwrap_or(path)
-            .trim()
-            .to_string();
 
         Ok(match &self.mode {
             Mode::Create => SaveRequest::Create(ItemCreate {
-                title,
-                path: path.to_string(),
-                type_id: self.draft.type_id.clone(),
-                payload_json,
+                title: save.title,
+                path: save.path,
+                type_id: save.type_id,
+                payload_json: save.payload_json,
             }),
             Mode::Edit(id) => SaveRequest::Update {
                 id: id.clone(),
                 item: ItemUpdate {
-                    title,
-                    path: path.to_string(),
-                    type_id: self.draft.type_id.clone(),
-                    payload_json,
+                    title: save.title,
+                    path: save.path,
+                    type_id: save.type_id,
+                    payload_json: save.payload_json,
                 },
             },
         })

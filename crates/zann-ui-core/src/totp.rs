@@ -27,12 +27,23 @@ pub enum TotpError {
 
 /// TOTP parameters as they come out of an item payload; `None` means "use the
 /// RFC 6238 default".
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct TotpParams {
     pub secret: String,
     pub algorithm: Option<String>,
     pub digits: Option<u32>,
     pub period: Option<u32>,
+}
+
+impl std::fmt::Debug for TotpParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TotpParams")
+            .field("secret", &"<redacted>")
+            .field("algorithm", &self.algorithm)
+            .field("digits", &self.digits)
+            .field("period", &self.period)
+            .finish()
+    }
 }
 
 impl TotpParams {
@@ -44,12 +55,22 @@ impl TotpParams {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 pub struct TotpCode {
     pub code: String,
     /// Seconds until the current code rolls over.
     pub remaining_seconds: u32,
     pub period: u32,
+}
+
+impl std::fmt::Debug for TotpCode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TotpCode")
+            .field("code", &"<redacted>")
+            .field("remaining_seconds", &self.remaining_seconds)
+            .field("period", &self.period)
+            .finish()
+    }
 }
 
 pub fn generate_totp(params: &TotpParams) -> Result<TotpCode, TotpError> {
@@ -125,6 +146,12 @@ mod tests {
     use super::*;
 
     const SECRET: &str = "JBSWY3DPEHPK3PXP";
+
+    #[test]
+    fn debug_never_prints_the_secret() {
+        let params = TotpParams::new("JBSWY3DPEHPK3PXP");
+        assert!(!format!("{params:?}").contains("JBSWY3DPEHPK3PXP"));
+    }
 
     #[test]
     fn generates_code_with_defaults() {
