@@ -17,6 +17,9 @@ pub mod local_vault;
 pub mod maintenance;
 pub use zann_db::SqliteFileLocation;
 
+#[cfg(test)]
+mod test_support;
+
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::path::Path;
@@ -1717,8 +1720,8 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Mutex;
 
+    use crate::test_support::CanonicalTempDir;
     use serde_json::json;
-    use tempfile::TempDir;
     use zann_client::config::{
         ClientId, ConnectionMetadata, CredentialActivation, CredentialBundle, CredentialPortError,
         CredentialSecret, CredentialStore, LegacyCredentialLocator, LegacyCredentialSource,
@@ -1792,7 +1795,7 @@ mod tests {
     }
 
     struct ConfigFixture {
-        temp: TempDir,
+        temp: CanonicalTempDir,
         paths: ClientPaths,
         target: SessionTarget,
         master_key: Arc<SecretKey>,
@@ -1823,7 +1826,7 @@ mod tests {
     }
 
     fn configured_fixture() -> ConfigFixture {
-        let temp = TempDir::new().expect("temporary adapter root");
+        let temp = CanonicalTempDir::new("temporary adapter root");
         let paths = ClientPaths::new(temp.path());
         let repository = ConfigRepository::new(paths.clone());
         let credentials = MemoryCredentials::default();
@@ -2741,8 +2744,8 @@ mod tests {
         let _lock = CWD_LOCK.lock().expect("lock process working directory");
         let original = std::env::current_dir().expect("read working directory");
         let _restore = CurrentDirGuard(original);
-        let first = TempDir::new().expect("first location root");
-        let second = TempDir::new().expect("second location root");
+        let first = CanonicalTempDir::new("first location root");
+        let second = CanonicalTempDir::new("second location root");
 
         std::env::set_current_dir(first.path()).expect("enter first location root");
         let location = SqliteFileLocation::from_path(Path::new("cache.sqlite"))
@@ -2767,7 +2770,7 @@ mod tests {
     #[tokio::test]
     async fn open_rejects_crossed_config_and_database_roots_before_sqlite_creation() {
         let fixture = configured_fixture();
-        let second = TempDir::new().expect("second adapter root");
+        let second = CanonicalTempDir::new("second adapter root");
         let second_paths = ClientPaths::new(second.path());
         fs::copy(fixture.paths.config(), second_paths.config())
             .expect("copy semantically identical config");

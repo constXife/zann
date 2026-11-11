@@ -586,7 +586,8 @@ pub async fn initialize_database(location: &SqliteFileLocation) -> LocalResult<(
 #[cfg(test)]
 mod compatibility_tests {
     use serde::Deserialize;
-    use tempfile::TempDir;
+
+    use crate::test_support::CanonicalTempDir;
 
     use super::*;
 
@@ -652,7 +653,7 @@ mod compatibility_tests {
 
     #[test]
     fn client_state_uses_the_explicit_database_root() {
-        let temp = TempDir::new().expect("tempdir");
+        let temp = CanonicalTempDir::new("tempdir");
         let root = temp.path().join("custom-client-root");
         std::fs::create_dir_all(&root).expect("create client root");
         let db_path = root.join("local.sqlite");
@@ -663,7 +664,7 @@ mod compatibility_tests {
 
     #[test]
     fn filesystem_path_keeps_sqlite_uri_delimiters_literal() {
-        let temp = TempDir::new().expect("tempdir");
+        let temp = CanonicalTempDir::new("tempdir");
         let root = temp.path().join("literal # ? % root");
         std::fs::create_dir_all(&root).expect("create client root");
         let db_path = root.join("local # ? %.sqlite");
@@ -682,7 +683,7 @@ mod compatibility_tests {
 
     #[test]
     fn percent_encoded_legacy_uri_keeps_database_and_client_root_together() {
-        let temp = TempDir::new().expect("tempdir");
+        let temp = CanonicalTempDir::new("tempdir");
         let root = temp.path().join("encoded root");
         std::fs::create_dir_all(&root).expect("create encoded root");
         let db_path = root.join("local # ? %.sqlite");

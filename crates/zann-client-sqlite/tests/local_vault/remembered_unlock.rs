@@ -5,22 +5,17 @@
 //!
 //! Nothing here needs a credential store or an authenticator: those paths are
 //! covered in `zann-keystore`.
+
+use crate::support::CanonicalTempDir;
 use zann_client_sqlite::local_vault::open_vault as create_core;
 
 use std::fs;
-use std::path::PathBuf;
 
 use uuid::Uuid;
 
-fn temp_root() -> PathBuf {
-    let root = std::env::temp_dir().join(format!("zann-ffi-remembered-{}", Uuid::now_v7()));
-    fs::create_dir_all(&root).expect("create temp dir");
-    root
-}
-
 #[test]
 fn a_fresh_device_has_nothing_remembered() {
-    let root = temp_root();
+    let root = CanonicalTempDir::new();
     let db_url = format!("sqlite://{}", root.join("local.sqlite").display());
 
     let core = create_core(db_url).expect("create core");
@@ -29,13 +24,11 @@ fn a_fresh_device_has_nothing_remembered() {
     assert!(!remembered.armed);
     assert_eq!(remembered.source, "keystore");
     assert!(remembered.hardware_keys.is_empty());
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn the_remembered_unlock_is_kept_out_of_the_client_config() {
-    let root = temp_root();
+    let root = CanonicalTempDir::new();
     let db_url = format!("sqlite://{}", root.join("local.sqlite").display());
     let password = format!("test-master-password-{}", Uuid::now_v7());
 
@@ -60,6 +53,4 @@ fn the_remembered_unlock_is_kept_out_of_the_client_config() {
     // whole vault hangs on.
     let core = create_core(db_url).expect("reopen core");
     assert!(core.unlock(password).expect("unlock").unlocked);
-
-    let _ = fs::remove_dir_all(&root);
 }

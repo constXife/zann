@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use tempfile::TempDir;
+use crate::support::CanonicalTempDir;
 use zann_client::app::local::{LocalError, LocalVaultService};
 use zann_client_sqlite::local_vault::LocalVault;
 use zann_db::SqliteFileLocation;
@@ -10,7 +10,7 @@ use zann_keystore::{
 };
 
 fn open(
-    root: &TempDir,
+    root: &CanonicalTempDir,
     keystore: Arc<dyn Keystore>,
     auth: Arc<FakeHardwareAuthenticator>,
 ) -> Arc<LocalVault> {
@@ -18,7 +18,7 @@ fn open(
     LocalVault::open(location, keystore, auth).unwrap()
 }
 
-fn initialized(root: &TempDir, auth: Arc<FakeHardwareAuthenticator>) -> Arc<LocalVault> {
+fn initialized(root: &CanonicalTempDir, auth: Arc<FakeHardwareAuthenticator>) -> Arc<LocalVault> {
     let core = open(root, Arc::new(UnsupportedKeystore), auth);
     core.initialize_master_password("test master password".into())
         .unwrap();
@@ -38,7 +38,7 @@ fn assert_kind(error: LocalError, expected: &str) {
 
 #[test]
 fn injected_hardware_enrolls_reopens_unlocks_and_polls_without_os_store() {
-    let root = TempDir::new().unwrap();
+    let root = CanonicalTempDir::new();
     let auth = Arc::new(FakeHardwareAuthenticator::new(1));
     let core = initialized(&root, auth.clone());
     let port: &dyn LocalVaultService = core.as_ref();
@@ -85,7 +85,7 @@ fn injected_hardware_enrolls_reopens_unlocks_and_polls_without_os_store() {
 
 #[test]
 fn failed_touch_or_token_swap_never_publishes_enrollment() {
-    let root = TempDir::new().unwrap();
+    let root = CanonicalTempDir::new();
     let auth = Arc::new(FakeHardwareAuthenticator::new(1));
     let core = initialized(&root, auth.clone());
     auth.fail_next_create(FidoError::Timeout);
@@ -113,7 +113,7 @@ fn failed_touch_or_token_swap_never_publishes_enrollment() {
 
 #[test]
 fn lock_between_touches_cancels_enrollment() {
-    let root = TempDir::new().unwrap();
+    let root = CanonicalTempDir::new();
     let auth = Arc::new(FakeHardwareAuthenticator::new(1));
     let core = initialized(&root, auth.clone());
     let error = core
@@ -146,7 +146,7 @@ impl Keystore for MemoryKeystore {
 
 #[test]
 fn injected_keystore_handles_remember_unlock_and_forget() {
-    let root = TempDir::new().unwrap();
+    let root = CanonicalTempDir::new();
     let auth = Arc::new(FakeHardwareAuthenticator::new(1));
     auth.disconnect();
     let store = Arc::new(MemoryKeystore(Mutex::new(None)));
@@ -165,7 +165,7 @@ fn injected_keystore_handles_remember_unlock_and_forget() {
 
 #[test]
 fn keystore_failure_keeps_its_kind_and_source() {
-    let root = TempDir::new().unwrap();
+    let root = CanonicalTempDir::new();
     let core = initialized(&root, Arc::new(FakeHardwareAuthenticator::new(1)));
     assert_kind(
         core.remember_with_keystore().unwrap_err(),

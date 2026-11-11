@@ -1,18 +1,12 @@
+use crate::support::CanonicalTempDir;
 use std::fs;
-use std::path::PathBuf;
 use zann_client_sqlite::local_vault::open_vault as create_core;
 
 use uuid::Uuid;
 
-fn temp_root() -> PathBuf {
-    let root = std::env::temp_dir().join(format!("zann-ffi-test-{}", Uuid::now_v7()));
-    fs::create_dir_all(&root).expect("create temp dir");
-    root
-}
-
 #[test]
 fn master_password_persists_across_reopen() {
-    let root = temp_root();
+    let root = CanonicalTempDir::new();
     let db_path = root.join("local.sqlite");
     let db_url = format!("sqlite://{}", db_path.display());
     let password = format!("test-master-password-{}", Uuid::now_v7());
@@ -29,5 +23,4 @@ fn master_password_persists_across_reopen() {
     assert!(status.unlocked);
 
     let _ = fs::remove_file(&db_path);
-    let _ = fs::remove_dir_all(&root);
 }

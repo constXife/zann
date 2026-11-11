@@ -3,18 +3,11 @@
 //! The point of `verify` is to answer "is my data still intact" without the
 //! user having to take it on faith. These tests hold it to that: a clean vault
 //! must report clean, and a damaged one must be caught rather than shrugged at.
+
+use crate::support::CanonicalTempDir;
 use zann_client_sqlite::local_vault::open_vault as create_core;
 
-use std::fs;
-use std::path::PathBuf;
-
 use uuid::Uuid;
-
-fn temp_root(tag: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("zann-ffi-verify-{}-{}", tag, Uuid::now_v7()));
-    fs::create_dir_all(&root).expect("create temp dir");
-    root
-}
 
 fn db_url(root: &std::path::Path) -> String {
     format!("sqlite://{}", root.join("local.sqlite").display())
@@ -22,7 +15,7 @@ fn db_url(root: &std::path::Path) -> String {
 
 #[test]
 fn a_healthy_vault_reports_clean() {
-    let root = temp_root("clean");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -42,13 +35,11 @@ fn a_healthy_vault_reports_clean() {
         "unexpected problems: {:?}",
         report.problems
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn a_locked_vault_cannot_be_verified() {
-    let root = temp_root("locked");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -58,15 +49,13 @@ fn a_locked_vault_cannot_be_verified() {
     // key and must say so rather than reporting a hollow pass.
     core.verify()
         .expect_err("a locked vault must not report on data it cannot read");
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// The whole reason this exists: damage in the file must surface, and it must
 /// survive the round trip through the facade with a usable `kind`.
 #[test]
 fn a_damaged_payload_is_reported_through_the_facade() {
-    let root = temp_root("damaged");
+    let root = CanonicalTempDir::new();
     let password = format!("pw-{}", Uuid::now_v7());
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(password.clone())
@@ -109,6 +98,4 @@ fn a_damaged_payload_is_reported_through_the_facade() {
     assert_eq!(report.problems.len(), 1);
     assert_eq!(report.problems[0].kind, "checksum_mismatch");
     assert_eq!(report.problems[0].item_path.as_deref(), Some("secrets/one"));
-
-    let _ = fs::remove_dir_all(&root);
 }

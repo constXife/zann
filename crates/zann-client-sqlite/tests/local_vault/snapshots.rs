@@ -5,6 +5,8 @@
 //! tests pin the properties that make the answer trustworthy — the copy opens
 //! as a database, it still holds the data, and taking one does not disturb the
 //! vault it was taken from.
+
+use crate::support::CanonicalTempDir;
 use zann_client_sqlite::local_vault::open_vault as create_core;
 
 use std::fs;
@@ -12,12 +14,6 @@ use std::path::PathBuf;
 
 use uuid::Uuid;
 use zann_client::app::local::{ItemsFilter, Page, Retention};
-
-fn temp_root(tag: &str) -> PathBuf {
-    let root = std::env::temp_dir().join(format!("zann-ffi-snap-{}-{}", tag, Uuid::now_v7()));
-    fs::create_dir_all(&root).expect("create temp dir");
-    root
-}
 
 fn db_url(root: &std::path::Path) -> String {
     format!("sqlite://{}", root.join("local.sqlite").display())
@@ -38,7 +34,7 @@ fn all_items() -> (ItemsFilter, Page) {
 
 #[test]
 fn a_snapshot_is_a_working_copy_that_still_holds_the_data() {
-    let root = temp_root("copy");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
     core.initialize_master_password(password.clone())
@@ -57,7 +53,7 @@ fn a_snapshot_is_a_working_copy_that_still_holds_the_data() {
         snapshot.identity_path.is_some(),
         "a snapshot of an initialised vault must carry its salt"
     );
-    let restored_root = temp_root("restored");
+    let restored_root = CanonicalTempDir::new();
     let restored = create_core(db_url(&restored_root)).expect("open a fresh vault");
     let outcome = restored
         .snapshot_restore(snapshot.path.clone())
@@ -70,14 +66,11 @@ fn a_snapshot_is_a_working_copy_that_still_holds_the_data() {
     let items = restored.items_list(filter, page).expect("list items");
     assert_eq!(items.items.len(), 1, "the snapshot lost the data");
     assert_eq!(items.items[0].path, "secrets/api");
-
-    let _ = fs::remove_dir_all(&root);
-    let _ = fs::remove_dir_all(&restored_root);
 }
 
 #[test]
 fn taking_a_snapshot_leaves_the_original_usable() {
-    let root = temp_root("live");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -93,15 +86,13 @@ fn taking_a_snapshot_leaves_the_original_usable() {
     let (filter, page) = all_items();
     let items = core.items_list(filter, page).expect("list after snapshot");
     assert_eq!(items.items.len(), 2);
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// A locked vault must still be able to snapshot: the copy is encrypted either
 /// way, and a client that wants one on startup has no key yet.
 #[test]
 fn a_locked_vault_can_still_be_snapshotted() {
-    let root = temp_root("locked");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -109,13 +100,11 @@ fn a_locked_vault_can_still_be_snapshotted() {
 
     let snapshot = core.snapshot_create(None).expect("snapshot while locked");
     assert!(PathBuf::from(&snapshot.path).exists());
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn listing_reports_what_was_taken() {
-    let root = temp_root("list");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -126,13 +115,11 @@ fn listing_reports_what_was_taken() {
     let listed = core.snapshot_list().expect("list");
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].path, taken.path);
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn nothing_is_due_right_after_a_snapshot() {
-    let root = temp_root("due");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -148,13 +135,11 @@ fn nothing_is_due_right_after_a_snapshot() {
         .expect("second due check")
         .is_none());
     assert_eq!(core.snapshot_list().expect("list").len(), 1);
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn retention_bounds_how_many_are_kept() {
-    let root = temp_root("retention");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
@@ -170,19 +155,16 @@ fn retention_bounds_how_many_are_kept() {
 
     let listed = core.snapshot_list().expect("list");
     assert_eq!(listed.len(), 1, "retention did not drop the older snapshot");
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
 fn the_restore_target_is_the_live_database() {
-    let root = temp_root("target");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     assert_eq!(
         core.snapshot_restore_target(),
         root.join("local.sqlite").display().to_string()
     );
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// The point of restoring in the app: the same facade keeps working afterwards.
@@ -190,7 +172,7 @@ fn the_restore_target_is_the_live_database() {
 /// the moment a user is least able to follow instructions.
 #[test]
 fn restoring_brings_back_the_snapshotted_items_without_reopening() {
-    let root = temp_root("restore");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
     core.initialize_master_password(password.clone())
@@ -227,14 +209,12 @@ fn restoring_brings_back_the_snapshotted_items_without_reopening() {
     let items = core.items_list(filter, page).expect("list after restore");
     assert_eq!(items.items.len(), 1, "the restore did not take effect");
     assert_eq!(items.items[0].path, "secrets/keep");
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// Undoing a restore is a restore of what it displaced.
 #[test]
 fn a_restore_can_itself_be_undone() {
-    let root = temp_root("undo");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
     core.initialize_master_password(password.clone())
@@ -259,8 +239,6 @@ fn a_restore_can_itself_be_undone() {
         2,
         "undoing the restore did not bring the newer state back"
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// The salt saved beside a snapshot is read before the database moves, so a
@@ -268,7 +246,7 @@ fn a_restore_can_itself_be_undone() {
 /// the vault would be a database whose password nobody knows.
 #[test]
 fn a_damaged_salt_beside_a_snapshot_stops_the_restore() {
-    let root = temp_root("badsalt");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
     core.initialize_master_password(password.clone())
@@ -294,15 +272,13 @@ fn a_damaged_salt_beside_a_snapshot_stops_the_restore() {
         1,
         "a refused restore damaged the vault"
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
 
 /// A path that is not a vault database must be refused before anything is
 /// replaced, and the vault must be usable afterwards.
 #[test]
 fn restoring_something_that_is_not_a_vault_is_refused() {
-    let root = temp_root("foreign");
+    let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
     core.initialize_master_password(password.clone())
@@ -323,6 +299,4 @@ fn restoring_something_that_is_not_a_vault_is_refused() {
         1,
         "a refused restore damaged the vault"
     );
-
-    let _ = fs::remove_dir_all(&root);
 }
