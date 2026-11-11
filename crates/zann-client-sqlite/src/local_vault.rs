@@ -568,6 +568,9 @@ impl LocalVaultService for LocalVault {
             access_expires_at,
         )
     }
+    fn remote_client(&self) -> LocalResult<AppClient> {
+        self.app_client()
+    }
 }
 
 /// Prepare the explicitly selected native database before remote session setup.

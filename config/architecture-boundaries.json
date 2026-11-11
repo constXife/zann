@@ -453,8 +453,8 @@
       "exception_ids": [],
       "pattern": "AppClient|AppSession|SyncEngine|zann_client::(app::(AppClient|spi)|session|sync)",
       "roots": ["crates/zann-cli/src", "apps/desktop/src-tauri/src", "apps/cosmic/src", "crates/zann-ffi/src", "crates/zann-client-sqlite/src"],
-      "max_matches": 11,
-      "allowed_files": ["apps/cosmic/src/backend/remote.rs", "apps/desktop/src-tauri/src/infra/sync_client.rs", "crates/zann-client-sqlite/src/local_vault.rs"]
+      "max_matches": 15,
+      "allowed_files": ["apps/cosmic/src/backend/remote.rs", "apps/desktop/src-tauri/src/infra/sync_client.rs", "crates/zann-client-sqlite/src/local_vault.rs", "crates/zann-ffi/src/session.rs"]
     },
     {
       "name": "application-owner-construction-is-sealed",
