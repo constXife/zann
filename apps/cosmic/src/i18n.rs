@@ -31,6 +31,12 @@ pub fn t_args(key: &str, args: &[(&str, &str)]) -> String {
     text
 }
 
+pub fn field_label(key: &str) -> String {
+    catalogue()
+        .read()
+        .map_or_else(|_| key.to_string(), |catalogue| catalogue.field_label(key))
+}
+
 pub fn has(key: &str) -> bool {
     catalogue().read().is_ok_and(|catalogue| catalogue.has(key))
 }
