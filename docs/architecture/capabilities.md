@@ -152,19 +152,21 @@ default defined by `zann-ui-core::settings`.
   same page transaction, including empty pages that only advance the
   checkpoint. It MUST NOT look up a possibly rotated key fingerprint after
   network validation.
-  The current SQLite schema still keys vaults, items and history by globally
-  unique server UUIDs rather than `(storage_id, id)`. The local adapter MUST
-  fail closed when another storage already owns any of those identifiers; a
-  multi-endpoint rollout is blocked until composite physical keys and foreign
-  keys are migrated. A `NULL` vault key fingerprint may be bound only by a
+  The SQLite schema keys vaults, items and history by `(storage_id, id)`, and
+  item/history rows reference their vault through a storage-composite foreign
+  key, so several configured connections sync into one database without
+  identifier collisions and a reset or cascade never crosses a storage. A
+  connection with more than one credential profile MUST still fail closed:
+  its profiles share the connection's `storage_id`. A `NULL` vault key
+  fingerprint may be bound only by a
   writer-serialized exact envelope/wrap CAS that proves the whole vault
   projection and checkpoint are empty.
   Each remote projection additionally stores one all-or-none Config v2
   generation proof: repository fingerprint, stable-target fingerprint,
   unsigned big-endian revision and exact content fingerprint. Only exact
   catalog reconciliation may claim an unbound generation, and only while all
-  catalog key fingerprints and every item/history/pending/cursor and
-  cross-storage reference are empty. Pull requires an existing claim. Equal
+  catalog key fingerprints and every item/history/pending/cursor row of that
+  storage are empty. Pull requires an existing claim. Equal
   revisions require identical content, rollback and repository/target changes
   fail closed, and a newer generation advances in the same `BEGIN IMMEDIATE`
   transaction as its catalog or pull write. The adapter holds the async
