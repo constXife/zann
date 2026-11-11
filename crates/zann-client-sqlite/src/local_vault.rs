@@ -9,7 +9,7 @@ use zann_client::app::{
     AppClient, ClientId, ClientPaths, ConfigIdentity, ConfigKdfParams, CredentialSecret,
     LegacySessionImport, SessionClient, SessionOperation,
 };
-use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
+use zann_client::config::{CredentialStore, LegacyCredentialSource};
 use zann_core::{ItemCounts as DomainItemCounts, ItemListParams, ItemsService, VaultsService};
 use zann_crypto::crypto::SecretKey;
 #[cfg(debug_assertions)]
@@ -23,16 +23,15 @@ use zann_db::local::{
 use zann_db::services::LocalServices;
 use zann_db::SqliteFileLocation;
 use zann_db::{connect_sqlite_file_with_max, migrate_local, SqlitePool};
-use zann_keystore::{
-    default_authenticator, default_keystore, HardwareAuthenticator, Keystore,
-    RememberedUnlock as RememberedUnlockStore, UnlockError, UnlockSource,
-};
+use zann_keystore::{RememberedUnlock as RememberedUnlockStore, UnlockError, UnlockSource};
 
 use zann_client::app::local::*;
 
 pub struct LocalVault {
     keystore: Arc<dyn Keystore>,
     authenticator: Arc<dyn HardwareAuthenticator>,
+    credentials: Arc<dyn CredentialStore>,
+    legacy_credentials: Arc<dyn LegacyCredentialSource>,
     runtime: Runtime,
     /// Behind a lock because a snapshot restore replaces the database under it.
     /// `SqlitePool` is a handle, so reads take a clone rather than hold the lock
@@ -190,7 +189,6 @@ impl LocalVault {
 }
 impl LocalVault {
     fn app_client(&self) -> LocalResult<AppClient> {
-        let credentials = Arc::new(OsCredentialStore::system_default());
         let factory = Arc::new(
             SqliteSyncStoreFactory::new(&self.database_path)
                 .map_err(|error| LocalError::Service(error.to_string()))?,
@@ -199,12 +197,12 @@ impl LocalVault {
             ClientId::new("desktop").map_err(|error| LocalError::Service(error.to_string()))?;
         let client = AppClient::new(
             ClientPaths::new(&self.root),
-            credentials,
+            self.credentials.clone(),
             SessionClient::new(client_id),
             factory,
         );
         client
-            .initialize(&OsLegacyCredentialSource::system_default())
+            .initialize(self.legacy_credentials.as_ref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
         Ok(client)
     }
@@ -226,45 +224,29 @@ impl LocalVault {
     }
 }
 
+/// Opens a legacy `sqlite:` URI with the desktop ports.
 pub fn open_vault(db_url: String) -> LocalResult<Arc<LocalVault>> {
     let location = SqliteFileLocation::from_uri(&db_url)
         .map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
-    open_vault_at_location(location)
+    LocalVault::open(location, LocalVaultPorts::system_default())
 }
 
-/// Opens an exact filesystem path without interpreting URI delimiters.
-///
-/// This is deliberately Rust-only: UniFFI's public compatibility surface takes
-/// a SQLite URI in [`open_vault`], while native composition roots already own
-/// a [`Path`] and must not stringify it into a URI.
-pub fn open_vault_at_path(db_path: &Path) -> LocalResult<Arc<LocalVault>> {
-    let location = SqliteFileLocation::from_path(db_path)
-        .map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
-    open_vault_at_location(location)
-}
-
-/// Opens a location already parsed and resolved by the native composition root.
+/// Opens a location already parsed and resolved by the native composition
+/// root, with the desktop ports.
 pub fn open_vault_at_file_location(location: &SqliteFileLocation) -> LocalResult<Arc<LocalVault>> {
-    open_vault_at_location(location.clone())
-}
-
-// Desktop composition used by the URI/path convenience entry points above.
-fn open_vault_at_location(location: SqliteFileLocation) -> LocalResult<Arc<LocalVault>> {
-    LocalVault::open(
-        location,
-        default_keystore().into(),
-        default_authenticator().into(),
-    )
+    LocalVault::open(location.clone(), LocalVaultPorts::system_default())
 }
 
 impl LocalVault {
     /// Compose a vault with platform-provided ports. No hardware or OS-store
     /// discovery occurs during construction.
-    pub fn open(
-        location: SqliteFileLocation,
-        keystore: Arc<dyn Keystore>,
-        authenticator: Arc<dyn HardwareAuthenticator>,
-    ) -> LocalResult<Arc<Self>> {
+    pub fn open(location: SqliteFileLocation, ports: LocalVaultPorts) -> LocalResult<Arc<Self>> {
+        let LocalVaultPorts {
+            keystore,
+            authenticator,
+            credentials,
+            legacy_credentials,
+        } = ports;
         let runtime = Runtime::new().map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
         let root = location.root().to_path_buf();
         let database_path = location.path().to_path_buf();
@@ -282,6 +264,8 @@ impl LocalVault {
         Ok(Arc::new(LocalVault {
             keystore,
             authenticator,
+            credentials,
+            legacy_credentials,
             runtime,
             pool: Mutex::new(pool),
             database_path,
@@ -394,6 +378,8 @@ impl From<Retention> for crate::maintenance::RetentionPolicy {
 }
 
 mod enrollment;
+mod ports;
+pub use ports::*;
 mod unlock;
 
 mod session;
@@ -657,7 +643,8 @@ mod compatibility_tests {
         let root = temp.path().join("custom-client-root");
         std::fs::create_dir_all(&root).expect("create client root");
         let db_path = root.join("local.sqlite");
-        let core = open_vault_at_path(&db_path).expect("create core");
+        let core =
+            open_vault_at_path(&db_path, LocalVaultPorts::system_default()).expect("create core");
 
         assert_eq!(core.root, root);
     }
@@ -669,7 +656,8 @@ mod compatibility_tests {
         std::fs::create_dir_all(&root).expect("create client root");
         let db_path = root.join("local # ? %.sqlite");
 
-        let core = open_vault_at_path(&db_path).expect("create core at exact path");
+        let core = open_vault_at_path(&db_path, LocalVaultPorts::system_default())
+            .expect("create core at exact path");
 
         assert_eq!(core.root, root);
         assert!(db_path.exists(), "SQLite must create the exact path");
