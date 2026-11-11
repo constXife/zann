@@ -449,10 +449,9 @@ impl PushCommitChange {
                     && proof.item_id() == pending.item_id() => {}
             _ => return Err(SyncModelError::InvalidPendingProof),
         }
-        // A create pushes a row with no prior local projection; every other
-        // operation rewrites an existing exact projection.
-        let creates_item = expected.exact_proof().is_none();
-        if creates_item != matches!(pending.operation(), ChangeType::Create) {
+        // Every operation, a create included, confirms the exact local
+        // projection its pending row was recorded with.
+        if expected.exact_proof().is_none() {
             return Err(SyncModelError::InvalidPendingProof);
         }
         Ok(Self {
