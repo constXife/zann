@@ -140,7 +140,7 @@ impl LocalVault {
 
     pub fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome> {
         let master_key = self.master_key()?;
-        let client = self.sync_app_client()?;
+        let client = self.app_client()?;
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
@@ -162,7 +162,7 @@ impl LocalVault {
     /// change would be discarded.
     pub fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()> {
         let master_key = self.master_key()?;
-        let client = self.sync_app_client()?;
+        let client = self.app_client()?;
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
@@ -188,7 +188,7 @@ impl LocalVault {
         refresh_token: String,
         access_expires_at: Option<String>,
     ) -> LocalResult<()> {
-        let client = self.sync_app_client()?;
+        let client = self.app_client()?;
         let access = CredentialSecret::new(access_token)
             .map_err(|_| LocalError::InvalidArgument("access token".to_string()))?;
         let refresh = CredentialSecret::new(refresh_token)

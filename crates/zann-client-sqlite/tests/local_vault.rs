@@ -4,6 +4,8 @@
 mod backup_round_trip;
 #[path = "local_vault/config_compat.rs"]
 mod config_compat;
+#[path = "local_vault/kdf_identity.rs"]
+mod kdf_identity;
 #[path = "local_vault/master_password.rs"]
 mod master_password;
 #[path = "local_vault/remembered_unlock.rs"]

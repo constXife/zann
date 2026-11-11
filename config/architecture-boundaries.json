@@ -376,6 +376,14 @@
       "allowed_files": ["apps/cosmic/src/backend/mod.rs"]
     },
     {
+      "name": "client-sqlite-config-ownership",
+      "exception_ids": [],
+      "pattern": "struct (CliConfig|CliContext|TokenEntry|IdentityConfig)|CONFIG_FILENAME|[.]join[(]\"[.]zann\"|\"config[.]json\"",
+      "roots": ["crates/zann-client-sqlite/src"],
+      "max_matches": 0,
+      "allowed_files": []
+    },
+    {
       "name": "ffi-config-ownership",
       "exception_ids": [],
       "pattern": "struct (CliConfig|CliContext|TokenEntry)|CONFIG_FILENAME|[.]join[(]\"[.]zann\"|\"config[.]json\"",

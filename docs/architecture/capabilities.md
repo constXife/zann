@@ -296,6 +296,12 @@ requires an explicit repository migration; clients MUST NOT silently
 reinterpret its credential references at a new path. A future schema version
 is not treated as corruption and MUST NOT be replaced from an older backup.
 
+The KDF identity (`identity`: salt and parameters) lives only in Config v2. A
+login commits the account's identity from prelogin; `LocalVault` generates one
+only when it initializes a vault and no identity is committed yet, and a
+snapshot restore replaces it by compare-and-swap. Opening a database never
+creates an identity, so a second device can adopt the account's salt.
+
 If the primary is absent while the predecessor backup exists, initialization
 MUST stop for explicit recovery; it MUST NOT create defaults or remigrate
 legacy state. A recovered revision must be newer than the potentially lost
@@ -561,7 +567,7 @@ the current scope; they do not permit additional call sites or dependencies.
 | MIG-001 | `@constXife` | `apps/desktop/src-tauri/src/infra/{auth,http,identity,remote}.rs`, `services/{auth,auth_oidc,auth_password,sync,sync_helpers}.rs` and their current command/state glue | remote/auth/sync drift | characterization plus DB-backed parity tests before each slice moves | Tauri uses `zann-client` remote/auth/sync and the fork is deleted (ADR phase 4) |
 | MIG-003 | `@constXife` | Tauri's current database/keystore integration and remaining shell-local application policy | split roots and application-policy drift | explicit-root tests and canonical facade conformance | remaining shell-local application policy and direct infrastructure edges are removed (ADR phase 5) |
 | MIG-004 | `@constXife` | `apps/desktop/src-tauri/src/crypto.rs` and `services/session.rs` | incompatible or unaudited crypto behaviour | golden compatibility fixtures before replacement | every call routes through `zann-crypto` and copies are deleted (ADR phase 2) |
-| MIG-005 | `@constXife` | legacy local identity writer in `crates/zann-client-sqlite/src/local_vault/identity.rs` and `maintenance/snapshot.rs` (moved from FFI / zann-app) and Tauri writers in `apps/desktop/src-tauri/src/{infra/config,state}.rs` | cross-client data loss and plaintext tokens | backup/round-trip fixtures during migration; no new fields in legacy shape | config v2, locking, atomic replace, namespaces and credential separation are used by all clients (ADR phase 2) |
+| MIG-005 | `@constXife` | Tauri legacy config writers in `apps/desktop/src-tauri/src/{infra/config,state}.rs` and the COSMIC default-root resolver in `apps/cosmic/src/backend/mod.rs` | cross-client data loss and plaintext tokens | backup/round-trip fixtures during migration; no new fields in legacy shape | config v2, locking, atomic replace, namespaces and credential separation are used by all clients (ADR phase 2) |
 | MIG-006 | `@constXife` | `apps/cosmic/src/screens/{connect,vault}.rs`, `apps/desktop/src/composables/app/actions/{useAppAuthFlow,useAppWatchers}.ts`, `apps/desktop/src/composables/app/state/useAppItemFilters.ts`, `apps/desktop/src/composables/{useItemDetails,useFolders}.ts` and `apps/desktop/src/utils/itemCategories.ts` | divergent UI behaviour and stale async results | existing flow/UI tests plus new operation-ID tests | clients consume `zann-flows` and `zann-ui-core`; duplicate policy is deleted (ADR phase 6) |
 
 Because these entries predate the exception policy, `@constXife` is their
@@ -642,5 +648,5 @@ Remote item operations use the shared redirect-free transport and bounded
 responses; service-account authentication uses the canonical auth transport.
 The server observation must verify its signature and receive explicit trust
 before configured credentials are read. `--insecure` permits loopback HTTP and
-does not disable certificate verification. The legacy local identity writer
-remains under MIG-005; this change closes that migration only for the CLI.
+does not disable certificate verification. The CLI and `zann-client-sqlite`
+no longer write `config.json`; MIG-005 remains only for the Tauri writers.

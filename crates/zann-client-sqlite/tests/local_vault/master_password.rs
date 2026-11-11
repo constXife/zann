@@ -29,6 +29,5 @@ fn master_password_persists_across_reopen() {
     assert!(status.unlocked);
 
     let _ = fs::remove_file(&db_path);
-    let _ = fs::remove_file(root.join("config.json"));
     let _ = fs::remove_dir_all(&root);
 }

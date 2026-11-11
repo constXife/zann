@@ -105,7 +105,7 @@ mod tests {
     #[test]
     fn write_private_creates_owner_only_file_and_leaves_no_temp() {
         let root = scratch("write");
-        let target = root.join("config.json");
+        let target = root.join("private.json");
 
         write_private(&target, b"secret").expect("write");
 
@@ -115,7 +115,7 @@ mod tests {
             .expect("read dir")
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
-            .filter(|path| path.file_name().is_some_and(|name| name != "config.json"))
+            .filter(|path| path.file_name().is_some_and(|name| name != "private.json"))
             .collect();
         assert!(leftovers.is_empty(), "no temp leftovers: {leftovers:?}");
     }
@@ -123,7 +123,7 @@ mod tests {
     #[test]
     fn write_private_replaces_world_readable_existing_file() {
         let root = scratch("replace");
-        let target = root.join("config.json");
+        let target = root.join("private.json");
         fs::write(&target, b"old").expect("seed");
         #[cfg(unix)]
         fs::set_permissions(&target, fs::Permissions::from_mode(0o644)).expect("loosen");

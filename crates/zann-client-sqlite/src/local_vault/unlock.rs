@@ -6,7 +6,10 @@ impl LocalVault {
     }
 
     pub fn unlock(&self, password: String) -> LocalResult<VaultStatus> {
-        let master_key = Arc::new(derive_master_key(&password, &self.identity())?);
+        let identity = self
+            .kdf_identity()?
+            .ok_or_else(|| LocalError::InvalidArgument("vault is not initialized".to_string()))?;
+        let master_key = Arc::new(derive_master_key(&password, &identity)?);
         self.finish_unlock(master_key)
     }
 
@@ -107,8 +110,23 @@ impl LocalVault {
             ));
         }
 
-        // Derive master key from password
-        let master_key = Arc::new(derive_master_key(&password, &self.identity())?);
+        // A login has already committed the account's identity; only a vault
+        // that is local-only from the start gets a fresh salt.
+        let client = self.app_client()?;
+        let identity = match client
+            .kdf_identity()
+            .map_err(|err| LocalError::Service(err.to_string()))?
+        {
+            Some(identity) => identity,
+            None => {
+                let identity = new_local_identity();
+                client
+                    .replace_kdf_identity_if_matches(None, identity.clone())
+                    .map_err(|err| LocalError::Service(err.to_string()))?;
+                identity
+            }
+        };
+        let master_key = Arc::new(derive_master_key(&password, &identity)?);
 
         // Create local storage if none exists
         let storage_repo = LocalStorageRepo::new(&pool);

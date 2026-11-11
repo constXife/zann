@@ -1,7 +1,7 @@
-//! The remembered unlock lives in its own file, away from `config.json`. That
-//! separation is the point: `config.json` is written by several typed structs
-//! (the CLI, the client, the desktop) and serde drops fields none of them
-//! model, so an enrolment stored there would vanish on the next write.
+//! The remembered unlock lives in its own file, away from the client config.
+//! That separation is the point: the config is written by several clients
+//! under a strict schema, so an enrolment stored there would be rejected or
+//! lost on the next write.
 //!
 //! Nothing here needs a credential store or an authenticator: those paths are
 //! covered in `zann-keystore`.
@@ -34,7 +34,7 @@ fn a_fresh_device_has_nothing_remembered() {
 }
 
 #[test]
-fn the_remembered_unlock_is_kept_out_of_config_json() {
+fn the_remembered_unlock_is_kept_out_of_the_client_config() {
     let root = temp_root();
     let db_url = format!("sqlite://{}", root.join("local.sqlite").display());
     let password = format!("test-master-password-{}", Uuid::now_v7());
@@ -43,16 +43,16 @@ fn the_remembered_unlock_is_kept_out_of_config_json() {
     core.initialize_master_password(password.clone())
         .expect("initialize master password");
 
-    // Rewrites config.json through the remembered-unlock path.
+    // Persists through the remembered-unlock path.
     core.remove_hardware_key("not-enrolled".to_string())
         .expect("remove is a no-op");
     drop(core);
 
-    let config = fs::read_to_string(root.join("config.json")).expect("config.json");
+    let config = fs::read_to_string(root.join("client-config.json")).expect("client config");
     assert!(config.contains("\"identity\""));
     assert!(
         !config.contains("remembered_unlock"),
-        "config.json is shared with clients that would drop this field"
+        "the client config is shared with clients that would drop this field"
     );
     assert!(root.join("unlock.json").exists());
 
