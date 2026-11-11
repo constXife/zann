@@ -95,7 +95,7 @@ Match verification depth to the blast radius of the diff:
 - `cargo fmt` / `cargo clippy --all-targets --all-features -- -D warnings` — format and lint Rust code (warnings are errors in CI).
 - `just architecture-check` (`./scripts/check-client-architecture.sh`) — validate client-layer ownership, dependency direction, and `MIG-*` exceptions.
 - `./scripts/check-audit-surface-deps.sh` — validate `zann-crypto` dependency isolation.
-- `./scripts/generate-swift-bindings.sh <out-dir>` — on macOS, build the host `zann-ffi` library and generate its Swift bindings.
+- `apps/apple/ZannCoreKit/build-xcframework.sh <debug|release>` then `swift test --package-path apps/apple/ZannCoreKit` — on macOS, build the `ZannFFI.xcframework` and Swift bindings and run the binding tests.
 - `just cosmic-test` (`cd apps/cosmic && cargo test`) — run headless flow and backend tests for the COSMIC client.
 - `just cosmic-run` / `nix build .#zann-cosmic` — run or package the COSMIC desktop client.
 - `just desktop-test` (`cd apps/desktop && bun run test`) — run Tauri frontend unit tests.
