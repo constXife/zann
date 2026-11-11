@@ -733,7 +733,7 @@ impl<'a> LocalServices<'a> {
         }
         let pending_repo = PendingChangeRepo::new(self.pool);
         let _ = pending_repo.delete_by_item(storage_id, item_id).await;
-        repo.delete_by_id(item_id)
+        repo.delete_by_id(storage_id, item_id)
             .await
             .map_err(|err| ServiceError::new("item_delete_failed", err.to_string()))?;
         Ok(())
@@ -764,7 +764,7 @@ impl<'a> LocalServices<'a> {
             if pending_items.contains(&item.id) {
                 continue;
             }
-            if repo.delete_by_id(item.id).await.is_ok() {
+            if repo.delete_by_id(storage_id, item.id).await.is_ok() {
                 removed += 1;
             }
         }

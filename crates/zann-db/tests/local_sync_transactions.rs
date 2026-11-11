@@ -311,37 +311,6 @@ async fn insert_pending(pool: &SqlitePool, pending: &LocalPendingChange) {
 }
 
 #[tokio::test]
-async fn remote_storage_count_is_capped_without_materializing_rows() {
-    let pool = empty_migrated_pool(1).await;
-    let repository = LocalStorageRepo::new(&pool);
-    assert_eq!(
-        repository
-            .remote_count_up_to_two()
-            .await
-            .expect("count initial remote storages"),
-        0
-    );
-    for index in 0..3 {
-        let storage = remote_storage(
-            Uuid::now_v7(),
-            &format!("https://remote-count-{index}.example"),
-            &format!("remote-count-{index}"),
-        );
-        repository
-            .upsert(&storage)
-            .await
-            .expect("insert remote storage");
-        assert_eq!(
-            repository
-                .remote_count_up_to_two()
-                .await
-                .expect("count capped remote storages"),
-            u8::try_from(index + 1).expect("small count").min(2)
-        );
-    }
-}
-
-#[tokio::test]
 async fn storage_list_accepts_its_exact_cap_and_rejects_cap_plus_one() {
     let pool = empty_migrated_pool(1).await;
     sqlx_core::query::query::<Sqlite>(
@@ -568,10 +537,6 @@ async fn bounded_projection_readers_reject_oversized_sqlite_bodies_before_decode
             .get_bounded(fixture.scope.storage_id)
             .await,
     );
-    assert!(LocalStorageRepo::new(&fixture.pool)
-        .remote_count_up_to_two()
-        .await
-        .is_err());
     sqlx_core::query::query::<Sqlite>("UPDATE storages SET kind = ?2 WHERE id = ?1")
         .bind(Uuid::nil())
         .bind(StorageKind::LocalOnly.as_i32())
@@ -804,23 +769,37 @@ async fn bounded_projection_readers_reject_oversized_sqlite_bodies_before_decode
             .await
             .expect("restore bounded item row");
     }
-    for column in ["storage_id", "vault_id"] {
-        let sql = format!("UPDATE items_cache SET {column} = zeroblob(1048576) WHERE id = ?1");
-        sqlx_core::query::query::<Sqlite>(&sql)
-            .bind(projected.id)
-            .execute(&fixture.pool)
-            .await
-            .expect("install oversized item identifier");
-        expect_corrupt_projection(
-            LocalItemRepo::new(&fixture.pool)
-                .get_by_id_bounded(fixture.scope.storage_id, projected.id)
-                .await,
-        );
+    sqlx_core::query::query::<Sqlite>(
+        "UPDATE items_cache SET vault_id = zeroblob(1048576) WHERE id = ?1",
+    )
+    .bind(projected.id)
+    .execute(&fixture.pool)
+    .await
+    .expect("install oversized item vault identifier");
+    expect_corrupt_projection(
         LocalItemRepo::new(&fixture.pool)
-            .update(&projected)
-            .await
-            .expect("restore bounded item identifier");
-    }
+            .get_by_id_bounded(fixture.scope.storage_id, projected.id)
+            .await,
+    );
+    LocalItemRepo::new(&fixture.pool)
+        .update(&projected)
+        .await
+        .expect("restore bounded item vault identifier");
+
+    // A row whose storage identifier is corrupt is outside every storage
+    // scope; the storage-keyed read never selects or decodes it.
+    sqlx_core::query::query::<Sqlite>(
+        "UPDATE items_cache SET storage_id = zeroblob(1048576) WHERE id = ?1",
+    )
+    .bind(projected.id)
+    .execute(&fixture.pool)
+    .await
+    .expect("install oversized item storage identifier");
+    assert!(LocalItemRepo::new(&fixture.pool)
+        .get_by_id_bounded(fixture.scope.storage_id, projected.id)
+        .await
+        .expect("storage-scoped read ignores rows outside the storage")
+        .is_none());
 }
 
 #[tokio::test]
@@ -831,7 +810,6 @@ async fn pull_writer_preflights_corrupt_storage_vault_cursor_item_and_pending_ro
         StorageId,
         StorageKind,
         StorageDrift,
-        SecondRemote,
         Vault,
         VaultStorageId,
         Cursor,
@@ -849,7 +827,6 @@ async fn pull_writer_preflights_corrupt_storage_vault_cursor_item_and_pending_ro
         Corruption::StorageId,
         Corruption::StorageKind,
         Corruption::StorageDrift,
-        Corruption::SecondRemote,
         Corruption::Vault,
         Corruption::VaultStorageId,
         Corruption::Cursor,
@@ -920,16 +897,6 @@ async fn pull_writer_preflights_corrupt_storage_vault_cursor_item_and_pending_ro
                 .execute(&fixture.pool)
                 .await
                 .expect("install exact storage-binding drift");
-            }
-            Corruption::SecondRemote => {
-                LocalStorageRepo::new(&fixture.pool)
-                    .upsert(&remote_storage(
-                        Uuid::now_v7(),
-                        "https://second-writer-cache.example",
-                        "second-writer-cache",
-                    ))
-                    .await
-                    .expect("install second remote storage");
             }
             Corruption::Vault => {
                 sqlx_core::query::query::<Sqlite>("DROP TRIGGER local_vaults_v2_validate_update")
@@ -1067,8 +1034,7 @@ async fn pull_writer_preflights_corrupt_storage_vault_cursor_item_and_pending_ro
             Corruption::Storage
             | Corruption::StorageId
             | Corruption::StorageKind
-            | Corruption::StorageDrift
-            | Corruption::SecondRemote => {
+            | Corruption::StorageDrift => {
                 assert!(matches!(
                     error,
                     LocalSyncError::StorageBindingChanged { .. }
@@ -1962,108 +1928,99 @@ async fn concurrent_cache_key_fingerprint_binds_allow_only_one_distinct_key() {
 }
 
 #[tokio::test]
-async fn cache_key_fingerprint_bind_rejects_cross_storage_projection_references() {
-    for reference in ["item", "checkpoint", "pending", "history"] {
-        let pool = empty_migrated_pool(1).await;
-        let target_storage = remote_storage(
-            Uuid::now_v7(),
-            "https://bind-target.example",
-            "bind-target-fingerprint",
-        );
-        let foreign_storage = LocalStorage {
-            id: Uuid::now_v7(),
-            kind: StorageKind::LocalOnly,
-            name: "Foreign local storage".to_string(),
-            server_url: None,
-            server_name: None,
-            server_fingerprint: None,
-            account_subject: None,
-            personal_vaults_enabled: true,
-            auth_method: None,
-        };
-        let storage_repo = LocalStorageRepo::new(&pool);
-        storage_repo
-            .upsert(&target_storage)
-            .await
-            .expect("insert target storage");
-        storage_repo
-            .upsert(&foreign_storage)
-            .await
-            .expect("insert foreign storage");
-        let target_scope = LocalSyncScope {
-            storage_id: target_storage.id,
-            vault_id: Uuid::now_v7(),
-        };
-        let mut target_vault = vault(target_scope, "Bind target");
-        target_vault.cache_key_fp = None;
-        LocalVaultRepo::new(&pool)
-            .create(&target_vault)
-            .await
-            .expect("insert empty target vault");
-        let foreign_scope = LocalSyncScope {
-            storage_id: foreign_storage.id,
-            vault_id: target_scope.vault_id,
-        };
-        let projected_item = item(
-            foreign_scope,
-            Uuid::now_v7(),
-            "accounts/cross-storage-bind",
-            "cross-storage-bind",
-            1,
-            SyncStatus::Synced,
-        );
-        match reference {
-            "item" => insert_item(&pool, &projected_item).await,
-            "checkpoint" => SyncCursorRepo::new(&pool)
-                .upsert_checkpoint(&LocalSyncCheckpoint {
-                    storage_id: foreign_scope.storage_id,
-                    vault_id: foreign_scope.vault_id,
-                    cursor: Some("foreign-cursor".to_string()),
-                    last_seq: Some(1),
-                    last_sync_at: Some(timestamp(1)),
-                })
-                .await
-                .expect("insert foreign checkpoint"),
-            "pending" => {
-                insert_pending(
-                    &pool,
-                    &pending(foreign_scope, &projected_item, ChangeType::Create),
-                )
-                .await
-            }
-            "history" => LocalItemHistoryRepo::new(&pool)
-                .create(&history(
-                    foreign_scope,
-                    projected_item.id,
-                    1,
-                    "foreign-history",
-                ))
-                .await
-                .expect("insert foreign history"),
-            _ => unreachable!("fixed reference case"),
-        }
-
-        let error = LocalVaultRepo::new(&pool)
-            .bind_cache_key_fingerprint(
-                target_scope.storage_id,
-                target_scope.vault_id,
-                &target_vault.vault_key_enc,
-                target_vault.key_wrap_type,
-                "aabbccddeeff",
-            )
-            .await
-            .expect_err("any cross-storage projection reference must block binding");
-        assert!(
-            matches!(error, LocalVaultKeyBindError::ProjectionNotEmpty),
-            "reference={reference}, error={error:?}"
-        );
-        let stored = LocalVaultRepo::new(&pool)
-            .get_by_id(target_scope.storage_id, target_scope.vault_id)
-            .await
-            .expect("read unbound vault")
-            .expect("target vault exists");
-        assert_eq!(stored.cache_key_fp, None, "reference={reference}");
+async fn cache_key_fingerprint_bind_ignores_another_storages_projection_for_the_same_vault_id() {
+    let pool = empty_migrated_pool(1).await;
+    let target_storage = remote_storage(
+        Uuid::now_v7(),
+        "https://bind-target.example",
+        "bind-target-fingerprint",
+    );
+    let foreign_storage = remote_storage(
+        Uuid::now_v7(),
+        "https://bind-foreign.example",
+        "bind-foreign-fingerprint",
+    );
+    let storage_repo = LocalStorageRepo::new(&pool);
+    for storage in [&target_storage, &foreign_storage] {
+        storage_repo.upsert(storage).await.expect("insert storage");
     }
+    let shared_vault_id = Uuid::now_v7();
+    let target_scope = LocalSyncScope {
+        storage_id: target_storage.id,
+        vault_id: shared_vault_id,
+    };
+    let foreign_scope = LocalSyncScope {
+        storage_id: foreign_storage.id,
+        vault_id: shared_vault_id,
+    };
+    let mut target_vault = vault(target_scope, "Bind target");
+    target_vault.cache_key_fp = None;
+    LocalVaultRepo::new(&pool)
+        .create(&target_vault)
+        .await
+        .expect("insert empty target vault");
+    LocalVaultRepo::new(&pool)
+        .create(&vault(foreign_scope, "Bind foreign"))
+        .await
+        .expect("insert same vault id in the foreign storage");
+
+    let projected_item = item(
+        foreign_scope,
+        Uuid::now_v7(),
+        "accounts/cross-storage-bind",
+        "cross-storage-bind",
+        1,
+        SyncStatus::Synced,
+    );
+    insert_item(&pool, &projected_item).await;
+    SyncCursorRepo::new(&pool)
+        .upsert_checkpoint(&LocalSyncCheckpoint {
+            storage_id: foreign_scope.storage_id,
+            vault_id: foreign_scope.vault_id,
+            cursor: Some("foreign-cursor".to_string()),
+            last_seq: Some(1),
+            last_sync_at: Some(timestamp(1)),
+        })
+        .await
+        .expect("insert foreign checkpoint");
+    insert_pending(
+        &pool,
+        &pending(foreign_scope, &projected_item, ChangeType::Update),
+    )
+    .await;
+    LocalItemHistoryRepo::new(&pool)
+        .create(&history(
+            foreign_scope,
+            projected_item.id,
+            1,
+            "foreign-history",
+        ))
+        .await
+        .expect("insert foreign history");
+
+    let bound = LocalVaultRepo::new(&pool)
+        .bind_cache_key_fingerprint(
+            target_scope.storage_id,
+            target_scope.vault_id,
+            &target_vault.vault_key_enc,
+            target_vault.key_wrap_type,
+            "aabbccddeeff",
+        )
+        .await
+        .expect("another storage's projection does not block binding");
+    assert_eq!(bound, CacheKeyFingerprintBind::Bound);
+    let stored = LocalVaultRepo::new(&pool)
+        .get_by_id(target_scope.storage_id, target_scope.vault_id)
+        .await
+        .expect("read bound vault")
+        .expect("target vault exists");
+    assert_eq!(stored.cache_key_fp.as_deref(), Some("aabbccddeeff"));
+    let foreign = LocalItemRepo::new(&pool)
+        .get_by_id(foreign_scope.storage_id, projected_item.id)
+        .await
+        .expect("read foreign item")
+        .expect("foreign item is untouched");
+    assert_eq!(foreign.payload_enc, projected_item.payload_enc);
 }
 
 #[tokio::test]
@@ -3708,12 +3665,12 @@ async fn reset_rejects_dirty_items_and_non_server_confirmed_history() {
 }
 
 #[tokio::test]
-async fn reset_rejects_foreign_storage_item_referencing_a_target_vault_without_cascade() {
+async fn schema_rejects_item_and_history_rows_referencing_another_storages_vault() {
     let fixture = fixture().await;
     let foreign_storage = remote_storage(
         Uuid::now_v7(),
-        "https://foreign-item.example",
-        "foreign-item-fingerprint",
+        "https://foreign-reference.example",
+        "foreign-reference-fingerprint",
     );
     LocalStorageRepo::new(&fixture.pool)
         .upsert(&foreign_storage)
@@ -3731,65 +3688,10 @@ async fn reset_rejects_foreign_storage_item_referencing_a_target_vault_without_c
         3,
         SyncStatus::Synced,
     );
-    insert_item(&fixture.pool, &malformed_item).await;
-
-    let reset = ResetProjection::new(storage_proof(&fixture.storage), None)
-        .expect("valid cross-storage item reset plan");
-    let error = expect_sync_error(
-        LocalSyncRepo::new(&fixture.pool)
-            .reset_projection(&reset)
-            .await,
-        "foreign-storage item must prevent target vault deletion",
-    );
-    assert!(matches!(
-        error,
-        LocalSyncError::CrossStorageVaultReference {
-            storage_id,
-            foreign_items: 1,
-            foreign_history: 0,
-        } if storage_id == fixture.scope.storage_id
-    ));
-
-    let stored_item = LocalItemRepo::new(&fixture.pool)
-        .get_by_id(foreign_storage.id, malformed_item.id)
+    LocalItemRepo::new(&fixture.pool)
+        .create(&malformed_item)
         .await
-        .expect("read malformed item after rejected reset")
-        .expect("malformed item survives rejected reset");
-    assert_eq!(stored_item.payload_enc, malformed_item.payload_enc);
-    assert_eq!(stored_item.checksum, malformed_item.checksum);
-    let stored_vault = LocalVaultRepo::new(&fixture.pool)
-        .get_by_id(fixture.scope.storage_id, fixture.scope.vault_id)
-        .await
-        .expect("read target vault after rejected reset")
-        .expect("target vault survives rejected reset");
-    assert_eq!(stored_vault.vault_key_enc, vec![7, 8, 9]);
-    assert_eq!(
-        cursor(&fixture.pool, fixture.scope).await.as_deref(),
-        Some("cursor-1")
-    );
-    assert!(LocalStorageRepo::new(&fixture.pool)
-        .get(fixture.scope.storage_id)
-        .await
-        .expect("read target storage after rejected reset")
-        .is_some());
-}
-
-#[tokio::test]
-async fn reset_rejects_foreign_storage_history_referencing_a_target_vault_without_cascade() {
-    let fixture = fixture().await;
-    let foreign_storage = remote_storage(
-        Uuid::now_v7(),
-        "https://foreign-history.example",
-        "foreign-history-fingerprint",
-    );
-    LocalStorageRepo::new(&fixture.pool)
-        .upsert(&foreign_storage)
-        .await
-        .expect("insert foreign storage");
-    let malformed_scope = LocalSyncScope {
-        storage_id: foreign_storage.id,
-        vault_id: fixture.scope.vault_id,
-    };
+        .expect_err("an item must not reference a vault of another storage");
     let malformed_history = history(
         malformed_scope,
         Uuid::now_v7(),
@@ -3799,47 +3701,7 @@ async fn reset_rejects_foreign_storage_history_referencing_a_target_vault_withou
     LocalItemHistoryRepo::new(&fixture.pool)
         .create(&malformed_history)
         .await
-        .expect("insert malformed history");
-
-    let reset = ResetProjection::new(storage_proof(&fixture.storage), None)
-        .expect("valid cross-storage history reset plan");
-    let error = expect_sync_error(
-        LocalSyncRepo::new(&fixture.pool)
-            .reset_projection(&reset)
-            .await,
-        "foreign-storage history must prevent target vault deletion",
-    );
-    assert!(matches!(
-        error,
-        LocalSyncError::CrossStorageVaultReference {
-            storage_id,
-            foreign_items: 0,
-            foreign_history: 1,
-        } if storage_id == fixture.scope.storage_id
-    ));
-
-    let stored_history = LocalItemHistoryRepo::new(&fixture.pool)
-        .list_by_item_limit(foreign_storage.id, malformed_history.item_id, 10)
-        .await
-        .expect("read malformed history after rejected reset");
-    assert_eq!(stored_history.len(), 1);
-    assert_eq!(stored_history[0].payload_enc, malformed_history.payload_enc);
-    assert_eq!(stored_history[0].checksum, malformed_history.checksum);
-    let stored_vault = LocalVaultRepo::new(&fixture.pool)
-        .get_by_id(fixture.scope.storage_id, fixture.scope.vault_id)
-        .await
-        .expect("read target vault after rejected reset")
-        .expect("target vault survives rejected reset");
-    assert_eq!(stored_vault.vault_key_enc, vec![7, 8, 9]);
-    assert_eq!(
-        cursor(&fixture.pool, fixture.scope).await.as_deref(),
-        Some("cursor-1")
-    );
-    assert!(LocalStorageRepo::new(&fixture.pool)
-        .get(fixture.scope.storage_id)
-        .await
-        .expect("read target storage after rejected reset")
-        .is_some());
+        .expect_err("history must not reference a vault of another storage");
 }
 
 #[tokio::test]

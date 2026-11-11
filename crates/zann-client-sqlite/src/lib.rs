@@ -1,10 +1,11 @@
 //! Production SQLite adapter for the canonical `zann-client` sync owner.
 //!
 //! An instance is an operation-scoped lease over exactly one explicit session
-//! target, config root, database pool and immutable master key. The current
-//! SQLite schema uses global UUID primary keys for vaults and items, so this
-//! adapter currently rejects multiple configured connections/profiles and
-//! multiple remote storage rows. Missing exact remote projections may be
+//! target, config root, database pool and immutable master key. Vaults, items
+//! and history are keyed by `(storage_id, id)`, so every configured connection
+//! syncs its own remote storage into the shared database. A connection with
+//! several credential profiles is still rejected because its profiles would
+//! share one storage projection. Missing exact remote projections may be
 //! materialized, but existing storage and key bindings are never replaced.
 
 #![deny(clippy::unwrap_used)]
@@ -98,13 +99,13 @@ impl AppSyncStoreFactory for SqliteSyncStoreFactory {
     fn reset_projection(
         self: Arc<Self>,
         paths: ClientPaths,
-        _target: SessionTarget,
+        target: SessionTarget,
         master_key: Arc<SecretKey>,
     ) -> SyncStoreFuture<'static, ()> {
         let database_path = self.location.path().to_path_buf();
         Box::pin(async move {
             let store = Arc::new(SqliteSyncStore::open(paths, &database_path, master_key).await?);
-            store.reset_single_remote_projection().await
+            store.reset_target_projection(target).await
         })
     }
 }
@@ -256,26 +257,33 @@ impl SqliteSyncStore {
         })
     }
 
-    /// Removes the single remote storage's complete projection in one terminal
-    /// transaction. This is the local recovery path used when a server has been
-    /// rebuilt or re-trusted: it must fail closed while any pending, dirty-item
-    /// or non-server history state would be discarded, and it never requires a
-    /// previously authorized target generation.
-    async fn reset_single_remote_projection(self: Arc<Self>) -> Result<(), SyncStoreError> {
+    /// Removes the target connection's complete remote projection in one
+    /// terminal transaction. This is the local recovery path used when a server
+    /// has been rebuilt or re-trusted: it must fail closed while any pending,
+    /// dirty-item or non-server history state would be discarded, and it never
+    /// requires a previously authorized target generation. Other storages in
+    /// the same database are never touched.
+    async fn reset_target_projection(
+        self: Arc<Self>,
+        target: SessionTarget,
+    ) -> Result<(), SyncStoreError> {
         let worker = Arc::clone(&self);
         self.dispatch_terminal_mutation(async move {
             worker.database.verify_identity().await?;
-            let remotes: Vec<LocalStorage> = LocalStorageRepo::new(worker.database.pool())
-                .list()
+            let anchor = worker
+                .config
+                .resolve_credential_profile_anchor(target.connection_id(), target.profile_name())
+                .map_err(map_config_lease_error)?;
+            let storage_id = canonical_uuid(required(anchor.storage_id())?)?;
+            let storage = LocalStorageRepo::new(worker.database.pool())
+                .get_bounded(storage_id)
                 .await
-                .map_err(|_| store_error(SyncStoreErrorKind::InvalidData))?
-                .into_iter()
-                .filter(|storage| storage.kind == StorageKind::Remote)
-                .collect();
-            let [storage] = remotes.as_slice() else {
+                .map_err(map_projection_read)?
+                .ok_or_else(|| store_error(SyncStoreErrorKind::NotFound))?;
+            if storage.kind != StorageKind::Remote {
                 return Err(store_error(SyncStoreErrorKind::InvalidData));
-            };
-            let proof = LocalStorageProof::try_from(storage).map_err(map_local_sync_error)?;
+            }
+            let proof = LocalStorageProof::try_from(&storage).map_err(map_local_sync_error)?;
             let reset = ResetProjection::new(proof, None).map_err(map_local_sync_error)?;
             LocalSyncRepo::new(worker.database.pool())
                 .reset_projection(&reset)
@@ -372,19 +380,11 @@ impl SqliteSyncStore {
         &self,
         expected: &TargetBinding,
     ) -> Result<LocalStorage, SyncStoreError> {
-        let repository = LocalStorageRepo::new(self.database.pool());
-        let storage = repository
+        let storage = LocalStorageRepo::new(self.database.pool())
             .get_bounded(expected.storage_id)
             .await
             .map_err(map_projection_read)?
             .ok_or_else(|| store_error(SyncStoreErrorKind::NotFound))?;
-        let remote_count = repository
-            .remote_count_up_to_two()
-            .await
-            .map_err(|_| store_error(SyncStoreErrorKind::InvalidData))?;
-        if remote_count != 1 {
-            return Err(store_error(SyncStoreErrorKind::InvalidData));
-        }
         ensure_storage_matches_target(&storage, expected)?;
         Ok(storage)
     }
@@ -421,14 +421,6 @@ impl SqliteSyncStore {
             .map_err(map_projection_read)?
             .is_none()
         {
-            if storage_repository
-                .remote_count_up_to_two()
-                .await
-                .map_err(|_| store_error(SyncStoreErrorKind::InvalidData))?
-                != 0
-            {
-                return Err(store_error(SyncStoreErrorKind::InvalidData));
-            }
             let candidate = LocalStorage {
                 id: expected.storage_id,
                 kind: StorageKind::Remote,
@@ -1299,9 +1291,6 @@ fn capture_target_binding_for_test(
             continue;
         }
         let config = snapshot.config();
-        if config.connections.len() != 1 {
-            return Err(store_error(SyncStoreErrorKind::InvalidData));
-        }
         let connection = config
             .connections
             .get(target.connection_id())
@@ -1381,7 +1370,7 @@ fn target_binding_from_generation(
     generation: &AuthorizedTargetGeneration,
     master_key: &SecretKey,
 ) -> Result<TargetBinding, SyncStoreError> {
-    ensure_single_target_topology(generation.single_target_topology())?;
+    ensure_single_profile_connection(generation.single_profile_connection())?;
     if generation.connection_id() != target.connection_id()
         || generation.profile_name() != target.profile_name()
         || generation.display_name().is_empty()
@@ -1419,7 +1408,7 @@ fn target_binding_from_generation(
     })
 }
 
-fn ensure_single_target_topology(proven: bool) -> Result<(), SyncStoreError> {
+fn ensure_single_profile_connection(proven: bool) -> Result<(), SyncStoreError> {
     if !proven {
         return Err(store_error(SyncStoreErrorKind::InvalidData));
     }
@@ -1697,9 +1686,9 @@ fn map_local_sync_error(error: LocalSyncError) -> SyncStoreError {
         | LocalSyncError::StorageGenerationChanged { .. } => {
             store_error(SyncStoreErrorKind::StaleCheckpoint)
         }
-        LocalSyncError::ProjectionNotClean { .. }
-        | LocalSyncError::CrossStorageVaultReference { .. }
-        | LocalSyncError::InvalidPlan { .. } => store_error(SyncStoreErrorKind::InvalidData),
+        LocalSyncError::ProjectionNotClean { .. } | LocalSyncError::InvalidPlan { .. } => {
+            store_error(SyncStoreErrorKind::InvalidData)
+        }
         LocalSyncError::Database(_) => store_error(SyncStoreErrorKind::Internal),
     }
 }
@@ -1735,6 +1724,8 @@ mod tests {
         CredentialSecret, CredentialStore, LegacyCredentialLocator, LegacyCredentialSource,
     };
     use zann_db::local::{LocalSyncCheckpoint, SyncCursorRepo};
+
+    mod multi_storage;
 
     #[derive(Default)]
     struct MemoryCredentials(Mutex<HashMap<String, String>>);
@@ -1908,11 +1899,11 @@ mod tests {
     }
 
     #[test]
-    fn adapter_rejects_an_unproven_single_target_topology_before_binding_conversion() {
-        let error = ensure_single_target_topology(false)
-            .expect_err("global-UUID adapter requires an exact single-target proof");
+    fn adapter_rejects_a_multi_profile_connection_before_binding_conversion() {
+        let error = ensure_single_profile_connection(false)
+            .expect_err("profiles of one connection would share one storage projection");
         assert_eq!(error.kind(), SyncStoreErrorKind::InvalidData);
-        ensure_single_target_topology(true).expect("exact topology is supported");
+        ensure_single_profile_connection(true).expect("a single-profile connection is supported");
     }
 
     #[test]
@@ -2919,7 +2910,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn local_endpoint_drift_and_multiple_remote_caches_fail_closed() {
+    async fn local_endpoint_drift_fails_closed_and_other_remote_caches_coexist() {
         let fixture = configured_fixture();
         let database_path = fixture.temp.path().join("endpoint-drift.sqlite");
         let pool = zann_db::connect_sqlite_path_with_max(&database_path, 1)
@@ -2971,11 +2962,10 @@ mod tests {
             .upsert(&second)
             .await
             .expect("insert second remote cache");
-        let error = store
+        store
             .resolve_exact_target_for_test(&fixture.target)
             .await
-            .expect_err("multiple remote caches must fail closed");
-        assert_eq!(error.kind(), SyncStoreErrorKind::InvalidData);
+            .expect("another connection's remote cache does not affect this target");
         pool.close().await;
     }
 
@@ -3104,7 +3094,7 @@ mod tests {
     }
 
     #[test]
-    fn factory_reset_removes_the_single_remote_projection() {
+    fn factory_reset_removes_only_the_target_projection() {
         let _serial = TERMINAL_MUTATION_TEST_LOCK
             .lock()
             .expect("serialize process-global terminal admission test");

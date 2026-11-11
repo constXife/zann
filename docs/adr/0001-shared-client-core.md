@@ -170,10 +170,11 @@ personal-vault capability; legacy profiles lacking that pair fail before the
 catalog request. Local adapters persist pulled deletes as `Synced` rows
 with `deleted_at`, and server-confirmed history replacement has no authority to
 delete local/UI, pending, rejected or conflict history.
-The SQLite adapter remains single-target while the physical schema uses global
-vault/item/history UUID keys: a second storage that presents the same server
-identifier must fail rather than alias another endpoint's projection. Composite
-`(storage_id, id)` keys are required for a multi-endpoint rollout. Initial key
+The SQLite schema keys vaults, items and history by `(storage_id, id)` with
+storage-composite foreign keys, so every configured connection projects into
+its own storage and identical server identifiers never alias another
+endpoint's projection. A connection with several credential profiles still
+fails closed because its profiles would share one storage. Initial key
 binding is permitted only for an empty projection through an exact
 envelope/wrap/fingerprint transaction; an ordinary key update clears the
 fingerprint and cannot silently re-authorize an existing cache.

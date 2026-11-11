@@ -7,15 +7,17 @@ pub(super) async fn ensure_item_expectation(
     expectation: &LocalItemExpectation,
 ) -> Result<(), LocalSyncError> {
     let matches = match expectation {
-        LocalItemExpectation::Absent => {
-            query!(r#"SELECT 1 FROM items_cache WHERE id = ?1"#, item_id)
-                .fetch_optional(&mut **tx)
-                .await
-                .map_err(LocalSyncError::Database)?
-                .is_none()
-        }
+        LocalItemExpectation::Absent => query!(
+            r#"SELECT 1 FROM items_cache WHERE storage_id = ?1 AND id = ?2"#,
+            scope.storage_id,
+            item_id
+        )
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(LocalSyncError::Database)?
+        .is_none(),
         LocalItemExpectation::Exact(proof) => {
-            ensure_item_projection_bounded(tx, item_id).await?;
+            ensure_item_projection_bounded(tx, scope, item_id).await?;
             query!(
                 r#"
                 SELECT 1
@@ -62,6 +64,7 @@ pub(super) async fn ensure_item_expectation(
 
 pub(super) async fn ensure_item_projection_bounded(
     tx: &mut Transaction<'static, Sqlite>,
+    scope: LocalSyncScope,
     item_id: Uuid,
 ) -> Result<(), LocalSyncError> {
     let valid = query!(
@@ -95,7 +98,7 @@ pub(super) async fn ensure_item_projection_bounded(
                 THEN sync_status IN (1, 2, 3, 4, 5, 6) ELSE 0 END
         THEN 1 ELSE 0 END AS valid
         FROM items_cache
-        WHERE id = ?1
+        WHERE storage_id = ?9 AND id = ?1
         "#,
         item_id,
         MAX_ITEM_PATH_LEN as i64,
@@ -104,7 +107,8 @@ pub(super) async fn ensure_item_projection_bounded(
         MAX_ITEM_CIPHERTEXT_BYTES as i64,
         MAX_CHECKSUM_BYTES as i64,
         CACHE_KEY_FINGERPRINT_BYTES as i64,
-        MAX_TIMESTAMP_BYTES as i64
+        MAX_TIMESTAMP_BYTES as i64,
+        scope.storage_id
     )
     .fetch_optional(&mut **tx)
     .await

@@ -254,7 +254,7 @@ impl<'a> LocalItemHistoryRepo<'a> {
         query!(
             r#"
             DELETE FROM item_history
-            WHERE id IN (
+            WHERE storage_id = ?1 AND id IN (
                 SELECT id
                 FROM item_history
                 WHERE storage_id = ?1 AND item_id = ?2 AND sync_status = ?3
@@ -283,7 +283,7 @@ impl<'a> LocalItemHistoryRepo<'a> {
         query!(
             r#"
             DELETE FROM item_history
-            WHERE id IN (
+            WHERE storage_id = ?1 AND id IN (
                 SELECT id
                 FROM item_history
                 WHERE storage_id = ?1 AND item_id = ?2 AND sync_status = ?3

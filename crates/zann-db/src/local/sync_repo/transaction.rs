@@ -83,7 +83,6 @@ pub(super) async fn commit_push_leased_in(
     generation: &LocalSyncGenerationProof,
 ) -> Result<PushReceipt, LocalSyncError> {
     ensure_storage_proof(tx, expected_storage).await?;
-    ensure_single_remote_storage(tx, expected_storage.id).await?;
     ensure_bound_generation_and_advance(tx, expected_storage.id, generation).await?;
     commit_push_in(tx, commit).await
 }
@@ -138,7 +137,6 @@ pub(super) async fn commit_pull_bound_in(
     expected_storage: &LocalStorageProof,
 ) -> Result<PullReceipt, LocalSyncError> {
     ensure_storage_proof(tx, expected_storage).await?;
-    ensure_single_remote_storage(tx, expected_storage.id).await?;
     commit_pull_in(tx, page).await
 }
 
@@ -149,7 +147,6 @@ pub(super) async fn commit_pull_leased_in(
     generation: &LocalSyncGenerationProof,
 ) -> Result<PullReceipt, LocalSyncError> {
     ensure_storage_proof(tx, expected_storage).await?;
-    ensure_single_remote_storage(tx, expected_storage.id).await?;
     ensure_bound_generation_and_advance(tx, expected_storage.id, generation).await?;
     commit_pull_in(tx, page).await
 }
@@ -159,7 +156,6 @@ pub(super) async fn reset_projection_in(
     reset: &ResetProjection,
 ) -> Result<ResetReceipt, LocalSyncError> {
     ensure_storage_proof(tx, &reset.expected_storage).await?;
-    ensure_vault_references_are_storage_scoped(tx, reset.storage_id).await?;
 
     let pending_count: i64 = query!(
         r#"SELECT COUNT(*) AS count FROM pending_changes WHERE storage_id = ?1"#,
@@ -294,69 +290,6 @@ pub(super) async fn reset_projection_in(
         vaults_deleted,
         storage_metadata_updated,
     })
-}
-
-pub(super) async fn ensure_vault_references_are_storage_scoped(
-    tx: &mut Transaction<'static, Sqlite>,
-    storage_id: Uuid,
-) -> Result<(), LocalSyncError> {
-    // `items_cache` and `item_history` currently reference a vault by its
-    // globally unique id, not by `(storage_id, vault_id)`. Fail closed before
-    // deleting target vaults if malformed rows from another storage would be
-    // reached by SQLite's `ON DELETE CASCADE`.
-    let references = sqlx_core::query::query::<Sqlite>(
-        r#"
-        SELECT
-            (
-                SELECT COUNT(*)
-                FROM items_cache AS item
-                WHERE item.storage_id != ?1
-                  AND EXISTS (
-                      SELECT 1
-                      FROM local_vaults AS vault
-                      WHERE vault.storage_id = ?1 AND vault.id = item.vault_id
-                  )
-            ) AS foreign_items,
-            (
-                SELECT COUNT(*)
-                FROM item_history AS history
-                WHERE history.storage_id != ?1
-                  AND EXISTS (
-                      SELECT 1
-                      FROM local_vaults AS vault
-                      WHERE vault.storage_id = ?1 AND vault.id = history.vault_id
-                  )
-            ) AS foreign_history
-        "#,
-    )
-    .bind(storage_id)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(LocalSyncError::Database)?;
-    let foreign_items = u64::try_from(
-        references
-            .try_get::<i64, _>("foreign_items")
-            .map_err(LocalSyncError::Database)?,
-    )
-    .map_err(|_| LocalSyncError::InvalidPlan {
-        reason: "cross-storage item count is outside the supported range",
-    })?;
-    let foreign_history = u64::try_from(
-        references
-            .try_get::<i64, _>("foreign_history")
-            .map_err(LocalSyncError::Database)?,
-    )
-    .map_err(|_| LocalSyncError::InvalidPlan {
-        reason: "cross-storage history count is outside the supported range",
-    })?;
-    if foreign_items != 0 || foreign_history != 0 {
-        return Err(LocalSyncError::CrossStorageVaultReference {
-            storage_id,
-            foreign_items,
-            foreign_history,
-        });
-    }
-    Ok(())
 }
 
 pub(super) async fn delete_storage_rows(

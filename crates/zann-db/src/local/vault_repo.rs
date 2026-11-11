@@ -8,9 +8,8 @@ use sqlx_sqlite::Sqlite;
 use uuid::Uuid;
 
 use crate::local::sync_repo::{
-    claim_generation, ensure_bound_generation_and_advance, ensure_single_remote_storage,
-    ensure_storage_proof, inspect_generation_binding, validate_storage_proof,
-    LocalGenerationBindingState,
+    claim_generation, ensure_bound_generation_and_advance, ensure_storage_proof,
+    inspect_generation_binding, validate_storage_proof, LocalGenerationBindingState,
 };
 use crate::local::{
     KeyWrapType, LocalProjectionReadError, LocalStorageProof, LocalStorageRepo, LocalSyncError,
@@ -174,8 +173,7 @@ impl<'a> LocalVaultRepo<'a> {
         .map(|row| row.is_some())
     }
 
-    /// Proves one globally identified vault belongs to `storage_id` without
-    /// decoding an unbounded SQLite value before the identity/body preflight.
+    /// Proves one storage-scoped vault exists without decoding an unbounded SQLite value before the identity/body preflight.
     pub async fn exists_bounded(
         &self,
         storage_id: Uuid,
@@ -232,8 +230,9 @@ impl<'a> LocalVaultRepo<'a> {
                 cache_key_fp,
                 last_synced_at as "last_synced_at"
             FROM local_vaults
-            WHERE id = ?1
+            WHERE storage_id = ?1 AND id = ?2
             "#,
+            storage_id,
             vault_id
         )
         .fetch_optional(&mut *tx)
@@ -250,13 +249,15 @@ impl<'a> LocalVaultRepo<'a> {
         tx.commit().await
     }
 
-    /// Inserts remote catalog metadata without replacing an existing global
-    /// vault identity. Callers re-read and compare every field afterwards.
+    /// Inserts remote catalog metadata without replacing an existing
+    /// storage-scoped vault identity. Callers re-read and compare every field
+    /// afterwards.
     pub async fn insert_if_absent(&self, vault: &LocalVault) -> Result<bool, sqlx_core::Error> {
         validate_vault(vault)?;
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let present = query!(
-            r#"SELECT 1 AS present FROM local_vaults WHERE id = ?1 LIMIT 1"#,
+            r#"SELECT 1 AS present FROM local_vaults WHERE storage_id = ?1 AND id = ?2"#,
+            vault.storage_id,
             vault.id
         )
         .fetch_optional(&mut *tx)
@@ -337,9 +338,7 @@ impl<'a> LocalVaultRepo<'a> {
     ///
     /// The encrypted envelope and wrap type are compare-and-swap inputs. The
     /// target fingerprint may replace `NULL` or prove an identical prior bind;
-    /// any other state fails closed. Rows referencing the globally unique
-    /// vault id are checked across every storage because the legacy schema's
-    /// foreign key is not storage-composite.
+    /// any other state fails closed.
     pub async fn bind_cache_key_fingerprint(
         &self,
         storage_id: Uuid,
@@ -424,8 +423,7 @@ impl<'a> LocalVaultRepo<'a> {
     ///
     /// The first generation claim is allowed only when the complete catalog
     /// matches, every target fingerprint is `NULL`, and the storage has no
-    /// item, history, pending, cursor, or cross-storage vault references.  The
-    /// generation claim and all fingerprint transitions commit atomically.
+    /// item, history, pending, or cursor rows.  The generation claim and all fingerprint transitions commit atomically.
     /// Once claimed, catalog reconciliation only proves identical already-
     /// bound fingerprints; a newer authorized config revision may advance in
     /// this same transaction.
@@ -722,13 +720,14 @@ pub(crate) async fn bounded_vault_preflight(
                 AND (last_synced_at IS NULL OR typeof(last_synced_at) = 'integer')
             THEN 1 ELSE 0 END AS valid
             FROM local_vaults
-            WHERE id = ?1
+            WHERE storage_id = ?6 AND id = ?1
             "#,
             vault_id,
             MAX_LOCAL_VAULT_SLUG_BYTES as i64,
             MAX_LOCAL_VAULT_NAME_BYTES as i64,
             MAX_LOCAL_VAULT_KEY_ENVELOPE_BYTES as i64,
-            LOCAL_VAULT_CACHE_KEY_FP_BYTES as i64
+            LOCAL_VAULT_CACHE_KEY_FP_BYTES as i64,
+            storage_id
         )
         .fetch_optional(&mut **tx)
         .await?;
@@ -805,21 +804,13 @@ pub(crate) async fn bounded_vault_scope_membership(
         return Ok(Some(false));
     }
     query!(
-        r#"
-        SELECT CASE WHEN storage_id = ?2 THEN 1 ELSE 0 END AS matches_storage
-        FROM local_vaults
-        WHERE id = ?1
-        "#,
-        vault_id,
-        storage_id
+        r#"SELECT 1 FROM local_vaults WHERE storage_id = ?1 AND id = ?2"#,
+        storage_id,
+        vault_id
     )
     .fetch_optional(&mut **tx)
-    .await?
-    .map(|row| {
-        row.try_get::<i64, _>("matches_storage")
-            .map(|value| value == 1)
-    })
-    .transpose()
+    .await
+    .map(|row| row.map(|_| true))
 }
 
 /// Checks only SQLite record metadata, so even an attacker-sized dynamic ID is
@@ -937,9 +928,6 @@ async fn bind_cache_key_fingerprints_bound_in(
     ensure_storage_proof(tx, expected_storage)
         .await
         .map_err(map_storage_proof_key_error)?;
-    ensure_single_remote_storage(tx, expected_storage.storage_id())
-        .await
-        .map_err(map_storage_proof_key_error)?;
     let bounded = bounded_vault_preflight(tx, expected_storage.storage_id(), None)
         .await
         .map_err(LocalVaultKeyBindError::Database)?;
@@ -970,9 +958,6 @@ async fn bind_cache_key_fingerprints_leased_in(
     bindings: &[CacheKeyFingerprintBinding<'_>],
 ) -> Result<CacheKeyFingerprintBatchBind, LocalVaultKeyBindError> {
     ensure_storage_proof(tx, expected_storage)
-        .await
-        .map_err(map_storage_proof_key_error)?;
-    ensure_single_remote_storage(tx, expected_storage.storage_id())
         .await
         .map_err(map_storage_proof_key_error)?;
     ensure_exact_catalog(tx, expected_storage.storage_id(), bindings).await?;
@@ -1103,7 +1088,7 @@ async fn ensure_storage_projection_empty_for_claim(
 ) -> Result<(), LocalVaultKeyBindError> {
     ensure_projection_identifiers_bounded(tx).await?;
     for binding in bindings {
-        ensure_vault_projection_empty(tx, binding.vault_id).await?;
+        ensure_vault_projection_empty(tx, storage_id, binding.vault_id).await?;
     }
     for table in [
         "items_cache",
@@ -1180,7 +1165,7 @@ async fn bind_cache_key_fingerprints_in(
         }
 
         if fingerprint_state == 0 {
-            ensure_vault_projection_empty(tx, binding.vault_id).await?;
+            ensure_vault_projection_empty(tx, binding.storage_id, binding.vault_id).await?;
             requires_update.push(*binding);
         } else if fingerprint_state != 1 {
             return Err(LocalVaultKeyBindError::KeyBindingChanged);
@@ -1201,10 +1186,18 @@ async fn bind_cache_key_fingerprints_in(
               AND vault_key_enc = ?7
               AND key_wrap_type = ?8
               AND cache_key_fp IS NULL
-              AND NOT EXISTS (SELECT 1 FROM items_cache WHERE vault_id = ?2)
-              AND NOT EXISTS (SELECT 1 FROM sync_cursors WHERE vault_id = ?2)
-              AND NOT EXISTS (SELECT 1 FROM pending_changes WHERE vault_id = ?2)
-              AND NOT EXISTS (SELECT 1 FROM item_history WHERE vault_id = ?2)
+              AND NOT EXISTS (
+                  SELECT 1 FROM items_cache WHERE storage_id = ?1 AND vault_id = ?2
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM sync_cursors WHERE storage_id = ?1 AND vault_id = ?2
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM pending_changes WHERE storage_id = ?1 AND vault_id = ?2
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM item_history WHERE storage_id = ?1 AND vault_id = ?2
+              )
             "#,
             binding.storage_id,
             binding.vault_id,
@@ -1233,19 +1226,27 @@ async fn bind_cache_key_fingerprints_in(
 
 async fn ensure_vault_projection_empty(
     tx: &mut Transaction<'static, Sqlite>,
+    storage_id: Uuid,
     vault_id: Uuid,
 ) -> Result<(), LocalVaultKeyBindError> {
     ensure_projection_identifiers_bounded(tx).await?;
-    // These checks deliberately use the globally unique vault id. The legacy
-    // schema's item/history foreign keys are not storage-composite.
     let references = query!(
         r#"
         SELECT
-            EXISTS(SELECT 1 FROM items_cache WHERE vault_id = ?1 LIMIT 1) AS items,
-            EXISTS(SELECT 1 FROM sync_cursors WHERE vault_id = ?1 LIMIT 1) AS checkpoints,
-            EXISTS(SELECT 1 FROM pending_changes WHERE vault_id = ?1 LIMIT 1) AS pending,
-            EXISTS(SELECT 1 FROM item_history WHERE vault_id = ?1 LIMIT 1) AS history
+            EXISTS(
+                SELECT 1 FROM items_cache WHERE storage_id = ?1 AND vault_id = ?2
+            ) AS items,
+            EXISTS(
+                SELECT 1 FROM sync_cursors WHERE storage_id = ?1 AND vault_id = ?2
+            ) AS checkpoints,
+            EXISTS(
+                SELECT 1 FROM pending_changes WHERE storage_id = ?1 AND vault_id = ?2
+            ) AS pending,
+            EXISTS(
+                SELECT 1 FROM item_history WHERE storage_id = ?1 AND vault_id = ?2
+            ) AS history
         "#,
+        storage_id,
         vault_id
     )
     .fetch_one(&mut **tx)

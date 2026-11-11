@@ -455,11 +455,6 @@ pub enum LocalSyncError {
         dirty_items: u64,
         non_server_history: u64,
     },
-    CrossStorageVaultReference {
-        storage_id: Uuid,
-        foreign_items: u64,
-        foreign_history: u64,
-    },
     StorageBindingChanged {
         storage_id: Uuid,
     },
@@ -509,16 +504,6 @@ impl fmt::Debug for LocalSyncError {
                 .field("dirty_items", dirty_items)
                 .field("non_server_history", non_server_history)
                 .finish(),
-            Self::CrossStorageVaultReference {
-                storage_id,
-                foreign_items,
-                foreign_history,
-            } => formatter
-                .debug_struct("CrossStorageVaultReference")
-                .field("storage_id", storage_id)
-                .field("foreign_items", foreign_items)
-                .field("foreign_history", foreign_history)
-                .finish(),
             Self::StorageBindingChanged { storage_id } => formatter
                 .debug_struct("StorageBindingChanged")
                 .field("storage_id", storage_id)
@@ -547,9 +532,6 @@ impl fmt::Display for LocalSyncError {
             Self::StaleVaultKey { .. } => "local vault cache key changed",
             Self::PendingChangesPresent { .. } => "local pending changes prevent projection reset",
             Self::ProjectionNotClean { .. } => "local projection is not safe to reset",
-            Self::CrossStorageVaultReference { .. } => {
-                "cross-storage vault references prevent projection reset"
-            }
             Self::StorageBindingChanged { .. } => "local storage binding changed",
             Self::StorageGenerationChanged { .. } => "local sync generation changed",
             Self::InvalidPlan { .. } => "invalid local sync persistence plan",

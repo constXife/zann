@@ -41,8 +41,8 @@ use transaction::*;
 mod storage;
 use storage::*;
 pub(crate) use storage::{
-    claim_generation, ensure_bound_generation_and_advance, ensure_single_remote_storage,
-    ensure_storage_proof, inspect_generation_binding, LocalGenerationBindingState,
+    claim_generation, ensure_bound_generation_and_advance, ensure_storage_proof,
+    inspect_generation_binding, LocalGenerationBindingState,
 };
 mod checkpoint;
 use checkpoint::*;
