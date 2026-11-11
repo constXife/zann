@@ -2,19 +2,20 @@
 ignore = [
   "RUSTSEC-2024-0388",
   "RUSTSEC-2024-0384",
-  # RUSTSEC-2023-0071 - Marvin Attack, a timing sidechannel in `rsa` that can
-  # leak a private key. Upstream has no patch; the constant-time rewrite has
-  # been open since 2023, so no version bump clears it.
+  # RUSTSEC-2026-0459 - the SQLite bundled by `libsqlite3-sys` < 0.39 can
+  # return uninitialized page-cache memory when it opens a database together
+  # with a crafted sibling `-wal` file of a different page size. The patched
+  # `libsqlite3-sys` 0.39 is out of reach: `sqlx-sqlite` 0.8 pins `^0.30.1` and
+  # 0.9 still caps it below 0.38.
   #
-  # `rsa` reaches us through `jsonwebtoken` <- `zann-server`, which only ever
-  # verifies: the sole RSA usage is `Validation::new(Algorithm::RS256)` in
-  # `domains/auth/core/oidc.rs`, checking OIDC tokens against the provider's
-  # public JWKS. There is no `EncodingKey` anywhere in `crates/zann-server/src`,
-  # so the server performs no RSA private-key operation. The attack targets
-  # private-key decryption and signing; public-key verification handles no
-  # secret whose timing could leak.
+  # `libsqlite3-sys` reaches us through `sqlx-sqlite` <- `zann-db`, used by the
+  # local client cache (`zann-client-sqlite`) and by `zann-server` tests only.
+  # Every database and snapshot the client opens is one it created itself in
+  # the user's own state directory. A party able to plant a database and `-wal`
+  # pair there can already write the user's files, so the advisory's
+  # precondition - a less trusted writer than the reader - does not arise.
   #
-  # Revisit if the server ever signs or decrypts with RSA, or if `jsonwebtoken`
-  # drops the dependency.
-  "RUSTSEC-2023-0071",
+  # Remove once `sqlx-sqlite` accepts `libsqlite3-sys` >= 0.39, or revisit if
+  # the client ever opens a SQLite file it did not create (e.g. imports one).
+  "RUSTSEC-2026-0459",
 ]
