@@ -9,9 +9,10 @@ if [[ $# -ne 1 || ( $1 != debug && $1 != release ) ]]; then
   exit 2
 fi
 profile=$1
-cargo_profile_flag=()
+# Cargo's `dev` profile writes to target/<triple>/debug.
+cargo_profile=dev
 if [[ $profile == release ]]; then
-  cargo_profile_flag=(--release)
+  cargo_profile=release
 fi
 
 package_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -33,7 +34,7 @@ target_dir=$(cargo metadata --format-version 1 --no-deps | jq -r '.target_direct
 
 targets=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)
 for target in "${targets[@]}"; do
-  cargo rustc -p zann-ffi --lib --locked --target "$target" "${cargo_profile_flag[@]}" \
+  cargo rustc -p zann-ffi --lib --locked --target "$target" --profile "$cargo_profile" \
     --crate-type staticlib
 done
 
