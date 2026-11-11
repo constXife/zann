@@ -53,6 +53,7 @@ Dependencies point strictly downward (`[SHELL]` → `[PRESENTATION]` → `[CORE]
 - `zann-flows` (planned): headless state machines (`handle(State, Event) -> (State, Vec<Effect>)`) with operation IDs and cancellation.
 
 ### 3. `[SHELL]` — Native Interfaces & Edge Adapters
+- `apps/apple`: SwiftUI macOS client (`project.yml` for XcodeGen; iOS/iPadOS planned) over the `ZannCoreKit` package around `zann-ffi`. Owns views and Apple OS adapters (Keychain ports) only.
 - `apps/cosmic`: COSMIC-native (`libcosmic` / Iced) reference desktop client for Linux. Links `[CORE]` and `[PRESENTATION]` directly in Rust.
 - `apps/desktop`: Tauri desktop app (`src/` Vue 3 + TypeScript frontend, `src-tauri/` Rust backend).
 - `crates/zann-cli`: server-oriented CLI (`zann-client` `remote` + Config v2 + `CredentialStore` + `delivery` surfaces, free of SQLite and GUI deps).
@@ -96,6 +97,7 @@ Match verification depth to the blast radius of the diff:
 - `just architecture-check` (`./scripts/check-client-architecture.sh`) — validate client-layer ownership, dependency direction, and `MIG-*` exceptions.
 - `./scripts/check-audit-surface-deps.sh` — validate `zann-crypto` dependency isolation.
 - `apps/apple/ZannCoreKit/build-xcframework.sh <debug|release>` then `swift test --package-path apps/apple/ZannCoreKit` — on macOS, build the `ZannFFI.xcframework` and Swift bindings and run the binding tests.
+- `cd apps/apple && xcodegen --spec project.yml && xcodebuild test -project Zann.xcodeproj -scheme Zann -destination 'platform=macOS,arch=arm64'` — generate, build and test the macOS app (needs the xcframework above).
 - `just cosmic-test` (`cd apps/cosmic && cargo test`) — run headless flow and backend tests for the COSMIC client.
 - `just cosmic-run` / `nix build .#zann-cosmic` — run or package the COSMIC desktop client.
 - `just desktop-test` (`cd apps/desktop && bun run test`) — run Tauri frontend unit tests.

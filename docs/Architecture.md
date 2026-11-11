@@ -59,8 +59,11 @@ package. `build-xcframework.sh` compiles `libzann_ffi.a` for macOS, iOS and the
 iOS simulator (arm64), packs them into `ZannFFI.xcframework` and generates the
 Swift bindings from the built library; neither is committed. Deployment targets
 come from the package's `platforms` (Rust's iOS default of 10.0 cannot link the
-blake3 NEON objects). The `zann-core-kit` CI job builds the package, runs its
-binding tests on macOS and links the test bundle for both iOS slices.
+blake3 NEON objects). The macOS app in `apps/apple` (XcodeGen spec `project.yml`; the
+`.xcodeproj` is generated) links ZannCoreKit and supplies Keychain
+implementations of `PlatformKeystore` and `PlatformSecretStore` to
+`create_core`. The `apple` CI job builds the package, runs its binding tests on
+macOS, links them for both iOS slices, then builds and tests the app.
 
 `zann-protocol` and `zann-flows` name the accepted target boundaries. Until
 those crates are introduced, their code must remain in the canonical owner

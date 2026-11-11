@@ -1,0 +1,53 @@
+import SwiftUI
+
+@main
+struct ZannApp: App {
+    @StateObject private var model = AppModel(opening: AppModel.openDefaultCore)
+
+    var body: some Scene {
+        WindowGroup {
+            RootView()
+                .environmentObject(model)
+                .frame(minWidth: 520, minHeight: 380)
+        }
+        .commands {
+            CommandMenu("Vault") {
+                Button("Lock") { Task { await model.lock() } }
+                    .keyboardShortcut("l", modifiers: .command)
+                    .disabled(!model.isUnlocked)
+            }
+        }
+    }
+}
+
+struct RootView: View {
+    @EnvironmentObject private var model: AppModel
+
+    var body: some View {
+        switch model.screen {
+        case .failed(let message):
+            ContentUnavailableNotice(title: "Zann could not open its database", message: message)
+        case .welcome:
+            WelcomeView()
+        case .master(let mode):
+            MasterPasswordView(mode: mode)
+        case .vault:
+            VaultView()
+        }
+    }
+}
+
+/// `ContentUnavailableView` needs macOS 14; the app targets 13.
+struct ContentUnavailableNotice: View {
+    let title: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Text(title).font(.title2)
+            Text(message).foregroundStyle(.secondary).textSelection(.enabled)
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}

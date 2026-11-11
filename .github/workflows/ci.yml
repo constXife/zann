@@ -26,7 +26,7 @@ jobs:
       audit_surface: ${{ steps.filter.outputs.audit_surface }}
       client_architecture: ${{ steps.filter.outputs.client_architecture }}
       shared_clients: ${{ steps.filter.outputs.shared_clients }}
-      zann_core_kit: ${{ steps.filter.outputs.zann_core_kit }}
+      apple: ${{ steps.filter.outputs.apple }}
       cosmic: ${{ steps.filter.outputs.cosmic }}
       nix_module: ${{ steps.filter.outputs.nix_module }}
       ci: ${{ steps.filter.outputs.ci }}
@@ -153,8 +153,8 @@ jobs:
               - 'schemas/**'
               - 'tests/fixtures/**'
             # Everything compiled into the zann-ffi library that the native
-            # Apple shell links, plus the ZannCoreKit package around it.
-            zann_core_kit:
+            # Apple shell links, plus the shell itself.
+            apple:
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'rust-toolchain.toml'
@@ -167,7 +167,7 @@ jobs:
               - 'crates/zann-keystore/**'
               - 'crates/zann-ui-core/**'
               - 'schemas/**'
-              - 'apps/apple/ZannCoreKit/**'
+              - 'apps/apple/**'
             # Полная Nix-сборка libcosmic с wgpu занимает десятки минут,
             # поэтому здесь только исходники и упаковка COSMIC. Совместимость
             # с crates/** закрывает headless job cosmic-rust-consumer.
@@ -416,10 +416,11 @@ jobs:
         run: cargo test -p zann-client --no-default-features --features auth-lock --lib config::locking::tests --locked
 
   # Builds the ZannCoreKit XCFramework (macOS, iOS, iOS simulator), runs its
-  # binding tests on macOS and links the test bundle for both iOS slices.
-  zann-core-kit:
+  # binding tests on macOS, links them for both iOS slices, then builds and
+  # tests the macOS app generated from apps/apple/project.yml.
+  apple:
     needs: changes
-    if: needs.changes.outputs.zann_core_kit == 'true' || needs.changes.outputs.ci == 'true'
+    if: needs.changes.outputs.apple == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -445,6 +446,14 @@ jobs:
           xcodebuild build-for-testing -quiet -scheme ZannCoreKit \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/xcode \
             ARCHS=arm64
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Test the macOS app
+        working-directory: apps/apple
+        run: |
+          xcodegen --spec project.yml
+          xcodebuild test -quiet -project Zann.xcodeproj -scheme Zann \
+            -destination 'platform=macOS,arch=arm64' -derivedDataPath build
 
   # Tauri is outside the root workspace, so root tests cannot catch shared API
   # or compatibility changes in its Rust adapter.
@@ -951,7 +960,7 @@ jobs:
       - audit-surface
       - client-architecture
       - client-locking-portability
-      - zann-core-kit
+      - apple
       - desktop-rust-consumer
       - cosmic-rust-consumer
       - cosmic-package

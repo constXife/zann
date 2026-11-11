@@ -1,0 +1,53 @@
+# XcodeGen spec for the Apple shell. Zann.xcodeproj is generated from this
+# file (`xcodegen --spec apps/apple/project.yml`) and is not committed.
+name: Zann
+options:
+  createIntermediateGroups: true
+packages:
+  ZannCoreKit:
+    path: ZannCoreKit
+targets:
+  Zann:
+    type: application
+    platform: macOS
+    deploymentTarget: "13.0"
+    sources:
+      - Zann
+    dependencies:
+      - package: ZannCoreKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rlyeh.zann.apple
+        PRODUCT_NAME: Zann
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        GENERATE_INFOPLIST_FILE: true
+        INFOPLIST_KEY_CFBundleDisplayName: Zann
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        SWIFT_VERSION: "5.0"
+        # Ad-hoc signing until the app gets a team and a sandbox.
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ARCHS: arm64
+    scheme:
+      testTargets:
+        - ZannTests
+  ZannTests:
+    type: bundle.unit-test
+    platform: macOS
+    # XCTest itself requires macOS 14.
+    deploymentTarget: "14.0"
+    sources:
+      - ZannTests
+    dependencies:
+      # ZannCoreKit comes from the host app; linking it here too would load a
+      # second copy of the Rust core into the test process.
+      - target: Zann
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rlyeh.zann.apple.tests
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGN_STYLE: Manual
+        ARCHS: arm64
