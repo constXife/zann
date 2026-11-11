@@ -54,6 +54,13 @@ zann-ffi is an edge adapter over the application and presentation APIs. It is
 not an application layer and Rust clients must not use FFI types as their
 internal domain model.
 
+Swift bindings are generated from the built library
+(`scripts/generate-swift-bindings.sh`), never committed. The `ffi-native-targets`
+CI job builds `zann-ffi` for `aarch64-apple-darwin` and links it for
+`aarch64-apple-ios` with `IPHONEOS_DEPLOYMENT_TARGET=16.0` (Rust's default 10.0
+cannot link the blake3 NEON objects). The job then generates the Swift bindings
+and links a Swift smoke program against the host library.
+
 `zann-protocol` and `zann-flows` name the accepted target boundaries. Until
 those crates are introduced, their code must remain in the canonical owner
 listed in the capability map; it must not be copied into a shell.
