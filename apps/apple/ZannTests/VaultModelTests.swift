@@ -55,6 +55,17 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(model.visibleItems.map(\.title), ["GitHub"])
     }
 
+    func testFoldersComeFromThePathsAndNarrowTheList() throws {
+        let model = try makeModel()
+        XCTAssertEqual(model.folders.tree.map(\.path), ["Personal", "Work"])
+        XCTAssertEqual(model.folders.itemsWithoutFolder, 1)
+
+        model.folder = .path(path: "Work")
+        XCTAssertEqual(model.visibleItems.map(\.title), ["GitHub"])
+        model.folder = .withoutFolder
+        XCTAssertEqual(model.visibleItems.map(\.title), ["Bank"])
+    }
+
     func testSelectionProjectsFieldsWithMaskingAndTotp() async throws {
         let model = try makeModel()
         let github = try XCTUnwrap(model.visibleItems.first { $0.title == "GitHub" })
@@ -122,6 +133,7 @@ final class VaultModelTests: XCTestCase {
     func testSavedItemOutsideTheFilterResetsTheList() async throws {
         let model = try makeModel()
         model.categoryID = "note"
+        model.folder = .path(path: "Personal")
         model.query = "gro"
         model.startCreating(typeID: "login")
         let editor = try XCTUnwrap(model.editor)
@@ -131,6 +143,7 @@ final class VaultModelTests: XCTestCase {
         await model.saveEditor()
 
         XCTAssertEqual(model.categoryID, "all")
+        XCTAssertEqual(model.folder, .any)
         XCTAssertEqual(model.query, "")
         let detail = try await loadedDetail(model)
         XCTAssertEqual(detail.title, "Mail")
