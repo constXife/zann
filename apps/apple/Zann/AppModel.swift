@@ -29,8 +29,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var strings: Strings
     /// Why the last settings change could not be saved.
     @Published private(set) var settingsError: String?
+    /// Whether Touch ID can open the vault without the master password.
+    @Published private(set) var touchIDArmed = false
+    /// An arm or disarm is running; the settings toggle waits for it.
+    @Published private(set) var touchIDBusy = false
 
     private let core: CoreFacade?
+    /// The keystore the core was composed with; asked for its status only,
+    /// which never prompts.
+    private let keystore: DeviceKeystore?
     private let preferencesFile: PreferencesFile?
     private let systemLanguage: String
     /// The last input the app received while unlocked; the idle lock counts
@@ -41,29 +48,89 @@ final class AppModel: ObservableObject {
     /// `defaultPreferencesFile`, tests a core over a temporary database,
     /// in-memory ports and a temporary preferences file.
     init(
-        opening open: () throws -> CoreFacade,
+        opening open: () throws -> (core: CoreFacade, keystore: DeviceKeystore),
         preferences file: () throws -> PreferencesFile,
         systemLanguage: String
     ) {
         self.systemLanguage = systemLanguage
-        var opened: CoreFacade?
+        var opened: (core: CoreFacade, keystore: DeviceKeystore)?
         var openedFile: PreferencesFile?
+        var armed = false
+        var rememberedError: Error?
         // Placeholders for the failure screen only; nothing reads them there.
         var loaded = devicePreferencesDefault()
         do {
             let preferencesFile = try file()
             loaded = try preferencesFile.load()
-            let core = try open()
-            screen = try core.appStatus().initialized ? .master(.unlock) : .welcome
+            let composed = try open()
+            screen = try composed.core.appStatus().initialized ? .master(.unlock) : .welcome
+            // An unreadable remembered unlock must not block the password: it
+            // shows on the unlock screen and Touch ID stays off.
+            do {
+                armed = try Self.touchIDArmed(composed.core)
+            } catch {
+                rememberedError = error
+            }
             openedFile = preferencesFile
-            opened = core
+            opened = composed
         } catch {
             screen = .failed(describe(error))
         }
         preferences = loaded
         strings = Strings(language: loaded.language ?? systemLanguage)
         preferencesFile = openedFile
-        core = opened
+        core = opened?.core
+        keystore = opened?.keystore
+        touchIDArmed = armed
+        keystore?.setPromptReason(strings("unlock.touchIdReason"))
+        if let rememberedError {
+            error = message(for: rememberedError)
+        }
+    }
+
+    /// What Touch ID can do on this device right now; never prompts.
+    var keystoreStatus: PlatformKeystoreStatus? {
+        keystore?.status()
+    }
+
+    /// Prompts for Touch ID; dismissing the prompt leaves no error behind.
+    func unlockWithTouchID() async {
+        guard let core, !busy, touchIDArmed else { return }
+        let page = await perform {
+            _ = try core.unlockRemembered()
+            return try VaultModel.loadPage(core)
+        }
+        if let page {
+            open(core: core, page: page)
+        } else if case .Unlock("keystore_cancelled", _)? = lastFailure as? CoreError {
+            error = nil
+        }
+    }
+
+    /// Arms or disarms Touch ID, one change at a time so a quick on-then-off
+    /// cannot interleave the keychain and `unlock.json` writes. Arming needs
+    /// the vault unlocked, because the core wraps the master key it holds;
+    /// disarming works any time, so a device without Touch ID can still
+    /// revoke it.
+    func setTouchID(_ enabled: Bool) async {
+        guard let core, !touchIDBusy, !enabled || isUnlocked else { return }
+        touchIDBusy = true
+        defer { touchIDBusy = false }
+        settingsError = nil
+        let result = await Task.detached(priority: .userInitiated) {
+            Result {
+                if enabled {
+                    try core.rememberWithKeystore()
+                } else {
+                    try core.forgetRemembered()
+                }
+                return try Self.touchIDArmed(core)
+            }
+        }.value
+        switch result {
+        case .success(let armed): touchIDArmed = armed
+        case .failure(let failure): settingsError = message(for: failure)
+        }
     }
 
     /// Applies one settings change and saves it; the change takes effect only
@@ -82,6 +149,7 @@ final class AppModel: ObservableObject {
         settingsError = nil
         if next.language != preferences.language {
             strings = Strings(language: next.language ?? systemLanguage)
+            keystore?.setPromptReason(strings("unlock.touchIdReason"))
         }
         preferences = next
     }
@@ -112,6 +180,10 @@ final class AppModel: ObservableObject {
             return try VaultModel.loadPage(core)
         }
         guard let page else { return }
+        open(core: core, page: page)
+    }
+
+    private func open(core: CoreFacade, page: ItemPage) {
         vault = VaultModel(core: core, page: page)
         lastActivity = Date()
         screen = .vault
@@ -153,10 +225,14 @@ final class AppModel: ObservableObject {
         screen = .master(.unlock)
     }
 
+    /// The failure behind the last `nil` from `perform`.
+    private var lastFailure: Error?
+
     /// Runs `work` off the main actor; a failure lands in `error` as `nil`.
     private func perform<T>(_ work: @escaping () throws -> T) async -> T? {
         busy = true
         error = nil
+        lastFailure = nil
         defer { busy = false }
         let result = await Task.detached(priority: .userInitiated) {
             Result(catching: work)
@@ -165,20 +241,39 @@ final class AppModel: ObservableObject {
         case .success(let value):
             return value
         case .failure(let failure):
-            error = describe(failure)
+            lastFailure = failure
+            error = message(for: failure)
             return nil
         }
     }
 
+    /// Unlock failures carry an `errors.<kind>` translation key; others, and
+    /// kinds without a translation, read as the core's message.
+    private func message(for failure: Error) -> String {
+        if case .Unlock(let kind, _)? = failure as? CoreError {
+            let key = "errors.\(kind)"
+            let text = strings(key)
+            if text != key { return text }
+        }
+        return describe(failure)
+    }
+
+    private nonisolated static func touchIDArmed(_ core: CoreFacade) throws -> Bool {
+        let remembered = try core.rememberedUnlock()
+        return remembered.armed && remembered.source == "keystore"
+    }
+
     /// The database lives under Application Support in a directory named after
-    /// the bundle, apart from the Tauri desktop app's.
-    static func openDefaultCore() throws -> CoreFacade {
-        let bundleID = try Self.bundleID()
-        return try createCore(
+    /// the bundle, apart from the Tauri desktop app's. The Touch ID reason is
+    /// set by `AppModel` once it knows the language.
+    static func openDefaultCore() throws -> (core: CoreFacade, keystore: DeviceKeystore) {
+        let keystore = KeychainKeystore(service: try Self.bundleID(), promptReason: "")
+        let core = try createCore(
             dbPath: try Self.dataDirectory().appendingPathComponent("local.sqlite").path,
-            keystore: KeychainKeystore(service: bundleID),
+            keystore: keystore,
             secretStore: KeychainSecretStore()
         )
+        return (core, keystore)
     }
 
     /// Beside the database, so one directory holds all of this app's state.

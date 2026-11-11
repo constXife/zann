@@ -15,6 +15,10 @@ targets:
       - Zann
     dependencies:
       - package: ZannCoreKit
+    # Signing lives in Signing.xcconfig so a local, ignored file can add a team.
+    configFiles:
+      Debug: Signing.xcconfig
+      Release: Signing.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rlyeh.zann.apple
@@ -25,9 +29,6 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: Zann
         INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
         SWIFT_VERSION: "5.0"
-        # Ad-hoc signing until the app gets a team and a sandbox.
-        CODE_SIGN_IDENTITY: "-"
-        CODE_SIGN_STYLE: Manual
         ARCHS: arm64
     scheme:
       testTargets:

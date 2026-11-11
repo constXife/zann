@@ -19,11 +19,16 @@ final class AppModelTests: XCTestCase {
 
     /// `name` picks the database and preferences file, so one test can
     /// compare several apps.
-    private func makeModel(_ name: String = "local") -> AppModel {
+    private func makeModel(
+        _ name: String = "local", keystore: MemoryKeystore = MemoryKeystore()
+    ) -> AppModel {
         let database = directory.appendingPathComponent("\(name).sqlite").path
         let preferences = directory.appendingPathComponent("\(name).preferences.json")
         return AppModel(opening: {
-            try createCore(dbPath: database, keystore: MemoryKeystore(), secretStore: MemorySecretStore())
+            let core = try createCore(
+                dbPath: database, keystore: keystore, secretStore: MemorySecretStore()
+            )
+            return (core, keystore)
         }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en")
     }
 
@@ -141,10 +146,86 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(message.contains("device preferences"), message)
     }
 
+    func testTouchIDArmsUnlocksAndDisarms() async {
+        let keystore = MemoryKeystore()
+        let model = makeModel(keystore: keystore)
+        model.startCreatingVault()
+        await model.submit(password: "correct horse battery", mode: .create)
+        XCTAssertFalse(model.touchIDArmed)
+        XCTAssertEqual(keystore.promptReason, "unlock your vault")
+
+        await model.setTouchID(true)
+        XCTAssertNil(model.settingsError)
+        XCTAssertTrue(model.touchIDArmed)
+        XCTAssertTrue(makeModel().touchIDArmed, "armed state survives a relaunch")
+
+        await model.lock()
+        await model.unlockWithTouchID()
+        XCTAssertEqual(model.screen, .vault)
+
+        await model.setTouchID(false)
+        XCTAssertFalse(model.touchIDArmed)
+        XCTAssertFalse(keystore.holdsKey)
+    }
+
+    func testTouchIDChangesRunOneAtATimeAndDisarmWithoutBiometrics() async {
+        let keystore = MemoryKeystore()
+        let model = makeModel(keystore: keystore)
+        model.startCreatingVault()
+        await model.submit(password: "correct horse battery", mode: .create)
+
+        // A second change while one runs is refused, never interleaved.
+        async let first: Void = model.setTouchID(true)
+        async let second: Void = model.setTouchID(false)
+        _ = await (first, second)
+        XCTAssertEqual(model.touchIDArmed, keystore.holdsKey)
+        XCTAssertFalse(model.touchIDBusy)
+
+        await model.setTouchID(true)
+        keystore.biometricsAvailable = false
+        await model.lock()
+        await model.setTouchID(false)
+        XCTAssertFalse(model.touchIDArmed)
+        XCTAssertFalse(keystore.holdsKey)
+    }
+
+    func testUnreadableRememberedUnlockKeepsThePasswordWorking() async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let first = makeModel()
+        first.startCreatingVault()
+        await first.submit(password: "correct horse battery", mode: .create)
+        try Data("not json".utf8).write(to: directory.appendingPathComponent("unlock.json"))
+
+        let model = makeModel()
+        XCTAssertEqual(model.screen, .master(.unlock))
+        XCTAssertFalse(model.touchIDArmed)
+        XCTAssertNotNil(model.error)
+        await model.submit(password: "correct horse battery", mode: .unlock)
+        XCTAssertEqual(model.screen, .vault)
+    }
+
+    func testDismissedTouchIDPromptLeavesNoError() async {
+        let keystore = MemoryKeystore()
+        let model = makeModel(keystore: keystore)
+        model.startCreatingVault()
+        await model.submit(password: "correct horse battery", mode: .create)
+        await model.setTouchID(true)
+        await model.lock()
+
+        keystore.cancelLoads = true
+        await model.unlockWithTouchID()
+        XCTAssertEqual(model.screen, .master(.unlock))
+        XCTAssertNil(model.error)
+    }
+
     func testUnopenableDatabaseShowsFailure() {
         let preferences = directory.appendingPathComponent("preferences.json")
         let model = AppModel(opening: {
-            try createCore(dbPath: "relative/local.sqlite", keystore: MemoryKeystore(), secretStore: MemorySecretStore())
+            let keystore = MemoryKeystore()
+            let core = try createCore(
+                dbPath: "relative/local.sqlite", keystore: keystore, secretStore: MemorySecretStore()
+            )
+            return (core, keystore)
         }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en")
         guard case .failed = model.screen else {
             return XCTFail("expected the failure screen, got \(model.screen)")
@@ -152,15 +233,31 @@ final class AppModelTests: XCTestCase {
     }
 }
 
-final class MemoryKeystore: PlatformKeystore {
+/// A keystore that always "passes" Touch ID, unless `cancelLoads` makes it
+/// behave like a dismissed prompt.
+final class MemoryKeystore: DeviceKeystore {
     private var dwk: Data?
+    private(set) var promptReason = ""
+    var cancelLoads = false
+    var biometricsAvailable = true
+
+    var holdsKey: Bool { dwk != nil }
+
+    func setPromptReason(_ reason: String) { promptReason = reason }
 
     func status() -> PlatformKeystoreStatus {
-        PlatformKeystoreStatus(supported: true, biometricsAvailable: false, reason: nil, message: nil)
+        PlatformKeystoreStatus(
+            supported: true, biometricsAvailable: biometricsAvailable, reason: nil, message: nil
+        )
     }
 
     func storeDwk(dwk: Data) throws { self.dwk = dwk }
-    func loadDwk() throws -> Data? { dwk }
+
+    func loadDwk() throws -> Data? {
+        if cancelLoads { throw PlatformStoreError.Cancelled }
+        return dwk
+    }
+
     func deleteDwk() throws { dwk = nil }
 }
 

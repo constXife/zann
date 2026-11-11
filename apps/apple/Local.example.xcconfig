@@ -1,0 +1,6 @@
+// Copy to Local.xcconfig, which git ignores, and set your own team ID. The
+// team stays on this machine; nothing personal lands in the repository.
+DEVELOPMENT_TEAM = ABCDE12345
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = Apple Development
+CODE_SIGN_ENTITLEMENTS = Zann/Zann.entitlements

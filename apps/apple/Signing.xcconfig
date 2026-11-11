@@ -1,0 +1,9 @@
+// Ad-hoc signing by default, so CI and fresh clones build without an Apple
+// team. Touch ID keeps the device key in the data protection keychain, which
+// only a team-signed build with a provisioning profile may use: copy
+// Local.example.xcconfig to Local.xcconfig (ignored by git) and set your team
+// there. Without it Touch ID reports itself unavailable.
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual
+
+#include? "Local.xcconfig"

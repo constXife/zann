@@ -13,13 +13,30 @@ open Zann.xcodeproj           # or: xcodebuild test -scheme Zann -destination 'p
 `project.yml` is the source of the Xcode project; `Zann.xcodeproj` is
 generated and ignored, so parallel branches never conflict on `.pbxproj`.
 
+## Signing and Touch ID
+
+Builds are ad-hoc signed by default (`Signing.xcconfig`), which is all CI and
+the tests need. Touch ID unlock keeps the device key in the data protection
+keychain behind a biometric access control (#146), and macOS lets only a
+team-signed build with a provisioning profile use it. To try Touch ID locally:
+
+```bash
+cp apps/apple/Local.example.xcconfig apps/apple/Local.xcconfig   # set DEVELOPMENT_TEAM
+cd apps/apple && xcodegen --spec project.yml && open Zann.xcodeproj
+```
+
+`Local.xcconfig` is ignored by git, so your team ID stays on your machine.
+Without it Settings shows Touch ID as unavailable; the key is never stored
+anywhere weaker.
+
 ## Boundaries
 
 The app owns SwiftUI views and macOS adapters only. Crypto, sync, password
 rules, URL normalization, field ordering and TOTP stay in Rust.
 
-- `Zann/KeychainStores.swift` implements the core's `PlatformKeystore` and
-  `PlatformSecretStore` ports with generic-password Keychain items.
+- `Zann/KeychainStores.swift` implements the core's `PlatformKeystore` port
+  over the data protection keychain with a `.biometryCurrentSet` access
+  control, and `PlatformSecretStore` with plain generic-password items.
 - `Zann/AppModel.swift` sequences blocking core calls off the main actor;
   `ZannTests` drive it against the real core over a temporary database.
 - `Zann/Vault/` is vault home: sidebar categories -> item list -> item
@@ -42,5 +59,5 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
 
 The database and `preferences.json` live in
 `~/Library/Application Support/com.rlyeh.zann.apple/`, apart from the Tauri
-desktop app's. The build is ad-hoc signed and not
-sandboxed yet, so Keychain items use the login keychain.
+desktop app's. The app is not sandboxed yet, so session tokens use the
+login keychain.
