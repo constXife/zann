@@ -73,6 +73,7 @@ final class VaultModel: ObservableObject {
     /// A new item of `typeID`, or of the type zann-ui-core picks for the
     /// selected category.
     func startCreating(typeID: String? = nil) {
+        guard editor == nil else { return }
         let type = typeID ?? createTypeForCategory(categoryId: categoryID)
         open { try ItemEditorModel.create(typeID: type) }
     }

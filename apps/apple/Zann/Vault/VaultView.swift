@@ -39,14 +39,12 @@ struct VaultView: View {
                 } primaryAction: {
                     vault.startCreating()
                 }
-                .keyboardShortcut("n", modifiers: .command)
                 .help("\(app.strings("common.create")) (⌘N)")
                 Button {
                     Task { await vault.startEditing() }
                 } label: {
                     Label(app.strings("common.edit"), systemImage: "square.and.pencil")
                 }
-                .keyboardShortcut("e", modifiers: .command)
                 .help("\(app.strings("common.edit")) (⌘E)")
                 .disabled(vault.detail == nil)
                 Button {

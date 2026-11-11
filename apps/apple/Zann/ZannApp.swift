@@ -14,6 +14,19 @@ struct ZannApp: App {
                 .frame(minWidth: 520, minHeight: 380)
         }
         .commands {
+            // One vault window: ⌘N creates an item rather than a second window.
+            CommandGroup(replacing: .newItem) {
+                Button(model.strings("common.create")) { model.vault?.startCreating() }
+                    .keyboardShortcut("n", modifiers: .command)
+                    .disabled(model.vault == nil)
+            }
+            CommandGroup(after: .pasteboard) {
+                Button(model.strings("common.edit")) {
+                    Task { await model.vault?.startEditing() }
+                }
+                .keyboardShortcut("e", modifiers: .command)
+                .disabled(model.vault == nil)
+            }
             CommandMenu("Vault") {
                 Button("Lock") { Task { await model.lock() } }
                     .keyboardShortcut("l", modifiers: .command)
