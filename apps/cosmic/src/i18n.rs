@@ -37,6 +37,20 @@ pub fn field_label(key: &str) -> String {
         .map_or_else(|_| key.to_string(), |catalogue| catalogue.field_label(key))
 }
 
+pub fn minutes_label(minutes: u32) -> String {
+    catalogue().read().map_or_else(
+        |_| minutes.to_string(),
+        |catalogue| catalogue.minutes_label(minutes),
+    )
+}
+
+pub fn seconds_label(seconds: u32) -> String {
+    catalogue().read().map_or_else(
+        |_| seconds.to_string(),
+        |catalogue| catalogue.seconds_label(seconds),
+    )
+}
+
 pub fn has(key: &str) -> bool {
     catalogue().read().is_ok_and(|catalogue| catalogue.has(key))
 }

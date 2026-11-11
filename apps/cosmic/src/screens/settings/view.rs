@@ -1,4 +1,5 @@
 use super::*;
+use crate::i18n::{minutes_label, seconds_label};
 
 impl State {
     pub fn view(&self) -> Element<'_, Message> {
@@ -530,14 +531,7 @@ fn minutes_choice(
     selected: u32,
     on_select: fn(u32) -> Message,
 ) -> Element<'static, Message> {
-    let labels = options
-        .iter()
-        .map(|value| match value {
-            0 => t("time.never"),
-            60 => t("time.hour"),
-            value => format!("{value} {}", t("time.minutes")),
-        })
-        .collect();
+    let labels = options.iter().copied().map(minutes_label).collect();
     choice(options, labels, selected, on_select)
 }
 
@@ -546,15 +540,7 @@ fn seconds_choice(
     selected: u32,
     on_select: fn(u32) -> Message,
 ) -> Element<'static, Message> {
-    let labels = options
-        .iter()
-        .map(|value| match value {
-            0 => t("time.never"),
-            120 => format!("2 {}", t("time.minutes")),
-            300 => format!("5 {}", t("time.minutes")),
-            value => format!("{value} {}", t("time.seconds")),
-        })
-        .collect();
+    let labels = options.iter().copied().map(seconds_label).collect();
     choice(options, labels, selected, on_select)
 }
 

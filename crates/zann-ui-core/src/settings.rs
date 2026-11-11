@@ -199,6 +199,20 @@ impl Default for DevicePreferences {
     }
 }
 
+impl DevicePreferences {
+    /// A shell's stored preferences. Absent fields take the defaults above, so
+    /// a file written by an older shell still loads.
+    pub fn from_json(json: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(json)
+    }
+
+    /// The stored form for a shell's own preferences file.
+    #[must_use]
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).expect("device preferences always serialize")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
