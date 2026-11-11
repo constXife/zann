@@ -669,7 +669,7 @@ mod compatibility_tests {
 
         assert_eq!(core.root, root);
         assert!(db_path.exists(), "SQLite must create the exact path");
-        core.initialize_master_password("literal-root-password".to_string())
+        core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
             .expect("initialize at exact path");
         assert!(
             core.root.join("client-config.json").exists(),
@@ -699,7 +699,7 @@ mod compatibility_tests {
             db_path.exists(),
             "URI and config root must name one database"
         );
-        core.initialize_master_password("encoded-root-password".to_string())
+        core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
             .expect("initialize at encoded path");
         assert!(root.join("client-config.json").exists());
     }
