@@ -264,6 +264,7 @@
     "remember": "Remember unlock on this device",
     "autoUnlock": "Unlock automatically on launch",
     "touchId": "Unlock with Touch ID",
+    "touchIdReason": "unlock your vault",
     "savedUnlock": "Use saved unlock",
     "hardwareKeyPrompt": "Insert your hardware key",
     "hardwareKeyTouch": "Touch the key…",

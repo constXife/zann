@@ -37,6 +37,14 @@ struct MasterPasswordView: View {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
             }
             HStack {
+                if mode == .unlock && model.touchIDArmed {
+                    Button {
+                        Task { await model.unlockWithTouchID() }
+                    } label: {
+                        Label(model.strings("unlock.touchId"), systemImage: "touchid")
+                    }
+                    .disabled(model.busy)
+                }
                 Spacer()
                 if model.busy {
                     ProgressView().controlSize(.small)

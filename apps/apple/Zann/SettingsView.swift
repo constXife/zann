@@ -53,9 +53,33 @@ struct SettingsView: View {
                 choice("settings.revealAfter", \.autoHideRevealSeconds,
                        options.autoHideRevealSeconds, label: model.strings.secondsLabel)
             }
+            touchID
             failure
         }
         .formStyle(.grouped)
+    }
+
+    /// Arming wraps the master key the unlocked core holds, so the toggle
+    /// works only while the vault is open.
+    @ViewBuilder private var touchID: some View {
+        let status = model.keystoreStatus
+        Section(model.strings("settings.keystore")) {
+            Toggle(model.strings("unlock.touchId"), isOn: Binding(
+                get: { model.touchIDArmed },
+                set: { enabled in Task { await model.setTouchID(enabled) } }
+            ))
+            // Turning it off stays possible without Touch ID, to revoke it.
+            .disabled(
+                model.touchIDBusy
+                    || (!model.touchIDArmed
+                        && (!model.isUnlocked || status?.biometricsAvailable != true))
+            )
+            if let status, !status.supported {
+                Text(model.strings("errors.keystore_unsupported")).foregroundStyle(.secondary)
+            } else if let status, !status.biometricsAvailable {
+                Text(model.strings("settings.biometricsUnsupported")).foregroundStyle(.secondary)
+            }
+        }
     }
 
     @ViewBuilder private var failure: some View {
