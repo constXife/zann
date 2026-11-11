@@ -154,6 +154,20 @@ impl ItemProjection {
         self.deleted_at.is_some()
     }
 
+    /// Whether `next` may replace this projection: it carries a later server
+    /// revision, or this exact one again. A push never advances the pull
+    /// cursor, so the next pull echoes every revision the push confirmed.
+    #[must_use]
+    pub fn accepts_pulled(&self, next: &Self) -> bool {
+        self.seq < next.seq
+            || (self.seq == next.seq
+                && self.path == next.path
+                && self.name == next.name
+                && self.type_id == next.type_id
+                && self.checksum == next.checksum
+                && self.deleted_at.is_some() == next.deleted_at.is_some())
+    }
+
     /// Every authoritative projection produced by pull is locally synced.
     /// A remote delete is represented only by `deleted_at`, never by the
     /// ambiguous local `Tombstone` producer status.

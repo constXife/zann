@@ -2363,6 +2363,36 @@ async fn commit_push_updates_items_deletes_exact_pending_and_keeps_pull_cursor()
         .expect("push checkpoint exists");
     assert_eq!(checkpoint.cursor.as_deref(), Some("cursor-1"));
     assert_eq!(checkpoint.last_seq, Some(1));
+
+    // The next pull from the unchanged cursor echoes the confirmed revision.
+    let mut divergent = stored.clone();
+    divergent.payload_enc = vec![9, 8, 7];
+    divergent.checksum = canonical_checksum("checksum-divergent");
+    expect_sync_error(
+        PullChange::new(fixture.scope, exact(&stored), divergent, Vec::new()),
+        "other content at the held revision must not replace it",
+    );
+    let echo = PullChange::new(fixture.scope, exact(&stored), stored.clone(), Vec::new())
+        .expect("the confirmed revision may be pulled again");
+    let page = PullPage::new(
+        fixture.scope,
+        "001122aabbcc".to_string(),
+        Some("cursor-1".to_string()),
+        Some(1),
+        "cursor-2".to_string(),
+        Some(5),
+        timestamp(5),
+        vec![echo],
+    )
+    .expect("valid echo page");
+    LocalSyncRepo::new(&fixture.pool)
+        .commit_pull_page(&page)
+        .await
+        .expect("commit the echoed revision");
+    assert_eq!(
+        cursor(&fixture.pool, fixture.scope).await.as_deref(),
+        Some("cursor-2")
+    );
 }
 
 #[tokio::test]

@@ -532,7 +532,7 @@ impl SyncEngine {
                     })?;
                     if let Some(proof) = expected.exact_proof() {
                         if proof.sync_status() != SyncStatus::Synced
-                            || proof.projection().seq() >= change.item.seq()
+                            || !proof.projection().accepts_pulled(&change.item)
                         {
                             return Err(SyncError::new(
                                 operation_id,
@@ -1730,6 +1730,85 @@ mod tests {
         assert_eq!(fixture.store.commit_attempts.load(Ordering::SeqCst), 0);
     }
 
+    /// The projection a confirmed push leaves for `change`: synced at its
+    /// server revision while the pull cursor stays behind it.
+    fn pushed_projection(change: &PersonalPullChangeWire) -> StoredProjection {
+        StoredProjection {
+            path: change.path.clone(),
+            name: change.name.clone(),
+            type_id: change.type_id.clone(),
+            payload_enc: change.payload_enc.clone().expect("live change payload"),
+            checksum: crate::sync::ContentChecksum::parse(&change.checksum)
+                .expect("valid checksum"),
+            cache_key_fingerprint: zann_crypto::cache_key_fingerprint(&SecretKey::from_bytes(
+                [7_u8; 32],
+            )),
+            seq: SyncSeq::new(change.seq).expect("valid sequence"),
+            updated_at: chrono::Utc::now(),
+            deleted_at: None,
+            sync_status: SyncStatus::Synced,
+        }
+    }
+
+    /// Pulls one page holding `change` from cursor 4 over `held`.
+    async fn pull_over_pushed(
+        item_id: Uuid,
+        make: impl FnOnce(Uuid) -> (PersonalPullChangeWire, StoredProjection),
+    ) -> (Arc<FakeStore>, Result<SyncOutcome, SyncError>) {
+        let mut held = None;
+        let fixture = fixture_with_vault(VaultPlane::PersonalClient, |vault_id| {
+            let (change, projection) = make(vault_id);
+            held = Some(projection);
+            vec![personal_page(vec![change], 5, false)]
+        });
+        let vault_id = fixture.remote.vaults.first().expect("one vault").0;
+        let scope = SyncScope::new(fixture.store.storage_id, vault_id).expect("valid scope");
+        fixture
+            .store
+            .default_checkpoint
+            .lock()
+            .expect("default checkpoint")
+            .clone_from(&(Some(cursor_string(4)), Some(4)));
+        fixture
+            .store
+            .stored_items
+            .lock()
+            .expect("stored items")
+            .insert((scope, item_id), held.expect("held projection"));
+        let result = fixture
+            .engine
+            .pull(&fixture.target, fixture.operation)
+            .await;
+        (fixture.store, result)
+    }
+
+    #[tokio::test]
+    async fn pull_reapplies_the_exact_revision_a_push_confirmed() {
+        let item_id = Uuid::now_v7();
+        let (store, result) = pull_over_pushed(item_id, |vault_id| {
+            let change = personal_change(vault_id, item_id, 5);
+            let held = pushed_projection(&change);
+            (change, held)
+        })
+        .await;
+        result.expect("an echoed revision is idempotent");
+        assert_eq!(store.commit_attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn pull_rejects_different_content_at_the_held_revision() {
+        let item_id = Uuid::now_v7();
+        let (store, result) = pull_over_pushed(item_id, |vault_id| {
+            // Each call encrypts under a fresh nonce: same seq, other content.
+            let held = pushed_projection(&personal_change(vault_id, item_id, 5));
+            (personal_change(vault_id, item_id, 5), held)
+        })
+        .await;
+        let error = result.expect_err("other content at the held revision is a conflict");
+        assert_eq!(error.kind(), SyncErrorKind::ConcurrentLocalChange);
+        assert_eq!(store.commit_attempts.load(Ordering::SeqCst), 0);
+    }
+
     #[tokio::test]
     async fn pull_projection_carries_fingerprint_of_the_exact_payload_key() {
         let item_id = Uuid::now_v7();
@@ -2532,8 +2611,9 @@ mod tests {
             .expect("proof");
 
         let stored = ItemState::exact(proof).with_pending(create.clone());
-        let states = validate_item_states_for_push(scope, &[create.clone()], vec![stored])
-            .expect("a create pushes its stored local projection");
+        let states =
+            validate_item_states_for_push(scope, std::slice::from_ref(&create), vec![stored])
+                .expect("a create pushes its stored local projection");
         assert!(states[&item_id].exact_proof().is_some());
 
         let missing = ItemState::absent(item_id)
