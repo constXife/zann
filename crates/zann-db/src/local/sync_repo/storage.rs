@@ -146,36 +146,6 @@ pub(super) async fn ensure_storage_projection_bounded(
     Ok(())
 }
 
-pub(crate) async fn ensure_single_remote_storage(
-    tx: &mut Transaction<'static, Sqlite>,
-    storage_id: Uuid,
-) -> Result<(), LocalSyncError> {
-    ensure_storage_kinds_bounded(tx, storage_id).await?;
-    let row = query!(
-        r#"
-        SELECT COUNT(*) AS count
-        FROM (
-            SELECT 1
-            FROM storages
-            WHERE CASE
-                WHEN typeof(kind) = 'integer' THEN kind = ?1
-                ELSE 0
-            END
-            LIMIT 2
-        )
-        "#,
-        StorageKind::Remote.as_i32()
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(LocalSyncError::Database)?;
-    let count: i64 = row.try_get("count").map_err(LocalSyncError::Database)?;
-    if count != 1 {
-        return Err(LocalSyncError::StorageBindingChanged { storage_id });
-    }
-    Ok(())
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LocalGenerationBindingState {
     Unbound,

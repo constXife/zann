@@ -258,41 +258,6 @@ impl<'a> LocalStorageRepo<'a> {
         Ok(storages)
     }
 
-    /// Counts at most two remote storage bindings without materializing their
-    /// metadata. A return value of `2` means "two or more" and is sufficient
-    /// for single-endpoint adapters to fail closed.
-    pub async fn remote_count_up_to_two(&self) -> Result<u8, sqlx_core::Error> {
-        let mut tx = self.pool.begin().await?;
-        if storage_headers_corrupt(&mut tx).await? {
-            tx.rollback().await?;
-            return Err(sqlx_core::Error::Protocol(
-                "local storage identity or kind is corrupt".to_string(),
-            ));
-        }
-        let row = query!(
-            r#"
-            SELECT COUNT(*) AS count
-            FROM (
-                SELECT 1
-                FROM storages
-                WHERE CASE
-                    WHEN typeof(kind) = 'integer' THEN kind = ?1
-                    ELSE 0
-                END
-                LIMIT 2
-            )
-            "#,
-            zann_core::StorageKind::Remote.as_i32()
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        let count: i64 = row.try_get("count")?;
-        let count =
-            u8::try_from(count).map_err(|error| sqlx_core::Error::Decode(Box::new(error)))?;
-        tx.commit().await?;
-        Ok(count)
-    }
-
     pub async fn delete(&self, storage_id: Uuid) -> Result<u64, sqlx_core::Error> {
         query!(r#"DELETE FROM storages WHERE id = ?1"#, storage_id)
             .execute(self.pool)

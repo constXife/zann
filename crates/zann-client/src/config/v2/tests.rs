@@ -872,7 +872,7 @@ fn seed_auth_intent_profile(repo: &ConfigRepository, store: &TestCredentialStore
 }
 
 #[test]
-fn authorized_generation_proves_the_temporary_single_target_topology() {
+fn authorized_generation_proves_a_single_profile_connection() {
     let profile_temp = TempDir::new().expect("profile tempdir");
     let profile_repo = repository(&profile_temp);
     initialize(&profile_repo);
@@ -884,7 +884,7 @@ fn authorized_generation_proves_the_temporary_single_target_topology() {
     let exact = profile_repo
         .authorized_target_generation_from_anchor(&exact_anchor)
         .expect("exact topology generation");
-    assert!(exact.single_target_topology());
+    assert!(exact.single_profile_connection());
 
     let revision = profile_repo
         .snapshot()
@@ -906,7 +906,7 @@ fn authorized_generation_proves_the_temporary_single_target_topology() {
     let multi_profile = profile_repo
         .authorized_target_generation_from_anchor(&multi_profile_anchor)
         .expect("multi-profile generation");
-    assert!(!multi_profile.single_target_topology());
+    assert!(!multi_profile.single_profile_connection());
     assert_ne!(
         exact.stable_target_fingerprint(),
         multi_profile.stable_target_fingerprint(),
@@ -924,7 +924,7 @@ fn authorized_generation_proves_the_temporary_single_target_topology() {
     let selected = connection_repo
         .authorized_target_generation_from_anchor(&selected_anchor)
         .expect("selected exact generation");
-    assert!(selected.single_target_topology());
+    assert!(selected.single_profile_connection());
 
     let other = ConnectionId::deterministic("other", "https://other-topology.test");
     connection_repo
@@ -939,11 +939,11 @@ fn authorized_generation_proves_the_temporary_single_target_topology() {
     let multi_connection = connection_repo
         .authorized_target_generation_from_anchor(&multi_connection_anchor)
         .expect("multi-connection generation");
-    assert!(!multi_connection.single_target_topology());
-    assert_ne!(
+    assert!(multi_connection.single_profile_connection());
+    assert_eq!(
         selected.stable_target_fingerprint(),
         multi_connection.stable_target_fingerprint(),
-        "adding a connection must change the stable topology proof"
+        "another connection owns its own storage and leaves this target stable"
     );
 }
 

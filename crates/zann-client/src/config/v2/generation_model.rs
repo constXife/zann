@@ -45,7 +45,7 @@ pub struct AuthorizedTargetGeneration {
     pub(super) expected_master_key_fp: Option<String>,
     pub(super) account_subject: Option<String>,
     pub(super) auth_method: Option<AuthMethod>,
-    pub(super) single_target_topology: bool,
+    pub(super) single_profile_connection: bool,
 }
 
 impl AuthorizedTargetGeneration {
@@ -113,10 +113,11 @@ impl AuthorizedTargetGeneration {
         self.auth_method
     }
 
-    /// Whether this generation proved the temporary single-connection,
-    /// single-profile topology required by the global-UUID SQLite schema.
-    pub fn single_target_topology(&self) -> bool {
-        self.single_target_topology
+    /// Whether the target connection has exactly one credential profile.
+    /// Local projections are keyed by the connection's `storage_id`, so
+    /// several profiles of one connection cannot yet share one projection.
+    pub fn single_profile_connection(&self) -> bool {
+        self.single_profile_connection
     }
 
     #[cfg(all(test, feature = "sync"))]
@@ -147,7 +148,7 @@ impl AuthorizedTargetGeneration {
             expected_master_key_fp: Some("000000000000".to_string()),
             account_subject,
             auth_method,
-            single_target_topology: true,
+            single_profile_connection: true,
         })
     }
 }
@@ -241,8 +242,7 @@ pub(super) fn authorized_target_generation(
             .ok_or_else(|| ConfigError::MissingConnection {
                 connection_id: connection_id.clone(),
             })?;
-    let single_target_topology =
-        config.connections.len() == 1 && connection.credential_profiles().len() == 1;
+    let single_profile_connection = connection.credential_profiles().len() == 1;
 
     let mut repository = GenerationFingerprint::new(b"zann.authorized-target.repository.v1");
     repository.part(b"repository_binding", repository_binding_digest.as_bytes());
@@ -270,9 +270,11 @@ pub(super) fn authorized_target_generation(
         }
         None => stable.part(b"auth_method", b"absent"),
     }
+    // The label predates the per-connection predicate; it is part of the
+    // stable fingerprint persisted by local projections, so it stays fixed.
     stable.part(
         b"single_target_topology",
-        if single_target_topology {
+        if single_profile_connection {
             b"true"
         } else {
             b"false"
@@ -298,7 +300,7 @@ pub(super) fn authorized_target_generation(
     );
     exact.part(
         b"single_target_topology",
-        if single_target_topology {
+        if single_profile_connection {
             b"true"
         } else {
             b"false"
@@ -334,7 +336,7 @@ pub(super) fn authorized_target_generation(
         expected_master_key_fp: anchor.expected_master_key_fp,
         account_subject: anchor.account_subject,
         auth_method: anchor.auth_method,
-        single_target_topology,
+        single_profile_connection,
     })
 }
 

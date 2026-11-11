@@ -55,8 +55,7 @@ impl<'a> LocalItemRepo<'a> {
         query!(
             r#"
             UPDATE items_cache
-            SET storage_id = ?2,
-                vault_id = ?3,
+            SET vault_id = ?3,
                 path = ?4,
                 name = ?5,
                 type_id = ?6,
@@ -67,7 +66,7 @@ impl<'a> LocalItemRepo<'a> {
                 deleted_at = ?11,
                 updated_at = ?12,
                 sync_status = ?13
-            WHERE id = ?1
+            WHERE storage_id = ?2 AND id = ?1
             "#,
             item.id,
             item.storage_id,
@@ -88,11 +87,19 @@ impl<'a> LocalItemRepo<'a> {
         .map(|result| result.rows_affected())
     }
 
-    pub async fn delete_by_id(&self, item_id: Uuid) -> Result<u64, sqlx_core::Error> {
-        query!(r#"DELETE FROM items_cache WHERE id = ?1"#, item_id)
-            .execute(self.pool)
-            .await
-            .map(|result| result.rows_affected())
+    pub async fn delete_by_id(
+        &self,
+        storage_id: Uuid,
+        item_id: Uuid,
+    ) -> Result<u64, sqlx_core::Error> {
+        query!(
+            r#"DELETE FROM items_cache WHERE storage_id = ?1 AND id = ?2"#,
+            storage_id,
+            item_id
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| result.rows_affected())
     }
 
     pub async fn list_deleted_before(
@@ -296,7 +303,7 @@ impl<'a> LocalItemRepo<'a> {
                     THEN sync_status IN (1, 2, 3, 4, 5, 6) ELSE 0 END
             THEN 1 ELSE 0 END AS valid
             FROM items_cache
-            WHERE id = ?1
+            WHERE storage_id = ?9 AND id = ?1
             "#,
             item_id,
             MAX_ITEM_PATH_BYTES,
@@ -305,7 +312,8 @@ impl<'a> LocalItemRepo<'a> {
             MAX_ITEM_CIPHERTEXT_BYTES,
             MAX_ITEM_CHECKSUM_BYTES,
             CACHE_KEY_FINGERPRINT_BYTES,
-            MAX_TIMESTAMP_BYTES
+            MAX_TIMESTAMP_BYTES,
+            storage_id
         )
         .fetch_optional(&mut *tx)
         .await?;
@@ -335,19 +343,13 @@ impl<'a> LocalItemRepo<'a> {
                 updated_at as "updated_at",
                 sync_status
             FROM items_cache
-            WHERE id = ?1
+            WHERE storage_id = ?1 AND id = ?2
             "#,
+            storage_id,
             item_id
         )
         .fetch_optional(&mut *tx)
         .await?;
-        if item
-            .as_ref()
-            .is_some_and(|stored| stored.storage_id != storage_id)
-        {
-            tx.rollback().await?;
-            return Err(LocalProjectionReadError::CorruptProjection);
-        }
         tx.commit().await?;
         Ok(item)
     }
