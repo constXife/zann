@@ -32,11 +32,7 @@ final class VaultModelTests: XCTestCase {
     }
 
     private func makeModel() throws -> VaultModel {
-        let page = try core.itemsList(
-            filter: ItemsFilter(query: nil, includeDeleted: true),
-            page: Page(limit: 200, cursor: nil)
-        )
-        return VaultModel(core: core, page: page)
+        VaultModel(core: core, page: try VaultModel.loadPage(core))
     }
 
     func testCategoriesCountTheLoadedItems() throws {
@@ -94,6 +90,95 @@ final class VaultModelTests: XCTestCase {
         // Give the superseded load time to land; it must not replace Bank.
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(model.detail?.title, "Bank")
+    }
+
+    func testNewItemTakesTheCategoryTypeAndIsShownAfterSave() async throws {
+        let model = try makeModel()
+        model.categoryID = "note"
+        model.startCreating()
+        let editor = try XCTUnwrap(model.editor)
+        XCTAssertEqual(editor.mode, .create)
+        XCTAssertEqual(editor.typeID, "note")
+        editor.setPath("Personal/Shopping")
+        editor.setValue(try index(of: "text", in: editor), "eggs")
+
+        await model.saveEditor()
+
+        XCTAssertNil(model.editor)
+        XCTAssertEqual(model.categoryID, "note")
+        XCTAssertEqual(model.visibleItems.map(\.title).sorted(), ["Groceries", "Shopping"])
+        let detail = try await loadedDetail(model)
+        XCTAssertEqual(detail.title, "Shopping")
+        XCTAssertEqual(detail.fields.first { $0.key == "text" }?.value, "eggs")
+    }
+
+    func testCategoryWithSeveralTypesCreatesItsFirstType() throws {
+        let model = try makeModel()
+        model.categoryID = "infra"
+        model.startCreating()
+        XCTAssertEqual(model.editor?.typeID, "ssh_key")
+    }
+
+    func testSavedItemOutsideTheFilterResetsTheList() async throws {
+        let model = try makeModel()
+        model.categoryID = "note"
+        model.query = "gro"
+        model.startCreating(typeID: "login")
+        let editor = try XCTUnwrap(model.editor)
+        editor.setPath("Mail")
+        editor.setValue(try index(of: "username", in: editor), "carol")
+
+        await model.saveEditor()
+
+        XCTAssertEqual(model.categoryID, "all")
+        XCTAssertEqual(model.query, "")
+        let detail = try await loadedDetail(model)
+        XCTAssertEqual(detail.title, "Mail")
+    }
+
+    func testEditingKeepsUntouchedFieldsAndShowsTheStoredVersion() async throws {
+        let model = try makeModel()
+        let github = try XCTUnwrap(model.visibleItems.first { $0.title == "GitHub" })
+        model.select(github.id)
+        _ = try await loadedDetail(model)
+
+        await model.startEditing()
+        let editor = try XCTUnwrap(model.editor)
+        XCTAssertEqual(editor.mode, .edit(id: github.id))
+        XCTAssertEqual(editor.path, "Work/GitHub")
+        editor.setPath("Work/GitHub Enterprise")
+        editor.setValue(try index(of: "username", in: editor), "alice2")
+
+        await model.saveEditor()
+
+        XCTAssertNil(model.editor)
+        XCTAssertEqual(model.selectedItemID, github.id)
+        let detail = try await loadedDetail(model)
+        XCTAssertEqual(detail.title, "GitHub Enterprise")
+        let values = Dictionary(uniqueKeysWithValues: detail.fields.map { ($0.key, $0.value) })
+        XCTAssertEqual(values["username"], "alice2")
+        XCTAssertEqual(values["password"], "hunter2")
+        XCTAssertEqual(model.visibleItems.count, 3)
+    }
+
+    func testInvalidDraftStaysOpenWithTheTranslatedError() async throws {
+        let model = try makeModel()
+        model.startCreating(typeID: "note")
+        let editor = try XCTUnwrap(model.editor)
+        editor.setPath("Empty")
+        while !editor.fields.isEmpty {
+            editor.removeField(0)
+        }
+
+        await model.saveEditor()
+
+        XCTAssertTrue(model.editor === editor)
+        XCTAssertEqual(editor.error, .translated(key: "errors.fields_required"))
+        XCTAssertEqual(model.visibleItems.count, 3)
+    }
+
+    private func index(of key: String, in editor: ItemEditorModel) throws -> Int {
+        try XCTUnwrap(editor.fields.firstIndex { $0.key == key }, "no \(key) field")
     }
 
     private func loadedDetail(_ model: VaultModel) async throws -> VaultModel.Detail {

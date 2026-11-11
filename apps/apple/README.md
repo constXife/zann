@@ -26,6 +26,8 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   detail, as `docs/ux/Layout-Responsive-Spec.md` orders them and COSMIC lays
   them out. Categories, filtering, field order, masking, field labels and TOTP
   come from zann-ui-core; labels read the shared `i18n/` catalogue.
+  Create (⌘N) and edit (⌘E) open a sheet over a zann-ui-core `ItemDraftFfi`,
+  which owns the type templates, validation and the stored payload.
 - `Zann/Platform/` holds the macOS adapters: a pasteboard writer that marks
   values concealed and clears them on the configured timer, and the held
   Option key that reveals masked values while pressed.

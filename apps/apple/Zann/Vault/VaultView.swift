@@ -25,7 +25,30 @@ struct VaultView: View {
             )
         }
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
+                    ForEach(ItemEditorModel.typeIDs, id: \.self) { typeID in
+                        Button {
+                            vault.startCreating(typeID: typeID)
+                        } label: {
+                            Label(app.strings("types.\(typeID)"), systemImage: Symbols.item(typeID))
+                        }
+                    }
+                } label: {
+                    Label(app.strings("common.create"), systemImage: "plus")
+                } primaryAction: {
+                    vault.startCreating()
+                }
+                .keyboardShortcut("n", modifiers: .command)
+                .help("\(app.strings("common.create")) (⌘N)")
+                Button {
+                    Task { await vault.startEditing() }
+                } label: {
+                    Label(app.strings("common.edit"), systemImage: "square.and.pencil")
+                }
+                .keyboardShortcut("e", modifiers: .command)
+                .help("\(app.strings("common.edit")) (⌘E)")
+                .disabled(vault.detail == nil)
                 Button {
                     Task { await app.lock() }
                 } label: {
@@ -34,7 +57,15 @@ struct VaultView: View {
                 .help("\(app.strings("common.lock")) (⌘L)")
             }
         }
+        .sheet(item: editor) { editor in
+            ItemEditorView(editor: editor, vault: vault, strings: app.strings)
+        }
         .frame(minWidth: 900, minHeight: 520)
+    }
+
+    /// Dismissing the sheet from outside the form (lock) discards the draft.
+    private var editor: Binding<ItemEditorModel?> {
+        Binding(get: { vault.editor }, set: { if $0 == nil { vault.cancelEditing() } })
     }
 }
 
