@@ -116,11 +116,11 @@ fn select_personal_vault(core: &LocalVault, storage_id: &str) {
         .expect("select the personal vault");
 }
 
-/// One account, two devices. Device A registers and publishes the personal
-/// vault; device B starts from an empty root, logs in, syncs and opens that
-/// vault's key with the same master password. Device B opens its database
-/// before the login, as every client does, so a salt invented at open would
-/// collide with the account's.
+/// One account, two devices. Device A registers, publishes the personal vault
+/// and pushes an item created in it; device B starts from an empty root, logs
+/// in, syncs, opens that vault's key with the same master password and
+/// decrypts the item. Device B opens its database before the login, as every
+/// client does, so a salt invented at open would collide with the account's.
 #[test]
 #[ignore]
 fn second_device_unlocks_the_synced_personal_vault() {
@@ -180,8 +180,16 @@ fn second_device_unlocks_the_synced_personal_vault() {
     let core = create_core(make_db_url(device_a.path())).expect("reopen device A");
     core.initialize_master_password(master_password.clone())
         .expect("device A creates the vault");
-    core.remote_sync(Some(storage_id))
+    core.remote_sync(Some(storage_id.clone()))
         .expect("device A publishes the personal vault");
+    select_personal_vault(&core, &storage_id);
+    let item_id = core
+        .debug_create_kv_item("pushed".to_string(), "key".to_string(), "value".to_string())
+        .expect("device A creates an item");
+    core.remote_sync(Some(storage_id.clone()))
+        .expect("device A pushes the created item");
+    core.remote_sync(Some(storage_id))
+        .expect("device A has nothing left to push");
     drop(core);
 
     let device_b = tempdir().expect("device B root");
@@ -216,4 +224,10 @@ fn second_device_unlocks_the_synced_personal_vault() {
         .expect_err("another password must not open device A's vault");
     core.unlock(master_password)
         .expect("device B opens device A's vault key");
+    select_personal_vault(&core, prepared.storage_id());
+    let item = core
+        .item_get(item_id)
+        .expect("device B decrypts device A's item");
+    assert_eq!(item.path, "pushed");
+    assert!(item.payload_json.contains("\"value\""));
 }
