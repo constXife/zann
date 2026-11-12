@@ -28,7 +28,7 @@ use zann_cosmic::preferences::{self, Store};
 use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};
 use zann_cosmic::session::Session;
 use zann_cosmic::tray;
-use zann_ui_core::DevicePreferences;
+use zann_ui_core::{DevicePreferences, SettingsSection};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::default()
@@ -90,6 +90,9 @@ enum Message {
     /// A sync started from Settings ended; the ticket goes back to the
     /// session's schedule.
     ManualSynced(AutoSyncTicket, String, Result<(), SyncFailure>),
+    /// A scheduled sync found this storage's server changed its identity;
+    /// show the recovery Settings offers for it.
+    ReviewStaleServer(String),
     Vault(vault::Message),
     /// Effects the shell owns because they leave the app.
     Copy(String),
@@ -478,6 +481,16 @@ impl cosmic::Application for App {
             }
             Message::Lock => return self.lock(),
             Message::OpenSettings => return self.open_settings(),
+            Message::ReviewStaleServer(storage_id) => {
+                let open = self.open_settings();
+                let section =
+                    self.update_settings(settings::Message::Select(SettingsSection::Accounts));
+                let refusal = self.update_settings(settings::Message::Synced(
+                    storage_id,
+                    Err(SyncFailure::IdentityChanged),
+                ));
+                return Task::batch([open, section, refusal]);
+            }
             Message::Quit => return self.quit(),
             Message::CloseRequested => {
                 return if self.close_to_tray && self.tray_available {
@@ -676,6 +689,9 @@ impl cosmic::Application for App {
                         lift(feedback, Message::Vault),
                     ]),
                     vault::Outcome::Locked => cosmic::task::message(Message::Lock),
+                    vault::Outcome::StaleServer(storage_id) => {
+                        cosmic::task::message(Message::ReviewStaleServer(storage_id))
+                    }
                 }
             }
 
@@ -684,6 +700,7 @@ impl cosmic::Application for App {
             | Message::OpenUrl(_)
             | Message::Lock
             | Message::OpenSettings
+            | Message::ReviewStaleServer(_)
             | Message::Quit
             | Message::CloseRequested
             | Message::WindowClosed(_)

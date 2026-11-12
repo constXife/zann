@@ -39,19 +39,27 @@ impl State {
                     return Outcome::Task(self.arm_auto_sync(session));
                 };
                 let facade = session.facade();
+                let storage_id = local::current_storage_id(&facade);
                 let list_generation = self.list_generation;
                 let query = (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
                 return Outcome::Task(cosmic::task::future(async move {
+                    let synced = storage_id.clone();
+                    let result =
+                        off_thread(move || Ok(local::sync_and_reload(&facade, synced, query)))
+                            .await
+                            .unwrap_or_else(|err| Err(local::SyncFailure::Other(err)));
                     Message::AutoSynced {
                         ticket,
+                        storage_id,
                         list_generation,
-                        result: off_thread(move || local::sync_and_reload(&facade, query)).await,
+                        result,
                     }
                 }));
             }
 
             Message::AutoSynced {
                 ticket,
+                storage_id,
                 list_generation,
                 result,
             } => {
@@ -66,12 +74,16 @@ impl State {
                             self.error = None;
                         }
                         self.sync_error = None;
+                        self.stale_server = None;
                         page
                     }
-                    Err(err) => {
-                        let message = t_args("items.syncFailed", &[("error", &err)]);
+                    Err(failure) => {
+                        let message =
+                            t_args("items.syncFailed", &[("error", &failure.to_string())]);
                         self.error = Some(message.clone());
                         self.sync_error = Some(message);
+                        self.stale_server =
+                            (failure == local::SyncFailure::IdentityChanged).then_some(storage_id);
                         None
                     }
                 };
@@ -92,6 +104,13 @@ impl State {
                 ]));
             }
 
+            // Settings owns the recovery, the same one its own sync offers.
+            Message::ReviewStaleServer => {
+                if let Some(storage_id) = self.stale_server_banner() {
+                    return Outcome::StaleServer(storage_id.to_string());
+                }
+            }
+
             Message::DetailRefreshed(Ok(detail)) => {
                 let shown = self
                     .detail
@@ -107,6 +126,13 @@ impl State {
             _ => unreachable!("only auto-sync messages reach this handler"),
         }
         Outcome::None
+    }
+
+    /// The stale server, while the banner its refusal left is still shown.
+    pub(super) fn stale_server_banner(&self) -> Option<&str> {
+        self.stale_server
+            .as_deref()
+            .filter(|_| self.error.is_some() && self.error == self.sync_error)
     }
 
     /// The item on screen may have changed on the server. An open editor or

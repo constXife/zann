@@ -714,6 +714,7 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
     let ignored = vault.update(
         vault::Message::AutoSynced {
             ticket: stale,
+            storage_id: local::current_storage_id(&session.facade()),
             list_generation: 0,
             result: Ok(Some(empty.clone())),
         },
@@ -727,6 +728,7 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
     vault.update(
         vault::Message::AutoSynced {
             ticket: current,
+            storage_id: local::current_storage_id(&session.facade()),
             list_generation: 0,
             result: Ok(Some(empty)),
         },
@@ -757,6 +759,7 @@ fn a_sync_started_under_an_older_search_keeps_the_newer_list() {
     vault.update(
         vault::Message::AutoSynced {
             ticket,
+            storage_id: local::current_storage_id(&session.facade()),
             list_generation: 0,
             result: Ok(Some(empty)),
         },
@@ -893,6 +896,76 @@ fn a_successful_sync_clears_the_changed_identity_and_other_failures_stay_plain()
 }
 
 #[test]
+fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recovery() {
+    use std::time::Instant;
+
+    let (dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    const STORAGE: &str = "remote-storage";
+    let now = Instant::now();
+    session.auto_sync().unlocked(now, false);
+    let mut vault = vault::State::new(page, None);
+
+    // Nothing to review before a refusal.
+    assert!(matches!(
+        vault.update(vault::Message::ReviewStaleServer, &session),
+        vault::Outcome::None
+    ));
+
+    let ticket = session.auto_sync().take_due(now).expect("due on unlock");
+    vault.update(
+        vault::Message::AutoSynced {
+            ticket,
+            storage_id: STORAGE.to_string(),
+            list_generation: 0,
+            result: Err(local::SyncFailure::IdentityChanged),
+        },
+        &session,
+    );
+    let vault::Outcome::StaleServer(storage_id) =
+        vault.update(vault::Message::ReviewStaleServer, &session)
+    else {
+        panic!("the refusal leads to the recovery");
+    };
+    assert_eq!(storage_id, STORAGE);
+
+    // Settings takes it as the refusal its own sync would have met.
+    let mut state = settings_for(&dir);
+    assert!(matches!(
+        state.update(
+            settings::Message::Synced(storage_id, Err(local::SyncFailure::IdentityChanged)),
+            &session,
+        ),
+        settings::Outcome::Task(_)
+    ));
+    assert_eq!(
+        state.stale_server().expect("stale server").storage_id,
+        STORAGE
+    );
+
+    // A plain failure or a sync that goes through withdraws the offer.
+    for result in [
+        Err(local::SyncFailure::Other("offline".to_string())),
+        Ok(None),
+    ] {
+        let ticket = session.auto_sync().take_now().expect("idle schedule");
+        vault.update(
+            vault::Message::AutoSynced {
+                ticket,
+                storage_id: STORAGE.to_string(),
+                list_generation: 0,
+                result,
+            },
+            &session,
+        );
+        assert!(matches!(
+            vault.update(vault::Message::ReviewStaleServer, &session),
+            vault::Outcome::None
+        ));
+    }
+}
+
+#[test]
 fn backend_classifies_the_identity_change_and_forgets_idempotently() {
     let (_dir, session) = vault_with_items();
     let facade = session.facade();
@@ -910,6 +983,11 @@ fn backend_classifies_the_identity_change_and_forgets_idempotently() {
     ));
 
     let storage = local::current_storage_id(&facade);
+    // A storage no server syncs has nothing to sync on schedule.
+    assert!(matches!(
+        local::sync_and_reload(&facade, storage.clone(), None),
+        Ok(None)
+    ));
     assert_eq!(
         local::pending_change_count(&facade, storage.clone()).expect("count"),
         0

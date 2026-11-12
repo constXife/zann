@@ -130,6 +130,7 @@
     "loadedCount": "{loaded} of {total} loaded, {shown} shown",
     "memoryWindow": "{loaded} of {total} loaded · search to reach the rest",
     "syncFailed": "Sync failed: {error}",
+    "reviewStaleServer": "Review in Settings",
     "selectItem": "Select an item",
     "details": "Details",
     "detailsHint": "Details will appear here. Secrets are masked by default.",

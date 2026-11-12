@@ -156,6 +156,12 @@ impl State {
 
         if let Some(error) = self.error.as_ref() {
             content = content.push(widget::text::caption(error.clone()));
+            if self.stale_server_banner().is_some() {
+                content = content.push(
+                    widget::button::standard(t("items.reviewStaleServer"))
+                        .on_press(Message::ReviewStaleServer),
+                );
+            }
         }
 
         content

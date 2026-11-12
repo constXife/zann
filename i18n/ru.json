@@ -130,6 +130,7 @@
     "loadedCount": "загружено {loaded} из {total}, показано {shown}",
     "memoryWindow": "загружено {loaded} из {total} · остальные доступны через поиск",
     "syncFailed": "Синхронизация не удалась: {error}",
+    "reviewStaleServer": "Открыть в настройках",
     "selectItem": "Выберите запись",
     "details": "Детали",
     "detailsHint": "Детали появятся здесь. Секреты скрыты по умолчанию.",

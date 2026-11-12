@@ -116,25 +116,29 @@ pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailu
         .map_err(SyncFailure::from)
 }
 
-/// A scheduled or manual sync of the vault's server. `None` when there is no
-/// server or the sync changed nothing; otherwise the first page again, for
-/// `query`.
+/// A scheduled sync of the open storage, the one "Sync now" in Settings runs
+/// for it, so a refusal names the storage its recovery acts on. `None` when
+/// the storage has no server or the sync changed nothing; otherwise the first
+/// page again, for `query`.
 pub fn sync_and_reload(
     facade: &Facade,
+    storage_id: String,
     query: Option<String>,
-) -> Result<Option<ItemsPage>, String> {
-    if !facade
-        .app_status()
-        .map_err(|err| err.to_string())?
-        .server_connected
-    {
+) -> Result<Option<ItemsPage>, SyncFailure> {
+    let remote = facade
+        .list_storages()?
+        .iter()
+        .any(|storage| storage.id == storage_id && storage.kind == "remote");
+    if !remote {
         return Ok(None);
     }
-    let outcome = facade.remote_sync(None).map_err(|err| err.to_string())?;
+    let outcome = facade.remote_sync(Some(storage_id))?;
     if outcome.changes_committed == 0 {
         return Ok(None);
     }
-    items(facade, None, query).map(Some)
+    items(facade, None, query)
+        .map(Some)
+        .map_err(SyncFailure::Other)
 }
 
 /// The first sync of a newly connected server; the core then moves the
