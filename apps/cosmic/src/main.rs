@@ -21,7 +21,7 @@ use cosmic::iced::{event, keyboard, mouse, window, Event, Length, Size, Subscrip
 use cosmic::prelude::*;
 use cosmic::widget::{menu, nav_bar};
 use cosmic::{executor, widget, Element};
-use zann_client::app::AutoSyncTicket;
+use zann_client::app::local::AutoSyncTicket;
 use zann_cosmic::i18n::t;
 use zann_cosmic::preferences::{self, Store};
 use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};

@@ -10,8 +10,8 @@ use cosmic::iced::{event, keyboard, mouse, Alignment, Event, Length, Subscriptio
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
 use cosmic::{theme, widget, Element};
+use zann_client::app::local::AutoSyncTicket;
 use zann_client::app::local::{ItemSummary, VaultSummary};
-use zann_client::app::AutoSyncTicket;
 use zann_ui_core::{
     category_views, create_type_for, filtered_indices, FolderFilter, ItemCounts, ItemFilter,
     VaultScope,

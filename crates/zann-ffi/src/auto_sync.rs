@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use zann_client::app::{AutoSyncSchedule, AutoSyncTicket};
+use zann_client::app::local::{AutoSyncSchedule, AutoSyncTicket};
 
 /// Admission for one sync; hand it back to `finished`.
 #[derive(uniffi::Object)]

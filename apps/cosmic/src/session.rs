@@ -7,7 +7,7 @@
 use std::cell::{RefCell, RefMut};
 
 use zann_client::app::local::AppStatus;
-use zann_client::app::AutoSyncSchedule;
+use zann_client::app::local::AutoSyncSchedule;
 
 use crate::backend::local::{self, Facade};
 use crate::backend::{activate_database, ActiveDatabaseGuard, DatabaseLocation};

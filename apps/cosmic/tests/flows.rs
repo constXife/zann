@@ -669,7 +669,7 @@ fn saved_item_from_a_destroyed_screen_cannot_replace_the_new_screen_detail() {
 #[test]
 fn a_save_schedules_a_push_and_a_lock_drops_it() {
     use std::time::Instant;
-    use zann_client::sync::AUTO_SYNC_DEBOUNCE;
+    use zann_client::app::local::AUTO_SYNC_DEBOUNCE;
 
     let (_dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).unwrap();

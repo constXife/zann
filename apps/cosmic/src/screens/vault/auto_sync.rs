@@ -1,7 +1,7 @@
 //! Automatic sync of the open vault. The core's schedule, kept by the session,
 //! decides when; this screen keeps a timer armed for it, runs the sync and
 //! shows what it brought in.
-use zann_client::sync::AUTO_SYNC_DEBOUNCE;
+use zann_client::app::local::AUTO_SYNC_DEBOUNCE;
 
 use super::*;
 
