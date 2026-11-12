@@ -31,6 +31,10 @@ impl TranslationCatalogue {
         self.0.field_label(&key)
     }
 
+    pub fn type_label(&self, type_id: String) -> String {
+        self.0.type_label(&type_id)
+    }
+
     pub fn minutes_label(&self, minutes: u32) -> String {
         self.0.minutes_label(minutes)
     }

@@ -14,8 +14,11 @@ struct ZannApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(model)
-                .frame(minWidth: 520, minHeight: 380)
         }
+        // Room for all three vault columns from the first launch; the window
+        // also grows to the vault's own minimum when it opens.
+        .defaultSize(width: 1180, height: 760)
+        .windowResizability(.contentMinSize)
         .commands {
             // One vault window: ⌘N creates an item rather than a second window.
             CommandGroup(replacing: .newItem) {
@@ -55,9 +58,17 @@ struct RootView: View {
 
     var body: some View {
         screen
+            // The one place the window minimum is set: an outer minimum would
+            // hide the vault's larger one from the window.
+            .frame(minWidth: minimum.width, minHeight: minimum.height)
             .onAppear { lockTriggers = lockTriggers ?? LockTriggers(model: model) }
             // Closing the window keeps the app running, so it counts as hidden.
             .onDisappear { Task { await model.appHidden() } }
+    }
+
+    /// Three vault columns need more room than the single-column screens.
+    private var minimum: CGSize {
+        model.screen == .vault ? CGSize(width: 900, height: 560) : CGSize(width: 520, height: 380)
     }
 
     @ViewBuilder private var screen: some View {

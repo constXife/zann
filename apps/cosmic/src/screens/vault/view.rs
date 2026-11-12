@@ -177,18 +177,18 @@ pub(super) fn vault_label(vault: &VaultSummary) -> String {
 
 fn item_row(item: &ItemSummary) -> Element<'_, Message> {
     let spacing = theme::spacing();
+    // The title already names the item; the caption says where it lives.
+    let mut text = widget::column::with_capacity(2).push(widget::text::body(item.title.clone()));
+    if let Some(folder) = zann_ui_core::folder_of(&item.path) {
+        text = text.push(widget::text::caption(folder.to_string()));
+    }
     widget::row::with_capacity(2)
         .push(
             widget::icon::from_name(item_icon(&item.type_id))
                 .size(20)
                 .icon(),
         )
-        .push(
-            widget::column::with_capacity(2)
-                .push(widget::text::body(item.title.clone()))
-                .push(widget::text::caption(item.path.clone()))
-                .width(Length::Fill),
-        )
+        .push(text.width(Length::Fill))
         .spacing(spacing.space_s)
         .align_y(Alignment::Center)
         .into()

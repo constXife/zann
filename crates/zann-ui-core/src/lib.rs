@@ -28,10 +28,10 @@ pub use categories::{
 };
 pub use counts::ItemCounts;
 pub use filter::{filtered_indices, item_matches, FolderFilter, ItemFilter};
-pub use folders::{build_folder_tree, FolderNode, FolderTree};
+pub use folders::{build_folder_tree, folder_of, FolderNode, FolderTree};
 pub use i18n::{Catalogue, LANGUAGES};
 pub use item::{ItemLike, ItemView};
-pub use item_detail::{project_item_fields, ItemDetailField};
+pub use item_detail::{project_item_fields, ItemDetailField, MASKED_VALUE};
 pub use server_url::normalize_server_url;
 pub use settings::{DevicePreferences, SettingsSection};
 pub use totp::{generate_totp, TotpCode, TotpError, TotpParams};

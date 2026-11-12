@@ -37,6 +37,13 @@ pub fn field_label(key: &str) -> String {
         .map_or_else(|_| key.to_string(), |catalogue| catalogue.field_label(key))
 }
 
+pub fn type_label(type_id: &str) -> String {
+    catalogue().read().map_or_else(
+        |_| type_id.to_string(),
+        |catalogue| catalogue.type_label(type_id),
+    )
+}
+
 pub fn minutes_label(minutes: u32) -> String {
     catalogue().read().map_or_else(
         |_| minutes.to_string(),

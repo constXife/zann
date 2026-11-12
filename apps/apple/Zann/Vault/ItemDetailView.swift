@@ -43,6 +43,10 @@ private struct ItemDetailContent: View {
 
     @State private var revealed: Set<Int> = []
     @State private var copied: Int?
+    /// Below this width a label beside its value leaves the value too little
+    /// room, so every row puts its label above instead.
+    @State private var compact = false
+    private static let compactWidth: CGFloat = 420
 
     var body: some View {
         ScrollView {
@@ -65,6 +69,7 @@ private struct ItemDetailContent: View {
                             FieldRow(
                                 field: field,
                                 label: strings.fieldLabel(field.key),
+                                compact: compact,
                                 revealed: revealed.contains(index) || revealAll,
                                 copied: copied == index,
                                 revealHelp: strings(revealed.contains(index) ? "common.hide" : "common.reveal"),
@@ -81,6 +86,9 @@ private struct ItemDetailContent: View {
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .strokeBorder(Color(nsColor: .separatorColor))
                     )
+                    .onGeometryChange(for: Bool.self) { proxy in
+                        proxy.size.width < Self.compactWidth
+                    } action: { compact = $0 }
                 }
             }
             .padding(24)
@@ -90,7 +98,8 @@ private struct ItemDetailContent: View {
     }
 
     private var subtitle: String {
-        detail.path.isEmpty ? detail.typeID : "\(detail.path) · \(detail.typeID)"
+        let type = strings.typeLabel(detail.typeID)
+        return detail.path.isEmpty ? type : "\(detail.path) · \(type)"
     }
 
     private func copy(_ value: String, index: Int) {
@@ -124,24 +133,54 @@ private struct ItemDetailContent: View {
 private struct FieldRow: View {
     let field: ItemDetailFieldFfi
     let label: String
+    /// The label sits above the value instead of beside it.
+    let compact: Bool
     let revealed: Bool
     let copied: Bool
     let revealHelp: String
     let onCopy: (String) -> Void
     let onToggleReveal: () -> Void
 
+    /// zann-ui-core's fixed-width mask, the same one COSMIC shows.
+    private static let mask = maskedValue()
+
     var body: some View {
+        Group {
+            if compact {
+                VStack(alignment: .leading, spacing: 2) {
+                    labelText.padding(.horizontal, 8)
+                    valueAndEye
+                }
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    labelText
+                        .lineLimit(2)
+                        .frame(width: 140, alignment: .leading)
+                    valueAndEye
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private var labelText: some View {
+        Text(label).foregroundStyle(.secondary)
+    }
+
+    private var valueAndEye: some View {
         HStack(alignment: .center, spacing: 12) {
-            Text(label)
-                .foregroundStyle(.secondary)
-                .frame(width: 130, alignment: .leading)
             if let totp = field.totp {
                 TotpValue(params: totp, copied: copied, onCopy: onCopy)
             } else {
                 Button { onCopy(field.value) } label: {
                     Text(shown)
-                        .font(field.multiline ? .body : .body.monospaced())
-                        .lineLimit(field.multiline ? nil : 1)
+                        // Only secrets are set in a fixed-width face; plain
+                        // values read as ordinary text and wrap. A secret
+                        // keeps one line, so revealing it never resizes the row.
+                        .font(field.masked ? .body.monospaced() : .body)
+                        .lineLimit(field.masked ? 1 : nil)
+                        .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(CopySurfaceStyle(copied: copied))
@@ -156,18 +195,14 @@ private struct FieldRow: View {
             .opacity(canReveal ? 1 : 0)
             .disabled(!canReveal)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
     }
 
     private var canReveal: Bool {
         field.masked && field.totp == nil
     }
 
-    /// Same masking width rule as COSMIC's `Field::display_value`.
     private var shown: String {
-        guard field.masked, !revealed else { return field.value }
-        return String(repeating: "•", count: min(max(field.value.count, 4), 24))
+        field.masked && !revealed ? Self.mask : field.value
     }
 }
 

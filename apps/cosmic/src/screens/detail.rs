@@ -5,9 +5,9 @@
 use cosmic::iced::{Alignment, Background, Color, Length, Vector};
 use cosmic::{theme, widget, Element};
 use zann_client::app::local::ItemDetail;
-use zann_ui_core::{generate_totp, project_item_fields, TotpParams};
+use zann_ui_core::{generate_totp, project_item_fields, TotpParams, MASKED_VALUE};
 
-use crate::i18n::{field_label, t};
+use crate::i18n::{field_label, t, type_label};
 
 #[derive(Clone)]
 pub enum Message {
@@ -127,7 +127,8 @@ impl Detail {
         let mut column = widget::column::with_capacity(self.fields.len() + 2)
             .push(widget::text::caption(format!(
                 "{} · {}",
-                self.path, self.type_id
+                self.path,
+                type_label(&self.type_id)
             )))
             .spacing(spacing.space_s);
 
@@ -154,7 +155,7 @@ impl Field {
     /// the platform reveal modifier is ephemeral and never mutates that state.
     pub fn display_value(&self, reveal_all: bool) -> String {
         if self.masked && !self.revealed && !reveal_all {
-            "•".repeat(self.value.chars().count().clamp(4, 24))
+            MASKED_VALUE.to_string()
         } else {
             self.value.clone()
         }
