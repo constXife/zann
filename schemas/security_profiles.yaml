@@ -96,3 +96,12 @@ profiles:
       revealable: [password, notes]
     never_log_fields: [password, notes]
     exposable_public_attrs: [host, username, protocol]
+
+  secret:
+    version: 1
+    ui:
+      masked_by_default: [value]
+      copyable: [value]
+      revealable: [value]
+    never_log_fields: [value]
+    exposable_public_attrs: [policy]

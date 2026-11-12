@@ -64,6 +64,8 @@
     "email": "Email",
     "phone": "Телефон",
     "token": "Токен",
+    "value": "Значение",
+    "policy": "Политика",
     "private_key": "Приватный ключ",
     "public_key": "Публичный ключ",
     "passphrase": "Парольная фраза",
