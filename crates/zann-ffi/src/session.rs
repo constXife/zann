@@ -10,10 +10,10 @@ use std::time::{Duration, Instant};
 
 use tokio::runtime::Runtime;
 use zann_client::app::{
-    AppClient, AuthMethod, ConnectionTrustChallenge, LocalLogoutStatus, LoginPassword,
-    LogoutOutcome, PasswordLoginRequest, PasswordRegistrationRequest, PersonalVaultStatus,
-    PrepareConnectionOutcome, PreparedConnection, RemoteLogoutStatus, SessionAccess,
-    SessionCancellationHandle, SessionError, SessionErrorKind, SessionOperation,
+    AppClient, AuthMethod, ConnectionRemoval, ConnectionTrustChallenge, LocalLogoutStatus,
+    LoginPassword, LogoutOutcome, PasswordLoginRequest, PasswordRegistrationRequest,
+    PersonalVaultStatus, PrepareConnectionOutcome, PreparedConnection, RemoteLogoutStatus,
+    SessionAccess, SessionCancellationHandle, SessionError, SessionErrorKind, SessionOperation,
 };
 use zann_client::oidc::{OidcBrowserError, OidcBrowserErrorKind, OidcBrowserLogin};
 
@@ -33,6 +33,7 @@ pub enum SessionErrorKindFfi {
     TrustRequired,
     TrustMismatch,
     TrustInvalid,
+    ServerIdentityChanged,
     InsecureTransport,
     TransportUnavailable,
     TransportRejected,
@@ -60,6 +61,7 @@ impl From<SessionErrorKind> for SessionErrorKindFfi {
             SessionErrorKind::TrustRequired => Self::TrustRequired,
             SessionErrorKind::TrustMismatch => Self::TrustMismatch,
             SessionErrorKind::TrustInvalid => Self::TrustInvalid,
+            SessionErrorKind::ServerIdentityChanged => Self::ServerIdentityChanged,
             SessionErrorKind::InsecureTransport => Self::InsecureTransport,
             SessionErrorKind::TransportUnavailable => Self::TransportUnavailable,
             SessionErrorKind::TransportRejected => Self::TransportRejected,
@@ -326,6 +328,27 @@ impl From<LogoutOutcome> for LogoutOutcomeFfi {
     }
 }
 
+/// What `RemoteSession::remove_connection` did.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
+pub enum ConnectionRemovalFfi {
+    /// `cleanup_deferred`: some stored credentials are retired but still in
+    /// the store while the config backup references them; a later reconcile
+    /// deletes them, as after a logout.
+    Removed {
+        cleanup_deferred: bool,
+    },
+    AlreadyAbsent,
+}
+
+impl From<ConnectionRemoval> for ConnectionRemovalFfi {
+    fn from(removal: ConnectionRemoval) -> Self {
+        match removal {
+            ConnectionRemoval::Removed { cleanup_deferred } => Self::Removed { cleanup_deferred },
+            ConnectionRemoval::AlreadyAbsent => Self::AlreadyAbsent,
+        }
+    }
+}
+
 struct Bridge {
     runtime: Runtime,
     client: AppClient,
@@ -385,6 +408,22 @@ impl RemoteSession {
             .ok_or_else(|| CoreError::InvalidArgument("challenge was already used".to_string()))?;
         let prepared = self.0.client.trust_connection(challenge)?;
         Ok(Arc::new(PreparedConnectionFfi(prepared)))
+    }
+
+    /// Forgets the connection `prepare_connection` keys by this endpoint and
+    /// name, with its credentials, without contacting the server. It is the
+    /// "Forget this server" recovery from `ServerIdentityChanged`; the next
+    /// `prepare_connection` pins the server as on first use.
+    pub fn remove_connection(
+        &self,
+        endpoint: String,
+        connection_name: String,
+    ) -> CoreResult<ConnectionRemovalFfi> {
+        Ok(self
+            .0
+            .client
+            .remove_connection(&endpoint, &connection_name)?
+            .into())
     }
 
     pub fn password_login(
@@ -500,6 +539,7 @@ mod tests {
             SessionErrorKind::TrustRequired,
             SessionErrorKind::TrustMismatch,
             SessionErrorKind::TrustInvalid,
+            SessionErrorKind::ServerIdentityChanged,
             SessionErrorKind::InsecureTransport,
             SessionErrorKind::TransportUnavailable,
             SessionErrorKind::TransportRejected,
