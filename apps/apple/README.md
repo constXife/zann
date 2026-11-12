@@ -10,6 +10,15 @@ xcodegen --spec project.yml   # brew install xcodegen
 open Zann.xcodeproj           # or: xcodebuild test -scheme Zann -destination 'platform=macOS,arch=arm64'
 ```
 
+The server tests run against a live server with password sign-in, and skip
+without one:
+
+```bash
+TEST_RUNNER_ZANN_REMOTE_URL=http://127.0.0.1:18081 \
+  xcodebuild test -project Zann.xcodeproj -scheme Zann -destination 'platform=macOS,arch=arm64'
+ZANN_REMOTE_URL=http://127.0.0.1:18081 cargo test -p zann-ffi --test remote_sync -- --ignored
+```
+
 `project.yml` is the source of the Xcode project; `Zann.xcodeproj` is
 generated and ignored, so parallel branches never conflict on `.pbxproj`.
 
@@ -51,6 +60,16 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   key that reveals masked values while pressed, and the lock triggers (input
   as activity, the idle tick, focus loss, hiding and minimizing) whose effect
   `AppModel` decides from `DevicePreferences`.
+
+- `Zann/Connect/` signs this Mac in to a server through the core's
+  `RemoteSession`: probe and pin the server, confirm a changed fingerprint,
+  then a password or browser sign-in. The core pins trust, keeps the session
+  and decides when registration is offered. The account's personal vault
+  then opens with its master password (or a new account creates one) and
+  syncs once; the core then moves the still-empty session to the server's
+  personal vault and keeps choosing it after a restart.
+- Every later unlock opens the vault at once and syncs in the background;
+  ⌘R syncs on demand. A vault that only lives on this Mac has no sync.
 
 - `Zann/SettingsView.swift` is the Settings window (⌘,) over the shared
   device preferences. `Zann/PreferencesFile.swift` keeps them in this app's

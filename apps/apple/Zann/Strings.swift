@@ -25,4 +25,21 @@ struct Strings {
     func secondsLabel(_ seconds: UInt32) -> String {
         catalogue.secondsLabel(seconds: seconds)
     }
+
+    /// Unlock and sync failures carry an `errors.<kind>` key; other errors,
+    /// and kinds without a translation, read as the core's message.
+    func message(for failure: Error) -> String {
+        let kind: String?
+        switch failure as? CoreError {
+        case .Unlock(let unlockKind, _)?: kind = unlockKind
+        case .Sync(let syncKind, _)?: kind = syncKind
+        default: kind = nil
+        }
+        if let kind {
+            let key = "errors.\(kind)"
+            let text = self(key)
+            if text != key { return text }
+        }
+        return describe(failure)
+    }
 }

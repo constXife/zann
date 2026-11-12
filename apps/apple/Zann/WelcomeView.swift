@@ -12,6 +12,11 @@ struct WelcomeView: View {
             Button("Create a Local Vault") { model.startCreatingVault() }
                 .keyboardShortcut(.defaultAction)
                 .controlSize(.large)
+            Button(model.strings("wizard.connect")) { model.startConnecting() }
+                .controlSize(.large)
+            if let error = model.error {
+                Text(error).foregroundStyle(.red).textSelection(.enabled)
+            }
         }
         .padding(32)
         .frame(maxWidth: 420)

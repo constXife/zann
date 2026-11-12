@@ -6,7 +6,8 @@ struct ZannApp: App {
     @StateObject private var model = AppModel(
         opening: AppModel.openDefaultCore,
         preferences: AppModel.defaultPreferencesFile,
-        systemLanguage: Locale.preferredLanguages.first ?? Locale.current.identifier
+        systemLanguage: Locale.preferredLanguages.first ?? Locale.current.identifier,
+        openBrowser: { NSWorkspace.shared.open($0) }
     )
 
     var body: some Scene {
@@ -30,6 +31,13 @@ struct ZannApp: App {
                 .disabled(model.vault == nil)
             }
             CommandMenu("Vault") {
+                Button(model.strings("settings.accounts.syncNow")) {
+                    Task { await model.vault?.sync() }
+                }
+                .keyboardShortcut("r", modifiers: .command)
+                // Commands observe only AppModel; a vault with no server
+                // makes this a no-op.
+                .disabled(model.vault == nil)
                 Button("Lock") { Task { await model.lock() } }
                     .keyboardShortcut("l", modifiers: .command)
                     .disabled(!model.isUnlocked)
@@ -58,6 +66,10 @@ struct RootView: View {
             ContentUnavailableNotice(title: "Zann could not open its database", message: message)
         case .welcome:
             WelcomeView()
+        case .connect:
+            if let connect = model.connect {
+                ConnectView(connect: connect)
+            }
         case .master(let mode):
             MasterPasswordView(mode: mode)
         case .vault:

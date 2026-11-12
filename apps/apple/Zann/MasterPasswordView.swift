@@ -23,6 +23,12 @@ struct MasterPasswordView: View {
                 Text("It encrypts this vault. It cannot be recovered if you forget it.")
                     .foregroundStyle(.secondary)
             }
+            if model.syncAfterUnlock {
+                if mode == .unlock {
+                    Text(model.strings("wizard.unlockSubtitle")).foregroundStyle(.secondary)
+                }
+                Text(model.strings("wizard.syncAfterUnlock")).foregroundStyle(.secondary)
+            }
             SecureField("Master password", text: $password)
                 .focused($focused)
                 .onSubmit(submit)
