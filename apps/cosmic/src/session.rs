@@ -4,7 +4,10 @@
 //! an `Option<Facade>` or guess what to do without one — the shell shows
 //! [`crate::Shell::Blocked`] instead.
 
+use std::cell::{RefCell, RefMut};
+
 use zann_client::app::local::AppStatus;
+use zann_client::app::local::AutoSyncSchedule;
 
 use crate::backend::local::{self, Facade};
 use crate::backend::{activate_database, ActiveDatabaseGuard, DatabaseLocation};
@@ -12,6 +15,9 @@ use crate::backend::{activate_database, ActiveDatabaseGuard, DatabaseLocation};
 pub struct Session {
     facade: Facade,
     location: DatabaseLocation,
+    /// Outlives every vault screen, so a lock from any path forgets what was
+    /// due and a sync from before it cannot complete into the next unlock.
+    auto_sync: RefCell<AutoSyncSchedule>,
     _active_database: ActiveDatabaseGuard,
 }
 
@@ -33,6 +39,7 @@ impl Session {
             Self {
                 facade,
                 location,
+                auto_sync: RefCell::new(AutoSyncSchedule::new()),
                 _active_database: active_database,
             },
             status,
@@ -48,7 +55,14 @@ impl Session {
         &self.location
     }
 
+    /// When the core says to sync; screens run the timer and the sync.
+    pub fn auto_sync(&self) -> RefMut<'_, AutoSyncSchedule> {
+        self.auto_sync.borrow_mut()
+    }
+
+    /// Also cancels a sync in flight and everything the schedule had due.
     pub fn lock(&self) {
         let _ = self.facade.lock();
+        self.auto_sync().locked();
     }
 }

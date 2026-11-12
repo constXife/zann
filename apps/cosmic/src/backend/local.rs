@@ -83,6 +83,27 @@ pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
+/// A scheduled or manual sync of the vault's server. `None` when there is no
+/// server or the sync changed nothing; otherwise the first page again, for
+/// `query`.
+pub fn sync_and_reload(
+    facade: &Facade,
+    query: Option<String>,
+) -> Result<Option<ItemsPage>, String> {
+    if !facade
+        .app_status()
+        .map_err(|err| err.to_string())?
+        .server_connected
+    {
+        return Ok(None);
+    }
+    let outcome = facade.remote_sync(None).map_err(|err| err.to_string())?;
+    if outcome.changes_committed == 0 {
+        return Ok(None);
+    }
+    items(facade, None, query).map(Some)
+}
+
 /// The first sync of a newly connected server; the core then moves the
 /// still-empty session to that server's personal vault.
 pub fn sync_new_server(facade: &Facade, storage_id: String) -> Result<(), String> {

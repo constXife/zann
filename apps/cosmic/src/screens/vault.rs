@@ -10,6 +10,7 @@ use cosmic::iced::{event, keyboard, mouse, Alignment, Event, Length, Subscriptio
 use cosmic::prelude::*;
 use cosmic::widget::nav_bar;
 use cosmic::{theme, widget, Element};
+use zann_client::app::local::AutoSyncTicket;
 use zann_client::app::local::{ItemSummary, VaultSummary};
 use zann_ui_core::{
     category_views, create_type_for, filtered_indices, FolderFilter, ItemCounts, ItemFilter,
@@ -116,6 +117,10 @@ pub struct State {
     /// Space left after libcosmic's navigation column.
     content_width: f32,
     drag: Option<Drag>,
+    /// Only the latest armed auto-sync timer counts.
+    sync_timer: u64,
+    /// The banner a failed sync left, cleared by the next one that succeeds.
+    sync_error: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -165,6 +170,17 @@ pub enum Message {
     ResizeStart,
     ResizeMove(f32),
     ResizeEnd,
+    /// The auto-sync timer armed with this ID fired.
+    SyncDue(u64),
+    /// A scheduled sync ended: the first page again when it changed
+    /// something, for the list generation it started under.
+    AutoSynced {
+        ticket: AutoSyncTicket,
+        list_generation: u64,
+        result: Result<Option<ItemsPage>, String>,
+    },
+    /// The shown item, read again after a sync changed the vault.
+    DetailRefreshed(Result<Detail, String>),
 }
 
 pub enum Outcome {
@@ -180,6 +196,7 @@ pub enum Outcome {
 
 impl State {
     pub fn new(page: ItemsPage, sync_error: Option<String>) -> Self {
+        let sync_error = sync_error.map(|err| t_args("items.syncFailed", &[("error", &err)]));
         let mut state = Self {
             vaults: Vec::new(),
             selected_vault_id: None,
@@ -198,7 +215,7 @@ impl State {
             history: None,
             editing_generation: 0,
             busy: false,
-            error: sync_error.map(|err| t_args("items.syncFailed", &[("error", &err)])),
+            error: sync_error.clone(),
             last_activity: Instant::now(),
             auto_lock_minutes: 10,
             reveal_seconds: 20,
@@ -209,6 +226,8 @@ impl State {
             // Enough for the default split until the shell reports its width.
             content_width: layout::LIST_DEFAULT + layout::HANDLE + layout::DETAIL_MIN,
             drag: None,
+            sync_timer: 0,
+            sync_error,
         };
         state.apply_page(page, true);
         state.rebuild_nav();
@@ -403,6 +422,9 @@ impl State {
                 | Message::Tick
                 | Message::ClearCopied(_)
                 | Message::HideRevealed(_)
+                | Message::SyncDue(_)
+                | Message::AutoSynced { .. }
+                | Message::DetailRefreshed(_)
         ) {
             self.last_activity = Instant::now();
         }
@@ -675,6 +697,10 @@ impl State {
             }
 
             Message::ResizeEnd => self.drag = None,
+
+            message @ (Message::SyncDue(_)
+            | Message::AutoSynced { .. }
+            | Message::DetailRefreshed(_)) => return self.update_auto_sync(message, session),
         }
         Outcome::None
     }
@@ -825,4 +851,5 @@ impl zann_ui_core::ItemLike for ItemSummaryView<'_> {
     }
 }
 
+mod auto_sync;
 mod editing;

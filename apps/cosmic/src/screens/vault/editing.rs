@@ -181,6 +181,7 @@ impl State {
                         return Outcome::Task(Task::batch([
                             refresh_items,
                             Self::load_vaults(session),
+                            self.local_change(session),
                         ]));
                     }
                     history::Outcome::Copy(value) => {
@@ -210,7 +211,11 @@ impl State {
                         off_thread(move || local::items(&facade, None, None)).await,
                     )
                 });
-                return Outcome::Task(Task::batch([refresh_items, Self::load_vaults(session)]));
+                return Outcome::Task(Task::batch([
+                    refresh_items,
+                    Self::load_vaults(session),
+                    self.local_change(session),
+                ]));
             }
 
             Message::Saved(_, Err(err)) => {
