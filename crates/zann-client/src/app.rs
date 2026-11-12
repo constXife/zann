@@ -28,8 +28,8 @@ pub use crate::session::{
     SessionOperationId, SessionTarget, SessionTargetError,
 };
 pub use crate::sync::{
-    AccountKeyCheck, SyncError, SyncErrorKind, SyncOutcome, SyncOutcomeStatus, SyncProgress,
-    SyncProgressPhase, SyncProgressSink, SyncStage,
+    AccountKeyCheck, AutoSyncSchedule, AutoSyncTicket, SyncError, SyncErrorKind, SyncOutcome,
+    SyncOutcomeStatus, SyncProgress, SyncProgressPhase, SyncProgressSink, SyncStage,
 };
 use crate::sync::{SyncEngine, SyncFuture};
 

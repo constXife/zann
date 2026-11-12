@@ -42,6 +42,8 @@ pub struct LocalVault {
     storage_id: Mutex<Uuid>,
     vault_id: Mutex<Option<Uuid>>,
     master_key: Mutex<Option<Arc<SecretKey>>>,
+    /// Cancelled on lock, so no sync keeps the master key past it.
+    syncs: in_flight::InFlightSyncs,
     /// The vault directory. The remembered unlock is persisted there in its own
     /// file, so every client on this machine sees the same enrolments.
     root: PathBuf,
@@ -276,6 +278,7 @@ impl LocalVault {
             storage_id: Mutex::new(storage_id),
             vault_id: Mutex::new(None),
             master_key: Mutex::new(None),
+            syncs: in_flight::InFlightSyncs::default(),
             root,
         }))
     }
@@ -382,6 +385,7 @@ impl From<Retention> for crate::maintenance::RetentionPolicy {
 }
 
 mod enrollment;
+mod in_flight;
 mod ports;
 pub use ports::*;
 mod unlock;

@@ -83,7 +83,14 @@
       "group": "items",
       "order": 80,
       "filter": {
-        "type_ids": ["ssh_key", "database", "cloud_iam", "file_secret", "server_credentials"],
+        "type_ids": [
+          "ssh_key",
+          "database",
+          "cloud_iam",
+          "file_secret",
+          "server_credentials",
+          "secret"
+        ],
         "is_deleted": false
       }
     },

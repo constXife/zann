@@ -21,6 +21,7 @@ pub trait LocalVaultService: Send + Sync {
     fn remove_hardware_key(&self, credential_id: String) -> LocalResult<()>;
     fn remember_with_keystore(&self) -> LocalResult<()>;
     fn forget_remembered(&self) -> LocalResult<()>;
+    /// Forgets the master key and cancels every `remote_sync` in flight.
     fn lock(&self) -> LocalResult<VaultStatus>;
     fn vault_status(&self) -> LocalResult<VaultStatus>;
     fn current_vault_id(&self) -> Option<String>;
