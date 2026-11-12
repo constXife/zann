@@ -32,7 +32,7 @@ final class VaultModelTests: XCTestCase {
     }
 
     private func makeModel() throws -> VaultModel {
-        VaultModel(core: core, page: try VaultModel.loadPage(core), strings: Strings(language: "en"))
+        VaultModel(core: core, contents: try VaultModel.load(core), strings: Strings(language: "en"))
     }
 
     func testALocalOnlyVaultHasNothingToSync() async throws {
@@ -41,6 +41,22 @@ final class VaultModelTests: XCTestCase {
         await model.sync()
         XCTAssertFalse(model.canSync)
         XCTAssertNil(model.syncError)
+        XCTAssertEqual(model.visibleItems.count, 3)
+    }
+
+    func testALocalStorageOpensItsOnlyVaultAndRefusesAnUnknownOne() async throws {
+        let model = try makeModel()
+        XCTAssertEqual(model.vaults.map(\.id), [model.vaultID])
+        XCTAssertEqual(model.vaults.first?.scope, .personal)
+        XCTAssertEqual(model.vaults.first?.itemCount, 3)
+        let opened = model.vaultID
+
+        await model.selectVault(opened)
+        XCTAssertNil(model.error)
+        await model.selectVault(UUID().uuidString.lowercased())
+        XCTAssertNotNil(model.error)
+        XCTAssertEqual(model.vaultID, opened)
+        XCTAssertEqual(core.currentVaultId(), opened)
         XCTAssertEqual(model.visibleItems.count, 3)
     }
 
