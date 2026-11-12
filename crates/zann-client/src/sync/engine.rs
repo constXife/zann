@@ -9,9 +9,9 @@ use uuid::Uuid;
 use zann_core::SyncStatus;
 
 use super::model::{
-    ItemState, PendingExpectation, PendingProof, PullCommitChange, PullPageCommit, PushCommitPlan,
-    ReconciledCatalog, ResolvedSyncTarget, SyncCursor, SyncError, SyncErrorKind, SyncFuture,
-    SyncLocalStore, SyncOutcome, SyncOutcomeStatus, SyncProgress, SyncProgressPhase,
+    CatalogSnapshot, ItemState, PendingExpectation, PendingProof, PullCommitChange, PullPageCommit,
+    PushCommitPlan, ReconciledCatalog, ResolvedSyncTarget, SyncCursor, SyncError, SyncErrorKind,
+    SyncFuture, SyncLocalStore, SyncOutcome, SyncOutcomeStatus, SyncProgress, SyncProgressPhase,
     SyncProgressSink, SyncSeq, SyncStage, SyncStoreError, SyncStoreErrorKind, VaultPlane,
     MAX_CATALOG_VAULTS, MAX_PULL_CHANGES, MAX_PULL_PAGES,
 };
@@ -24,6 +24,8 @@ use crate::session::{
     AppSession, OperationCompletion, SessionAccess, SessionError, SessionErrorKind,
     SessionOperation, SessionTarget,
 };
+
+mod key_proof;
 
 const MAX_REQUEST_TIME: Duration = Duration::from_secs(30);
 
@@ -63,6 +65,15 @@ pub(crate) struct SyncEngine {
     progress: Arc<dyn SyncProgressSink>,
 }
 
+/// One target's authorized session, resolved local projection and fetched
+/// catalog, before anything local is committed.
+struct OpenedCatalog<'a> {
+    remote: &'a Arc<dyn SyncRemote>,
+    access: SessionAccess,
+    resolved: ResolvedSyncTarget,
+    catalog: CatalogSnapshot,
+}
+
 #[cfg_attr(not(feature = "app"), allow(dead_code))]
 impl SyncEngine {
     #[must_use]
@@ -95,13 +106,16 @@ impl SyncEngine {
         Box::pin(async move { self.pull_inner(target, operation).await })
     }
 
-    async fn pull_inner(
+    /// Authorizes the target, resolves its local projection against the
+    /// session's bindings and fetches the server's catalog. Nothing local is
+    /// committed yet.
+    async fn open_catalog(
         &self,
         target: &SessionTarget,
-        operation: SessionOperation,
-    ) -> Result<SyncOutcome, SyncError> {
+        operation: &SessionOperation,
+    ) -> Result<OpenedCatalog<'_>, SyncError> {
         let operation_id = operation.operation_id();
-        self.ensure_dispatchable(&operation, SyncStage::Authorization)?;
+        self.ensure_dispatchable(operation, SyncStage::Authorization)?;
         self.report(operation_id, SyncProgressPhase::Authorizing, 0, 0, 0, 0);
         let access = self
             .authorizer
@@ -140,7 +154,7 @@ impl SyncEngine {
             )
         })?;
 
-        self.ensure_dispatchable(&operation, SyncStage::ResolveTarget)?;
+        self.ensure_dispatchable(operation, SyncStage::ResolveTarget)?;
         let authorized_target_generation = access.authorized_target_generation();
         let resolved = self
             .local
@@ -190,7 +204,7 @@ impl SyncEngine {
             ));
         }
 
-        self.ensure_dispatchable(&operation, SyncStage::Catalog)?;
+        self.ensure_dispatchable(operation, SyncStage::Catalog)?;
         self.report(operation_id, SyncProgressPhase::Catalog, 0, 0, 0, 0);
         let remote = self.remote.as_ref().map_err(|_| {
             SyncError::new(
@@ -199,9 +213,9 @@ impl SyncEngine {
                 SyncStage::Catalog,
             )
         })?;
-        let timeout = request_timeout(&operation, SyncStage::Catalog)?;
-        let mut catalog = await_remote(
-            &operation,
+        let timeout = request_timeout(operation, SyncStage::Catalog)?;
+        let catalog = await_remote(
+            operation,
             SyncStage::Catalog,
             remote.fetch_catalog(&access, timeout),
         )
@@ -218,60 +232,28 @@ impl SyncEngine {
                 SyncStage::Catalog,
             ));
         }
-        let uninitialized_personal = catalog
-            .vaults()
-            .iter()
-            .filter(|vault| {
-                vault.plane() == VaultPlane::PersonalClient && vault.vault_key_envelope().is_empty()
-            })
-            .map(super::model::CatalogVault::id)
-            .collect::<Vec<_>>();
-        for vault_id in uninitialized_personal {
-            self.ensure_dispatchable(&operation, SyncStage::ReconcileCatalog)?;
-            let scope =
-                super::model::SyncScope::new(resolved.storage_id(), vault_id).map_err(|_| {
-                    SyncError::new(
-                        operation_id,
-                        SyncErrorKind::Protocol,
-                        SyncStage::ReconcileCatalog,
-                    )
-                })?;
-            let publication = Arc::clone(&self.local)
-                .prepare_generated_key(scope, Vec::new())
-                .await
-                .map_err(|error| {
-                    map_store_error(operation_id, SyncStage::ReconcileCatalog, error)
-                })?;
-            let published_envelope = publication.published_envelope().to_vec();
-            let timeout = request_timeout(&operation, SyncStage::Catalog)?;
-            await_remote(
-                &operation,
-                SyncStage::Catalog,
-                remote.publish_personal_vault_key(&access, vault_id, &published_envelope, timeout),
-            )
+        Ok(OpenedCatalog {
+            remote,
+            access,
+            resolved,
+            catalog,
+        })
+    }
+
+    async fn pull_inner(
+        &self,
+        target: &SessionTarget,
+        operation: SessionOperation,
+    ) -> Result<SyncOutcome, SyncError> {
+        let operation_id = operation.operation_id();
+        let OpenedCatalog {
+            remote,
+            access,
+            resolved,
+            mut catalog,
+        } = self.open_catalog(target, &operation).await?;
+        self.publish_uninitialized_keys(remote, &access, &resolved, &mut catalog, &operation)
             .await?;
-            tokio::spawn(Arc::clone(&self.local).commit_generated_key(publication))
-                .await
-                .map_err(|_| {
-                    SyncError::new(
-                        operation_id,
-                        SyncErrorKind::Internal,
-                        SyncStage::ReconcileCatalog,
-                    )
-                })?
-                .map_err(|error| {
-                    map_store_error(operation_id, SyncStage::ReconcileCatalog, error)
-                })?;
-            catalog
-                .install_generated_envelope(vault_id, &[], published_envelope)
-                .map_err(|_| {
-                    SyncError::new(
-                        operation_id,
-                        SyncErrorKind::Internal,
-                        SyncStage::ReconcileCatalog,
-                    )
-                })?;
-        }
         let catalog = Arc::new(catalog);
         let resolved = Arc::new(resolved);
 
