@@ -9,6 +9,7 @@ auth:
 server:
   master_key_mode: auto_generate
   master_key_file: "/data/smk"
+  identity_key_file: "/data/identity-key"
 
 metrics:
   enabled: true
