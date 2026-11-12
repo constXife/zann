@@ -1720,7 +1720,10 @@ impl TokenManager {
                 return Err(SessionError::from_auth(&operation, &failure));
             }
         };
-        if !matches!(&identity.source, AuthSource::Oidc { .. })
+        // `/me` reports the credential of this request, and that is now a
+        // Zann session token: the server answers `Internal` for it however
+        // the session was opened, exactly as after a password login.
+        if !matches!(identity.source, AuthSource::Internal)
             || identity.email.is_empty()
             || identity.email.trim() != identity.email
             || identity.email.len() > LOGIN_EMAIL_MAX_BYTES
@@ -1788,12 +1791,24 @@ impl TokenManager {
         let repository = self.inner.repository.clone();
         let store = self.inner.credential_store.clone();
         let expected_revision = anchor.source_revision();
-        let (locks, committed) = match run_with_locks(locks, move || {
+        // The commit takes the config and credential locks itself, so the
+        // operation locks go first, as in `import_session_tokens`; the
+        // revision and stored binding it expects still reject any change
+        // made in between.
+        drop(locks);
+        let committed = match run_blocking(move || {
             repository.commit_authenticated_session(expected_revision, commit, store.as_ref())
         })
         .await
         {
-            Ok(result) => result,
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(error)) => {
+                let _ = port.logout(refresh.expose_secret()).await;
+                return Err(SessionError::new(
+                    &operation,
+                    config_error_kind(&error, &operation),
+                ));
+            }
             Err(_) => {
                 let _ = port.logout(refresh.expose_secret()).await;
                 return Err(SessionError::new(
@@ -1802,27 +1817,22 @@ impl TokenManager {
                 ));
             }
         };
-        let committed = match committed {
-            Ok(outcome) => outcome,
-            Err(error) => {
-                let _ = port.logout(refresh.expose_secret()).await;
-                drop(locks);
-                return Err(SessionError::new(
-                    &operation,
-                    config_error_kind(&error, &operation),
-                ));
-            }
-        };
         cleanup_deferred |= outcome_has_warnings(committed.transaction());
-        let (locks, authorized_target_generation) = self
-            .generation_from_snapshot(
-                locks,
-                committed.snapshot().clone(),
-                &request.target,
-                &operation,
+        let repository = self.inner.repository.clone();
+        let snapshot = committed.snapshot().clone();
+        let connection_id = request.target.connection_id.clone();
+        let profile_name = request.target.profile_name.clone();
+        let authorized_target_generation = run_blocking(move || {
+            repository.authorized_target_generation_from_snapshot(
+                &snapshot,
+                &connection_id,
+                &profile_name,
             )
-            .await?;
-        drop(locks);
+        })
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .ok_or_else(|| SessionError::new(&operation, SessionErrorKind::RecoveryRequired))?;
         Ok(SessionAccess {
             operation_id: operation.operation_id,
             target: request.target,
@@ -4542,39 +4552,8 @@ mod tests {
             *self.login_behavior.lock().expect("login behavior lock") = behavior;
         }
 
-        fn set_me_behavior(&self, behavior: MeBehavior) {
-            *self.me_behavior.lock().expect("me behavior lock") = behavior;
-        }
-
-        fn set_prelogin_results(&self, results: Vec<Result<PreloginResponse, AuthFailure>>) {
-            *self.prelogin.lock().expect("prelogin lock") = results.into();
-        }
-    }
-
-    impl AuthPort for FakeAuthPort {
-        fn verified_endpoint(&self) -> AuthFuture<'_, EndpointIdentity> {
-            self.probe_calls.fetch_add(1, Ordering::SeqCst);
-            let result = self.identity.lock().expect("identity lock").clone();
-            Box::pin(async move { result })
-        }
-
-        fn prelogin<'a>(&'a self, _email: &'a str) -> AuthFuture<'a, PreloginResponse> {
-            self.prelogin_calls.fetch_add(1, Ordering::SeqCst);
-            let mut results = self.prelogin.lock().expect("prelogin lock");
-            let result = if results.len() > 1 {
-                results.pop_front().expect("nonempty prelogin results")
-            } else {
-                results.front().expect("prelogin result configured").clone()
-            };
-            Box::pin(async move { result })
-        }
-
-        fn password_login<'a>(
-            &'a self,
-            _email: &'a str,
-            _password: &'a LoginPassword,
-            _client: &'a SessionClient,
-        ) -> AuthFuture<'a, LoginResponse> {
+        /// The scripted answer of a password or OIDC login.
+        fn scripted_login(&self) -> AuthFuture<'static, LoginResponse> {
             self.login_calls.fetch_add(1, Ordering::SeqCst);
             let behavior = self
                 .login_behavior
@@ -4610,6 +4589,46 @@ mod tests {
                     }
                 }
             })
+        }
+
+        fn set_me_behavior(&self, behavior: MeBehavior) {
+            *self.me_behavior.lock().expect("me behavior lock") = behavior;
+        }
+
+        fn set_prelogin_results(&self, results: Vec<Result<PreloginResponse, AuthFailure>>) {
+            *self.prelogin.lock().expect("prelogin lock") = results.into();
+        }
+    }
+
+    impl AuthPort for FakeAuthPort {
+        fn verified_endpoint(&self) -> AuthFuture<'_, EndpointIdentity> {
+            self.probe_calls.fetch_add(1, Ordering::SeqCst);
+            let result = self.identity.lock().expect("identity lock").clone();
+            Box::pin(async move { result })
+        }
+
+        fn prelogin<'a>(&'a self, _email: &'a str) -> AuthFuture<'a, PreloginResponse> {
+            self.prelogin_calls.fetch_add(1, Ordering::SeqCst);
+            let mut results = self.prelogin.lock().expect("prelogin lock");
+            let result = if results.len() > 1 {
+                results.pop_front().expect("nonempty prelogin results")
+            } else {
+                results.front().expect("prelogin result configured").clone()
+            };
+            Box::pin(async move { result })
+        }
+
+        fn password_login<'a>(
+            &'a self,
+            _email: &'a str,
+            _password: &'a LoginPassword,
+            _client: &'a SessionClient,
+        ) -> AuthFuture<'a, LoginResponse> {
+            self.scripted_login()
+        }
+
+        fn oidc_login<'a>(&'a self, _token: &'a OidcToken) -> AuthFuture<'a, LoginResponse> {
+            self.scripted_login()
         }
 
         fn me<'a>(&'a self, _access_token: &'a str) -> AuthFuture<'a, Identity> {
@@ -5726,6 +5745,68 @@ mod tests {
         assert!(anchor
             .credentials()
             .contains_key(&CredentialKind::ServiceAccount));
+    }
+
+    fn oidc_request(target: &SessionTarget) -> OidcLoginInput {
+        OidcLoginInput::new(
+            target.clone(),
+            OidcToken::new(format!("provider-token-{}", Uuid::now_v7())).expect("bounded token"),
+        )
+    }
+
+    fn oidc_harness() -> Harness {
+        let now = DateTime::parse_from_rfc3339("2026-08-16T12:00:00Z")
+            .expect("fixed time")
+            .with_timezone(&Utc);
+        Harness::new(
+            ADDRESS,
+            now + ChronoDuration::hours(1),
+            Some("old-refresh"),
+            None,
+        )
+    }
+
+    /// The server reports a Zann session token as `Internal` whichever login
+    /// opened it; the session is still bound as an OIDC one.
+    #[tokio::test]
+    async fn oidc_login_accepts_the_session_identity_the_server_reports() {
+        let harness = oidc_harness();
+        let port = FakeAuthPort::new(harness.identity(), success_behavior());
+        let access = harness
+            .login_app(port.clone())
+            .oidc_login(oidc_request(&harness.target), harness.operation())
+            .await
+            .expect("oidc login");
+
+        assert_eq!(access.auth_method(), Some(AuthMethod::Oidc));
+        assert_eq!(
+            access.account_subject(),
+            Some("018f4f08-7f1d-7d57-bd43-bb4b7c520001")
+        );
+        assert_eq!(port.login_calls(), 1);
+        assert_eq!(port.me_calls(), 1);
+        assert_eq!(port.logout_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn oidc_login_rejects_a_foreign_session_source_and_logs_out() {
+        let harness = oidc_harness();
+        let port = FakeAuthPort::new(harness.identity(), success_behavior());
+        let mut identity = match port.me_behavior.lock().expect("me behavior lock").clone() {
+            MeBehavior::Success(identity) => identity,
+            _ => unreachable!("FakeAuthPort starts with a successful /me"),
+        };
+        identity.source = AuthSource::ServiceAccount;
+        port.set_me_behavior(MeBehavior::Success(identity));
+
+        let error = harness
+            .login_app(port.clone())
+            .oidc_login(oidc_request(&harness.target), harness.operation())
+            .await
+            .expect_err("a service-account identity is not this login's session");
+
+        assert_eq!(error.kind(), SessionErrorKind::Protocol);
+        assert_eq!(port.logout_calls(), 1);
     }
 
     #[tokio::test]
