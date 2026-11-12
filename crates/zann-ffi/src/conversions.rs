@@ -22,19 +22,10 @@ impl From<native::VaultSummary> for VaultSummaryFfi {
         Self {
             id: value.id,
             name: value.name,
-            kind: value.kind,
-            is_default: value.is_default,
-            item_count: value.item_count,
-        }
-    }
-}
-
-impl From<VaultSummaryFfi> for native::VaultSummary {
-    fn from(value: VaultSummaryFfi) -> Self {
-        Self {
-            id: value.id,
-            name: value.name,
-            kind: value.kind,
+            scope: match value.kind {
+                native::VaultKind::Personal => crate::presentation::VaultScopeFfi::Personal,
+                native::VaultKind::Shared => crate::presentation::VaultScopeFfi::Shared,
+            },
             is_default: value.is_default,
             item_count: value.item_count,
         }

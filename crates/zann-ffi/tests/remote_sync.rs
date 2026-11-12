@@ -48,7 +48,7 @@ fn assert_in_personal_vault(core: &CoreFacade, storage_id: &str) {
         .into_iter()
         .find(|vault| vault.id == current)
         .expect("the open vault is in the server's storage");
-    assert_eq!(vault.kind, "personal");
+    assert_eq!(vault.scope, zann_ffi::VaultScopeFfi::Personal);
 }
 
 #[test]

@@ -830,7 +830,7 @@ impl State {
             .as_deref()
             .and_then(|id| self.vaults.iter().find(|vault| vault.id == id))
             .map_or(VaultScope::Personal, |vault| {
-                if vault.kind == "shared" {
+                if vault.kind == zann_core::VaultKind::Shared {
                     VaultScope::Shared
                 } else {
                     VaultScope::Personal

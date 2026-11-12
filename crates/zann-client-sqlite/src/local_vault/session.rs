@@ -26,10 +26,7 @@ impl LocalVault {
             result.push(VaultSummary {
                 id: vault.id.to_string(),
                 name: vault.name,
-                kind: match vault.kind {
-                    zann_core::VaultKind::Personal => "personal".to_string(),
-                    zann_core::VaultKind::Shared => "shared".to_string(),
-                },
+                kind: vault.kind,
                 is_default: vault.is_default,
                 item_count: count as u64,
             });

@@ -1,5 +1,7 @@
 //! Local vault read models and commands.
 
+pub use zann_core::VaultKind;
+
 #[derive(Debug, Clone)]
 pub struct VaultStatus {
     pub unlocked: bool,
@@ -9,7 +11,7 @@ pub struct VaultStatus {
 pub struct VaultSummary {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    pub kind: VaultKind,
     pub is_default: bool,
     pub item_count: u64,
 }
