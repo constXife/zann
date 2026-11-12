@@ -273,6 +273,12 @@ impl CoreFacade {
             .map(|value| value.into_iter().map(|value| value.into()).collect())
             .map_err(Into::into)
     }
+    /// Moves an unlocked session whose storage holds no item to the storage
+    /// a fresh start would open; call it after a newly connected server's
+    /// first sync.
+    pub fn follow_preferred_storage(&self) -> CoreResult<()> {
+        self.inner.follow_preferred_storage().map_err(Into::into)
+    }
     pub fn set_current_storage(&self, id: String) -> CoreResult<()> {
         self.inner.set_current_storage(id).map_err(Into::into)
     }
