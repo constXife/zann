@@ -17,6 +17,8 @@ mod remembered_unlock;
 mod remote_master_password;
 #[path = "local_vault/snapshots.rs"]
 mod snapshots;
+#[path = "local_vault/storage_connection.rs"]
+mod storage_connection;
 #[path = "local_vault/verify.rs"]
 mod verify;
 
