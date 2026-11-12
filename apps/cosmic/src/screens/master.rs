@@ -118,7 +118,7 @@ impl State {
                             // pull it first. A failed sync is worth reporting
                             // but must not keep the vault shut.
                             let sync_error = storage
-                                .map(|storage| local::sync(&facade, Some(storage)))
+                                .map(|storage| local::sync_new_server(&facade, storage))
                                 .and_then(Result::err);
                             local::items(&facade, None, None).map(|page| (page, sync_error))
                         })
@@ -156,7 +156,7 @@ impl State {
                 off_thread(move || {
                     local::unlock_remembered(&facade)?;
                     let sync_error = storage
-                        .map(|storage| local::sync(&facade, Some(storage)))
+                        .map(|storage| local::sync_new_server(&facade, storage))
                         .and_then(Result::err);
                     local::items(&facade, None, None).map(|page| (page, sync_error))
                 })

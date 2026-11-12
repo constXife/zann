@@ -71,10 +71,20 @@ pub fn open(db_path: &Path) -> Arc<CoreFacade> {
 }
 
 pub fn open_with(db_path: &Path, keystore: Arc<MemoryKeystore>) -> Arc<CoreFacade> {
+    open_with_secrets(db_path, keystore, Arc::default())
+}
+
+/// Reopening with the same secret store keeps the device's sessions, as the
+/// OS keychain does across launches.
+pub fn open_with_secrets(
+    db_path: &Path,
+    keystore: Arc<MemoryKeystore>,
+    secrets: Arc<MemorySecretStore>,
+) -> Arc<CoreFacade> {
     create_core(
         db_path.to_str().expect("UTF-8 test path").to_owned(),
         keystore,
-        Arc::new(MemorySecretStore::default()),
+        secrets,
     )
     .expect("open")
 }

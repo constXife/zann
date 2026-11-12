@@ -83,6 +83,15 @@ pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
+/// The first sync of a newly connected server; the core then moves the
+/// still-empty session to that server's personal vault.
+pub fn sync_new_server(facade: &Facade, storage_id: String) -> Result<(), String> {
+    sync(facade, Some(storage_id))?;
+    facade
+        .follow_preferred_storage()
+        .map_err(|err| err.to_string())
+}
+
 pub fn storages(facade: &Facade) -> Result<Vec<StorageSummary>, String> {
     facade.list_storages().map_err(|err| err.to_string())
 }

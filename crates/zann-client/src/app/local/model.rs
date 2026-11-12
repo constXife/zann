@@ -234,6 +234,8 @@ pub struct AppStatus {
     pub locked: bool,
     pub storages_count: u64,
     pub has_local_vault: bool,
+    /// A server is configured, so `remote_sync(None)` has a target.
+    pub server_connected: bool,
 }
 
 /// One enrolled authenticator, as the UI needs to show it. The wrapped master
