@@ -90,6 +90,27 @@ pub trait AppSyncStoreFactory: Send + Sync {
         target: SessionTarget,
         master_key: Arc<SecretKey>,
     ) -> SyncStoreFuture<'static, ()>;
+
+    /// The remote storage the database keeps for the normalized server
+    /// `address`, if any. A database keeps at most one storage per address,
+    /// so a new connection there takes it over instead of creating another.
+    fn storage_at(
+        self: Arc<Self>,
+        paths: ClientPaths,
+        address: String,
+    ) -> SyncStoreFuture<'static, Option<Uuid>>;
+
+    /// Voids the claim of the connection generation that synced
+    /// `storage_id`, keeping its projection and unsent changes. The caller
+    /// guarantees no connection syncs the storage any more. A sync claims it
+    /// again only when its server proves the same address and account and
+    /// the master key opens the vault keys the projection already bound.
+    /// Releasing an absent or released storage is a no-op.
+    fn release_storage(
+        self: Arc<Self>,
+        paths: ClientPaths,
+        storage_id: Uuid,
+    ) -> SyncStoreFuture<'static, ()>;
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -310,9 +331,18 @@ impl AppClient {
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
         let connection_id = ConnectionId::deterministic(connection_name, endpoint);
         let existing = snapshot.config().connections.get(&connection_id);
-        let storage_id = existing
-            .and_then(|connection| connection.metadata().storage_id.clone())
-            .unwrap_or_else(|| Uuid::now_v7().to_string());
+        let storage_id =
+            match existing.and_then(|connection| connection.metadata().storage_id.clone()) {
+                Some(storage_id) => storage_id,
+                None => {
+                    self.storage_for_new_connection(
+                        snapshot.config(),
+                        verified.binding().address(),
+                        operation_id,
+                    )
+                    .await?
+                }
+            };
         let target = SessionTarget::new(connection_id.clone(), profile_name.to_string())
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
         let prepared = PreparedConnection {
@@ -386,6 +416,41 @@ impl AppClient {
             )
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
         Ok(challenge.prepared)
+    }
+
+    /// The storage a connection without one syncs: the one the database
+    /// already keeps for `address`, released from the forgotten connection
+    /// that synced it, or a new one. Its unsent changes then reach the server
+    /// once it proves the same account and vault keys; see
+    /// [`AppSyncStoreFactory::release_storage`].
+    async fn storage_for_new_connection(
+        &self,
+        config: &crate::config::ConfigV2,
+        address: &str,
+        operation_id: SessionOperationId,
+    ) -> Result<String, SessionError> {
+        let local_error = |_| SessionError::for_app(operation_id, SessionErrorKind::Internal);
+        let found = Arc::clone(&self.sync_store_factory)
+            .storage_at(self.paths.clone(), address.to_string())
+            .await
+            .map_err(local_error)?;
+        let Some(storage_id) = found else {
+            return Ok(Uuid::now_v7().to_string());
+        };
+        let pinned = connection_removal::storage_connection(config, &storage_id.to_string())
+            .map_err(|kind| SessionError::for_app(operation_id, kind))?;
+        if pinned.is_some() {
+            // Another connection to this address syncs it already.
+            return Err(SessionError::for_app(
+                operation_id,
+                SessionErrorKind::Configuration,
+            ));
+        }
+        Arc::clone(&self.sync_store_factory)
+            .release_storage(self.paths.clone(), storage_id)
+            .await
+            .map_err(local_error)?;
+        Ok(storage_id.to_string())
     }
 
     /// Installs a metadata-only progress observer for subsequent sync calls.
@@ -956,6 +1021,76 @@ mod tests {
             let error = SyncStoreError::new(self.kind);
             Box::pin(async move { Err(error) })
         }
+
+        fn storage_at(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _address: String,
+        ) -> SyncStoreFuture<'static, Option<Uuid>> {
+            self.calls.fetch_add(1, Ordering::AcqRel);
+            let error = SyncStoreError::new(self.kind);
+            Box::pin(async move { Err(error) })
+        }
+
+        fn release_storage(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _storage_id: Uuid,
+        ) -> SyncStoreFuture<'static, ()> {
+            self.calls.fetch_add(1, Ordering::AcqRel);
+            let error = SyncStoreError::new(self.kind);
+            Box::pin(async move { Err(error) })
+        }
+    }
+
+    /// A database that keeps at most one remote storage and opens nothing,
+    /// for flows that only pin connections.
+    #[derive(Default)]
+    struct StorageDatabase {
+        kept: Option<Uuid>,
+        released: std::sync::Mutex<Vec<Uuid>>,
+    }
+
+    impl AppSyncStoreFactory for StorageDatabase {
+        fn open_existing(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _target: SessionTarget,
+            _master_key: Arc<SecretKey>,
+        ) -> SyncStoreFuture<'static, Arc<dyn SyncLocalStore>> {
+            Box::pin(async { Err(SyncStoreError::new(SyncStoreErrorKind::Unavailable)) })
+        }
+
+        fn reset_projection(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _target: SessionTarget,
+            _master_key: Arc<SecretKey>,
+        ) -> SyncStoreFuture<'static, ()> {
+            Box::pin(async { Err(SyncStoreError::new(SyncStoreErrorKind::Unavailable)) })
+        }
+
+        fn storage_at(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _address: String,
+        ) -> SyncStoreFuture<'static, Option<Uuid>> {
+            Box::pin(async move { Ok(self.kept) })
+        }
+
+        fn release_storage(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            storage_id: Uuid,
+        ) -> SyncStoreFuture<'static, ()> {
+            Box::pin(async move {
+                self.released
+                    .lock()
+                    .expect("released storages")
+                    .push(storage_id);
+                Ok(())
+            })
+        }
     }
 
     struct PendingFactory {
@@ -999,6 +1134,22 @@ mod tests {
                 self.started.notify_one();
                 pending::<Result<(), SyncStoreError>>().await
             })
+        }
+
+        fn storage_at(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _address: String,
+        ) -> SyncStoreFuture<'static, Option<Uuid>> {
+            Box::pin(pending())
+        }
+
+        fn release_storage(
+            self: Arc<Self>,
+            _paths: ClientPaths,
+            _storage_id: Uuid,
+        ) -> SyncStoreFuture<'static, ()> {
+            Box::pin(pending())
         }
     }
 
@@ -1415,11 +1566,15 @@ mod tests {
     const CONNECTION_NAME: &str = "Remote";
 
     fn trusting_client(dir: &tempfile::TempDir) -> AppClient {
+        trusting_client_over(dir, Arc::new(StorageDatabase::default()))
+    }
+
+    fn trusting_client_over(dir: &tempfile::TempDir, database: Arc<StorageDatabase>) -> AppClient {
         let app = AppClient::new(
             ClientPaths::new(dir.path()),
             Arc::new(EmptyCredentials),
             SessionClient::new(ClientId::new("app-client-test").expect("valid client id")),
-            Arc::new(ErrorFactory::new(SyncStoreErrorKind::Unavailable)),
+            database,
         );
         app.initialize(&NoLegacyCredentials)
             .expect("initialize config");
@@ -1468,6 +1623,45 @@ mod tests {
         assert!(matches!(outcome, PrepareConnectionOutcome::Ready(_)));
         mock.remove_async().await;
         endpoint
+    }
+
+    #[tokio::test]
+    async fn a_new_connection_takes_over_the_storage_kept_for_its_address() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let kept = Uuid::now_v7();
+        let database = Arc::new(StorageDatabase {
+            kept: Some(kept),
+            ..StorageDatabase::default()
+        });
+        let app = trusting_client_over(&dir, Arc::clone(&database));
+        let mut server = mockito::Server::new_async().await;
+        let endpoint = first_connect(&app, &mut server).await;
+
+        let pinned_storage = |name: &str| {
+            app.repository
+                .snapshot()
+                .expect("config snapshot")
+                .config()
+                .connections
+                .get(&ConnectionId::deterministic(name, &endpoint))
+                .and_then(|connection| connection.metadata().storage_id.clone())
+        };
+        assert_eq!(pinned_storage(CONNECTION_NAME), Some(kept.to_string()));
+        assert_eq!(*database.released.lock().expect("released"), vec![kept]);
+
+        let _identity = serve_identity(
+            &mut server,
+            &ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
+            "fingerprint-1",
+        )
+        .await;
+        let refused = app
+            .prepare_connection(&endpoint, "Second", "default")
+            .await
+            .expect_err("a storage another connection syncs is not taken over");
+        assert_eq!(refused.kind(), SessionErrorKind::Configuration);
+        assert_eq!(pinned_storage("Second"), None);
+        assert_eq!(*database.released.lock().expect("released"), vec![kept]);
     }
 
     #[tokio::test]

@@ -330,3 +330,154 @@ async fn corrupt_partial_generation_is_rejected_before_catalog_or_pull_mutation(
         .expect("vault exists");
     assert!(vault.cache_key_fp.is_none());
 }
+
+#[tokio::test]
+async fn a_released_storage_is_claimed_again_with_its_projection() {
+    let fixture = fixture(1).await;
+    let bindings = [binding(&fixture.vault)];
+    let vaults = LocalVaultRepo::new(&fixture.pool);
+    let storages = LocalStorageRepo::new(&fixture.pool);
+    vaults
+        .bind_cache_key_fingerprints_leased(
+            &proof(&fixture.storage),
+            &generation(1, 0x33),
+            &bindings,
+        )
+        .await
+        .expect("first claim");
+    sqlx_core::query::query::<Sqlite>(
+        r#"
+        INSERT INTO sync_cursors (storage_id, vault_id, cursor, last_seq)
+        VALUES (?1, ?2, 'kept', 1)
+        "#,
+    )
+    .bind(fixture.storage.id)
+    .bind(fixture.vault.id)
+    .execute(&fixture.pool)
+    .await
+    .expect("synced projection");
+
+    // Another connection's generation cannot take a claimed storage, and a
+    // claimed storage cannot be rebound.
+    let other_target = LocalSyncGenerationProof::new([0x11; 32], [0x66; 32], 1, [0x77; 32]);
+    assert!(matches!(
+        vaults
+            .bind_cache_key_fingerprints_leased(&proof(&fixture.storage), &other_target, &bindings)
+            .await,
+        Err(LocalVaultKeyBindError::GenerationChanged)
+    ));
+    assert!(!storages
+        .rebind_released(
+            &fixture.storage,
+            "Renamed",
+            "new-fingerprint",
+            AuthMethod::Oidc
+        )
+        .await
+        .expect("refused rebind"));
+
+    storages
+        .release_claim(fixture.storage.id)
+        .await
+        .expect("release");
+    storages
+        .release_claim(fixture.storage.id)
+        .await
+        .expect("releasing twice is a no-op");
+    assert!(storages
+        .rebind_released(
+            &fixture.storage,
+            "Renamed",
+            "new-fingerprint",
+            AuthMethod::Oidc
+        )
+        .await
+        .expect("rebind released storage"));
+    assert!(
+        !storages
+            .rebind_released(
+                &fixture.storage,
+                "Renamed",
+                "new-fingerprint",
+                AuthMethod::Oidc
+            )
+            .await
+            .expect("stale rebind"),
+        "a rebind compares the whole binding it read"
+    );
+    let rebound = storages
+        .get(fixture.storage.id)
+        .await
+        .expect("read storage")
+        .expect("storage kept");
+    assert_eq!(rebound.name, "Renamed");
+    assert_eq!(
+        rebound.server_fingerprint.as_deref(),
+        Some("new-fingerprint")
+    );
+    assert_eq!(rebound.auth_method, Some(AuthMethod::Oidc));
+    assert_eq!(rebound.server_url, fixture.storage.server_url);
+    assert_eq!(rebound.account_subject, fixture.storage.account_subject);
+
+    let claimed = vaults
+        .bind_cache_key_fingerprints_leased(&proof(&rebound), &other_target, &bindings)
+        .await
+        .expect("the bound key claims the released projection");
+    assert_eq!(claimed.already_bound(), 1);
+    let stored = stored_generation(&fixture.pool, fixture.storage.id).await;
+    assert_eq!(stored.1, vec![0x66; 32]);
+    let cursors = sqlx_core::query::query::<Sqlite>(
+        "SELECT COUNT(*) AS count FROM sync_cursors WHERE storage_id = ?1",
+    )
+    .bind(fixture.storage.id)
+    .fetch_one(&fixture.pool)
+    .await
+    .expect("count cursors")
+    .try_get::<i64, _>("count")
+    .expect("decode count");
+    assert_eq!(cursors, 1, "the projection survives the new claim");
+}
+
+#[tokio::test]
+async fn a_released_storage_refuses_a_different_vault_key() {
+    let fixture = fixture(1).await;
+    let vaults = LocalVaultRepo::new(&fixture.pool);
+    vaults
+        .bind_cache_key_fingerprints_leased(
+            &proof(&fixture.storage),
+            &generation(1, 0x33),
+            &[binding(&fixture.vault)],
+        )
+        .await
+        .expect("first claim");
+    LocalStorageRepo::new(&fixture.pool)
+        .release_claim(fixture.storage.id)
+        .await
+        .expect("release");
+
+    let mut other_key = binding(&fixture.vault);
+    other_key.target_cache_key_fp = "ffeeddccbbaa";
+    assert!(matches!(
+        vaults
+            .bind_cache_key_fingerprints_leased(
+                &proof(&fixture.storage),
+                &generation(1, 0x33),
+                &[other_key],
+            )
+            .await,
+        Err(LocalVaultKeyBindError::KeyBindingChanged)
+    ));
+    assert!(stored_generation_is_released(&fixture.pool, fixture.storage.id).await);
+}
+
+async fn stored_generation_is_released(pool: &SqlitePool, storage_id: Uuid) -> bool {
+    sqlx_core::query::query::<Sqlite>(
+        "SELECT sync_config_repository_fp IS NULL AS released FROM storages WHERE id = ?1",
+    )
+    .bind(storage_id)
+    .fetch_one(pool)
+    .await
+    .expect("read claim")
+    .try_get::<bool, _>("released")
+    .expect("decode claim")
+}

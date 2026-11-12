@@ -14,6 +14,13 @@ struct Strings {
         catalogue.get(key: key)
     }
 
+    /// The text for `key` with each `{name}` placeholder filled in.
+    func callAsFunction(_ key: String, _ args: [String: String]) -> String {
+        args.reduce(catalogue.get(key: key)) { text, arg in
+            text.replacingOccurrences(of: "{\(arg.key)}", with: arg.value)
+        }
+    }
+
     func fieldLabel(_ key: String) -> String {
         catalogue.fieldLabel(key: key)
     }

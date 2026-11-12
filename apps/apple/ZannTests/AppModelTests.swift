@@ -117,6 +117,13 @@ final class AppModelTests: XCTestCase {
         XCTAssertEqual(hidden.screen, .master(.unlock))
     }
 
+    func testTranslationsFillInTheirPlaceholders() {
+        let strings = Strings(language: "en")
+        let text = strings("settings.accounts.forgetServerConfirm", ["server": "Work"])
+        XCTAssertTrue(text.hasPrefix("Forget Work?"), text)
+        XCTAssertFalse(text.contains("{server}"))
+    }
+
     func testSettingsPersistAndSwitchTheLanguage() throws {
         let model = makeModel()
         XCTAssertEqual(model.preferences, devicePreferencesDefault())

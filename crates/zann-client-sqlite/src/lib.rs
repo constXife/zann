@@ -114,6 +114,65 @@ impl AppSyncStoreFactory for SqliteSyncStoreFactory {
             store.reset_target_projection(target).await
         })
     }
+
+    fn storage_at(
+        self: Arc<Self>,
+        paths: ClientPaths,
+        address: String,
+    ) -> SyncStoreFuture<'static, Option<Uuid>> {
+        let database_path = self.location.path().to_path_buf();
+        Box::pin(async move {
+            let database = open_projection_database(&paths, &database_path).await?;
+            let storages = LocalStorageRepo::new(database.pool())
+                .list()
+                .await
+                .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
+            database
+                .verify_identity()
+                .await
+                .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
+            Ok(storages
+                .into_iter()
+                .find(|storage| {
+                    storage.kind == StorageKind::Remote
+                        && storage.server_url.as_deref() == Some(address.as_str())
+                })
+                .map(|storage| storage.id))
+        })
+    }
+
+    fn release_storage(
+        self: Arc<Self>,
+        paths: ClientPaths,
+        storage_id: Uuid,
+    ) -> SyncStoreFuture<'static, ()> {
+        let database_path = self.location.path().to_path_buf();
+        Box::pin(async move {
+            let database = open_projection_database(&paths, &database_path).await?;
+            database
+                .verify_identity()
+                .await
+                .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
+            LocalStorageRepo::new(database.pool())
+                .release_claim(storage_id)
+                .await
+                .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))
+        })
+    }
+}
+
+/// Opens the existing database `paths` names, exactly as
+/// [`SqliteSyncStore::open`] does, for a storage lookup that needs no key.
+async fn open_projection_database(
+    paths: &ClientPaths,
+    database_path: &Path,
+) -> Result<ExistingSqliteDatabase, SyncStoreError> {
+    ensure_requested_paths_match(paths, database_path)?;
+    let database = zann_db::open_existing_sqlite(database_path)
+        .await
+        .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
+    ensure_paths_match_location(paths, database.location())?;
+    Ok(database)
 }
 
 /// An operation-scoped, bidirectional persistence adapter.
@@ -432,12 +491,31 @@ impl SqliteSyncStore {
         let expected = target_binding_from_generation(target, &generation, &self.master_key)?;
         self.database.verify_identity().await?;
         let storage_repository = LocalStorageRepo::new(self.database.pool());
-        if storage_repository
+        let stored = storage_repository
             .get_bounded(expected.storage_id)
             .await
-            .map_err(map_projection_read)?
-            .is_none()
-        {
+            .map_err(map_projection_read)?;
+        if let Some(stored) = stored {
+            if ensure_storage_matches_target(&stored, &expected).is_err()
+                && stored.kind == StorageKind::Remote
+                && stored.server_url.as_deref() == Some(expected.address.as_str())
+                && stored.account_subject.as_deref() == Some(expected.account_subject.as_str())
+            {
+                // A storage a new connection took over (see
+                // `AppSyncStoreFactory::release_storage`) learns what its
+                // server proves now. A storage still claimed is left as it
+                // is, and the exact check below refuses it.
+                storage_repository
+                    .rebind_released(
+                        &stored,
+                        &expected.display_name,
+                        &expected.server_fingerprint,
+                        expected.auth_method,
+                    )
+                    .await
+                    .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
+            }
+        } else {
             let candidate = LocalStorage {
                 id: expected.storage_id,
                 kind: StorageKind::Remote,

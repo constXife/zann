@@ -4,6 +4,10 @@ import ZannCoreKit
 /// First page only; paging and server-side search come in a later slice.
 private let itemsPageLimit: UInt32 = 200
 
+/// The `CoreError.Sync` kind for a server that no longer proves the identity
+/// this device pinned.
+private let serverIdentityChanged = "server_identity_changed"
+
 /// One unlocked vault: the loaded page, the sidebar categories, the visible
 /// list and the selected item's projected fields. Categories, filtering and
 /// field projection come from zann-ui-core; this type only holds selection and
@@ -16,6 +20,16 @@ final class VaultModel: ObservableObject {
         let path: String
         let typeID: String
         let fields: [ItemDetailFieldFfi]
+    }
+
+    /// The server that syncs this vault proves a different identity than the
+    /// one this device pinned. Retrying cannot help; the way out is to forget
+    /// it and connect again, and the confirmation says how many local changes
+    /// wait for that.
+    struct StaleServer: Equatable {
+        let storageID: String
+        let name: String
+        let pendingChanges: UInt64
     }
 
     @Published private(set) var categories: [CategoryViewFfi] = []
@@ -47,6 +61,8 @@ final class VaultModel: ObservableObject {
     @Published private(set) var syncing = false
     /// Why the last sync failed; the vault stays usable offline.
     @Published private(set) var syncError: String?
+    /// Set while the last sync was refused for a changed server identity.
+    @Published private(set) var staleServer: StaleServer?
 
     private let core: CoreFacade
     private let strings: Strings
@@ -123,6 +139,7 @@ final class VaultModel: ObservableObject {
         case noServer
         case unchanged
         case changed(ItemPage)
+        case identityChanged(StaleServer)
     }
 
     /// Pushes local changes and pulls the server's, then reloads the page if
@@ -140,7 +157,15 @@ final class VaultModel: ObservableObject {
         let result = await Task.detached(priority: .userInitiated) {
             Result { () -> Synced in
                 guard try core.appStatus().serverConnected else { return .noServer }
-                let outcome = try core.remoteSync(storageId: nil)
+                let outcome: SyncOutcomeFfi
+                do {
+                    outcome = try core.remoteSync(storageId: nil)
+                } catch let failure as CoreError {
+                    guard case .Sync(serverIdentityChanged, _) = failure,
+                          let stale = try Self.staleServer(core)
+                    else { throw failure }
+                    return .identityChanged(stale)
+                }
                 if follow { try core.followPreferredStorage() }
                 guard follow || outcome.changesCommitted > 0 else { return .unchanged }
                 return .changed(try Self.loadPage(core))
@@ -156,9 +181,15 @@ final class VaultModel: ObservableObject {
             succeeded()
         case .success(.noServer):
             canSync = false
+            staleServer = nil
+        case .success(.identityChanged(let stale)):
+            canSync = true
+            syncError = strings("errors.\(serverIdentityChanged)")
+            staleServer = stale
         case .failure(let failure):
             canSync = true
             syncError = strings.message(for: failure)
+            staleServer = nil
         }
     }
 
@@ -166,6 +197,25 @@ final class VaultModel: ObservableObject {
         canSync = true
         followPending = false
         syncError = nil
+        staleServer = nil
+    }
+
+    /// The vault on screen and what forgetting its server leaves behind, or
+    /// `nil` when no connection syncs it: then nothing here can be forgotten
+    /// and the refusal stays a plain error. The app never switches vaults,
+    /// so outside the first sync after connecting the vault on screen is the
+    /// one the active connection syncs.
+    private nonisolated static func staleServer(_ core: CoreFacade) throws -> StaleServer? {
+        let storageID = core.currentStorageId()
+        guard try core.syncsStorage(storageId: storageID) else { return nil }
+        guard let storage = try core.listStorages().first(where: { $0.id == storageID }) else {
+            throw CoreError.InvalidArgument("the vault on screen is not a known storage")
+        }
+        return StaleServer(
+            storageID: storageID,
+            name: storage.name,
+            pendingChanges: try core.pendingChangeCount(storageId: storageID)
+        )
     }
 
     /// The first page of the current vault. The trash category filters
