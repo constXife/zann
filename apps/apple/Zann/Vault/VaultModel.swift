@@ -50,6 +50,12 @@ final class VaultModel: ObservableObject {
 
     private let core: CoreFacade
     private let strings: Strings
+    /// The core decides when to sync and admits one sync at a time, manual
+    /// or automatic; this type only runs the timer and the sync.
+    private let schedule = AutoSyncScheduleFfi()
+    private var autoSync: Task<Void, Never>?
+    /// The sync the schedule admitted, until it ends.
+    private var running: Task<Void, Never>?
     private var items: [ItemSummary] = []
     private var counts: ItemCountsFfi
     /// Bumped on every selection so a slow load cannot show a previous item.
@@ -71,40 +77,95 @@ final class VaultModel: ObservableObject {
             syncError = strings.message(for: failure)
             followPending = true
         }
+        schedule.unlocked(synced: synced != nil)
         apply(page)
     }
 
-    /// Pushes local changes and pulls the server's, then reloads the page;
-    /// the core picks the server and the vault to show. A Mac that never
-    /// signed in to a server has nothing to sync.
+    /// Syncs whenever the core's schedule says so until `stopAutoSync`. A tick
+    /// that finds nothing due costs one call into the core.
+    func startAutoSync() {
+        guard autoSync == nil else { return }
+        autoSync = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                if let ticket = self.schedule.takeDue() {
+                    await self.start(ticket).value
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    /// The vault is locking: nothing more is due, and a sync still running
+    /// (which the core's lock cancels) schedules nothing.
+    func stopAutoSync() {
+        autoSync?.cancel()
+        autoSync = nil
+        schedule.locked()
+    }
+
+    /// Syncs now, or waits for the sync already running.
     func sync() async {
-        guard !syncing else { return }
+        if let ticket = schedule.takeNow() {
+            start(ticket)
+        }
+        await running?.value
+    }
+
+    @discardableResult
+    private func start(_ ticket: AutoSyncTicketFfi) -> Task<Void, Never> {
+        let task = Task { await self.run(ticket) }
+        running = task
+        return task
+    }
+
+    private enum Synced {
+        case noServer
+        case unchanged
+        case changed(ItemPage)
+    }
+
+    /// Pushes local changes and pulls the server's, then reloads the page if
+    /// anything changed; the core picks the server and the vault to show. A
+    /// Mac that never signed in to a server has nothing to sync.
+    private func run(_ ticket: AutoSyncTicketFfi) async {
         syncing = true
-        defer { syncing = false }
+        defer {
+            syncing = false
+            running = nil
+            schedule.finished(ticket: ticket)
+        }
         let core = core
         let follow = followPending
         let result = await Task.detached(priority: .userInitiated) {
-            Result { () -> ItemPage? in
-                guard try core.appStatus().serverConnected else { return nil }
-                _ = try core.remoteSync(storageId: nil)
+            Result { () -> Synced in
+                guard try core.appStatus().serverConnected else { return .noServer }
+                let outcome = try core.remoteSync(storageId: nil)
                 if follow { try core.followPreferredStorage() }
-                return try Self.loadPage(core)
+                guard follow || outcome.changesCommitted > 0 else { return .unchanged }
+                return .changed(try Self.loadPage(core))
             }
         }.value
         switch result {
-        case .success(let page?):
-            canSync = true
-            followPending = false
-            syncError = nil
+        case .success(.changed(let page)):
+            succeeded()
             apply(page)
             // The open item may have changed on the server.
-            if let selectedItemID { show(selectedItemID) }
-        case .success(nil):
+            if let selectedItemID { refreshDetail(selectedItemID) }
+        case .success(.unchanged):
+            succeeded()
+        case .success(.noServer):
             canSync = false
         case .failure(let failure):
             canSync = true
             syncError = strings.message(for: failure)
         }
+    }
+
+    private func succeeded() {
+        canSync = true
+        followPending = false
+        syncError = nil
     }
 
     /// The first page of the current vault. The trash category filters
@@ -146,6 +207,7 @@ final class VaultModel: ObservableObject {
     func saveEditor() async {
         guard let editor, let item = await editor.save(with: core) else { return }
         self.editor = nil
+        schedule.localChange()
         let core = core
         let result = await Task.detached(priority: .userInitiated) {
             Result { try Self.loadPage(core) }
@@ -181,6 +243,24 @@ final class VaultModel: ObservableObject {
         error = nil
         selection += 1
         guard let id else { return }
+        let token = selection
+        let core = core
+        Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try Self.loadDetail(core, id: id) }
+            }.value
+            guard token == selection else { return }
+            switch result {
+            case .success(let detail): self.detail = detail
+            case .failure(let failure): error = describe(failure)
+            }
+        }
+    }
+
+    /// Reloads the shown item in place after a background sync: the pane
+    /// keeps the old version until the new one arrives, and a selection made
+    /// meanwhile wins.
+    private func refreshDetail(_ id: String) {
         let token = selection
         let core = core
         Task {

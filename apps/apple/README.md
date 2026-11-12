@@ -68,8 +68,11 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   then opens with its master password (or a new account creates one) and
   syncs once; the core then moves the still-empty session to the server's
   personal vault and keeps choosing it after a restart.
-- Every later unlock opens the vault at once and syncs in the background;
-  ⌘R syncs on demand. A vault that only lives on this Mac has no sync.
+- Every later unlock opens the vault at once and syncs in the background.
+  While unlocked the vault syncs on the core's `AutoSyncSchedule`: a couple
+  of seconds after each save and every minute otherwise, one sync at a time;
+  ⌘R syncs on demand and lock stops it. A vault that only lives on this Mac
+  has no sync.
 
 - `Zann/SettingsView.swift` is the Settings window (⌘,) over the shared
   device preferences. `Zann/PreferencesFile.swift` keeps them in this app's

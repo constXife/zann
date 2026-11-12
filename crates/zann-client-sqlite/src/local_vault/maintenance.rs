@@ -199,9 +199,9 @@ impl LocalVault {
             .map_err(|err| LocalError::Service(err.to_string()))?;
         // Lock before anything moves. If the restore fails halfway, a locked
         // vault is recoverable; a key held over a database it does not match is
-        // a stream of decryption failures nobody can explain.
-        *self.master_key.lock().expect("lock poisoned") = None;
-        *self.vault_id.lock().expect("lock poisoned") = None;
+        // a stream of decryption failures nobody can explain. Locking also
+        // cancels a sync that would otherwise write into the old database.
+        self.lock()?;
 
         let outcome = self.runtime.block_on(crate::maintenance::snapshot::restore(
             self.pool(),

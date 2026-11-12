@@ -80,10 +80,16 @@ their platform-native controls inside the same semantic regions.
 - SHOULD: Prefer truncation with tooltips in dense views; allow wrapping in detail view.
 - MUST: Define minimum column widths for list/table layouts; avoid zero-width columns.
 - SHOULD: Use compact/comfortable density presets on desktop if supported.
+- SHOULD: An item list row shows the item's folder under its title, not the
+  full path that repeats the title.
+- SHOULD: When the detail column is too narrow for a label beside its value,
+  every field row puts its label above the value; rows never mix the two.
 
 ## Security Constraints
 
 - MUST: Secrets remain masked by default in all layouts.
+- MUST: A masked value shows `zann-ui-core`'s fixed-width `MASKED_VALUE`,
+  never a mask whose length follows the secret.
 - MUST: No auto-reveal on resize, rotate, or layout switch.
 - SHOULD: Avoid showing sensitive columns (e.g., password/TOTP) in narrow list modes.
 - MUST: Clipboard/reveal actions require explicit user action in all layouts.

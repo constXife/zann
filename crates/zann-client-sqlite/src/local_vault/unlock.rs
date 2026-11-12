@@ -83,9 +83,12 @@ impl LocalVault {
         self.save_remembered(&remembered)
     }
 
+    /// Drops the master key and cancels every sync in flight, so none keeps
+    /// its copy of the key until the server answers.
     pub fn lock(&self) -> LocalResult<VaultStatus> {
         *self.master_key.lock().expect("lock poisoned") = None;
         *self.vault_id.lock().expect("lock poisoned") = None;
+        self.syncs.cancel_all();
         Ok(VaultStatus { unlocked: false })
     }
 

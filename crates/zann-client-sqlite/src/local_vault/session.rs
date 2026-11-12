@@ -140,16 +140,19 @@ impl LocalVault {
         })
     }
 
+    /// Runs until done or until [`Self::lock`] cancels it.
     pub fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome> {
+        let (operation, cancel) = SessionOperation::new(
+            std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
+        );
+        // Registered before the key is read: a lock that clears the key after
+        // this point always finds the sync to cancel.
+        let _in_flight = self.syncs.register(operation.operation_id(), cancel);
         let master_key = self.master_key()?;
         let client = self.app_client()?;
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
-        let operation = SessionOperation::new(
-            std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
-        )
-        .0;
         let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
         let outcome = self
             .runtime

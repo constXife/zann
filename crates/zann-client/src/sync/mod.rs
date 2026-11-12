@@ -7,6 +7,7 @@
 mod account_key;
 mod engine;
 mod model;
+mod schedule;
 mod transport;
 mod wire;
 
@@ -25,3 +26,4 @@ pub use model::{
     SyncProgressPhase, SyncProgressSink, SyncScope, SyncSeq, SyncStage, SyncStoreError,
     SyncStoreErrorKind, SyncStoreFuture, VaultPayloadKey, VaultPlane,
 };
+pub use schedule::{AutoSyncSchedule, AutoSyncTicket, AUTO_SYNC_DEBOUNCE, AUTO_SYNC_INTERVAL};

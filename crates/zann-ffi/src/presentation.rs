@@ -82,6 +82,12 @@ impl From<ItemDetailField> for ItemDetailFieldFfi {
     }
 }
 
+/// What a masked value shows in place of itself.
+#[uniffi::export]
+pub fn masked_value() -> String {
+    zann_ui_core::MASKED_VALUE.to_string()
+}
+
 /// Item fields in canonical reading order with masking and TOTP metadata.
 #[uniffi::export]
 pub fn project_item_fields(payload_json: String) -> CoreResult<Vec<ItemDetailFieldFfi>> {
@@ -236,6 +242,12 @@ impl From<FolderNode> for FolderNodeFfi {
 pub struct FolderTreeFfi {
     pub items_without_folder: u64,
     pub tree: Vec<FolderNodeFfi>,
+}
+
+/// The folder an item path lives in, or `None` at the root.
+#[uniffi::export]
+pub fn folder_of(path: String) -> Option<String> {
+    zann_ui_core::folder_of(&path).map(str::to_string)
 }
 
 #[uniffi::export]

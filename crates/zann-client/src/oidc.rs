@@ -22,7 +22,7 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::app::{AppClient, OidcLoginInput, OidcToken};
 use crate::remote::auth::AuthHttpTransport;
-use crate::session::{SessionAccess, SessionOperation, SessionTarget};
+use crate::session::{SessionAccess, SessionError, SessionOperation, SessionTarget};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
@@ -42,32 +42,67 @@ pub enum OidcBrowserErrorKind {
 }
 
 pub struct OidcBrowserError {
-    kind: OidcBrowserErrorKind,
+    repr: Repr,
+}
+
+enum Repr {
+    /// A failure of the browser flow itself, before Zann saw the token.
+    Flow(OidcBrowserErrorKind),
+    /// Zann's own answer to the provider token: a rejected login, an
+    /// unreachable server or a session that could not be kept.
+    Session(SessionError),
 }
 
 impl OidcBrowserError {
     fn new(kind: OidcBrowserErrorKind) -> Self {
-        Self { kind }
+        debug_assert_ne!(kind, OidcBrowserErrorKind::Session);
+        Self {
+            repr: Repr::Flow(kind),
+        }
+    }
+
+    fn session(error: SessionError) -> Self {
+        Self {
+            repr: Repr::Session(error),
+        }
     }
 
     #[must_use]
     pub fn kind(&self) -> OidcBrowserErrorKind {
-        self.kind
+        match &self.repr {
+            Repr::Flow(kind) => *kind,
+            Repr::Session(_) => OidcBrowserErrorKind::Session,
+        }
+    }
+
+    /// The session failure behind [`OidcBrowserErrorKind::Session`], so a
+    /// caller can report it the way it reports any other login.
+    pub fn into_session_error(self) -> Result<SessionError, Self> {
+        match self.repr {
+            Repr::Session(error) => Ok(error),
+            Repr::Flow(_) => Err(self),
+        }
     }
 }
 
 impl fmt::Debug for OidcBrowserError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("OidcBrowserError")
-            .field("kind", &self.kind)
-            .finish()
+        let mut debug = formatter.debug_struct("OidcBrowserError");
+        debug.field("kind", &self.kind());
+        if let Repr::Session(error) = &self.repr {
+            debug.field("session", error);
+        }
+        debug.finish()
     }
 }
 
 impl fmt::Display for OidcBrowserError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self.kind {
+        let kind = match &self.repr {
+            Repr::Session(error) => return write!(formatter, "OIDC session failed: {error}"),
+            Repr::Flow(kind) => kind,
+        };
+        formatter.write_str(match kind {
             OidcBrowserErrorKind::Configuration => "OIDC target is not configured",
             OidcBrowserErrorKind::InvalidProvider => "OIDC provider metadata is invalid",
             OidcBrowserErrorKind::Transport => "OIDC provider is unavailable",
@@ -75,12 +110,19 @@ impl fmt::Display for OidcBrowserError {
             OidcBrowserErrorKind::Cancelled => "OIDC login was cancelled",
             OidcBrowserErrorKind::DeadlineExceeded => "OIDC login timed out",
             OidcBrowserErrorKind::AuthorizationRejected => "OIDC authorization was rejected",
-            OidcBrowserErrorKind::Session => "OIDC session could not be committed",
+            OidcBrowserErrorKind::Session => "OIDC session failed",
         })
     }
 }
 
-impl std::error::Error for OidcBrowserError {}
+impl std::error::Error for OidcBrowserError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.repr {
+            Repr::Session(error) => Some(error),
+            Repr::Flow(_) => None,
+        }
+    }
+}
 
 /// Prepared browser login. The caller opens [`Self::authorization_url`] and
 /// then awaits [`Self::finish`]. Dropping the value closes the callback port.
@@ -140,7 +182,7 @@ impl OidcBrowserLogin {
         client
             .oidc_login(OidcLoginInput::new(self.target, token), self.operation)
             .await
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Session))
+            .map_err(OidcBrowserError::session)
     }
 }
 
@@ -495,6 +537,32 @@ fn respond(stream: &mut TcpStream, status: u16, body: &str) -> std::io::Result<(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::{SessionErrorKind, SessionOperationId};
+
+    #[test]
+    fn session_failure_keeps_its_cause() {
+        let cause = SessionError::for_app(SessionOperationId::new(), SessionErrorKind::Protocol);
+        let rendered = cause.to_string();
+        let error = OidcBrowserError::session(cause);
+
+        assert_eq!(error.kind(), OidcBrowserErrorKind::Session);
+        assert_eq!(
+            error.to_string(),
+            format!("OIDC session failed: {rendered}")
+        );
+        let source = std::error::Error::source(&error).expect("session cause");
+        assert_eq!(source.to_string(), rendered);
+        let session = error.into_session_error().expect("session error");
+        assert_eq!(session.kind(), SessionErrorKind::Protocol);
+    }
+
+    #[test]
+    fn flow_failure_is_not_a_session_error() {
+        let error = OidcBrowserError::new(OidcBrowserErrorKind::Transport);
+        assert!(std::error::Error::source(&error).is_none());
+        let error = error.into_session_error().expect_err("flow error");
+        assert_eq!(error.kind(), OidcBrowserErrorKind::Transport);
+    }
 
     #[test]
     fn provider_urls_require_tls_except_loopback() {
