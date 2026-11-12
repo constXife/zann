@@ -36,6 +36,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var touchIDBusy = false
     /// The server sign-in in progress, present only on the connect screen.
     @Published private(set) var connect: ConnectModel?
+    /// Where leaving the connect screen goes: the welcome screen for a new
+    /// device, the unlock screen after forgetting a server.
+    private var connectReturn = Screen.welcome
     /// A fresh sign-in starts empty: it syncs right after the master
     /// password, before the vault opens.
     @Published private(set) var syncAfterUnlock = false
@@ -180,7 +183,8 @@ final class AppModel: ObservableObject {
         screen = .master(.create)
     }
 
-    func startConnecting() {
+    /// `serverURL` prefills the address, as after forgetting a server.
+    func startConnecting(serverURL: String? = nil, returnTo: Screen = .welcome) {
         guard let core else { return }
         error = nil
         let session: RemoteSession
@@ -194,6 +198,10 @@ final class AppModel: ObservableObject {
             session: session, strings: strings, openBrowser: openBrowser,
             connected: { [weak self] in self?.connected($0) }
         )
+        if let serverURL {
+            connect?.url = serverURL
+        }
+        connectReturn = returnTo
         screen = .connect
     }
 
@@ -201,7 +209,30 @@ final class AppModel: ObservableObject {
     func leaveConnecting() {
         connect?.cancel()
         connect = nil
-        screen = .welcome
+        screen = connectReturn
+    }
+
+    /// Forgets the server whose identity changed, with its pinned identity
+    /// and stored sign-in; the vault's items and unsent changes stay on this
+    /// Mac. The vault locks, since signing in again ends at the master
+    /// password, and the connect screen opens at the forgotten address.
+    func forgetStaleServer() async {
+        guard let core, let stale = vault?.staleServer, !busy else { return }
+        vault?.stopAutoSync()
+        let storageID = stale.storageID
+        guard let serverURL = await perform({ () -> String? in
+            let serverURL = try core.forgetServer(storageId: storageID)
+            _ = try core.lock()
+            return serverURL
+        }) else {
+            vault?.startAutoSync()
+            return
+        }
+        vault = nil
+        if preferences.clipboardClearOnLock {
+            Clipboard.clearOwned()
+        }
+        startConnecting(serverURL: serverURL, returnTo: .master(.unlock))
     }
 
     /// The account's existing personal vault opens with its master password;

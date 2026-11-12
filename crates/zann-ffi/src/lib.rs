@@ -308,6 +308,25 @@ impl CoreFacade {
     pub fn sync_reset(&self, storage_id: Option<String>) -> CoreResult<()> {
         self.inner.sync_reset(storage_id).map_err(Into::into)
     }
+    /// Whether a server connection syncs this storage; none does after
+    /// `forget_server` until the user connects again.
+    pub fn syncs_storage(&self, storage_id: String) -> CoreResult<bool> {
+        self.inner.syncs_storage(storage_id).map_err(Into::into)
+    }
+    /// Local changes in this storage that no server has confirmed yet.
+    pub fn pending_change_count(&self, storage_id: String) -> CoreResult<u64> {
+        self.inner
+            .pending_change_count(storage_id)
+            .map_err(Into::into)
+    }
+    /// Forgets the server connection that syncs this storage, with its pinned
+    /// identity and stored credentials, without contacting the server: the
+    /// recovery from a sync refused as `server_identity_changed`. Local items
+    /// and pending changes stay. Returns the forgotten address, or `None`
+    /// when no connection syncs this storage.
+    pub fn forget_server(&self, storage_id: String) -> CoreResult<Option<String>> {
+        self.inner.forget_server(storage_id).map_err(Into::into)
+    }
     pub fn remote_session(&self) -> CoreResult<Arc<RemoteSession>> {
         RemoteSession::new(self.inner.remote_client()?).map(Arc::new)
     }

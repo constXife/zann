@@ -45,3 +45,29 @@ fn ffi_projects_local_commands_results_and_errors() {
     assert!(!core.lock().expect("lock").unlocked);
     assert!(matches!(core.item_get(item.id), Err(CoreError::Locked)));
 }
+
+#[test]
+fn a_storage_no_server_syncs_has_no_server_to_forget() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let core = support::open(&root.path().join("local.sqlite"));
+    core.initialize_master_password("adapter-test-password".into())
+        .expect("initialize");
+    let storage = core.current_storage_id();
+
+    assert!(!core.syncs_storage(storage.clone()).expect("syncs storage"));
+    assert_eq!(
+        core.pending_change_count(storage.clone())
+            .expect("pending count"),
+        0
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            core.forget_server(storage.clone()).expect("forget server"),
+            None
+        );
+    }
+    assert!(matches!(
+        core.pending_change_count("not-a-storage".into()),
+        Err(CoreError::InvalidArgument(_))
+    ));
+}

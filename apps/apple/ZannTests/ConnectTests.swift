@@ -8,6 +8,8 @@ import ZannCoreKit
 @MainActor
 final class ConnectTests: XCTestCase {
     private var directory: URL!
+    /// Each device's core, so a test can check what the app asked of it.
+    private var cores: [String: CoreFacade] = [:]
 
     override func setUpWithError() throws {
         directory = FileManager.default.temporaryDirectory
@@ -15,6 +17,7 @@ final class ConnectTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        cores = [:]
         try? FileManager.default.removeItem(at: directory)
     }
 
@@ -29,6 +32,7 @@ final class ConnectTests: XCTestCase {
             let core = try createCore(
                 dbPath: database, keystore: keystore, secretStore: MemorySecretStore()
             )
+            self.cores[name] = core
             return (core, keystore)
         }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en",
         openBrowser: { _ in })
@@ -49,6 +53,21 @@ final class ConnectTests: XCTestCase {
         XCTAssertFalse(connect.back())
         model.leaveConnecting()
         XCTAssertEqual(model.screen, .welcome)
+        XCTAssertNil(model.connect)
+    }
+
+    /// After a server is forgotten the connect screen opens at its address,
+    /// and backing out of it leads to the unlock screen, not the welcome.
+    func testReconnectingStartsAtTheForgottenAddressAndBacksOutToUnlock() async throws {
+        let model = makeDevice("reconnect")
+        model.startConnecting(serverURL: "https://zann.example", returnTo: .master(.unlock))
+        let connect = try XCTUnwrap(model.connect)
+        XCTAssertEqual(connect.url, "https://zann.example")
+        XCTAssertEqual(connect.stage, .server)
+
+        XCTAssertFalse(connect.back())
+        model.leaveConnecting()
+        XCTAssertEqual(model.screen, .master(.unlock))
         XCTAssertNil(model.connect)
     }
 
@@ -163,6 +182,65 @@ final class ConnectTests: XCTestCase {
         await deviceB.lock()
         XCTAssertNil(deviceB.vault)
     }
+
+    /// Forgetting the server keeps the vault and its items on this Mac and
+    /// leaves nothing to sync until the user connects again; connecting to
+    /// the same server and account then sends what was saved meanwhile.
+    func testForgettingTheServerKeepsTheVaultUntilItConnectsAgain() async throws {
+        guard let url = ProcessInfo.processInfo.environment["ZANN_REMOTE_URL"], !url.isEmpty
+        else { throw XCTSkip("ZANN_REMOTE_URL is not set") }
+        let suffix = UUID().uuidString.lowercased()
+        let email = "apple-forget-\(suffix)@example.test"
+        let account = "account-password-\(suffix)"
+        try registerAccount(url: url, email: email, password: account)
+
+        let device = makeDevice("forget")
+        try await signIn(device, url: url, email: email, password: account)
+        let master = "master-password-\(suffix)"
+        await device.submit(password: master, mode: .create)
+        let vault = try XCTUnwrap(device.vault)
+        XCTAssertTrue(vault.canSync)
+        vault.startCreating(typeID: "note")
+        try XCTUnwrap(vault.editor).setPath("Kept/Local")
+        await vault.saveEditor()
+        await vault.sync()
+        XCTAssertNil(vault.syncError)
+
+        let core = try XCTUnwrap(cores["forget"])
+        let storage = core.currentStorageId()
+        XCTAssertTrue(try core.syncsStorage(storageId: storage))
+        XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 0)
+        XCTAssertEqual(try core.forgetServer(storageId: storage), url)
+        XCTAssertFalse(try core.syncsStorage(storageId: storage))
+        XCTAssertNil(try core.forgetServer(storageId: storage))
+
+        await vault.sync()
+        XCTAssertFalse(vault.canSync)
+        XCTAssertNil(vault.syncError)
+        XCTAssertNil(vault.staleServer)
+        XCTAssertEqual(vault.visibleItems.map(\.path), ["Kept/Local"])
+        vault.startCreating(typeID: "note")
+        try XCTUnwrap(vault.editor).setPath("Kept/Unsent")
+        await vault.saveEditor()
+        XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 1)
+        await device.lock()
+
+        try await signIn(device, url: url, email: email, password: account)
+        await device.submit(password: master, mode: .unlock)
+        let reconnected = try XCTUnwrap(device.vault)
+        XCTAssertNil(reconnected.syncError)
+        XCTAssertEqual(core.currentStorageId(), storage, "the new connection syncs the same vault")
+        XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 0)
+        await device.lock()
+
+        let witness = makeDevice("witness")
+        try await signIn(witness, url: url, email: email, password: account)
+        await witness.submit(password: master, mode: .unlock)
+        XCTAssertEqual(
+            Set(try XCTUnwrap(witness.vault).visibleItems.map(\.path)), ["Kept/Local", "Kept/Unsent"]
+        )
+    }
+
 
     /// The core offers registration only on a server without users, so the
     /// account comes from a throwaway core rather than through either device.
