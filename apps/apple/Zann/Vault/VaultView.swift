@@ -183,6 +183,9 @@ struct VaultSidebar: View {
             }
         }
         .listStyle(.sidebar)
+        .safeAreaInset(edge: .top) {
+            if vault.vaults.count > 1 { VaultPicker(vault: vault, strings: strings) }
+        }
     }
 
     private var selection: Binding<Selection?> {
@@ -202,6 +205,37 @@ struct VaultSidebar: View {
                     break
                 }
             }
+        )
+    }
+}
+
+/// Which of the storage's vaults the sidebar and the list show, like
+/// COSMIC's vault selector above its categories.
+private struct VaultPicker: View {
+    @ObservedObject var vault: VaultModel
+    let strings: Strings
+
+    var body: some View {
+        Picker(strings("nav.vaults"), selection: selection) {
+            ForEach(vault.vaults, id: \.id) { summary in
+                Label(
+                    "\(summary.name) (\(summary.itemCount))",
+                    systemImage: Symbols.vault(summary.scope)
+                )
+                .tag(summary.id)
+            }
+        }
+        .pickerStyle(.menu)
+        // Switching drops the open form, so it waits until the form closes.
+        .disabled(vault.editor != nil || vault.switching)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    private var selection: Binding<String> {
+        Binding(
+            get: { vault.vaultID },
+            set: { id in Task { await vault.selectVault(id) } }
         )
     }
 }

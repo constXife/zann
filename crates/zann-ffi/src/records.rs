@@ -7,7 +7,8 @@ pub struct VaultStatus {
 pub struct VaultSummaryFfi {
     pub id: String,
     pub name: String,
-    pub kind: String,
+    /// Personal or shared, as zann-ui-core scopes its categories.
+    pub scope: crate::presentation::VaultScopeFfi,
     pub is_default: bool,
     pub item_count: u64,
 }

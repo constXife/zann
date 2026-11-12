@@ -273,7 +273,7 @@ fn vault_context_exposes_the_active_personal_vault() {
     let context = local::vault_context(&facade).expect("vault context");
 
     assert_eq!(context.vaults.len(), 1);
-    assert_eq!(context.vaults[0].kind, "personal");
+    assert_eq!(context.vaults[0].kind, zann_core::VaultKind::Personal);
     assert_eq!(
         context.current_vault_id.as_deref(),
         Some(context.vaults[0].id.as_str())
@@ -478,14 +478,14 @@ fn vault_selector_only_reserves_sidebar_space_for_multiple_vaults() {
                 VaultSummary {
                     id: "personal".to_string(),
                     name: "Personal".to_string(),
-                    kind: "personal".to_string(),
+                    kind: zann_core::VaultKind::Personal,
                     is_default: false,
                     item_count: 399,
                 },
                 VaultSummary {
                     id: "shared".to_string(),
                     name: "infra".to_string(),
-                    kind: "shared".to_string(),
+                    kind: zann_core::VaultKind::Shared,
                     is_default: false,
                     item_count: 15,
                 },

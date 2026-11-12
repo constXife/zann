@@ -347,7 +347,7 @@ pub fn import_apple_passwords(
             .list_vaults()
             .map_err(|err| err.to_string())?
             .into_iter()
-            .find(|vault| vault.kind == "personal")
+            .find(|vault| vault.kind == zann_core::VaultKind::Personal)
             .ok_or_else(|| "personal vault not found after import".to_string())?;
         facade
             .set_current_vault(personal.id)

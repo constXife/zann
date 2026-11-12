@@ -173,7 +173,7 @@ impl State {
 }
 
 pub(super) fn vault_label(vault: &VaultSummary) -> String {
-    let kind = if vault.kind == "shared" {
+    let kind = if vault.kind == zann_core::VaultKind::Shared {
         t("nav.shared")
     } else {
         t("nav.personal")

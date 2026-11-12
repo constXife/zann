@@ -110,7 +110,7 @@ fn select_personal_vault(core: &LocalVault, storage_id: &str) {
         .list_vaults()
         .expect("list vaults")
         .into_iter()
-        .find(|vault| vault.kind == "personal")
+        .find(|vault| vault.kind == zann_core::VaultKind::Personal)
         .expect("the server's personal vault is synced");
     core.set_current_vault(vault.id)
         .expect("select the personal vault");

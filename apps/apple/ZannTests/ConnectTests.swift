@@ -242,6 +242,79 @@ final class ConnectTests: XCTestCase {
     }
 
 
+    /// A shared vault the account can reach opens from the picker with its
+    /// shared category labels, and the personal vault comes back the same way.
+    func testThePickerOpensASharedVaultAndComesBack() async throws {
+        guard let url = ProcessInfo.processInfo.environment["ZANN_REMOTE_URL"], !url.isEmpty
+        else { throw XCTSkip("ZANN_REMOTE_URL is not set") }
+        let suffix = UUID().uuidString.lowercased()
+        let email = "apple-vaults-\(suffix)@example.test"
+        let account = "account-password-\(suffix)"
+        try registerAccount(url: url, email: email, password: account)
+        // Slugs are unique on the server, so each run names its own vault.
+        let teamName = "Team \(suffix.prefix(8))"
+        try await createSharedVault(url: url, email: email, password: account, name: teamName)
+
+        let device = makeDevice("vaults")
+        try await signIn(device, url: url, email: email, password: account)
+        await device.submit(password: "master-password-\(suffix)", mode: .create)
+        let vault = try XCTUnwrap(device.vault)
+        vault.startCreating(typeID: "note")
+        try XCTUnwrap(vault.editor).setPath("Mine/Note")
+        await vault.saveEditor()
+        await vault.sync()
+        XCTAssertNil(vault.syncError)
+        let personal = vault.vaultID
+        let team = try XCTUnwrap(vault.vaults.first { $0.name == teamName })
+        XCTAssertEqual(team.scope, .shared)
+        XCTAssertEqual(vault.vaults.count, 2)
+
+        await vault.selectVault(team.id)
+        XCTAssertNil(vault.error)
+        XCTAssertEqual(vault.vaultID, team.id)
+        XCTAssertTrue(vault.visibleItems.isEmpty)
+        XCTAssertNotEqual(vault.categories.map(\.labelKey), categoryViews(
+            counts: ItemCountsFfi(all: 0, trash: 0, byType: []), scope: .personal
+        ).map(\.labelKey), "a shared vault labels its categories as shared")
+
+        await vault.selectVault(personal)
+        XCTAssertEqual(vault.visibleItems.map(\.path), ["Mine/Note"])
+        await device.lock()
+    }
+
+    /// Signs the account in over HTTP and creates a server-encrypted shared
+    /// vault, which no client creates yet.
+    private func createSharedVault(url: String, email: String, password: String, name: String)
+        async throws
+    {
+        func post(_ path: String, _ body: [String: Any], token: String? = nil) async throws -> Data {
+            var request = URLRequest(url: URL(string: url + path)!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "content-type")
+            if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "authorization") }
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard (200..<300).contains(status) else {
+                throw CoreError.Service("POST \(path) answered \(status)")
+            }
+            return data
+        }
+        let login = try await post("/v1/auth/login", ["email": email, "password": password])
+        let token = try XCTUnwrap(
+            (try JSONSerialization.jsonObject(with: login) as? [String: Any])?["access_token"] as? String
+        )
+        // Kind 2 is shared and cache policy 1 is full, as zann-core numbers them.
+        _ = try await post(
+            "/v1/vaults",
+            [
+                "slug": name.lowercased().replacingOccurrences(of: " ", with: "-"),
+                "name": name, "kind": 2, "cache_policy": 1,
+            ],
+            token: token
+        )
+    }
+
     /// The core offers registration only on a server without users, so the
     /// account comes from a throwaway core rather than through either device.
     private func registerAccount(url: String, email: String, password: String) throws {

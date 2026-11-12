@@ -109,12 +109,12 @@ final class AppModel: ObservableObject {
     /// Prompts for Touch ID; dismissing the prompt leaves no error behind.
     func unlockWithTouchID() async {
         guard let core, !busy, touchIDArmed else { return }
-        let page = await perform {
+        let contents = await perform {
             _ = try core.unlockRemembered()
-            return try VaultModel.loadPage(core)
+            return try VaultModel.load(core)
         }
-        if let page {
-            open(core: core, page: page)
+        if let contents {
+            open(core: core, contents: contents)
         } else if case .Unlock("keystore_cancelled", _)? = lastFailure as? CoreError {
             error = nil
         }
@@ -247,12 +247,12 @@ final class AppModel: ObservableObject {
     func submit(password: String, mode: MasterMode) async {
         guard let core, !busy, !password.isEmpty else { return }
         let syncFirst = syncAfterUnlock
-        let opened = await perform { () -> (ItemPage, Result<Void, Error>?) in
+        let opened = await perform { () -> (VaultModel.Contents, Result<Void, Error>?) in
             switch mode {
             case .create: _ = try core.initializeMasterPassword(password: password)
             case .unlock: _ = try core.unlock(password: password)
             }
-            guard syncFirst else { return (try VaultModel.loadPage(core), nil) }
+            guard syncFirst else { return (try VaultModel.load(core), nil) }
             // Once the first sync wrote the server's storage, the core moves
             // the still-empty session to its personal vault. A failed sync is
             // reported but must not keep the vault shut.
@@ -260,18 +260,20 @@ final class AppModel: ObservableObject {
                 _ = try core.remoteSync(storageId: nil)
                 try core.followPreferredStorage()
             }
-            return (try VaultModel.loadPage(core), synced)
+            return (try VaultModel.load(core), synced)
         }
-        guard let (page, synced) = opened else { return }
+        guard let (contents, synced) = opened else { return }
         syncAfterUnlock = false
-        open(core: core, page: page, synced: synced)
+        open(core: core, contents: contents, synced: synced)
     }
 
     /// The vault opens without waiting for the server and then syncs on the
     /// core's schedule: at once unless the first sync after connecting just
     /// ran, after every save, and on an interval while unlocked.
-    private func open(core: CoreFacade, page: ItemPage, synced: Result<Void, Error>? = nil) {
-        let vault = VaultModel(core: core, page: page, strings: strings, synced: synced)
+    private func open(
+        core: CoreFacade, contents: VaultModel.Contents, synced: Result<Void, Error>? = nil
+    ) {
+        let vault = VaultModel(core: core, contents: contents, strings: strings, synced: synced)
         self.vault = vault
         lastActivity = Date()
         screen = .vault

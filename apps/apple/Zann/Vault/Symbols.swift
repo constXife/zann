@@ -1,4 +1,5 @@
 import SwiftUI
+import ZannCoreKit
 
 /// SF Symbols for the icon names in schemas/ui_categories.json and for item
 /// types, like COSMIC maps them onto freedesktop icons.
@@ -14,6 +15,13 @@ enum Symbols {
         case "list": return "list.bullet"
         case "trash": return "trash"
         default: return "folder"
+        }
+    }
+
+    static func vault(_ scope: VaultScopeFfi) -> String {
+        switch scope {
+        case .personal: return "person"
+        case .shared: return "person.2"
         }
     }
 

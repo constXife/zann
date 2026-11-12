@@ -32,6 +32,21 @@ final class VaultModel: ObservableObject {
         let pendingChanges: UInt64
     }
 
+    /// The open vault's first page with the storage's vaults, loaded
+    /// together so the picker and the list never disagree.
+    struct Contents {
+        let page: ItemPage
+        let vaults: [VaultSummaryFfi]
+        let vault: VaultSummaryFfi
+    }
+
+    /// The vaults of the storage on screen; the picker shows when there are
+    /// several.
+    @Published private(set) var vaults: [VaultSummaryFfi] = []
+    /// The vault whose items are listed.
+    @Published private(set) var vaultID: String
+    /// A vault switch is loading.
+    @Published private(set) var switching = false
     @Published private(set) var categories: [CategoryViewFfi] = []
     @Published private(set) var folders = FolderTreeFfi(itemsWithoutFolder: 0, tree: [])
     @Published private(set) var visibleItems: [ItemSummary] = []
@@ -74,6 +89,8 @@ final class VaultModel: ObservableObject {
     private var running: Task<Void, Never>?
     private var items: [ItemSummary] = []
     private var counts: ItemCountsFfi
+    /// Shared vaults show the infrastructure categories.
+    private var scope: VaultScopeFfi
     /// Bumped on every selection so a slow load cannot show a previous item.
     private var selection = 0
     /// The first sync after signing in failed, so the move to the server's
@@ -82,10 +99,14 @@ final class VaultModel: ObservableObject {
 
     /// `synced` is the outcome of a sync that ran before the vault opened,
     /// `nil` when none did.
-    init(core: CoreFacade, page: ItemPage, strings: Strings, synced: Result<Void, Error>? = nil) {
+    init(
+        core: CoreFacade, contents: Contents, strings: Strings, synced: Result<Void, Error>? = nil
+    ) {
         self.core = core
         self.strings = strings
-        counts = page.counts
+        counts = contents.page.counts
+        vaultID = contents.vault.id
+        scope = contents.vault.scope
         categoryID = "all"
         canSync = synced != nil
         followPending = false
@@ -94,7 +115,7 @@ final class VaultModel: ObservableObject {
             followPending = true
         }
         schedule.unlocked(synced: synced != nil)
-        apply(page)
+        apply(contents)
     }
 
     /// Syncs whenever the core's schedule says so until `stopAutoSync`. A tick
@@ -138,7 +159,7 @@ final class VaultModel: ObservableObject {
     private enum Synced {
         case noServer
         case unchanged
-        case changed(ItemPage)
+        case changed(Contents)
         case identityChanged(StaleServer)
     }
 
@@ -168,13 +189,13 @@ final class VaultModel: ObservableObject {
                 }
                 if follow { try core.followPreferredStorage() }
                 guard follow || outcome.changesCommitted > 0 else { return .unchanged }
-                return .changed(try Self.loadPage(core))
+                return .changed(try Self.load(core))
             }
         }.value
         switch result {
-        case .success(.changed(let page)):
+        case .success(.changed(let contents)):
             succeeded()
-            apply(page)
+            apply(contents)
             // The open item may have changed on the server.
             if let selectedItemID { refreshDetail(selectedItemID) }
         case .success(.unchanged):
@@ -218,13 +239,51 @@ final class VaultModel: ObservableObject {
         )
     }
 
-    /// The first page of the current vault. The trash category filters
-    /// client-side, so deleted items load too.
-    nonisolated static func loadPage(_ core: CoreFacade) throws -> ItemPage {
-        try core.itemsList(
+    /// The first page of the current vault and the storage's vaults. The
+    /// trash category filters client-side, so deleted items load too.
+    nonisolated static func load(_ core: CoreFacade) throws -> Contents {
+        let page = try core.itemsList(
             filter: ItemsFilter(query: nil, includeDeleted: true),
             page: Page(limit: itemsPageLimit, cursor: nil)
         )
+        let vaults = try core.listVaults()
+        guard let id = core.currentVaultId(), let vault = vaults.first(where: { $0.id == id }) else {
+            throw CoreError.InvalidArgument("the open vault is not one of its storage's vaults")
+        }
+        return Contents(page: page, vaults: vaults, vault: vault)
+    }
+
+    /// Opens another vault of this storage with nothing filtered or
+    /// selected. If its items cannot load, the core goes back to the vault
+    /// on screen, so the picker and the list keep agreeing.
+    func selectVault(_ id: String) async {
+        guard id != vaultID, editor == nil, !switching else { return }
+        switching = true
+        defer { switching = false }
+        let core = core
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { () -> Contents in
+                let previous = core.currentVaultId()
+                _ = try core.setCurrentVault(id: id)
+                do {
+                    return try Self.load(core)
+                } catch {
+                    if let previous { _ = try core.setCurrentVault(id: previous) }
+                    throw error
+                }
+            }
+        }.value
+        switch result {
+        case .success(let contents):
+            error = nil
+            query = ""
+            folder = .any
+            categoryID = "all"
+            select(nil)
+            apply(contents)
+        case .failure(let failure):
+            error = describe(failure)
+        }
     }
 
     func select(_ id: String?) {
@@ -260,10 +319,10 @@ final class VaultModel: ObservableObject {
         schedule.localChange()
         let core = core
         let result = await Task.detached(priority: .userInitiated) {
-            Result { try Self.loadPage(core) }
+            Result { try Self.load(core) }
         }.value
         switch result {
-        case .success(let page): apply(page)
+        case .success(let contents): apply(contents)
         case .failure(let failure):
             error = describe(failure)
             return
@@ -325,11 +384,15 @@ final class VaultModel: ObservableObject {
         }
     }
 
-    private func apply(_ page: ItemPage) {
+    private func apply(_ contents: Contents) {
+        let page = contents.page
+        vaults = contents.vaults
+        vaultID = contents.vault.id
+        scope = contents.vault.scope
         items = page.items
         counts = page.counts
         totalCount = page.totalCount
-        categories = categoryViews(counts: counts, scope: .personal)
+        categories = categoryViews(counts: counts, scope: scope)
         folders = buildFolderTree(items: items)
         refreshVisible()
     }
