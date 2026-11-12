@@ -1,7 +1,26 @@
 import SwiftUI
 import ZannCoreKit
 
+/// Xcode runs the unit tests inside this app. While it hosts them it opens
+/// no vault: the tests bring their own cores over temporary databases, and
+/// the user's vault, Keychain items and sync stay out of the test process.
 @main
+enum ZannMain {
+    static func main() {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            TestHostApp.main()
+        } else {
+            ZannApp.main()
+        }
+    }
+}
+
+private struct TestHostApp: App {
+    var body: some Scene {
+        Settings { EmptyView() }
+    }
+}
+
 struct ZannApp: App {
     @StateObject private var model = AppModel(
         opening: AppModel.openDefaultCore,
