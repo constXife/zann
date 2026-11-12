@@ -125,6 +125,45 @@ final class ConnectTests: XCTestCase {
         XCTAssertEqual(reopened.visibleItems.map(\.path), ["Shared/From A"])
     }
 
+    /// Both Macs stay unlocked: an item saved on A appears on B within the
+    /// core's sync interval, with no Sync now on either.
+    func testAnEditOnOneMacReachesTheOtherWithoutSyncNow() async throws {
+        guard let url = ProcessInfo.processInfo.environment["ZANN_REMOTE_URL"], !url.isEmpty
+        else { throw XCTSkip("ZANN_REMOTE_URL is not set") }
+        let suffix = UUID().uuidString.lowercased()
+        let email = "apple-auto-\(suffix)@example.test"
+        let account = "account-password-\(suffix)"
+        let master = "master-password-\(suffix)"
+        try registerAccount(url: url, email: email, password: account)
+
+        let deviceA = makeDevice("a")
+        try await signIn(deviceA, url: url, email: email, password: account)
+        await deviceA.submit(password: master, mode: .create)
+        let vaultA = try XCTUnwrap(deviceA.vault)
+        let deviceB = makeDevice("b")
+        try await signIn(deviceB, url: url, email: email, password: account)
+        await deviceB.submit(password: master, mode: .unlock)
+        let vaultB = try XCTUnwrap(deviceB.vault)
+        XCTAssertTrue(vaultB.visibleItems.isEmpty)
+
+        vaultA.startCreating(typeID: "note")
+        try XCTUnwrap(vaultA.editor).setPath("Shared/Automatic")
+        await vaultA.saveEditor()
+
+        // Two automatic syncs in one process may meet the core's one-sync
+        // bound once; the next interval retries, so allow two.
+        let deadline = Date().addingTimeInterval(150)
+        while !vaultB.visibleItems.map(\.path).contains("Shared/Automatic") {
+            guard Date() < deadline else {
+                return XCTFail("B never saw A's item; last error: \(vaultB.syncError ?? "none")")
+            }
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
+
+        await deviceB.lock()
+        XCTAssertNil(deviceB.vault)
+    }
+
     /// The core offers registration only on a server without users, so the
     /// account comes from a throwaway core rather than through either device.
     private func registerAccount(url: String, email: String, password: String) throws {
