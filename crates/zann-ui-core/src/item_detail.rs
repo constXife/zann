@@ -11,6 +11,10 @@ const FIELD_ORDER: &[&str] = &[
     "username", "email", "password", "otp", "totp", "url", "key", "value", "notes",
 ];
 
+/// What every client shows in place of a masked value. A fixed width gives
+/// away nothing about the secret's length and fits the narrowest column.
+pub const MASKED_VALUE: &str = "••••••••";
+
 /// A field ready for display, before translation or temporary reveal state.
 /// Values and TOTP secrets remain local to the client.
 #[derive(Clone)]

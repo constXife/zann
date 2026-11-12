@@ -84,6 +84,18 @@ impl Catalogue {
         }
     }
 
+    /// The label for an item type id: the `types.*` translation, or the id
+    /// itself for a type this catalogue does not know.
+    #[must_use]
+    pub fn type_label(&self, type_id: &str) -> String {
+        let key = format!("types.{type_id}");
+        if self.has(&key) {
+            self.get(&key).to_string()
+        } else {
+            type_id.to_string()
+        }
+    }
+
     /// The label for a minutes option in settings, such as the auto-lock
     /// timeout: never, one hour, or a number of minutes.
     #[must_use]
@@ -178,5 +190,14 @@ mod tests {
         assert_eq!(catalogue.field_label("recovery_code"), "Recovery code");
         assert_eq!(catalogue.field_label(""), "");
         assert_eq!(Catalogue::new("ru").field_label("password"), "Пароль");
+    }
+
+    #[test]
+    fn type_labels_translate_known_types_and_keep_unknown_ids() {
+        let catalogue = Catalogue::new("en");
+        assert_eq!(catalogue.type_label("kv"), "Key-Value");
+        assert_eq!(catalogue.type_label("login"), "Login");
+        assert_eq!(catalogue.type_label("future_type"), "future_type");
+        assert_eq!(Catalogue::new("ru").type_label("login"), "Логин");
     }
 }
