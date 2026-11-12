@@ -316,39 +316,40 @@ fn load_master_key_from_file(file_path: &str, config: &ServerConfig) -> Option<S
     None
 }
 
-pub(super) fn load_identity_key(config: &ServerConfig) -> Option<SigningKey> {
-    let env_key = env::var("ZANN_IDENTITY_KEY").ok();
-    if let Some(value) = env_key {
-        return parse_identity_key(&value).ok();
+/// Loads the server's long-lived Ed25519 identity key.
+///
+/// Returns `Ok(None)` only when no source is configured; `preflight` refuses to
+/// start the server in that case. A configured but unreadable or malformed key
+/// is an error: clients pin the `server_id` derived from this key, so a silently
+/// replaced key would lock every pinned client out.
+pub(super) fn load_identity_key(config: &ServerConfig) -> Result<Option<SigningKey>, String> {
+    if let Ok(value) = env::var("ZANN_IDENTITY_KEY") {
+        return parse_identity_key(&value)
+            .map(Some)
+            .map_err(|err| format!("ZANN_IDENTITY_KEY invalid: {err}"));
     }
     if let Some(value) = config.server.identity_key.as_deref() {
-        return parse_identity_key(value).ok();
+        return parse_identity_key(value)
+            .map(Some)
+            .map_err(|err| format!("server.identity_key invalid: {err}"));
     }
 
-    let file_path = env::var("ZANN_IDENTITY_KEY_FILE")
+    let Some(file_path) = env::var("ZANN_IDENTITY_KEY_FILE")
         .ok()
-        .or_else(|| config.server.identity_key_file.clone());
-    let file_path = file_path?;
+        .or_else(|| config.server.identity_key_file.clone())
+    else {
+        return Ok(None);
+    };
 
     let path = Path::new(&file_path);
     if path.exists() {
-        let value = match read_secret_file(&file_path) {
-            Ok(value) => value,
-            Err(err) => {
-                warn!(event = "identity_key_read_failed", path = %file_path, error = %err);
-                return None;
-            }
-        };
-        return parse_identity_key(&value).ok();
+        let value = read_secret_file(&file_path)?;
+        return parse_identity_key(&value)
+            .map(Some)
+            .map_err(|err| format!("identity key file invalid ({file_path}): {err}"));
     }
 
-    match generate_identity_key_file(path) {
-        Ok(key) => Some(key),
-        Err(err) => {
-            warn!(event = "identity_key_autogen_failed", path = %file_path, error = %err);
-            None
-        }
-    }
+    generate_identity_key_file(path).map(Some)
 }
 
 fn parse_master_key(value: &str) -> Result<SecretKey, &'static str> {
