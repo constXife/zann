@@ -557,6 +557,18 @@ impl<'a> PendingChangeRepo<'a> {
         Ok(result.rows_affected())
     }
 
+    /// How many local changes in this storage the server has not confirmed.
+    pub async fn count_by_storage(&self, storage_id: Uuid) -> Result<u64, sqlx_core::Error> {
+        let row = query!(
+            r#"SELECT COUNT(*) AS count FROM pending_changes WHERE storage_id = ?1"#,
+            storage_id
+        )
+        .fetch_one(self.pool)
+        .await?;
+        let count: i64 = row.try_get("count")?;
+        Ok(u64::try_from(count).unwrap_or(0))
+    }
+
     pub async fn delete_by_storage(&self, storage_id: Uuid) -> Result<u64, sqlx_core::Error> {
         query!(
             r#"DELETE FROM pending_changes WHERE storage_id = ?1"#,

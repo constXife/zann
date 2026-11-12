@@ -454,6 +454,51 @@ async fn storage_exact_and_list_reads_fail_before_decoding_huge_dynamic_bodies()
 }
 
 #[tokio::test]
+async fn pending_count_covers_every_vault_of_one_storage_only() {
+    let fixture = fixture().await;
+    let other_vault = LocalSyncScope {
+        storage_id: fixture.scope.storage_id,
+        vault_id: Uuid::now_v7(),
+    };
+    LocalVaultRepo::new(&fixture.pool)
+        .create(&vault(other_vault, "Secondary"))
+        .await
+        .expect("insert second vault");
+    for (index, scope) in [fixture.scope, fixture.scope, other_vault]
+        .into_iter()
+        .enumerate()
+    {
+        let projected = item(
+            scope,
+            Uuid::now_v7(),
+            &format!("accounts/count-{index}"),
+            &format!("count-{index}"),
+            1,
+            SyncStatus::Modified,
+        );
+        insert_pending(
+            &fixture.pool,
+            &pending(scope, &projected, ChangeType::Create),
+        )
+        .await;
+    }
+
+    let repo = PendingChangeRepo::new(&fixture.pool);
+    assert_eq!(
+        repo.count_by_storage(fixture.scope.storage_id)
+            .await
+            .expect("count pending"),
+        3
+    );
+    assert_eq!(
+        repo.count_by_storage(Uuid::now_v7())
+            .await
+            .expect("count pending of another storage"),
+        0
+    );
+}
+
+#[tokio::test]
 async fn checkpoint_pending_reader_materializes_at_most_the_requested_limit() {
     let fixture = fixture().await;
     for index in 0..66 {
