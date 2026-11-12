@@ -811,7 +811,7 @@ impl SessionError {
         error
     }
 
-    #[cfg(feature = "app")]
+    #[cfg(any(feature = "app", all(test, feature = "sync")))]
     pub(crate) fn for_app(operation_id: SessionOperationId, kind: SessionErrorKind) -> Self {
         Self {
             operation_id,
