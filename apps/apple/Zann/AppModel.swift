@@ -236,16 +236,15 @@ final class AppModel: ObservableObject {
         open(core: core, page: page, synced: synced)
     }
 
-    /// Every unlock but the first after connecting syncs in the background,
-    /// so the vault opens without waiting for the server.
+    /// The vault opens without waiting for the server and then syncs on the
+    /// core's schedule: at once unless the first sync after connecting just
+    /// ran, after every save, and on an interval while unlocked.
     private func open(core: CoreFacade, page: ItemPage, synced: Result<Void, Error>? = nil) {
         let vault = VaultModel(core: core, page: page, strings: strings, synced: synced)
         self.vault = vault
         lastActivity = Date()
         screen = .vault
-        if synced == nil {
-            Task { await vault.sync() }
-        }
+        vault.startAutoSync()
     }
 
     func noteActivity(at now: Date = Date()) {
@@ -276,6 +275,9 @@ final class AppModel: ObservableObject {
 
     func lock() async {
         guard let core, isUnlocked, !busy else { return }
+        // Stopped first, so no tick admits a sync while the core locks; the
+        // core's lock cancels one already running.
+        vault?.stopAutoSync()
         guard await perform({ _ = try core.lock() }) != nil else { return }
         vault = nil
         if preferences.clipboardClearOnLock {
