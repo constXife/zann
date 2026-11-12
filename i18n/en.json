@@ -635,6 +635,7 @@
     "master_password_invalid": "Incorrect master password. This account already has encrypted personal vaults. Enter the same master password you used on your other device.",
     "history_unavailable_shared": "You do not have access to history details for this shared vault.",
     "server_unreachable": "Unable to reach the server. Check the URL and try again.",
+    "server_identity_changed": "This server no longer proves the identity you trusted. If its owner replaced its identity key, forget the server and connect again; otherwise do not sign in.",
     "network_timeout": "Network timeout. Check your connection and try again.",
     "rate_limited": "Too many requests. Please wait and retry.",
     "temporary_unavailable": "Server temporarily unavailable. Try again soon.",

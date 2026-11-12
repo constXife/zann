@@ -337,11 +337,22 @@ impl AppClient {
         };
         if let Some(connection) = existing {
             let metadata = connection.metadata();
-            if metadata.server_id.as_deref() != Some(verified.binding().server_id()) {
-                return Err(SessionError::for_app(
-                    operation_id,
-                    SessionErrorKind::TrustInvalid,
-                ));
+            match metadata.server_id.as_deref() {
+                Some(pinned) if pinned == verified.binding().server_id() => {}
+                // A changed identity key is refused outright, never offered
+                // for re-trust: recovery is an explicit `remove_connection`.
+                Some(_) => {
+                    return Err(SessionError::for_app(
+                        operation_id,
+                        SessionErrorKind::ServerIdentityChanged,
+                    ));
+                }
+                None => {
+                    return Err(SessionError::for_app(
+                        operation_id,
+                        SessionErrorKind::TrustInvalid,
+                    ));
+                }
             }
             if let Some(old) = metadata.server_fingerprint.as_deref() {
                 if old != verified.binding().server_fingerprint() {
@@ -1488,7 +1499,7 @@ mod tests {
             .await
             .expect_err("a different server_id must be refused");
 
-        assert_eq!(error.kind(), SessionErrorKind::TrustInvalid);
+        assert_eq!(error.kind(), SessionErrorKind::ServerIdentityChanged);
         assert_eq!(pinned_identity(&app, &endpoint), pinned);
     }
 

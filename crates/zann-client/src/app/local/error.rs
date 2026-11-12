@@ -81,6 +81,7 @@ fn session_error_kind_code(kind: SessionErrorKind) -> &'static str {
         SessionErrorKind::TrustRequired
         | SessionErrorKind::TrustMismatch
         | SessionErrorKind::TrustInvalid => "server_fingerprint_changed",
+        SessionErrorKind::ServerIdentityChanged => "server_identity_changed",
         SessionErrorKind::InsecureTransport => "insecure_transport",
         SessionErrorKind::Configuration | SessionErrorKind::SessionNotFound => "sync_no_target",
         _ => "sync_session",

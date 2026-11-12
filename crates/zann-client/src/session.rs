@@ -733,6 +733,11 @@ pub enum SessionErrorKind {
     TrustRequired,
     TrustMismatch,
     TrustInvalid,
+    /// The server at a pinned endpoint now proves a different `server_id`
+    /// (identity key). This is a hard refusal with SSH host-key semantics:
+    /// there is no re-trust challenge, and the only recovery is to forget the
+    /// connection explicitly and connect again.
+    ServerIdentityChanged,
     InsecureTransport,
     TransportUnavailable,
     TransportRejected,
@@ -760,6 +765,7 @@ impl fmt::Display for SessionErrorKind {
             Self::TrustRequired => "trust_required",
             Self::TrustMismatch => "trust_mismatch",
             Self::TrustInvalid => "trust_invalid",
+            Self::ServerIdentityChanged => "server_identity_changed",
             Self::InsecureTransport => "insecure_transport",
             Self::TransportUnavailable => "transport_unavailable",
             Self::TransportRejected => "transport_rejected",
@@ -1208,6 +1214,26 @@ impl EndpointIdentity {
 
     fn server_fingerprint(&self) -> &str {
         self.binding.server_fingerprint()
+    }
+
+    /// Compares this observed identity with a pinned binding. A different
+    /// `server_id` at the same address is a changed server identity; any
+    /// other drift is a plain trust mismatch.
+    fn pinned_mismatch(
+        &self,
+        address: &str,
+        server_id: &str,
+        server_fingerprint: &str,
+    ) -> Option<SessionErrorKind> {
+        if self.address() != address {
+            Some(SessionErrorKind::TrustMismatch)
+        } else if self.server_id() != server_id {
+            Some(SessionErrorKind::ServerIdentityChanged)
+        } else if self.server_fingerprint() != server_fingerprint {
+            Some(SessionErrorKind::TrustMismatch)
+        } else {
+            None
+        }
     }
 
     #[cfg(test)]
@@ -1960,6 +1986,16 @@ impl TokenManager {
             ),
             Some((connection_id, connection)) => {
                 let metadata = connection.metadata();
+                if metadata
+                    .server_id
+                    .as_deref()
+                    .is_some_and(|stored| stored != verified.server_id())
+                {
+                    return Err(SessionError::new(
+                        operation,
+                        SessionErrorKind::ServerIdentityChanged,
+                    ));
+                }
                 if let Some(stored) = metadata.server_fingerprint.as_deref() {
                     if stored != verified.server_fingerprint() {
                         return Err(SessionError::new(
@@ -3259,14 +3295,10 @@ impl TokenManager {
                 ));
             }
         };
-        if observed.address() != endpoint
-            || observed.server_id() != expected_server_id
-            || observed.server_fingerprint() != expected_fingerprint
+        if let Some(kind) =
+            observed.pinned_mismatch(&endpoint, expected_server_id, expected_fingerprint)
         {
-            return Err((
-                locks,
-                SessionError::new(operation, SessionErrorKind::TrustMismatch),
-            ));
+            return Err((locks, SessionError::new(operation, kind)));
         }
         Ok((locks, port, observed))
     }
@@ -3323,14 +3355,10 @@ impl TokenManager {
                 ));
             }
         };
-        if observed.address() != endpoint
-            || observed.server_id() != anchor.server_id()
-            || observed.server_fingerprint() != anchor.server_fingerprint()
+        if let Some(kind) =
+            observed.pinned_mismatch(&endpoint, anchor.server_id(), anchor.server_fingerprint())
         {
-            return Err((
-                locks,
-                SessionError::new(operation, SessionErrorKind::TrustMismatch),
-            ));
+            return Err((locks, SessionError::new(operation, kind)));
         }
         Ok((locks, port, observed))
     }
@@ -4914,6 +4942,32 @@ mod tests {
         assert!(!rendered.contains("old-access"));
         assert!(!rendered.contains(ADDRESS));
         assert!(!rendered.contains(PROFILE));
+    }
+
+    #[tokio::test]
+    async fn changed_server_id_is_a_distinct_refusal_that_reads_no_secret() {
+        let now = DateTime::parse_from_rfc3339("2026-08-16T12:00:00Z")
+            .expect("fixed time")
+            .with_timezone(&Utc);
+        let harness = Harness::new(
+            ADDRESS,
+            now + ChronoDuration::hours(1),
+            Some("old-refresh"),
+            None,
+        );
+        let replaced = EndpointIdentity::for_test(ADDRESS, "server-b", FINGERPRINT, true, true);
+        let port = FakeAuthPort::new(replaced, success_behavior());
+        let reads = harness.store.get_count();
+        let error = harness
+            .app(port.clone())
+            .access(&harness.target, harness.operation())
+            .await
+            .expect_err("changed server identity");
+
+        assert_eq!(error.kind(), SessionErrorKind::ServerIdentityChanged);
+        assert_eq!(harness.store.get_count(), reads);
+        assert_eq!(port.refresh_calls(), 0);
+        assert_eq!(port.logout_calls(), 0);
     }
 
     #[tokio::test]

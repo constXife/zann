@@ -179,6 +179,7 @@ fn session_error_kind(kind: SessionErrorKind) -> &'static str {
         SessionErrorKind::TrustRequired
         | SessionErrorKind::TrustMismatch
         | SessionErrorKind::TrustInvalid => "server_fingerprint_changed",
+        SessionErrorKind::ServerIdentityChanged => "server_identity_changed",
         SessionErrorKind::Configuration | SessionErrorKind::SessionNotFound => "context_missing",
         SessionErrorKind::DeadlineExceeded => "network_timeout",
         _ => "sync_session",
