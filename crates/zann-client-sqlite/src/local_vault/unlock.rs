@@ -119,6 +119,7 @@ impl LocalVault {
         {
             Some(identity) => identity,
             None => {
+                self.refuse_local_identity_on_server()?;
                 let identity = new_local_identity();
                 client
                     .replace_kdf_identity_if_matches(None, identity.clone())
@@ -127,6 +128,9 @@ impl LocalVault {
             }
         };
         let master_key = Arc::new(derive_master_key(&password, &identity)?);
+        // An account that already has a personal vault key opens only with
+        // the master password that made it, even through this path.
+        self.check_key_for_new_device(&master_key, Some(&identity))?;
 
         // Create local storage if none exists
         let storage_repo = LocalStorageRepo::new(&pool);

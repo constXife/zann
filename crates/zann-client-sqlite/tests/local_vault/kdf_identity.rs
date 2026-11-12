@@ -9,6 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use uuid::Uuid;
+use zann_client::app::local::LocalError;
 use zann_client::app::{
     AppClient, ClientId, ClientPaths, ConfigIdentity, ConfigKdfParams, SessionClient,
 };
@@ -88,8 +89,12 @@ fn a_local_only_vault_generates_and_commits_its_identity() {
     assert!(core.unlock(password).expect("unlock").unlocked);
 }
 
+/// The account's identity outlives the session that committed it, for
+/// instance after a logout. Without a session the account cannot confirm the
+/// master password, so nothing may be stored under an unchecked key: its
+/// first sync would bind that key to the connection for good.
 #[test]
-fn a_vault_created_after_login_uses_the_account_identity() {
+fn an_account_identity_without_a_session_stores_nothing() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("open core");
 
@@ -99,13 +104,21 @@ fn a_vault_created_after_login_uses_the_account_identity() {
         .replace_kdf_identity_if_matches(None, account_identity())
         .expect("a fresh device has no conflicting salt");
 
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
-        .expect("initialize master password");
-
+    let password = format!("pw-{}", Uuid::now_v7());
+    for refused in [
+        core.initialize_master_password(password.clone()),
+        core.unlock(password),
+    ] {
+        match refused {
+            Err(LocalError::Sync { kind, .. }) => assert_eq!(kind, "session_expired"),
+            other => panic!("expected a sign-in request, got {other:?}"),
+        }
+    }
+    assert!(!core.app_status().expect("status").initialized);
     assert_eq!(
         committed_identity(&root),
         Some(account_identity()),
-        "creating the vault must not replace the account's salt"
+        "the account's salt stays untouched"
     );
 }
 
@@ -115,8 +128,14 @@ fn a_second_device_unlocks_with_the_account_identity() {
 
     let first = CanonicalTempDir::new();
     let core = create_core(db_url(&first)).expect("open device A");
+    // Device A made the account's vault online, where the server confirmed
+    // its key; offline it stands in with the same salt and parameters, which
+    // alone determine the key.
+    let mut same_salt = account_identity();
+    same_salt.email = None;
+    same_salt.salt_fingerprint = None;
     app_client(&first)
-        .replace_kdf_identity_if_matches(None, account_identity())
+        .replace_kdf_identity_if_matches(None, same_salt)
         .expect("device A login");
     core.initialize_master_password(password.clone())
         .expect("device A creates the vault");
