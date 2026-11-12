@@ -197,6 +197,19 @@ pub enum PrepareConnectionOutcome {
     FingerprintChanged(Box<ConnectionTrustChallenge>),
 }
 
+/// What [`AppClient::remove_connection`] did.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConnectionRemoval {
+    /// The connection is gone from the config. `cleanup_deferred` means some
+    /// of its stored credentials are retired in the credential journal but
+    /// still in the store, typically because the config backup keeps the
+    /// previous generation restorable; a later credential reconcile deletes
+    /// them, exactly as after a logout.
+    Removed { cleanup_deferred: bool },
+    /// No connection was configured for this endpoint and name.
+    AlreadyAbsent,
+}
+
 /// Application policy facade over session and bidirectional sync owners.
 #[derive(Clone)]
 pub struct AppClient {
@@ -394,6 +407,47 @@ impl AppClient {
             )
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
         Ok(challenge.prepared)
+    }
+
+    /// Forgets the connection that `prepare_connection` keys by this endpoint
+    /// and name: its pinned server identity, credential profiles and stored
+    /// credentials. This is the explicit recovery from
+    /// [`SessionErrorKind::ServerIdentityChanged`]; the next
+    /// `prepare_connection` then pins whatever server answers, as on first
+    /// use. Nothing is sent to the server, and the local sync projection is
+    /// left to [`Self::reset_sync`].
+    ///
+    /// Repeating the call after it succeeded returns
+    /// [`ConnectionRemoval::AlreadyAbsent`].
+    pub fn remove_connection(
+        &self,
+        endpoint: &str,
+        connection_name: &str,
+    ) -> Result<ConnectionRemoval, SessionError> {
+        let operation_id = SessionOperationId::new();
+        let failure = |error: ConfigError| {
+            let kind = match error {
+                ConfigError::RevisionConflict { .. } => SessionErrorKind::ConcurrentSessionChange,
+                error => crate::session::local_config_error_kind(&error),
+            };
+            SessionError::for_app(operation_id, kind)
+        };
+        let snapshot = self.repository.snapshot().map_err(failure)?;
+        let connection_id = ConnectionId::deterministic(connection_name, endpoint);
+        if !snapshot.config().connections.contains_key(&connection_id) {
+            return Ok(ConnectionRemoval::AlreadyAbsent);
+        }
+        let outcome = self
+            .repository
+            .remove_connection(
+                snapshot.revision(),
+                &connection_id,
+                self.credential_store.as_ref(),
+            )
+            .map_err(failure)?;
+        Ok(ConnectionRemoval::Removed {
+            cleanup_deferred: !outcome.warnings().is_empty(),
+        })
     }
 
     /// Installs a metadata-only progress observer for subsequent sync calls.
@@ -1538,6 +1592,55 @@ mod tests {
             pinned_identity(&app, &endpoint),
             (server_id, Some("fingerprint-2".to_string()))
         );
+    }
+
+    #[tokio::test]
+    async fn forgetting_a_changed_server_lets_it_be_pinned_again() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let app = trusting_client(&dir);
+        let mut server = mockito::Server::new_async().await;
+        let endpoint = first_connect(&app, &mut server).await;
+        let (old_server_id, _) = pinned_identity(&app, &endpoint);
+        let _replaced = serve_identity(
+            &mut server,
+            &ed25519_dalek::SigningKey::from_bytes(&[8; 32]),
+            "fingerprint-1",
+        )
+        .await;
+        let refused = app
+            .prepare_connection(&endpoint, CONNECTION_NAME, "default")
+            .await
+            .expect_err("a different server_id must be refused");
+        assert_eq!(refused.kind(), SessionErrorKind::ServerIdentityChanged);
+
+        assert_eq!(
+            app.remove_connection(&endpoint, CONNECTION_NAME)
+                .expect("forget the server"),
+            ConnectionRemoval::Removed {
+                cleanup_deferred: false
+            }
+        );
+        assert!(app
+            .repository
+            .snapshot()
+            .expect("config snapshot")
+            .config()
+            .connections
+            .is_empty());
+        assert_eq!(
+            app.remove_connection(&endpoint, CONNECTION_NAME)
+                .expect("forgetting twice is a no-op"),
+            ConnectionRemoval::AlreadyAbsent
+        );
+
+        let outcome = app
+            .prepare_connection(&endpoint, CONNECTION_NAME, "default")
+            .await
+            .expect("a forgotten server is pinned as on first use");
+        assert!(matches!(outcome, PrepareConnectionOutcome::Ready(_)));
+        let (new_server_id, _) = pinned_identity(&app, &endpoint);
+        assert!(new_server_id.is_some());
+        assert_ne!(new_server_id, old_server_id);
     }
 }
 

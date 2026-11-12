@@ -4162,6 +4162,14 @@ fn config_error_kind(error: &ConfigError, operation: &SessionOperation) -> Sessi
         ConfigError::Busy { .. } if Instant::now() >= operation.deadline => {
             SessionErrorKind::DeadlineExceeded
         }
+        _ => local_config_error_kind(error),
+    }
+}
+
+/// Classifies a config failure of a local call that has no operation
+/// deadline.
+pub(crate) fn local_config_error_kind(error: &ConfigError) -> SessionErrorKind {
+    match error {
         ConfigError::Busy { .. } => SessionErrorKind::Busy,
         ConfigError::MissingConnection { .. } | ConfigError::MissingCredentialProfile { .. } => {
             SessionErrorKind::SessionNotFound

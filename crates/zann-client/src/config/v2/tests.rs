@@ -1857,3 +1857,147 @@ fn invalid_auth_intent_preflight_blocks_pending_credential_cleanup_port_calls() 
         assert!(repo.paths().credential_transaction_journal().exists());
     }
 }
+
+#[test]
+fn removing_a_connection_retires_its_credentials_and_every_reference() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo = repository(&temp);
+    initialize(&repo);
+    let store = TestCredentialStore::default();
+    let removed = seed_auth_intent_profile(&repo, &store);
+    let kept = commit(
+        &repo,
+        1,
+        endpoint("https://kept.test", "server-kept", "pin-kept"),
+        Some("storage-kept"),
+        AuthenticatedConnectionTarget::Create {
+            connection_name: "kept".to_string(),
+        },
+        IdentityCommit::InitializeOrMatch(identity("intent")),
+        "desktop",
+        "default",
+        "kept-secret",
+        &store,
+    )
+    .expect("second connection")
+    .connection_id()
+    .clone();
+    repo.set_cli_default_vault(&removed, "vault-a".to_string())
+        .expect("CLI default for the removed connection");
+    let source = repo.snapshot().expect("source snapshot");
+    let removed_ids: Vec<_> = source.config().connections[&removed]
+        .credential_profiles()
+        .values()
+        .flat_map(|profile| profile.credentials().values().cloned())
+        .collect();
+    assert_eq!(removed_ids.len(), 3);
+    let kept_ids: Vec<_> = source.config().connections[&kept]
+        .credential_profiles()
+        .values()
+        .flat_map(|profile| profile.credentials().values().cloned())
+        .collect();
+
+    let outcome = repo
+        .remove_connection(source.revision(), &removed, &store)
+        .expect("remove connection");
+
+    // The backup keeps the predecessor generation restorable, so its
+    // credentials are retired now and deleted once the backup moves on.
+    assert!(outcome.warnings().iter().all(|warning| matches!(
+        warning,
+        CredentialTransactionWarning::CleanupDeferred { credential_ids, .. }
+            if credential_ids.iter().all(|id| removed_ids.contains(id))
+    )));
+    let config = outcome.snapshot().config();
+    assert_eq!(outcome.snapshot().revision(), source.revision() + 1);
+    assert!(!config.connections.contains_key(&removed));
+    assert!(config.connections.contains_key(&kept));
+    assert_eq!(config.clients[&client_id("test")].active_connection(), None);
+    assert_eq!(
+        config.clients[&client_id("desktop")].active_connection(),
+        Some(&kept)
+    );
+    let ClientNamespace::CliV1(cli) = config.clients[&client_id("cli")].namespace() else {
+        panic!("CLI namespace");
+    };
+    assert!(!cli.default_vault_by_connection.contains_key(&removed));
+    assert_eq!(
+        repo.snapshot().expect("reloaded").revision(),
+        outcome.snapshot().revision()
+    );
+
+    repo.update_connection(&kept, |metadata| {
+        metadata.name = "rotate the backup".to_string();
+        Ok(())
+    })
+    .expect("rotate backup");
+    let reconciled = repo
+        .reconcile_credentials(&store)
+        .expect("delete retired credentials");
+    assert!(
+        reconciled.warnings().is_empty(),
+        "{:?}",
+        reconciled.warnings()
+    );
+    for credential_id in &removed_ids {
+        assert_eq!(store.value(credential_id), None, "retired credential");
+    }
+    for credential_id in &kept_ids {
+        assert!(store.value(credential_id).is_some(), "untouched credential");
+    }
+}
+
+#[test]
+fn removing_a_pinned_connection_without_credentials_needs_no_credential_io() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo = repository(&temp);
+    initialize(&repo);
+    let store = TestCredentialStore::default();
+    let connection_id = ConnectionId::deterministic("pinned", "https://pinned.test");
+    let pinned = repo
+        .pin_verified_connection(
+            0,
+            connection_id.clone(),
+            "pinned".to_string(),
+            &endpoint("https://pinned.test", "server-pinned", "pin-pinned"),
+            Some("storage-pinned".to_string()),
+        )
+        .expect("pin connection");
+
+    let outcome = repo
+        .remove_connection(pinned.revision(), &connection_id, &store)
+        .expect("remove pinned connection");
+
+    assert!(!outcome
+        .snapshot()
+        .config()
+        .connections
+        .contains_key(&connection_id));
+    assert_eq!(store.calls(), (0, 0, 0, 0));
+}
+
+#[test]
+fn removing_a_connection_fails_closed_on_a_stale_revision_or_missing_target() {
+    let temp = TempDir::new().expect("tempdir");
+    let repo = repository(&temp);
+    initialize(&repo);
+    let store = TestCredentialStore::default();
+    let connection_id = seed_auth_intent_profile(&repo, &store);
+    let before = repo.snapshot().expect("source snapshot");
+    let calls = store.calls();
+
+    assert!(matches!(
+        repo.remove_connection(before.revision() - 1, &connection_id, &store),
+        Err(ConfigError::RevisionConflict { .. })
+    ));
+    let missing = ConnectionId::deterministic("missing", "https://missing.test");
+    assert!(matches!(
+        repo.remove_connection(before.revision(), &missing, &store),
+        Err(ConfigError::MissingConnection { .. })
+    ));
+
+    let after = repo.snapshot().expect("unchanged snapshot");
+    assert_eq!(after.revision(), before.revision());
+    assert!(after.config().connections.contains_key(&connection_id));
+    assert_eq!(store.calls(), calls);
+}

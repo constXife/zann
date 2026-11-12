@@ -1,6 +1,6 @@
 mod support;
 
-use zann_ffi::{CoreError, SessionErrorKindFfi, SessionOperationFfi};
+use zann_ffi::{ConnectionRemovalFfi, CoreError, SessionErrorKindFfi, SessionOperationFfi};
 
 #[test]
 fn remote_session_projects_typed_session_errors() {
@@ -33,4 +33,20 @@ fn remote_session_projects_typed_session_errors() {
             ..
         })
     ));
+}
+
+#[test]
+fn forgetting_an_unknown_server_is_a_no_op() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let core = support::open(&root.path().join("local.sqlite"));
+    let session = core.remote_session().expect("remote session");
+
+    for _ in 0..2 {
+        assert_eq!(
+            session
+                .remove_connection("https://zann.example".into(), "Remote".into())
+                .expect("forget server"),
+            ConnectionRemovalFfi::AlreadyAbsent
+        );
+    }
 }

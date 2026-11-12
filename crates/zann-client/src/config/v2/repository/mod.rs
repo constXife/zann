@@ -163,6 +163,7 @@ impl ConfigRepository {
 }
 
 mod auth_intent;
+mod connection_remove;
 mod connections;
 mod credential_remove;
 mod credential_transaction;
