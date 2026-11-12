@@ -301,5 +301,20 @@
         "label": "fields.notes"
       }
     ]
+  },
+  "secret": {
+    "main": [
+      {
+        "key": "value",
+        "type": "secret",
+        "label": "fields.value"
+      },
+      {
+        "key": "policy",
+        "type": "text",
+        "label": "fields.policy"
+      }
+    ],
+    "advanced": []
   }
 }
