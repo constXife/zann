@@ -77,42 +77,54 @@ pub(crate) fn verified_endpoint_binding_for_test(
         .expect("static test endpoint binding must validate")
 }
 
+/// A `/system/info` response signed the way a server holding `signing_key`
+/// serves it.
 #[cfg(test)]
-mod tests {
+pub(crate) fn signed_system_info_for_test(
+    signing_key: &ed25519_dalek::SigningKey,
+    server_fingerprint: &str,
+) -> SystemInfoResponse {
     use base64::Engine as _;
-    use chrono::Utc;
     use data_encoding::BASE32_NOPAD;
-    use ed25519_dalek::{Signer, SigningKey};
+    use ed25519_dalek::Signer;
     use sha2::{Digest, Sha256};
-
-    use super::*;
     use zann_core::api::system::SystemIdentity;
 
     const SIGNATURE_PREFIX: &str = "zann-id:v1";
 
+    let public_key = signing_key.verifying_key().to_bytes();
+    let server_id = BASE32_NOPAD
+        .encode(&Sha256::digest(public_key))
+        .to_ascii_lowercase();
+    let timestamp = chrono::Utc::now().timestamp();
+    let message = format!("{SIGNATURE_PREFIX}:{server_id}:{timestamp}");
+    let signature = signing_key.sign(message.as_bytes()).to_bytes();
+    SystemInfoResponse {
+        version: "1.0.0".to_string(),
+        build_commit: Some("test-build".to_string()),
+        server_id,
+        identity: SystemIdentity {
+            public_key: base64::engine::general_purpose::STANDARD.encode(public_key),
+            timestamp,
+            signature: base64::engine::general_purpose::STANDARD.encode(signature),
+        },
+        server_fingerprint: server_fingerprint.to_string(),
+        server_name: Some("Test server".to_string()),
+        personal_vaults_enabled: true,
+        internal_users_present: Some(true),
+        auth_methods: vec![],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use base64::Engine as _;
+    use ed25519_dalek::{Signer, SigningKey};
+
+    use super::*;
+
     fn signed_system_info(signing_key: &SigningKey) -> SystemInfoResponse {
-        let public_key = signing_key.verifying_key().to_bytes();
-        let server_id = BASE32_NOPAD
-            .encode(&Sha256::digest(public_key))
-            .to_ascii_lowercase();
-        let timestamp = Utc::now().timestamp();
-        let message = format!("{SIGNATURE_PREFIX}:{server_id}:{timestamp}");
-        let signature = signing_key.sign(message.as_bytes()).to_bytes();
-        SystemInfoResponse {
-            version: "1.0.0".to_string(),
-            build_commit: Some("test-build".to_string()),
-            server_id,
-            identity: SystemIdentity {
-                public_key: base64::engine::general_purpose::STANDARD.encode(public_key),
-                timestamp,
-                signature: base64::engine::general_purpose::STANDARD.encode(signature),
-            },
-            server_fingerprint: "fingerprint-1".to_string(),
-            server_name: Some("Test server".to_string()),
-            personal_vaults_enabled: true,
-            internal_users_present: Some(true),
-            auth_methods: vec![],
-        }
+        signed_system_info_for_test(signing_key, "fingerprint-1")
     }
 
     #[test]
