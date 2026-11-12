@@ -129,12 +129,14 @@ impl LocalVault {
         }
 
         let locked = self.master_key.lock().expect("lock poisoned").is_none();
+        let server_connected = self.app_client()?.configured_target(None).is_ok();
 
         Ok(AppStatus {
             initialized,
             locked,
             storages_count,
             has_local_vault,
+            server_connected,
         })
     }
 

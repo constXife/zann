@@ -530,6 +530,7 @@ impl From<native::AppStatus> for AppStatusFfi {
             locked: value.locked,
             storages_count: value.storages_count,
             has_local_vault: value.has_local_vault,
+            server_connected: value.server_connected,
         }
     }
 }
@@ -541,6 +542,7 @@ impl From<AppStatusFfi> for native::AppStatus {
             locked: value.locked,
             storages_count: value.storages_count,
             has_local_vault: value.has_local_vault,
+            server_connected: value.server_connected,
         }
     }
 }

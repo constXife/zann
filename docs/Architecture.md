@@ -258,6 +258,14 @@ and recomputed-fingerprint coherence before candidate publication.
 Logout and refresh rejection use a symmetric credential-aware revoke rather
 than editing metadata directly.
 
+Which local storage a session shows is a `zann-client-sqlite::local_vault`
+rule, not a shell choice. Opening picks the storage holding the most items
+among those holding a vault, and a server storage wins over the local one when
+none holds an item. Unlocking always verifies the key against a vault of that
+storage. After a newly connected server's first sync, clients call
+`follow_preferred_storage`, which moves a session whose storage is still empty
+to the storage that opening would pick.
+
 Before an existing refresh secret is read or sent, `AppSession` probes the
 canonical endpoint and verifies the exact stored address, server identity and
 fingerprint binding. In protocol v1 the fingerprint is unsigned TOFU metadata

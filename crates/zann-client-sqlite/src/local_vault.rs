@@ -113,37 +113,39 @@ impl LocalVault {
     fn finish_unlock(&self, master_key: Arc<SecretKey>) -> LocalResult<VaultStatus> {
         let pool = self.pool();
         let repo = LocalVaultRepo::new(&pool);
-        let storage_id = self.storage_id();
-        let vaults = self
-            .runtime
-            .block_on(repo.list_by_storage(storage_id))
-            .map_err(|err| LocalError::Service(err.to_string()))?;
-        let vault_id = if vaults.is_empty() {
-            let services = LocalServices::new(&pool, master_key.as_ref());
-            let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
-            vault.id
-        } else {
-            let verify = vaults.first().expect("vaults not empty");
-            vault_crypto::decrypt_vault_key(master_key.as_ref(), verify.id, &verify.vault_key_enc)
-                .map_err(|_| LocalError::InvalidArgument("invalid password".to_string()))?;
-            let item_repo = LocalItemRepo::new(&pool);
-            let mut selected = vaults
-                .iter()
-                .find(|vault| vault.is_default)
-                .map(|vault| (vault.id, 0usize))
-                .or_else(|| vaults.first().map(|vault| (vault.id, 0usize)))
-                .expect("vaults not empty");
-            for vault in &vaults {
-                let count = self
-                    .runtime
-                    .block_on(item_repo.count_by_vault(storage_id, vault.id))
-                    .map_err(|err| LocalError::Service(err.to_string()))?;
-                if count as usize > selected.1 {
-                    selected = (vault.id, count as usize);
-                }
-            }
-            selected.0
+        let list = |storage_id| {
+            self.runtime
+                .block_on(repo.list_by_storage(storage_id))
+                .map_err(|err| LocalError::Service(err.to_string()))
         };
+        let mut storage_id = self.storage_id();
+        let mut vaults = list(storage_id)?;
+        if vaults.is_empty() {
+            // A storage without vaults, such as one whose first sync failed,
+            // has no key to check the password against: open the one a fresh
+            // start would, which holds a vault whenever any storage does.
+            storage_id = resolve_storage_id(&self.runtime, &pool)?;
+            vaults = list(storage_id)?;
+        }
+        let vault_id = match vaults.first() {
+            None => {
+                let services = LocalServices::new(&pool, master_key.as_ref());
+                let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
+                storage_id = vault.storage_id;
+                vault.id
+            }
+            Some(verify) => {
+                vault_crypto::decrypt_vault_key(
+                    master_key.as_ref(),
+                    verify.id,
+                    &verify.vault_key_enc,
+                )
+                .map_err(|_| LocalError::InvalidArgument("invalid password".to_string()))?;
+                preferred_vault(&self.runtime, &pool, storage_id, &vaults)?
+                    .expect("vaults not empty")
+            }
+        };
+        *self.storage_id.lock().expect("lock poisoned") = storage_id;
         *self.master_key.lock().expect("lock poisoned") = Some(master_key);
         *self.vault_id.lock().expect("lock poisoned") = Some(vault_id);
         Ok(VaultStatus { unlocked: true })
@@ -391,6 +393,9 @@ mod maintenance;
 mod identity;
 use identity::*;
 
+mod selection;
+use selection::*;
+
 impl LocalVaultService for LocalVault {
     #[cfg(debug_assertions)]
     fn debug_create_kv_item(
@@ -516,6 +521,9 @@ impl LocalVaultService for LocalVault {
     }
     fn set_current_storage(&self, id: String) -> LocalResult<()> {
         LocalVault::set_current_storage(self, id)
+    }
+    fn follow_preferred_storage(&self) -> LocalResult<()> {
+        LocalVault::follow_preferred_storage(self)
     }
     fn current_storage_id(&self) -> String {
         LocalVault::current_storage_id(self)
