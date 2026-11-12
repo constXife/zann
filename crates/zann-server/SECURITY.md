@@ -56,6 +56,19 @@ formal security audit, and is not recommended for production use.
   accepting identity changes or URL migration.
 - This prevents a "parrot" server from replaying a public key without the
   corresponding private key.
+- Clients pin `server_id` on first connect (TOFU). A different `server_id` at a
+  pinned endpoint is a hard `TrustInvalid`, like an SSH host key change: the
+  client offers no in-band re-trust, because accepting a new key is exactly
+  what an attacker who controls the endpoint would ask for. Only a
+  `server_fingerprint` change under the same proven `server_id` gets an
+  explicit compare-and-replace challenge.
+- The server therefore refuses to start without a configured identity key
+  (`ZANN_IDENTITY_KEY` / `server.identity_key`, or a key file via
+  `ZANN_IDENTITY_KEY_FILE` / `server.identity_key_file`, generated on first
+  start when missing). A configured key that cannot be read or parsed is a
+  startup error, never a reason to make a new one. Keep the key file on
+  persistent storage and back it up: losing it changes `server_id` and every
+  client must remove and re-add the connection.
 
 ### Privilege escalation and data overreach
 

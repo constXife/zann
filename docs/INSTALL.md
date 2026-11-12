@@ -51,6 +51,7 @@ Start from `config/config.example.yaml` and supply required secrets via env:
 - `ZANN_PASSWORD_PEPPER`
 - `ZANN_TOKEN_PEPPER`
 - `ZANN_SMK` or `ZANN_SMK_FILE` / `server.master_key_file` (shared vault master key; the server rejects the historically committed public dev key)
+- `ZANN_IDENTITY_KEY_FILE` / `server.identity_key_file` (Ed25519 server identity; generated on first start if the file is missing, and must live on persistent storage)
 - `ZANN_CONFIG_PATH` (path to your config file)
 
 The config file controls auth mode, OIDC settings, policies, and metrics.

@@ -29,6 +29,7 @@ Start from `config/config.example.yaml` and supply required secrets via env:
 - `ZANN_PASSWORD_PEPPER`
 - `ZANN_TOKEN_PEPPER`
 - `ZANN_SMK_FILE` or `server.master_key`
+- `ZANN_IDENTITY_KEY_FILE` or `server.identity_key_file` (persistent server identity)
 - `ZANN_CONFIG_PATH`
 
 ## Environment variables
@@ -40,6 +41,7 @@ Common env vars:
 - `ZANN_PASSWORD_PEPPER` / `ZANN_PASSWORD_PEPPER_FILE`
 - `ZANN_TOKEN_PEPPER` / `ZANN_TOKEN_PEPPER_FILE`
 - `ZANN_SMK` / `ZANN_SMK_FILE`
+- `ZANN_IDENTITY_KEY` / `ZANN_IDENTITY_KEY_FILE`
 
 Secret key files must be regular files without group or world permissions.
 When a file is supplied directly through systemd `LoadCredential=`, the server
