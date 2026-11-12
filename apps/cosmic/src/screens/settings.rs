@@ -565,7 +565,18 @@ impl State {
                         stale.pending_changes = Some(count);
                     }
                 }
-                Err(err) => self.error = Some(err),
+                // Without the count nothing can be forgotten; the account
+                // falls back to its sync control so the user can try again.
+                Err(err) => {
+                    if self
+                        .stale_server
+                        .as_ref()
+                        .is_some_and(|stale| stale.storage_id == storage_id)
+                    {
+                        self.stale_server = None;
+                    }
+                    self.error = Some(err);
+                }
             },
             Message::AskForget => {
                 if let Some(stale) = self

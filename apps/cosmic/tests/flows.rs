@@ -872,6 +872,24 @@ fn a_successful_sync_clears_the_changed_identity_and_other_failures_stay_plain()
     );
     assert!(state.stale_server().is_none());
     assert_eq!(state.error(), Some("offline"));
+
+    // A failed count never leaves the account without a way to retry.
+    state.update(
+        settings::Message::Synced(
+            "remote-storage".to_string(),
+            Err(local::SyncFailure::IdentityChanged),
+        ),
+        &session,
+    );
+    state.update(
+        settings::Message::PendingCounted(
+            "remote-storage".to_string(),
+            Err("database busy".to_string()),
+        ),
+        &session,
+    );
+    assert!(state.stale_server().is_none());
+    assert_eq!(state.error(), Some("database busy"));
 }
 
 #[test]
