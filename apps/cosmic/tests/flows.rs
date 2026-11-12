@@ -6,9 +6,9 @@ use zann_client::app::local::{ItemCreate, ItemSummary, ItemUpdate, VaultSummary}
 use zann_cosmic::backend::local;
 use zann_cosmic::backend::remote::{LoginOutcome, Method, Remote, ServerProbe};
 use zann_cosmic::screens::detail::Detail;
-use zann_cosmic::screens::{connect, master, vault};
+use zann_cosmic::screens::{connect, master, settings, vault};
 use zann_cosmic::session::Session;
-use zann_ui_core::ItemCounts;
+use zann_ui_core::{DevicePreferences, ItemCounts};
 
 static DB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -714,6 +714,7 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
     let ignored = vault.update(
         vault::Message::AutoSynced {
             ticket: stale,
+            storage_id: local::current_storage_id(&session.facade()),
             list_generation: 0,
             result: Ok(Some(empty.clone())),
         },
@@ -727,6 +728,7 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
     vault.update(
         vault::Message::AutoSynced {
             ticket: current,
+            storage_id: local::current_storage_id(&session.facade()),
             list_generation: 0,
             result: Ok(Some(empty)),
         },
@@ -757,10 +759,241 @@ fn a_sync_started_under_an_older_search_keeps_the_newer_list() {
     vault.update(
         vault::Message::AutoSynced {
             ticket,
+            storage_id: local::current_storage_id(&session.facade()),
             list_generation: 0,
             result: Ok(Some(empty)),
         },
         &session,
     );
     assert!(!vault.visible().is_empty());
+}
+
+fn settings_for(dir: &tempfile::TempDir) -> settings::State {
+    settings::State::new(
+        DevicePreferences::default(),
+        false,
+        dir.path().to_path_buf(),
+    )
+}
+
+#[test]
+fn a_changed_server_identity_offers_to_forget_it_after_counting_local_changes() {
+    let (dir, session) = vault_with_items();
+    let mut state = settings_for(&dir);
+    const STORAGE: &str = "remote-storage";
+
+    assert!(matches!(
+        state.update(settings::Message::SyncNow(STORAGE.to_string()), &session),
+        settings::Outcome::Sync(storage) if storage == STORAGE
+    ));
+    let refused = state.update(
+        settings::Message::Synced(
+            STORAGE.to_string(),
+            Err(local::SyncFailure::IdentityChanged),
+        ),
+        &session,
+    );
+    assert!(
+        matches!(refused, settings::Outcome::Task(_)),
+        "the refusal counts what forgetting would leave behind"
+    );
+    assert_eq!(state.error(), None, "the account row carries the error");
+    let stale = state.stale_server().expect("stale server");
+    assert_eq!(stale.storage_id, STORAGE);
+    assert_eq!(stale.pending_changes, None);
+
+    // Nothing is forgotten before the user can see what stays behind.
+    state.update(settings::Message::AskForget, &session);
+    assert!(!state.stale_server().expect("stale server").confirming);
+    state.update(
+        settings::Message::PendingCounted("another-storage".to_string(), Ok(9)),
+        &session,
+    );
+    assert_eq!(
+        state.stale_server().expect("stale server").pending_changes,
+        None
+    );
+    state.update(
+        settings::Message::PendingCounted(STORAGE.to_string(), Ok(2)),
+        &session,
+    );
+    assert_eq!(
+        state.stale_server().expect("stale server").pending_changes,
+        Some(2)
+    );
+    assert!(matches!(
+        state.update(settings::Message::ConfirmForget, &session),
+        settings::Outcome::None
+    ));
+
+    state.update(settings::Message::AskForget, &session);
+    assert!(state.stale_server().expect("stale server").confirming);
+    state.update(settings::Message::CancelForget, &session);
+    assert!(!state.stale_server().expect("stale server").confirming);
+    state.update(settings::Message::AskForget, &session);
+    assert!(matches!(
+        state.update(settings::Message::ConfirmForget, &session),
+        settings::Outcome::Task(_)
+    ));
+
+    let forgotten = state.update(
+        settings::Message::Forgotten(Ok(Some("https://zann.example".to_string()))),
+        &session,
+    );
+    let settings::Outcome::Reconnect { server_url } = forgotten else {
+        panic!("a forgotten server is connected to again");
+    };
+    assert!(state.stale_server().is_none());
+    let connect = connect::State::with_server_url(server_url.expect("pinned address"));
+    assert_eq!(connect.stage(), &connect::Stage::Server);
+    assert_eq!(connect.server_url(), "https://zann.example");
+}
+
+#[test]
+fn a_successful_sync_clears_the_changed_identity_and_other_failures_stay_plain() {
+    let (dir, session) = vault_with_items();
+    let mut state = settings_for(&dir);
+    state.update(
+        settings::Message::Synced(
+            "remote-storage".to_string(),
+            Err(local::SyncFailure::IdentityChanged),
+        ),
+        &session,
+    );
+    state.update(
+        settings::Message::Synced("remote-storage".to_string(), Ok(())),
+        &session,
+    );
+    assert!(state.stale_server().is_none());
+
+    state.update(
+        settings::Message::Synced(
+            "remote-storage".to_string(),
+            Err(local::SyncFailure::Other("offline".to_string())),
+        ),
+        &session,
+    );
+    assert!(state.stale_server().is_none());
+    assert_eq!(state.error(), Some("offline"));
+
+    // A failed count never leaves the account without a way to retry.
+    state.update(
+        settings::Message::Synced(
+            "remote-storage".to_string(),
+            Err(local::SyncFailure::IdentityChanged),
+        ),
+        &session,
+    );
+    state.update(
+        settings::Message::PendingCounted(
+            "remote-storage".to_string(),
+            Err("database busy".to_string()),
+        ),
+        &session,
+    );
+    assert!(state.stale_server().is_none());
+    assert_eq!(state.error(), Some("database busy"));
+}
+
+#[test]
+fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recovery() {
+    use std::time::Instant;
+
+    let (dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    const STORAGE: &str = "remote-storage";
+    let now = Instant::now();
+    session.auto_sync().unlocked(now, false);
+    let mut vault = vault::State::new(page, None);
+
+    // Nothing to review before a refusal.
+    assert!(matches!(
+        vault.update(vault::Message::ReviewStaleServer, &session),
+        vault::Outcome::None
+    ));
+
+    let ticket = session.auto_sync().take_due(now).expect("due on unlock");
+    vault.update(
+        vault::Message::AutoSynced {
+            ticket,
+            storage_id: STORAGE.to_string(),
+            list_generation: 0,
+            result: Err(local::SyncFailure::IdentityChanged),
+        },
+        &session,
+    );
+    let vault::Outcome::StaleServer(storage_id) =
+        vault.update(vault::Message::ReviewStaleServer, &session)
+    else {
+        panic!("the refusal leads to the recovery");
+    };
+    assert_eq!(storage_id, STORAGE);
+
+    // Settings takes it as the refusal its own sync would have met.
+    let mut state = settings_for(&dir);
+    assert!(matches!(
+        state.update(
+            settings::Message::Synced(storage_id, Err(local::SyncFailure::IdentityChanged)),
+            &session,
+        ),
+        settings::Outcome::Task(_)
+    ));
+    assert_eq!(
+        state.stale_server().expect("stale server").storage_id,
+        STORAGE
+    );
+
+    // A plain failure or a sync that goes through withdraws the offer.
+    for result in [
+        Err(local::SyncFailure::Other("offline".to_string())),
+        Ok(None),
+    ] {
+        let ticket = session.auto_sync().take_now().expect("idle schedule");
+        vault.update(
+            vault::Message::AutoSynced {
+                ticket,
+                storage_id: STORAGE.to_string(),
+                list_generation: 0,
+                result,
+            },
+            &session,
+        );
+        assert!(matches!(
+            vault.update(vault::Message::ReviewStaleServer, &session),
+            vault::Outcome::None
+        ));
+    }
+}
+
+#[test]
+fn backend_classifies_the_identity_change_and_forgets_idempotently() {
+    let (_dir, session) = vault_with_items();
+    let facade = session.facade();
+
+    assert_eq!(
+        local::SyncFailure::from(zann_client::app::local::LocalError::Sync {
+            kind: "server_identity_changed".to_string(),
+            message: "refused".to_string(),
+        }),
+        local::SyncFailure::IdentityChanged
+    );
+    assert!(matches!(
+        local::sync(&facade, None),
+        Err(local::SyncFailure::Other(_))
+    ));
+
+    let storage = local::current_storage_id(&facade);
+    // A storage no server syncs has nothing to sync on schedule.
+    assert!(matches!(
+        local::sync_and_reload(&facade, storage.clone(), None),
+        Ok(None)
+    ));
+    assert_eq!(
+        local::pending_change_count(&facade, storage.clone()).expect("count"),
+        0
+    );
+    assert_eq!(
+        local::forget_server(&facade, storage).expect("no server to forget"),
+        None
+    );
 }

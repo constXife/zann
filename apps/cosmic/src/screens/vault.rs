@@ -121,6 +121,9 @@ pub struct State {
     sync_timer: u64,
     /// The banner a failed sync left, cleared by the next one that succeeds.
     sync_error: Option<String>,
+    /// The storage whose server refused the last scheduled sync because its
+    /// identity changed; the banner then leads to the recovery in Settings.
+    stale_server: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -176,9 +179,12 @@ pub enum Message {
     /// something, for the list generation it started under.
     AutoSynced {
         ticket: AutoSyncTicket,
+        storage_id: String,
         list_generation: u64,
-        result: Result<Option<ItemsPage>, String>,
+        result: Result<Option<ItemsPage>, local::SyncFailure>,
     },
+    /// Open the recovery for the server that changed its identity.
+    ReviewStaleServer,
     /// The shown item, read again after a sync changed the vault.
     DetailRefreshed(Result<Detail, String>),
 }
@@ -192,6 +198,9 @@ pub enum Outcome {
         feedback: Task<Message>,
     },
     Locked,
+    /// The server syncing this storage changed its identity; Settings offers
+    /// to forget it.
+    StaleServer(String),
 }
 
 impl State {
@@ -228,6 +237,7 @@ impl State {
             drag: None,
             sync_timer: 0,
             sync_error,
+            stale_server: None,
         };
         state.apply_page(page, true);
         state.rebuild_nav();
@@ -700,6 +710,7 @@ impl State {
 
             message @ (Message::SyncDue(_)
             | Message::AutoSynced { .. }
+            | Message::ReviewStaleServer
             | Message::DetailRefreshed(_)) => return self.update_auto_sync(message, session),
         }
         Outcome::None

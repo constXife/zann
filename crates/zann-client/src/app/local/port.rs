@@ -67,6 +67,14 @@ pub trait LocalVaultService: Send + Sync {
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus>;
     fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome>;
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()>;
+    /// Local changes in this storage that no server has confirmed yet.
+    fn pending_change_count(&self, storage_id: String) -> LocalResult<u64>;
+    /// Forgets the server connection that syncs this storage, with its pinned
+    /// identity and stored credentials, without contacting the server: the
+    /// recovery from a server whose identity changed. The local projection,
+    /// pending changes included, stays on this device. Returns the forgotten
+    /// address, or `None` when no connection syncs this storage.
+    fn forget_server(&self, storage_id: String) -> LocalResult<Option<String>>;
     #[allow(clippy::too_many_arguments)]
     fn import_legacy_account(
         &self,

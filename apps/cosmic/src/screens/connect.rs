@@ -108,6 +108,19 @@ impl Default for State {
 }
 
 impl State {
+    /// Starts at the server stage with an address already filled in, as when
+    /// reconnecting to a server that was just forgotten.
+    pub fn with_server_url(url: String) -> Self {
+        Self {
+            url,
+            ..Self::default()
+        }
+    }
+
+    pub fn server_url(&self) -> &str {
+        &self.url
+    }
+
     pub fn stage(&self) -> &Stage {
         &self.stage
     }

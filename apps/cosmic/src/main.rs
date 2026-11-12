@@ -22,12 +22,13 @@ use cosmic::prelude::*;
 use cosmic::widget::{menu, nav_bar};
 use cosmic::{executor, widget, Element};
 use zann_client::app::local::AutoSyncTicket;
+use zann_cosmic::backend::local::SyncFailure;
 use zann_cosmic::i18n::t;
 use zann_cosmic::preferences::{self, Store};
 use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};
 use zann_cosmic::session::Session;
 use zann_cosmic::tray;
-use zann_ui_core::DevicePreferences;
+use zann_ui_core::{DevicePreferences, SettingsSection};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings = Settings::default()
@@ -88,7 +89,10 @@ enum Message {
     Settings(settings::Message),
     /// A sync started from Settings ended; the ticket goes back to the
     /// session's schedule.
-    ManualSynced(AutoSyncTicket, Result<(), String>),
+    ManualSynced(AutoSyncTicket, String, Result<(), SyncFailure>),
+    /// A scheduled sync found this storage's server changed its identity;
+    /// show the recovery Settings offers for it.
+    ReviewStaleServer(String),
     Vault(vault::Message),
     /// Effects the shell owns because they leave the app.
     Copy(String),
@@ -477,6 +481,16 @@ impl cosmic::Application for App {
             }
             Message::Lock => return self.lock(),
             Message::OpenSettings => return self.open_settings(),
+            Message::ReviewStaleServer(storage_id) => {
+                let open = self.open_settings();
+                let section =
+                    self.update_settings(settings::Message::Select(SettingsSection::Accounts));
+                let refusal = self.update_settings(settings::Message::Synced(
+                    storage_id,
+                    Err(SyncFailure::IdentityChanged),
+                ));
+                return Task::batch([open, section, refusal]);
+            }
             Message::Quit => return self.quit(),
             Message::CloseRequested => {
                 return if self.close_to_tray && self.tray_available {
@@ -509,7 +523,7 @@ impl cosmic::Application for App {
                 return self.show_window(activation_token);
             }
             Message::Settings(message) => return self.update_settings(message),
-            Message::ManualSynced(ticket, result) => {
+            Message::ManualSynced(ticket, storage_id, result) => {
                 let Shell::Ready { session, .. } = &self.shell else {
                     return Task::none();
                 };
@@ -520,7 +534,7 @@ impl cosmic::Application for App {
                     // Started before a lock; nothing it answered is open now.
                     return Task::none();
                 }
-                return self.update_settings(settings::Message::Synced(result));
+                return self.update_settings(settings::Message::Synced(storage_id, result));
             }
             Message::Unfocused => {
                 if let Shell::Ready {
@@ -675,6 +689,9 @@ impl cosmic::Application for App {
                         lift(feedback, Message::Vault),
                     ]),
                     vault::Outcome::Locked => cosmic::task::message(Message::Lock),
+                    vault::Outcome::StaleServer(storage_id) => {
+                        cosmic::task::message(Message::ReviewStaleServer(storage_id))
+                    }
                 }
             }
 
@@ -683,6 +700,7 @@ impl cosmic::Application for App {
             | Message::OpenUrl(_)
             | Message::Lock
             | Message::OpenSettings
+            | Message::ReviewStaleServer(_)
             | Message::Quit
             | Message::CloseRequested
             | Message::WindowClosed(_)
@@ -799,19 +817,22 @@ impl App {
                 // One sync at a time, whoever asked for it.
                 let Some(ticket) = session.auto_sync().take_now() else {
                     return lift(
-                        cosmic::task::message(settings::Message::Synced(Err(t("status.syncing")))),
+                        cosmic::task::message(settings::Message::Synced(
+                            storage_id,
+                            Err(SyncFailure::Other(t("status.syncing"))),
+                        )),
                         Message::Settings,
                     );
                 };
                 let facade = session.facade();
                 cosmic::task::future(async move {
-                    Message::ManualSynced(
-                        ticket,
-                        zann_cosmic::backend::off_thread(move || {
-                            zann_cosmic::backend::local::sync(&facade, Some(storage_id))
-                        })
-                        .await,
-                    )
+                    let target = storage_id.clone();
+                    let result = zann_cosmic::backend::off_thread(move || {
+                        Ok(zann_cosmic::backend::local::sync(&facade, Some(target)))
+                    })
+                    .await
+                    .unwrap_or_else(|err| Err(SyncFailure::Other(err)));
+                    Message::ManualSynced(ticket, storage_id, result)
                 })
             }
             settings::Outcome::Close { page } => {
@@ -828,18 +849,10 @@ impl App {
                 }
                 lift(load_vaults, Message::Vault)
             }
-            settings::Outcome::AddServer => {
-                if let Shell::Ready { screen, .. } = &mut self.shell {
-                    if matches!(screen, Screen::Settings { .. }) {
-                        let return_to = std::mem::replace(screen, Screen::Welcome);
-                        *screen = Screen::Connect {
-                            state: Box::default(),
-                            return_to: Some(Box::new(return_to)),
-                        };
-                    }
-                }
-                Task::none()
-            }
+            settings::Outcome::AddServer => self.connect_from_settings(connect::State::default()),
+            settings::Outcome::Reconnect { server_url } => self.connect_from_settings(
+                server_url.map_or_else(connect::State::default, connect::State::with_server_url),
+            ),
             settings::Outcome::Restored { notice } => {
                 let Shell::Ready { session, screen } = &mut self.shell else {
                     return Task::none();
@@ -852,6 +865,20 @@ impl App {
                 Task::none()
             }
         }
+    }
+
+    /// Opens the connect screen over Settings, which it returns to on cancel.
+    fn connect_from_settings(&mut self, state: connect::State) -> Task<Message> {
+        if let Shell::Ready { screen, .. } = &mut self.shell {
+            if matches!(screen, Screen::Settings { .. }) {
+                let return_to = std::mem::replace(screen, Screen::Welcome);
+                *screen = Screen::Connect {
+                    state: Box::new(state),
+                    return_to: Some(Box::new(return_to)),
+                };
+            }
+        }
+        Task::none()
     }
 
     fn change_preference(&mut self, change: preferences::Change) -> Task<Message> {

@@ -231,6 +231,14 @@ impl State {
             section = section.add(widget::text::body(t("settings.accounts.noServers")));
         }
         for storage in remotes {
+            if let Some(stale) = self
+                .stale_server
+                .as_ref()
+                .filter(|stale| stale.storage_id == storage.id)
+            {
+                section = section.add(self.stale_server_row(storage, stale));
+                continue;
+            }
             let mut sync = widget::button::standard(t("settings.accounts.syncNow"));
             if !self.syncing {
                 sync = sync.on_press(Message::SyncNow(storage.id.clone()));
@@ -246,6 +254,59 @@ impl State {
                 .control(widget::button::standard(t("common.create")).on_press(Message::AddServer)),
         );
         widget::settings::view_column(vec![section.into()]).into()
+    }
+
+    /// The account whose server changed its identity: the error in place of
+    /// its sync control, and the way out, behind a confirmation that says
+    /// what stays on this device.
+    fn stale_server_row<'a>(
+        &self,
+        storage: &'a StorageSummary,
+        stale: &StaleServer,
+    ) -> Element<'a, Message> {
+        let spacing = theme::spacing();
+        let idle = !self.busy && !self.syncing;
+        let mut column = widget::column::with_capacity(4)
+            .push(widget::text::body(storage.name.clone()))
+            .push(widget::text::caption(t("errors.server_identity_changed")))
+            .spacing(spacing.space_xxs)
+            .width(Length::Fill);
+
+        if !stale.confirming {
+            let mut forget = widget::button::standard(match stale.pending_changes {
+                Some(_) => t("settings.accounts.forgetServer"),
+                None => t("common.loading"),
+            });
+            if idle && stale.pending_changes.is_some() {
+                forget = forget.on_press(Message::AskForget);
+            }
+            return column.push(forget).into();
+        }
+
+        column = column.push(widget::text::body(t_args(
+            "settings.accounts.forgetServerConfirm",
+            &[("server", &storage.name)],
+        )));
+        if let Some(count) = stale.pending_changes.filter(|count| *count > 0) {
+            column = column.push(widget::text::caption(t_args(
+                "settings.accounts.forgetServerPending",
+                &[("count", &count.to_string())],
+            )));
+        }
+        let mut confirm = widget::button::destructive(t("settings.accounts.forgetServer"));
+        let mut cancel = widget::button::standard(t("common.cancel"));
+        if idle {
+            confirm = confirm.on_press(Message::ConfirmForget);
+            cancel = cancel.on_press(Message::CancelForget);
+        }
+        column
+            .push(
+                widget::row::with_capacity(2)
+                    .push(confirm)
+                    .push(cancel)
+                    .spacing(spacing.space_xs),
+            )
+            .into()
     }
 
     fn backups(&self) -> Element<'_, Message> {

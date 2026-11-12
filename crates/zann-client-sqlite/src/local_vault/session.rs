@@ -177,6 +177,21 @@ impl LocalVault {
             .map_err(LocalError::from)
     }
 
+    pub fn pending_change_count(&self, storage_id: String) -> LocalResult<u64> {
+        let storage_id = Uuid::parse_str(&storage_id)
+            .map_err(|_| LocalError::InvalidArgument("invalid storage id".to_string()))?;
+        let pool = self.pool();
+        self.runtime
+            .block_on(PendingChangeRepo::new(&pool).count_by_storage(storage_id))
+            .map_err(|err| LocalError::Service(err.to_string()))
+    }
+
+    pub fn forget_server(&self, storage_id: String) -> LocalResult<Option<String>> {
+        self.app_client()?
+            .remove_storage_connection(&storage_id)
+            .map_err(LocalError::from)
+    }
+
     /// Commits an already-authenticated legacy desktop session (live tokens
     /// from the legacy config plus its existing local storage id) as a Config
     /// v2 connection. Verifies the live server fingerprint and reads the

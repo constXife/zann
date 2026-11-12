@@ -18,7 +18,7 @@ use zann_crypto::vault_crypto;
 use zann_crypto::EncryptedPayload;
 use zann_db::local::{
     HistorySyncStatus, LocalItemHistoryRepo, LocalItemRepo, LocalStorage, LocalStorageRepo,
-    LocalVaultRepo,
+    LocalVaultRepo, PendingChangeRepo,
 };
 use zann_db::services::LocalServices;
 use zann_db::SqliteFileLocation;
@@ -545,6 +545,12 @@ impl LocalVaultService for LocalVault {
     }
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()> {
         LocalVault::sync_reset(self, storage_id)
+    }
+    fn pending_change_count(&self, storage_id: String) -> LocalResult<u64> {
+        LocalVault::pending_change_count(self, storage_id)
+    }
+    fn forget_server(&self, storage_id: String) -> LocalResult<Option<String>> {
+        LocalVault::forget_server(self, storage_id)
     }
     #[allow(clippy::too_many_arguments)]
     fn import_legacy_account(
