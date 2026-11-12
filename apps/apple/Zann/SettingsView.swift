@@ -11,8 +11,10 @@ struct SettingsView: View {
     var body: some View {
         TabView {
             general
+                .fittedToContent()
                 .tabItem { Label(model.strings("settings.tabs.general"), systemImage: "gearshape") }
             security
+                .fittedToContent()
                 .tabItem { Label(model.strings("settings.tabs.security"), systemImage: "lock") }
         }
         .frame(width: 520)
@@ -106,5 +108,13 @@ struct SettingsView: View {
             get: { model.preferences[keyPath: keyPath] },
             set: { value in model.updatePreferences { $0[keyPath: keyPath] = value } }
         )
+    }
+}
+
+private extension View {
+    /// A grouped form scrolls and takes any height it is given; in Settings
+    /// each tab should instead size the window to its own rows.
+    func fittedToContent() -> some View {
+        scrollDisabled(true).fixedSize(horizontal: false, vertical: true)
     }
 }

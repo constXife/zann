@@ -73,7 +73,6 @@ struct VaultView: View {
         .sheet(item: editor) { editor in
             ItemEditorView(editor: editor, vault: vault, strings: app.strings)
         }
-        .frame(minWidth: 900, minHeight: 520)
     }
 
     /// Dismissing the sheet from outside the form (lock) discards the draft.
@@ -179,10 +178,11 @@ struct ItemList: View {
         List(vault.visibleItems, id: \.id, selection: selection) { item in
             HStack(spacing: 10) {
                 ItemIcon(typeID: item.typeId)
+                // The title already names the item; the caption says where it lives.
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.title).lineLimit(1)
-                    if !item.path.isEmpty {
-                        Text(item.path)
+                    if let folder = folderOf(path: item.path) {
+                        Text(folder)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

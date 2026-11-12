@@ -18,6 +18,10 @@ struct Strings {
         catalogue.fieldLabel(key: key)
     }
 
+    func typeLabel(_ typeID: String) -> String {
+        catalogue.typeLabel(typeId: typeID)
+    }
+
     func minutesLabel(_ minutes: UInt32) -> String {
         catalogue.minutesLabel(minutes: minutes)
     }
