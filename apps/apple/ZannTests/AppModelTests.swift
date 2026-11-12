@@ -29,7 +29,8 @@ final class AppModelTests: XCTestCase {
                 dbPath: database, keystore: keystore, secretStore: MemorySecretStore()
             )
             return (core, keystore)
-        }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en")
+        }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en",
+        openBrowser: { _ in })
     }
 
     private func unlockedModel(
@@ -226,7 +227,8 @@ final class AppModelTests: XCTestCase {
                 dbPath: "relative/local.sqlite", keystore: keystore, secretStore: MemorySecretStore()
             )
             return (core, keystore)
-        }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en")
+        }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en",
+        openBrowser: { _ in })
         guard case .failed = model.screen else {
             return XCTFail("expected the failure screen, got \(model.screen)")
         }

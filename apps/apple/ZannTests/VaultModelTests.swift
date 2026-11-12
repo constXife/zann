@@ -32,7 +32,16 @@ final class VaultModelTests: XCTestCase {
     }
 
     private func makeModel() throws -> VaultModel {
-        VaultModel(core: core, page: try VaultModel.loadPage(core))
+        VaultModel(core: core, page: try VaultModel.loadPage(core), strings: Strings(language: "en"))
+    }
+
+    func testALocalOnlyVaultHasNothingToSync() async throws {
+        let model = try makeModel()
+        XCTAssertFalse(model.canSync)
+        await model.sync()
+        XCTAssertFalse(model.canSync)
+        XCTAssertNil(model.syncError)
+        XCTAssertEqual(model.visibleItems.count, 3)
     }
 
     func testCategoriesCountTheLoadedItems() throws {

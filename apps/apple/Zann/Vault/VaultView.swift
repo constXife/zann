@@ -16,6 +16,7 @@ struct VaultView: View {
         } content: {
             ItemList(vault: vault, strings: app.strings)
                 .navigationSplitViewColumnWidth(min: 320, ideal: 400, max: 560)
+                .safeAreaInset(edge: .bottom) { SyncStatus(vault: vault, strings: app.strings) }
         } detail: {
             ItemDetailView(
                 vault: vault,
@@ -47,6 +48,20 @@ struct VaultView: View {
                 }
                 .help("\(app.strings("common.edit")) (⌘E)")
                 .disabled(vault.detail == nil)
+                if vault.canSync {
+                    Button {
+                        Task { await vault.sync() }
+                    } label: {
+                        Label(
+                            app.strings("settings.accounts.syncNow"),
+                            systemImage: vault.syncError == nil
+                                ? "arrow.triangle.2.circlepath"
+                                : "exclamationmark.arrow.triangle.2.circlepath"
+                        )
+                    }
+                    .help(vault.syncError ?? "\(app.strings("settings.accounts.syncNow")) (⌘R)")
+                    .disabled(vault.syncing)
+                }
                 Button {
                     Task { await app.lock() }
                 } label: {
@@ -64,6 +79,31 @@ struct VaultView: View {
     /// Dismissing the sheet from outside the form (lock) discards the draft.
     private var editor: Binding<ItemEditorModel?> {
         Binding(get: { vault.editor }, set: { if $0 == nil { vault.cancelEditing() } })
+    }
+}
+
+/// Shown only while a sync runs or after one failed.
+struct SyncStatus: View {
+    @ObservedObject var vault: VaultModel
+    let strings: Strings
+
+    var body: some View {
+        if vault.syncing {
+            HStack(spacing: 6) {
+                ProgressView().controlSize(.small)
+                Text(strings("status.syncing")).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(8)
+            .background(.bar)
+        } else if let error = vault.syncError {
+            Label(error, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.red)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(8)
+                .background(.bar)
+        }
     }
 }
 

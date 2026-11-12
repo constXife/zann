@@ -42,18 +42,69 @@ final class VaultModel: ObservableObject {
     @Published private(set) var selectedItemID: String?
     /// The open create or edit form; at most one at a time.
     @Published private(set) var editor: ItemEditorModel?
+    /// Whether a server holds this vault's storage, so syncing means something.
+    @Published private(set) var canSync: Bool
+    @Published private(set) var syncing = false
+    /// Why the last sync failed; the vault stays usable offline.
+    @Published private(set) var syncError: String?
 
     private let core: CoreFacade
+    private let strings: Strings
     private var items: [ItemSummary] = []
     private var counts: ItemCountsFfi
     /// Bumped on every selection so a slow load cannot show a previous item.
     private var selection = 0
+    /// The first sync after signing in failed, so the move to the server's
+    /// vault still waits for one that succeeds.
+    private var followPending: Bool
 
-    init(core: CoreFacade, page: ItemPage) {
+    /// `synced` is the outcome of a sync that ran before the vault opened,
+    /// `nil` when none did.
+    init(core: CoreFacade, page: ItemPage, strings: Strings, synced: Result<Void, Error>? = nil) {
         self.core = core
+        self.strings = strings
         counts = page.counts
         categoryID = "all"
+        canSync = synced != nil
+        followPending = false
+        if case .failure(let failure)? = synced {
+            syncError = strings.message(for: failure)
+            followPending = true
+        }
         apply(page)
+    }
+
+    /// Pushes local changes and pulls the server's, then reloads the page;
+    /// the core picks the server and the vault to show. A Mac that never
+    /// signed in to a server has nothing to sync.
+    func sync() async {
+        guard !syncing else { return }
+        syncing = true
+        defer { syncing = false }
+        let core = core
+        let follow = followPending
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { () -> ItemPage? in
+                guard try core.appStatus().serverConnected else { return nil }
+                _ = try core.remoteSync(storageId: nil)
+                if follow { try core.followPreferredStorage() }
+                return try Self.loadPage(core)
+            }
+        }.value
+        switch result {
+        case .success(let page?):
+            canSync = true
+            followPending = false
+            syncError = nil
+            apply(page)
+            // The open item may have changed on the server.
+            if let selectedItemID { show(selectedItemID) }
+        case .success(nil):
+            canSync = false
+        case .failure(let failure):
+            canSync = true
+            syncError = strings.message(for: failure)
+        }
     }
 
     /// The first page of the current vault. The trash category filters

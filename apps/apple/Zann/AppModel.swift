@@ -9,6 +9,7 @@ final class AppModel: ObservableObject {
     enum Screen: Equatable {
         case failed(String)
         case welcome
+        case connect
         case master(MasterMode)
         case vault
     }
@@ -33,6 +34,11 @@ final class AppModel: ObservableObject {
     @Published private(set) var touchIDArmed = false
     /// An arm or disarm is running; the settings toggle waits for it.
     @Published private(set) var touchIDBusy = false
+    /// The server sign-in in progress, present only on the connect screen.
+    @Published private(set) var connect: ConnectModel?
+    /// A fresh sign-in starts empty: it syncs right after the master
+    /// password, before the vault opens.
+    @Published private(set) var syncAfterUnlock = false
 
     private let core: CoreFacade?
     /// The keystore the core was composed with; asked for its status only,
@@ -40,19 +46,23 @@ final class AppModel: ObservableObject {
     private let keystore: DeviceKeystore?
     private let preferencesFile: PreferencesFile?
     private let systemLanguage: String
+    private let openBrowser: (URL) -> Void
     /// The last input the app received while unlocked; the idle lock counts
     /// from here, as COSMIC's does.
     private var lastActivity = Date()
 
-    /// The composition root: the app passes `openDefaultCore` and
-    /// `defaultPreferencesFile`, tests a core over a temporary database,
-    /// in-memory ports and a temporary preferences file.
+    /// The composition root: the app passes `openDefaultCore`,
+    /// `defaultPreferencesFile` and the system browser, tests a core over a
+    /// temporary database, in-memory ports, a temporary preferences file and
+    /// a recorder.
     init(
         opening open: () throws -> (core: CoreFacade, keystore: DeviceKeystore),
         preferences file: () throws -> PreferencesFile,
-        systemLanguage: String
+        systemLanguage: String,
+        openBrowser: @escaping (URL) -> Void
     ) {
         self.systemLanguage = systemLanguage
+        self.openBrowser = openBrowser
         var opened: (core: CoreFacade, keystore: DeviceKeystore)?
         var openedFile: PreferencesFile?
         var armed = false
@@ -170,23 +180,72 @@ final class AppModel: ObservableObject {
         screen = .master(.create)
     }
 
+    func startConnecting() {
+        guard let core else { return }
+        error = nil
+        let session: RemoteSession
+        do {
+            session = try core.remoteSession()
+        } catch {
+            self.error = message(for: error)
+            return
+        }
+        connect = ConnectModel(
+            session: session, strings: strings, openBrowser: openBrowser,
+            connected: { [weak self] in self?.connected($0) }
+        )
+        screen = .connect
+    }
+
+    /// Back from the connect screen's first step, or away from it entirely.
+    func leaveConnecting() {
+        connect?.cancel()
+        connect = nil
+        screen = .welcome
+    }
+
+    /// The account's existing personal vault opens with its master password;
+    /// a new account creates one.
+    private func connected(_ outcome: ConnectModel.Connected) {
+        guard screen == .connect else { return }
+        connect = nil
+        syncAfterUnlock = true
+        screen = .master(outcome.hasPersonalKeys ? .unlock : .create)
+    }
+
     func submit(password: String, mode: MasterMode) async {
         guard let core, !busy, !password.isEmpty else { return }
-        let page = await perform {
+        let syncFirst = syncAfterUnlock
+        let opened = await perform { () -> (ItemPage, Result<Void, Error>?) in
             switch mode {
             case .create: _ = try core.initializeMasterPassword(password: password)
             case .unlock: _ = try core.unlock(password: password)
             }
-            return try VaultModel.loadPage(core)
+            guard syncFirst else { return (try VaultModel.loadPage(core), nil) }
+            // Once the first sync wrote the server's storage, the core moves
+            // the still-empty session to its personal vault. A failed sync is
+            // reported but must not keep the vault shut.
+            let synced = Result {
+                _ = try core.remoteSync(storageId: nil)
+                try core.followPreferredStorage()
+            }
+            return (try VaultModel.loadPage(core), synced)
         }
-        guard let page else { return }
-        open(core: core, page: page)
+        guard let (page, synced) = opened else { return }
+        syncAfterUnlock = false
+        open(core: core, page: page, synced: synced)
     }
 
-    private func open(core: CoreFacade, page: ItemPage) {
-        vault = VaultModel(core: core, page: page)
+    /// Every unlock but the first after connecting syncs in the background,
+    /// so the vault opens without waiting for the server.
+    private func open(core: CoreFacade, page: ItemPage, synced: Result<Void, Error>? = nil) {
+        let vault = VaultModel(core: core, page: page, strings: strings, synced: synced)
+        self.vault = vault
         lastActivity = Date()
         screen = .vault
+        if synced == nil {
+            Task { await vault.sync() }
+        }
     }
 
     func noteActivity(at now: Date = Date()) {
@@ -247,15 +306,8 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// Unlock failures carry an `errors.<kind>` translation key; others, and
-    /// kinds without a translation, read as the core's message.
     private func message(for failure: Error) -> String {
-        if case .Unlock(let kind, _)? = failure as? CoreError {
-            let key = "errors.\(kind)"
-            let text = strings(key)
-            if text != key { return text }
-        }
-        return describe(failure)
+        strings.message(for: failure)
     }
 
     private nonisolated static func touchIDArmed(_ core: CoreFacade) throws -> Bool {
