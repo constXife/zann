@@ -112,11 +112,16 @@ impl From<SessionError> for CoreError {
     }
 }
 
+/// Zann's answer to the provider token is a session failure like any other
+/// login's, so it keeps its own kind instead of a generic OIDC one.
 impl From<OidcBrowserError> for CoreError {
     fn from(error: OidcBrowserError) -> Self {
-        Self::Oidc {
-            kind: error.kind().into(),
-            message: error.to_string(),
+        match error.into_session_error() {
+            Ok(session) => session.into(),
+            Err(error) => Self::Oidc {
+                kind: error.kind().into(),
+                message: error.to_string(),
+            },
         }
     }
 }
