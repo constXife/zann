@@ -64,6 +64,8 @@
     "email": "Email",
     "phone": "Phone",
     "token": "Token",
+    "value": "Value",
+    "policy": "Policy",
     "private_key": "Private Key",
     "public_key": "Public Key",
     "passphrase": "Passphrase",
