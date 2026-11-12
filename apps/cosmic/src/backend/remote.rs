@@ -8,7 +8,7 @@ use tokio::runtime::Runtime;
 use zann_client::app::{
     AppClient, ClientId, ConnectionTrustChallenge, LoginPassword, PasswordLoginRequest,
     PasswordRegistrationRequest, PrepareConnectionOutcome, PreparedConnection,
-    SessionCancellationHandle, SessionClient, SessionOperation,
+    SessionCancellationHandle, SessionClient, SessionErrorKind, SessionOperation,
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_client::oidc::OidcBrowserErrorKind;
@@ -17,6 +17,7 @@ use zann_client_sqlite::SqliteSyncStoreFactory;
 use zann_core::AuthMethod;
 
 use super::active_database_location;
+use crate::i18n::t;
 
 const PROFILE: &str = "default";
 const CONNECTION_NAME: &str = "Remote";
@@ -121,7 +122,10 @@ impl Remote {
                 self.client
                     .prepare_connection(&server_url, CONNECTION_NAME, PROFILE),
             )
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| match error.kind() {
+                SessionErrorKind::ServerIdentityChanged => t("errors.server_identity_changed"),
+                _ => error.to_string(),
+            })?;
         let (prepared, fingerprint_changed) = match outcome {
             PrepareConnectionOutcome::Ready(prepared) => {
                 *self.prepared.lock().expect("lock poisoned") = Some(prepared.clone());

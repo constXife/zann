@@ -8,12 +8,13 @@ use zann_client::app::local::LocalVaultService;
 use zann_client::app::local::{
     AppStatus, ApplePasswordsImportReport, ApplePasswordsPreflight, BackupExportReport,
     BackupImportOptions, HardwareKey, ItemCreate, ItemDetail, ItemHistoryDetail,
-    ItemHistorySummary, ItemSummary, ItemUpdate, ItemsFilter, Page, RememberedUnlock, Snapshot,
-    SnapshotRestore, StorageSummary, VaultSummary, VerifyReport,
+    ItemHistorySummary, ItemSummary, ItemUpdate, ItemsFilter, LocalError, Page, RememberedUnlock,
+    Snapshot, SnapshotRestore, StorageSummary, VaultSummary, VerifyReport,
 };
 use zann_ui_core::ItemCounts;
 
 use super::DatabaseLocation;
+use crate::i18n::t;
 
 /// How many items a single `items_list` call pages in.
 pub const PAGE_LIMIT: u32 = 200;
@@ -76,11 +77,43 @@ pub fn unlock(facade: &Facade, password: String) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
-pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), String> {
+/// Why a sync failed, split only where the shell offers a different way out.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncFailure {
+    /// The server proves a different identity than the one this device
+    /// pinned. Retrying cannot help; the only recovery is forgetting it.
+    IdentityChanged,
+    Other(String),
+}
+
+impl From<LocalError> for SyncFailure {
+    fn from(error: LocalError) -> Self {
+        match error {
+            LocalError::Sync { kind, .. } if kind == SERVER_IDENTITY_CHANGED => {
+                Self::IdentityChanged
+            }
+            error => Self::Other(error.to_string()),
+        }
+    }
+}
+
+impl std::fmt::Display for SyncFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IdentityChanged => f.write_str(&t("errors.server_identity_changed")),
+            Self::Other(message) => f.write_str(message),
+        }
+    }
+}
+
+/// The stable code `zann-client` reports for a changed server identity.
+const SERVER_IDENTITY_CHANGED: &str = "server_identity_changed";
+
+pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailure> {
     facade
         .remote_sync(storage_id)
         .map(|_| ())
-        .map_err(|err| err.to_string())
+        .map_err(SyncFailure::from)
 }
 
 /// A scheduled or manual sync of the vault's server. `None` when there is no
@@ -107,9 +140,25 @@ pub fn sync_and_reload(
 /// The first sync of a newly connected server; the core then moves the
 /// still-empty session to that server's personal vault.
 pub fn sync_new_server(facade: &Facade, storage_id: String) -> Result<(), String> {
-    sync(facade, Some(storage_id))?;
+    sync(facade, Some(storage_id)).map_err(|failure| failure.to_string())?;
     facade
         .follow_preferred_storage()
+        .map_err(|err| err.to_string())
+}
+
+/// Local changes in this storage that no server has confirmed yet.
+pub fn pending_change_count(facade: &Facade, storage_id: String) -> Result<u64, String> {
+    facade
+        .pending_change_count(storage_id)
+        .map_err(|err| err.to_string())
+}
+
+/// Forgets the server that syncs this storage, keeping every local item and
+/// pending change. Returns the address it was pinned to, so the user can
+/// connect there again.
+pub fn forget_server(facade: &Facade, storage_id: String) -> Result<Option<String>, String> {
+    facade
+        .forget_server(storage_id)
         .map_err(|err| err.to_string())
 }
 

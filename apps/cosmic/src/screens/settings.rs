@@ -51,6 +51,23 @@ pub struct State {
     /// click away from a list of dates.
     confirming: Option<Snapshot>,
     verified: Option<Box<VerifyReport>>,
+    /// A server that refused to sync because its identity changed.
+    stale_server: Option<StaleServer>,
+}
+
+/// A server whose identity changed, and what forgetting it leaves behind.
+///
+/// Forgetting removes only the pinned identity and the stored sign-in; the
+/// storage's items and its unsynced changes stay on this device. Those
+/// changes reach the server again only through the same server and account,
+/// so the user sees how many there are and confirms before forgetting.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StaleServer {
+    pub storage_id: String,
+    /// Unconfirmed local changes; `None` while still being counted, and the
+    /// server cannot be forgotten before the count is known.
+    pub pending_changes: Option<u64>,
+    pub confirming: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -92,7 +109,13 @@ pub enum Message {
     Verify,
     Verified(Result<VerifyReport, String>),
     SyncNow(String),
-    Synced(Result<(), String>),
+    Synced(String, Result<(), local::SyncFailure>),
+    PendingCounted(String, Result<u64, String>),
+    /// Ask to forget the stale server. Shows the confirmation only.
+    AskForget,
+    CancelForget,
+    ConfirmForget,
+    Forgotten(Result<Option<String>, String>),
     AddServer,
     Open(String),
     Close,
@@ -105,6 +128,11 @@ pub enum Outcome {
     Changed(Change),
     Sync(String),
     AddServer,
+    /// The stale server is forgotten; connect again, starting from the
+    /// address it was pinned to when there was one.
+    Reconnect {
+        server_url: Option<String>,
+    },
     Open(String),
     Close {
         page: Option<local::ItemsPage>,
@@ -139,7 +167,16 @@ impl State {
             restore_target: String::new(),
             confirming: None,
             verified: None,
+            stale_server: None,
         }
+    }
+
+    pub fn stale_server(&self) -> Option<&StaleServer> {
+        self.stale_server.as_ref()
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 
     pub fn load(session: &Session) -> Task<Message> {
@@ -487,9 +524,93 @@ impl State {
                 self.error = None;
                 return Outcome::Sync(storage_id);
             }
-            Message::Synced(result) => {
+            Message::Synced(storage_id, result) => {
                 self.syncing = false;
-                self.error = result.err();
+                match result {
+                    Ok(()) => {
+                        if self
+                            .stale_server
+                            .as_ref()
+                            .is_some_and(|stale| stale.storage_id == storage_id)
+                        {
+                            self.stale_server = None;
+                        }
+                    }
+                    Err(local::SyncFailure::IdentityChanged) => {
+                        self.stale_server = Some(StaleServer {
+                            storage_id: storage_id.clone(),
+                            pending_changes: None,
+                            confirming: false,
+                        });
+                        let facade = session.facade();
+                        return Outcome::Task(cosmic::task::future(async move {
+                            let counted = storage_id.clone();
+                            Message::PendingCounted(
+                                storage_id,
+                                off_thread(move || local::pending_change_count(&facade, counted))
+                                    .await,
+                            )
+                        }));
+                    }
+                    Err(local::SyncFailure::Other(err)) => self.error = Some(err),
+                }
+            }
+            Message::PendingCounted(storage_id, result) => match result {
+                Ok(count) => {
+                    if let Some(stale) = self
+                        .stale_server
+                        .as_mut()
+                        .filter(|stale| stale.storage_id == storage_id)
+                    {
+                        stale.pending_changes = Some(count);
+                    }
+                }
+                Err(err) => self.error = Some(err),
+            },
+            Message::AskForget => {
+                if let Some(stale) = self
+                    .stale_server
+                    .as_mut()
+                    .filter(|stale| stale.pending_changes.is_some())
+                {
+                    self.error = None;
+                    stale.confirming = true;
+                }
+            }
+            Message::CancelForget => {
+                if let Some(stale) = self.stale_server.as_mut() {
+                    stale.confirming = false;
+                }
+            }
+            Message::ConfirmForget => {
+                if self.busy || self.syncing {
+                    return Outcome::None;
+                }
+                let Some(storage_id) = self
+                    .stale_server
+                    .as_ref()
+                    .filter(|stale| stale.confirming)
+                    .map(|stale| stale.storage_id.clone())
+                else {
+                    return Outcome::None;
+                };
+                let facade = session.facade();
+                self.busy = true;
+                self.error = None;
+                return Outcome::Task(cosmic::task::future(async move {
+                    Message::Forgotten(
+                        off_thread(move || local::forget_server(&facade, storage_id)).await,
+                    )
+                }));
+            }
+            Message::Forgotten(Ok(server_url)) => {
+                self.busy = false;
+                self.stale_server = None;
+                return Outcome::Reconnect { server_url };
+            }
+            Message::Forgotten(Err(err)) => {
+                self.busy = false;
+                self.error = Some(err);
             }
             Message::AddServer => return Outcome::AddServer,
             Message::Open(target) => return Outcome::Open(target),
