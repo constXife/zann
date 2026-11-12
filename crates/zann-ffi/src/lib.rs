@@ -5,6 +5,8 @@ use zann_client_sqlite::local_vault as native;
 
 mod records;
 pub use records::*;
+mod auto_sync;
+pub use auto_sync::*;
 mod conversions;
 mod session;
 pub use session::*;
