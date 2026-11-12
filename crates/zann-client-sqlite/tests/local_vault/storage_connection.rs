@@ -54,3 +54,56 @@ fn a_server_storage_without_a_connection_is_not_synced() {
     core.remote_sync(Some(storage_id))
         .expect_err("no server to sync with");
 }
+
+/// A new connection to an address takes over the storage the database keeps
+/// there: the factory finds it by address and releases it, as often as asked.
+#[test]
+fn the_storage_kept_for_an_address_is_found_and_released() {
+    use std::sync::Arc;
+    use zann_client::app::{AppSyncStoreFactory, ClientPaths};
+    use zann_client_sqlite::SqliteSyncStoreFactory;
+
+    let root = CanonicalTempDir::new();
+    let db_path = root.join("local.sqlite");
+    let core = create_core(format!("sqlite://{}", db_path.display())).expect("create core");
+    core.initialize_master_password(format!("test-master-password-{}", Uuid::now_v7()))
+        .expect("initialize master password");
+    drop(core);
+
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    let location = zann_db::SqliteFileLocation::from_path(&db_path).expect("location");
+    let pool = runtime
+        .block_on(zann_db::connect_sqlite_file_with_max(&location, 1))
+        .expect("connect");
+    let address = "https://zann.example.test/";
+    let remote = zann_db::local::LocalStorage {
+        id: Uuid::now_v7(),
+        kind: zann_core::StorageKind::Remote,
+        name: "Remote".to_string(),
+        server_url: Some(address.to_string()),
+        server_name: None,
+        server_fingerprint: None,
+        account_subject: None,
+        personal_vaults_enabled: true,
+        auth_method: None,
+    };
+    runtime
+        .block_on(zann_db::local::LocalStorageRepo::new(&pool).upsert(&remote))
+        .expect("insert a server storage");
+    runtime.block_on(pool.close());
+
+    let factory = Arc::new(SqliteSyncStoreFactory::new(&db_path).expect("factory"));
+    let paths = ClientPaths::with_local_db(root.path(), &db_path);
+    let at = |address: &str| {
+        runtime
+            .block_on(Arc::clone(&factory).storage_at(paths.clone(), address.to_string()))
+            .expect("look up storage")
+    };
+    assert_eq!(at(address), Some(remote.id));
+    assert_eq!(at("https://other.example.test/"), None);
+    for storage_id in [remote.id, remote.id, Uuid::now_v7()] {
+        runtime
+            .block_on(Arc::clone(&factory).release_storage(paths.clone(), storage_id))
+            .expect("releasing is idempotent");
+    }
+}

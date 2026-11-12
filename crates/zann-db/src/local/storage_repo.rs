@@ -3,6 +3,8 @@ use sqlx_core::transaction::Transaction;
 use sqlx_sqlite::Sqlite;
 use uuid::Uuid;
 
+use zann_core::{AuthMethod, StorageKind};
+
 use crate::local::{LocalProjectionReadError, LocalStorage};
 use crate::SqlitePool;
 
@@ -185,6 +187,76 @@ impl<'a> LocalStorageRepo<'a> {
             storage.account_subject.as_deref(),
             storage.personal_vaults_enabled,
             storage.auth_method.map(|value| value.as_i32())
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| result.rows_affected() == 1)
+    }
+
+    /// Voids the claim of the connection generation that synced this remote
+    /// storage, keeping its projection and unsent changes, so the next
+    /// connection to its address can claim it again (see
+    /// `LocalVaultRepo::bind_cache_key_fingerprints_leased`). Releasing an
+    /// absent or already released storage is a no-op.
+    pub async fn release_claim(&self, storage_id: Uuid) -> Result<(), sqlx_core::Error> {
+        query!(
+            r#"
+            UPDATE storages
+            SET sync_config_repository_fp = NULL,
+                sync_stable_target_fp = NULL,
+                sync_config_revision = NULL,
+                sync_config_content_fp = NULL
+            WHERE id = ?1 AND kind = ?2
+            "#,
+            storage_id,
+            StorageKind::Remote.as_i32()
+        )
+        .execute(self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    /// Rebinds a released remote storage to what its server proves now: its
+    /// display name, server fingerprint and auth method. Address, account and
+    /// capability stay, so the projection keeps belonging to the same
+    /// account. Returns `false`, changing nothing, when the row is claimed or
+    /// no longer reads `expected`.
+    pub async fn rebind_released(
+        &self,
+        expected: &LocalStorage,
+        name: &str,
+        server_fingerprint: &str,
+        auth_method: AuthMethod,
+    ) -> Result<bool, sqlx_core::Error> {
+        query!(
+            r#"
+            UPDATE storages
+            SET name = ?1,
+                server_fingerprint = ?2,
+                auth_method = ?3
+            WHERE id = ?4
+              AND kind = ?5
+              AND sync_config_repository_fp IS NULL
+              AND name = ?6
+              AND server_url IS ?7
+              AND server_name IS ?8
+              AND server_fingerprint IS ?9
+              AND account_subject IS ?10
+              AND personal_vaults_enabled = ?11
+              AND auth_method IS ?12
+            "#,
+            name,
+            server_fingerprint,
+            auth_method.as_i32(),
+            expected.id,
+            StorageKind::Remote.as_i32(),
+            expected.name.as_str(),
+            expected.server_url.as_deref(),
+            expected.server_name.as_deref(),
+            expected.server_fingerprint.as_deref(),
+            expected.account_subject.as_deref(),
+            expected.personal_vaults_enabled,
+            expected.auth_method.map(|value| value.as_i32())
         )
         .execute(self.pool)
         .await

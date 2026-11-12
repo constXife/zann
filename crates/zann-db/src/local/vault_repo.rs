@@ -423,7 +423,11 @@ impl<'a> LocalVaultRepo<'a> {
     ///
     /// The first generation claim is allowed only when the complete catalog
     /// matches, every target fingerprint is `NULL`, and the storage has no
-    /// item, history, pending, or cursor rows.  The generation claim and all fingerprint transitions commit atomically.
+    /// item, history, pending, or cursor rows. A storage whose claim was
+    /// released (`LocalStorageRepo::release_claim`) is claimed again with its
+    /// projection when at least one target fingerprint is already bound and
+    /// none differs. The generation claim and all fingerprint transitions
+    /// commit atomically.
     /// Once claimed, catalog reconciliation only proves identical already-
     /// bound fingerprints; a newer authorized config revision may advance in
     /// this same transaction.
@@ -968,11 +972,18 @@ async fn bind_cache_key_fingerprints_leased_in(
         .map_err(map_storage_proof_key_error)?
     {
         LocalGenerationBindingState::Unbound => {
-            if fingerprint_states.iter().any(|state| *state != 0) {
-                return Err(LocalVaultKeyBindError::GenerationChanged);
-            }
-            ensure_storage_projection_empty_for_claim(tx, expected_storage.storage_id(), bindings)
+            // A storage released for a new connection keeps its projection;
+            // the fingerprints bound before prove this master key opens the
+            // same vault keys, so it is claimed as it stands. A storage that
+            // never bound a key is claimed only while empty.
+            if fingerprint_states.iter().all(|state| *state == 0) {
+                ensure_storage_projection_empty_for_claim(
+                    tx,
+                    expected_storage.storage_id(),
+                    bindings,
+                )
                 .await?;
+            }
             claim_generation(tx, expected_storage.storage_id(), generation)
                 .await
                 .map_err(map_storage_proof_key_error)?;
