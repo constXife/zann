@@ -73,6 +73,11 @@ server:
   # name: "Zann HQ"
   # Optional: hard-coded server fingerprint for pinning
   # fingerprint: "sha256:..."
+  # Server identity key (Ed25519, base64, 32 bytes); required. Clients pin the
+  # server_id derived from it, so it must persist across restarts. The file is
+  # generated on first start when it does not exist yet.
+  identity_key_file: "/etc/zann/identity-key"
+  # identity_key: "base64..."
   # Server master key (SMK) for shared vaults (base64, 32 bytes)
   # master_key: "base64..."
   # master_key_file: "/etc/zann/smk"

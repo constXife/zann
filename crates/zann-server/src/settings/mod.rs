@@ -25,7 +25,7 @@ pub struct Settings {
     pub token_pepper: String,
     pub require_pepper: bool,
     pub server_master_key: Option<SecretKey>,
-    pub identity_key: Arc<SigningKey>,
+    pub identity_key: Option<Arc<SigningKey>>,
     pub access_token_ttl_seconds: i64,
     pub refresh_token_ttl_seconds: i64,
     pub item_history_ttl_days: Option<i64>,
@@ -144,17 +144,7 @@ impl Settings {
         config.server.max_body_bytes = max_body_bytes;
         config.server.max_clock_skew_seconds = max_clock_skew_seconds;
         let server_master_key = env_config::load_server_master_key(&config);
-        let identity_key = match env_config::load_identity_key(&config) {
-            Some(key) => Arc::new(key),
-            None => {
-                warn!(
-                    event = "identity_key_missing",
-                    "identity key missing; generating ephemeral key"
-                );
-                let key = SigningKey::generate(&mut rand::rngs::OsRng);
-                Arc::new(key)
-            }
-        };
+        let identity_key = env_config::load_identity_key(&config)?.map(Arc::new);
         let policies = env_config::load_policies(&config)
             .map_err(|err| format!("failed to load policies: {err}"))?;
         let (secret_policies, secret_default_policy) = env_config::load_secret_policies(&config)
@@ -222,6 +212,14 @@ pub fn preflight(settings: &Settings) -> Result<(), Vec<String>> {
                     .to_string(),
             );
         }
+    }
+    if settings.identity_key.is_none() {
+        missing.push(
+            "ZANN_IDENTITY_KEY_FILE or server.identity_key_file (or ZANN_IDENTITY_KEY / \
+             server.identity_key) is required: clients pin the server_id derived from this \
+             key, so it must survive restarts"
+                .to_string(),
+        );
     }
     if let Some(err) = validate_master_key_mode(settings) {
         missing.push(err);

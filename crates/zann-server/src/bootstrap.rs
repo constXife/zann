@@ -160,7 +160,10 @@ pub fn build_state(settings: &settings::Settings, db: PgPool) -> AppState {
         server_master_key: settings.server_master_key.as_ref().map(|key| {
             std::sync::Arc::new(zann_crypto::crypto::SecretKey::from_bytes(*key.as_bytes()))
         }),
-        identity_key: settings.identity_key.clone(),
+        identity_key: settings
+            .identity_key
+            .clone()
+            .expect("preflight refuses to start the server without an identity key"),
         access_token_ttl_seconds: settings.access_token_ttl_seconds,
         refresh_token_ttl_seconds: settings.refresh_token_ttl_seconds,
         argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),

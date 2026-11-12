@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 const TEST_SMK: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+const TEST_IDENTITY_KEY: &str = "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=";
 
 fn clear_auth_env() {
     env::remove_var("ZANN_AUTH_MODE");
@@ -30,6 +31,8 @@ fn clear_metrics_env() {
     env::remove_var("ZANN_METRICS_PROFILE");
     env::remove_var("ZANN_SMK");
     env::remove_var("ZANN_SMK_FILE");
+    env::remove_var("ZANN_IDENTITY_KEY");
+    env::remove_var("ZANN_IDENTITY_KEY_FILE");
 }
 
 fn set_policy_config_path() {
@@ -167,6 +170,7 @@ fn internal_auth_requires_password_pepper() {
     set_policy_config_path();
     env::set_var("ZANN_TOKEN_PEPPER", "test-token-pepper");
     env::set_var("ZANN_SMK", TEST_SMK);
+    env::set_var("ZANN_IDENTITY_KEY", TEST_IDENTITY_KEY);
 
     let settings = Settings::from_env_with_options(true).expect("settings");
     let missing = preflight(&settings).expect_err("preflight should fail");
@@ -192,6 +196,7 @@ fn oidc_only_allows_missing_password_pepper() {
     );
     env::set_var("ZANN_TOKEN_PEPPER", "test-token-pepper");
     env::set_var("ZANN_SMK", TEST_SMK);
+    env::set_var("ZANN_IDENTITY_KEY", TEST_IDENTITY_KEY);
 
     let settings = Settings::from_env_with_options(true).expect("settings");
     assert!(settings.password_pepper.is_empty());
@@ -215,6 +220,7 @@ fn oidc_only_requires_token_pepper() {
 "#,
     );
     env::set_var("ZANN_SMK", TEST_SMK);
+    env::set_var("ZANN_IDENTITY_KEY", TEST_IDENTITY_KEY);
 
     let settings = Settings::from_env_with_options(true).expect("settings");
     let missing = preflight(&settings).expect_err("preflight should fail");
@@ -228,6 +234,7 @@ fn metrics_enabled_requires_profile() {
     clear_auth_env();
     clear_metrics_env();
     env::set_var("ZANN_SMK", TEST_SMK);
+    env::set_var("ZANN_IDENTITY_KEY", TEST_IDENTITY_KEY);
     set_config_with_metrics("metrics:\n  enabled: true\n");
 
     let settings = Settings::from_env_with_options(false).expect("settings");
@@ -243,6 +250,7 @@ fn metrics_profile_prod_allowed_in_production() {
     clear_auth_env();
     clear_metrics_env();
     env::set_var("ZANN_SMK", TEST_SMK);
+    env::set_var("ZANN_IDENTITY_KEY", TEST_IDENTITY_KEY);
     env::set_var("ZANN_ENV", "production");
     set_config_with_metrics("metrics:\n  enabled: true\n  profile: prod\n");
 
@@ -256,6 +264,7 @@ fn metrics_profile_non_prod_blocked_in_production() {
     clear_auth_env();
     clear_metrics_env();
     env::set_var("ZANN_SMK", TEST_SMK);
+    env::set_var("ZANN_IDENTITY_KEY", TEST_IDENTITY_KEY);
     env::set_var("ZANN_ENV", "production");
     set_config_with_metrics("metrics:\n  enabled: true\n  profile: staging\n");
 
@@ -272,6 +281,7 @@ fn metrics_profile_debug_requires_allow_flag() {
     clear_auth_env();
     clear_metrics_env();
     env::set_var("ZANN_SMK", TEST_SMK);
+    env::set_var("ZANN_IDENTITY_KEY", TEST_IDENTITY_KEY);
     set_config_with_metrics("metrics:\n  enabled: true\n  profile: debug\n");
 
     let settings = Settings::from_env_with_options(false).expect("settings");
@@ -287,6 +297,7 @@ fn metrics_profile_debug_allowed_with_flag() {
     clear_auth_env();
     clear_metrics_env();
     env::set_var("ZANN_SMK", TEST_SMK);
+    env::set_var("ZANN_IDENTITY_KEY", TEST_IDENTITY_KEY);
     env::set_var("ZANN_ALLOW_METRICS_DEBUG", "true");
     set_config_with_metrics("metrics:\n  enabled: true\n  profile: debug\n");
 
@@ -390,4 +401,75 @@ fn publicly_known_dev_master_key_fails_preflight() {
     assert!(missing
         .iter()
         .any(|value| value.contains("publicly known committed dev key")));
+}
+
+fn ready_for_preflight() {
+    clear_auth_env();
+    clear_pepper_env();
+    clear_metrics_env();
+    set_policy_config_path();
+    env::set_var("ZANN_TOKEN_PEPPER", "test-token-pepper");
+    env::set_var("ZANN_PASSWORD_PEPPER", "test-password-pepper");
+    env::set_var("ZANN_SMK", TEST_SMK);
+}
+
+#[test]
+fn missing_identity_key_fails_preflight() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    ready_for_preflight();
+
+    let settings = Settings::from_env_with_options(true).expect("settings");
+    assert!(settings.identity_key.is_none());
+    let missing = preflight(&settings).expect_err("preflight should fail");
+    assert_eq!(
+        missing.len(),
+        1,
+        "only the identity key is missing: {missing:?}"
+    );
+    assert!(missing[0].contains("ZANN_IDENTITY_KEY_FILE or server.identity_key_file"));
+}
+
+#[test]
+fn identity_key_file_keeps_server_id_across_restarts() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    ready_for_preflight();
+    let dir = std::env::temp_dir().join(format!("zann-test-identity-{}", Uuid::new_v4()));
+    let key_path = dir.join("state").join("identity-key");
+    env::set_var("ZANN_IDENTITY_KEY_FILE", &key_path);
+
+    let first = Settings::from_env_with_options(true).expect("first start");
+    assert!(preflight(&first).is_ok());
+    assert!(key_path.is_file(), "first start persists the generated key");
+    let second = Settings::from_env_with_options(true).expect("restart");
+
+    let public_key = |settings: &Settings| {
+        settings
+            .identity_key
+            .as_ref()
+            .expect("identity key")
+            .verifying_key()
+            .to_bytes()
+    };
+    assert_eq!(public_key(&first), public_key(&second));
+    env::remove_var("ZANN_IDENTITY_KEY_FILE");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn unreadable_identity_key_fails_settings_load() {
+    let _lock = ENV_LOCK.lock().expect("env lock");
+    ready_for_preflight();
+
+    env::set_var("ZANN_IDENTITY_KEY", "not base64");
+    let err = Settings::from_env_with_options(true).expect_err("invalid inline key");
+    assert!(err.contains("ZANN_IDENTITY_KEY invalid"), "{err}");
+
+    env::remove_var("ZANN_IDENTITY_KEY");
+    let key_path = std::env::temp_dir().join(format!("zann-test-identity-{}.b64", Uuid::new_v4()));
+    std::fs::write(&key_path, "c2hvcnQ=").expect("write short key");
+    env::set_var("ZANN_IDENTITY_KEY_FILE", &key_path);
+    let err = Settings::from_env_with_options(true).expect_err("short key file");
+    assert!(err.contains("identity key file invalid"), "{err}");
+    env::remove_var("ZANN_IDENTITY_KEY_FILE");
+    let _ = std::fs::remove_file(&key_path);
 }
