@@ -41,6 +41,19 @@ impl AppClient {
         self.remove_pinned_connection(&snapshot, connection_id)
     }
 
+    /// Whether a connection syncs `storage_id`: the one
+    /// [`Self::configured_target`] resolves for it. A storage loses it when
+    /// [`Self::remove_storage_connection`] forgets its server.
+    pub fn syncs_storage(&self, storage_id: &str) -> Result<bool, SessionError> {
+        let snapshot = self
+            .repository
+            .snapshot()
+            .map_err(connection_removal_error)?;
+        storage_connection(snapshot.config(), storage_id)
+            .map(|connection| connection.is_some())
+            .map_err(|kind| SessionError::for_app(SessionOperationId::new(), kind))
+    }
+
     /// Forgets the connection that syncs `storage_id`, the one
     /// [`Self::configured_target`] resolves for it, exactly as
     /// [`Self::remove_connection`] does. It is the same recovery for a shell

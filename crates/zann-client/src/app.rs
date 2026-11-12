@@ -1551,6 +1551,10 @@ mod tests {
             .clone()
             .expect("first connect pins the storage");
 
+        assert!(app.syncs_storage(&storage_id).expect("synced storage"));
+        assert!(!app
+            .syncs_storage("another-storage")
+            .expect("unsynced storage"));
         assert_eq!(
             app.remove_storage_connection("another-storage")
                 .expect("no connection syncs another storage"),
@@ -1568,6 +1572,7 @@ mod tests {
             .config()
             .connections
             .is_empty());
+        assert!(!app.syncs_storage(&storage_id).expect("forgotten storage"));
         assert_eq!(
             app.remove_storage_connection(&storage_id)
                 .expect("forgetting twice is a no-op"),

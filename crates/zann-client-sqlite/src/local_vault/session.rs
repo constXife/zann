@@ -177,6 +177,12 @@ impl LocalVault {
             .map_err(LocalError::from)
     }
 
+    pub fn syncs_storage(&self, storage_id: String) -> LocalResult<bool> {
+        self.app_client()?
+            .syncs_storage(&storage_id)
+            .map_err(LocalError::from)
+    }
+
     pub fn pending_change_count(&self, storage_id: String) -> LocalResult<u64> {
         let storage_id = Uuid::parse_str(&storage_id)
             .map_err(|_| LocalError::InvalidArgument("invalid storage id".to_string()))?;

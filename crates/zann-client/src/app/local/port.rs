@@ -67,6 +67,9 @@ pub trait LocalVaultService: Send + Sync {
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus>;
     fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome>;
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()>;
+    /// Whether a server connection syncs this storage; none does after
+    /// [`Self::forget_server`] until the user connects again.
+    fn syncs_storage(&self, storage_id: String) -> LocalResult<bool>;
     /// Local changes in this storage that no server has confirmed yet.
     fn pending_change_count(&self, storage_id: String) -> LocalResult<u64>;
     /// Forgets the server connection that syncs this storage, with its pinned
