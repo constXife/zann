@@ -266,6 +266,13 @@ storage. After a newly connected server's first sync, clients call
 `follow_preferred_storage`, which moves a session whose storage is still empty
 to the storage that opening would pick.
 
+A device that holds no vault has nothing local to check a master key against,
+and its first sync binds the key's fingerprint to the connection. So when such
+a device is signed in to a server, unlocking or creating the master password
+first checks the derived key against the account's personal vault keys
+(`AppClient::verify_account_key`) and stores nothing on a mismatch. That first
+unlock needs the server; every later one is checked locally.
+
 Before an existing refresh secret is read or sent, `AppSession` probes the
 canonical endpoint and verifies the exact stored address, server identity and
 fingerprint binding. In protocol v1 the fingerprint is unsigned TOFU metadata

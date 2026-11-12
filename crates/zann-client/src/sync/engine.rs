@@ -27,10 +27,10 @@ use crate::session::{
 
 const MAX_REQUEST_TIME: Duration = Duration::from_secs(30);
 
-type AuthorizeFuture<'a> =
+pub(super) type AuthorizeFuture<'a> =
     Pin<Box<dyn Future<Output = Result<SessionAccess, SessionError>> + Send + 'a>>;
 
-trait SyncAuthorizer: Send + Sync {
+pub(super) trait SyncAuthorizer: Send + Sync {
     fn authorize<'a>(
         &'a self,
         target: &'a SessionTarget,
@@ -200,13 +200,12 @@ impl SyncEngine {
             )
         })?;
         let timeout = request_timeout(&operation, SyncStage::Catalog)?;
-        let mut catalog = self
-            .await_remote(
-                &operation,
-                SyncStage::Catalog,
-                remote.fetch_catalog(&access, timeout),
-            )
-            .await?;
+        let mut catalog = await_remote(
+            &operation,
+            SyncStage::Catalog,
+            remote.fetch_catalog(&access, timeout),
+        )
+        .await?;
         if !access.personal_vaults_enabled()
             && catalog
                 .vaults()
@@ -245,7 +244,7 @@ impl SyncEngine {
                 })?;
             let published_envelope = publication.published_envelope().to_vec();
             let timeout = request_timeout(&operation, SyncStage::Catalog)?;
-            self.await_remote(
+            await_remote(
                 &operation,
                 SyncStage::Catalog,
                 remote.publish_personal_vault_key(&access, vault_id, &published_envelope, timeout),
@@ -368,13 +367,12 @@ impl SyncEngine {
                         SyncError::new(operation_id, kind, SyncStage::LoadItemStates)
                     })?;
                 let timeout = request_timeout(&operation, SyncStage::Push)?;
-                let response = self
-                    .await_remote(
-                        &operation,
-                        SyncStage::Push,
-                        remote.push(&access, vault, &pending, timeout),
-                    )
-                    .await?;
+                let response = await_remote(
+                    &operation,
+                    SyncStage::Push,
+                    remote.push(&access, vault, &pending, timeout),
+                )
+                .await?;
                 let pushed_count = pending.len();
                 let (server_head, pushed) = validate_push_response(
                     vault.scope(),
@@ -443,19 +441,18 @@ impl SyncEngine {
                 );
                 let timeout = request_timeout(&operation, SyncStage::Pull)?;
                 self.ensure_dispatchable(&operation, SyncStage::Pull)?;
-                let pulled = self
-                    .await_remote(
-                        &operation,
-                        SyncStage::Pull,
-                        remote.pull_page(
-                            &access,
-                            vault.scope().vault_id(),
-                            vault.plane(),
-                            cursor.as_ref(),
-                            timeout,
-                        ),
-                    )
-                    .await;
+                let pulled = await_remote(
+                    &operation,
+                    SyncStage::Pull,
+                    remote.pull_page(
+                        &access,
+                        vault.scope().vault_id(),
+                        vault.plane(),
+                        cursor.as_ref(),
+                        timeout,
+                    ),
+                )
+                .await;
                 let page_wire = match pulled {
                     Ok(page) => page,
                     Err(error)
@@ -674,29 +671,6 @@ impl SyncEngine {
         }
     }
 
-    async fn await_remote<T>(
-        &self,
-        operation: &SessionOperation,
-        stage: SyncStage,
-        future: RemoteFuture<'_, T>,
-    ) -> Result<T, SyncError> {
-        let deadline = tokio::time::Instant::from_std(operation.deadline());
-        tokio::select! {
-            biased;
-            () = operation.cancelled() => Err(SyncError::new(
-                operation.operation_id(),
-                SyncErrorKind::Cancelled,
-                stage,
-            )),
-            () = tokio::time::sleep_until(deadline) => Err(SyncError::new(
-                operation.operation_id(),
-                SyncErrorKind::DeadlineExceeded,
-                stage,
-            )),
-            result = future => result.map_err(|error| map_remote_error(operation.operation_id(), stage, error)),
-        }
-    }
-
     fn partial_if_stopped(
         &self,
         operation: &SessionOperation,
@@ -761,7 +735,33 @@ impl std::fmt::Debug for SyncEngine {
     }
 }
 
-fn request_timeout(operation: &SessionOperation, stage: SyncStage) -> Result<Duration, SyncError> {
+/// One remote call bounded by the operation's cancellation and deadline.
+pub(super) async fn await_remote<T>(
+    operation: &SessionOperation,
+    stage: SyncStage,
+    future: RemoteFuture<'_, T>,
+) -> Result<T, SyncError> {
+    let deadline = tokio::time::Instant::from_std(operation.deadline());
+    tokio::select! {
+        biased;
+        () = operation.cancelled() => Err(SyncError::new(
+            operation.operation_id(),
+            SyncErrorKind::Cancelled,
+            stage,
+        )),
+        () = tokio::time::sleep_until(deadline) => Err(SyncError::new(
+            operation.operation_id(),
+            SyncErrorKind::DeadlineExceeded,
+            stage,
+        )),
+        result = future => result.map_err(|error| map_remote_error(operation.operation_id(), stage, error)),
+    }
+}
+
+pub(super) fn request_timeout(
+    operation: &SessionOperation,
+    stage: SyncStage,
+) -> Result<Duration, SyncError> {
     let remaining = operation
         .deadline()
         .checked_duration_since(std::time::Instant::now())
@@ -888,7 +888,7 @@ fn validate_item_states_for_push(
     Ok(mapped)
 }
 
-fn map_session_error(error: SessionError) -> SyncError {
+pub(super) fn map_session_error(error: SessionError) -> SyncError {
     let kind = match error.kind() {
         SessionErrorKind::Cancelled => SyncErrorKind::Cancelled,
         SessionErrorKind::DeadlineExceeded => SyncErrorKind::DeadlineExceeded,

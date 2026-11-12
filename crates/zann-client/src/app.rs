@@ -25,11 +25,11 @@ pub use crate::session::{
     SessionCancellationHandle, SessionClient, SessionError, SessionErrorKind, SessionOperation,
     SessionOperationId, SessionTarget, SessionTargetError,
 };
-use crate::sync::{SyncEngine, SyncFuture};
 pub use crate::sync::{
-    SyncError, SyncErrorKind, SyncOutcome, SyncOutcomeStatus, SyncProgress, SyncProgressPhase,
-    SyncProgressSink, SyncStage,
+    AccountKeyCheck, SyncError, SyncErrorKind, SyncOutcome, SyncOutcomeStatus, SyncProgress,
+    SyncProgressPhase, SyncProgressSink, SyncStage,
 };
+use crate::sync::{SyncEngine, SyncFuture};
 use crate::{config::ConfigRepository, remote::auth::AuthHttpTransport};
 
 /// Narrow persistence-adapter SPI. It contains bounded plans, opaque proofs
@@ -426,6 +426,18 @@ impl AppClient {
         operation: SessionOperation,
     ) -> Result<SessionAccess, SessionError> {
         self.session.import_session_tokens(request, operation).await
+    }
+
+    /// Checks a master key against the account's published personal vault
+    /// key before a new device keeps anything derived from it: the first sync
+    /// binds the key's fingerprint to the connection for good.
+    pub async fn verify_account_key(
+        &self,
+        target: &SessionTarget,
+        master_key: &SecretKey,
+        operation: SessionOperation,
+    ) -> Result<AccountKeyCheck, SyncError> {
+        crate::sync::verify_with_session(&self.session, target, master_key, operation).await
     }
 
     /// Reads the server's personal-vault initialization state using an opaque

@@ -6,8 +6,8 @@ use base64::Engine;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 use zann_client::app::{
-    AppClient, ClientId, ClientPaths, ConfigIdentity, ConfigKdfParams, CredentialSecret,
-    LegacySessionImport, SessionClient, SessionOperation,
+    AccountKeyCheck, AppClient, ClientId, ClientPaths, ConfigIdentity, ConfigKdfParams,
+    CredentialSecret, LegacySessionImport, SessionClient, SessionOperation,
 };
 use zann_client::config::{CredentialStore, LegacyCredentialSource};
 use zann_core::{ItemCounts as DomainItemCounts, ItemListParams, ItemsService, VaultsService};
@@ -128,7 +128,9 @@ impl LocalVault {
             vaults = list(storage_id)?;
         }
         let vault_id = match vaults.first() {
+            // No storage holds a vault: nothing local can check this key.
             None => {
+                self.check_key_for_new_device(&master_key, self.kdf_identity()?.as_ref())?;
                 let services = LocalServices::new(&pool, master_key.as_ref());
                 let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
                 storage_id = vault.storage_id;

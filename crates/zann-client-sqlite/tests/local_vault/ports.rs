@@ -6,6 +6,7 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 
 use crate::support::CanonicalTempDir;
+use zann_client::app::local::LocalError;
 use zann_client::config::{
     CredentialId, CredentialPortError, CredentialSecret, CredentialStore, LegacyCredentialLocator,
     LegacyCredentialSource,
@@ -86,8 +87,14 @@ fn injected_credential_ports_migrate_a_legacy_token_under_a_symlinked_container(
 
     let core = open_vault_at_path(&temp.join("container-link/vault/local.sqlite"), ports)
         .expect("open through the symlinked container");
-    core.initialize_master_password("test master password".into())
-        .expect("initialize, which migrates the legacy config");
+    // The fixture's server is unreachable, so the account cannot confirm the
+    // master password and nothing is created; the legacy config is migrated
+    // before that check.
+    match core.initialize_master_password("test master password".into()) {
+        Err(LocalError::Sync { .. }) => {}
+        other => panic!("a new device signed in to a server checks the key there first: {other:?}"),
+    }
+    assert!(!core.app_status().expect("status").initialized);
 
     assert_eq!(credentials.secrets(), ["test-legacy-access-token"]);
     let config = fs::read_to_string(container.join("vault/client-config.json")).expect("config");
