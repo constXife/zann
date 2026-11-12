@@ -118,18 +118,15 @@ pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailu
 
 /// A scheduled sync of the open storage, the one "Sync now" in Settings runs
 /// for it, so a refusal names the storage its recovery acts on. `None` when
-/// the storage has no server or the sync changed nothing; otherwise the first
-/// page again, for `query`.
+/// no server syncs the storage (a local one, or one whose server was
+/// forgotten) or the sync changed nothing; otherwise the first page again,
+/// for `query`.
 pub fn sync_and_reload(
     facade: &Facade,
     storage_id: String,
     query: Option<String>,
 ) -> Result<Option<ItemsPage>, SyncFailure> {
-    let remote = facade
-        .list_storages()?
-        .iter()
-        .any(|storage| storage.id == storage_id && storage.kind == "remote");
-    if !remote {
+    if !facade.syncs_storage(storage_id.clone())? {
         return Ok(None);
     }
     let outcome = facade.remote_sync(Some(storage_id))?;
