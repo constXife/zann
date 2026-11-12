@@ -197,19 +197,6 @@ pub enum PrepareConnectionOutcome {
     FingerprintChanged(Box<ConnectionTrustChallenge>),
 }
 
-/// What [`AppClient::remove_connection`] did.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ConnectionRemoval {
-    /// The connection is gone from the config. `cleanup_deferred` means some
-    /// of its stored credentials are retired in the credential journal but
-    /// still in the store, typically because the config backup keeps the
-    /// previous generation restorable; a later credential reconcile deletes
-    /// them, exactly as after a logout.
-    Removed { cleanup_deferred: bool },
-    /// No connection was configured for this endpoint and name.
-    AlreadyAbsent,
-}
-
 /// Application policy facade over session and bidirectional sync owners.
 #[derive(Clone)]
 pub struct AppClient {
@@ -270,19 +257,11 @@ impl AppClient {
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
         let config = snapshot.config();
         let connection_id = if let Some(storage_id) = storage_id {
-            let mut matches = config.connections.iter().filter(|(_, connection)| {
-                connection.metadata().storage_id.as_deref() == Some(storage_id)
-            });
-            let selected = matches.next().map(|(id, _)| id.clone());
-            if matches.next().is_some() {
-                return Err(SessionError::for_app(
-                    operation_id,
-                    SessionErrorKind::Configuration,
-                ));
-            }
-            selected.ok_or_else(|| {
-                SessionError::for_app(operation_id, SessionErrorKind::Configuration)
-            })?
+            connection_removal::storage_connection(config, storage_id)
+                .map_err(|kind| SessionError::for_app(operation_id, kind))?
+                .ok_or_else(|| {
+                    SessionError::for_app(operation_id, SessionErrorKind::Configuration)
+                })?
         } else if let Some(active) = config
             .clients
             .get(&self.client_id)
@@ -407,47 +386,6 @@ impl AppClient {
             )
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
         Ok(challenge.prepared)
-    }
-
-    /// Forgets the connection that `prepare_connection` keys by this endpoint
-    /// and name: its pinned server identity, credential profiles and stored
-    /// credentials. This is the explicit recovery from
-    /// [`SessionErrorKind::ServerIdentityChanged`]; the next
-    /// `prepare_connection` then pins whatever server answers, as on first
-    /// use. Nothing is sent to the server, and the local sync projection is
-    /// left to [`Self::reset_sync`].
-    ///
-    /// Repeating the call after it succeeded returns
-    /// [`ConnectionRemoval::AlreadyAbsent`].
-    pub fn remove_connection(
-        &self,
-        endpoint: &str,
-        connection_name: &str,
-    ) -> Result<ConnectionRemoval, SessionError> {
-        let operation_id = SessionOperationId::new();
-        let failure = |error: ConfigError| {
-            let kind = match error {
-                ConfigError::RevisionConflict { .. } => SessionErrorKind::ConcurrentSessionChange,
-                error => crate::session::local_config_error_kind(&error),
-            };
-            SessionError::for_app(operation_id, kind)
-        };
-        let snapshot = self.repository.snapshot().map_err(failure)?;
-        let connection_id = ConnectionId::deterministic(connection_name, endpoint);
-        if !snapshot.config().connections.contains_key(&connection_id) {
-            return Ok(ConnectionRemoval::AlreadyAbsent);
-        }
-        let outcome = self
-            .repository
-            .remove_connection(
-                snapshot.revision(),
-                &connection_id,
-                self.credential_store.as_ref(),
-            )
-            .map_err(failure)?;
-        Ok(ConnectionRemoval::Removed {
-            cleanup_deferred: !outcome.warnings().is_empty(),
-        })
     }
 
     /// Installs a metadata-only progress observer for subsequent sync calls.
@@ -1595,6 +1533,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn forgetting_the_server_of_a_storage_returns_its_address_once() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let app = trusting_client(&dir);
+        let mut server = mockito::Server::new_async().await;
+        let endpoint = first_connect(&app, &mut server).await;
+        let storage_id = app
+            .repository
+            .snapshot()
+            .expect("config snapshot")
+            .config()
+            .connections
+            .get(&ConnectionId::deterministic(CONNECTION_NAME, &endpoint))
+            .expect("pinned connection")
+            .metadata()
+            .storage_id
+            .clone()
+            .expect("first connect pins the storage");
+
+        assert_eq!(
+            app.remove_storage_connection("another-storage")
+                .expect("no connection syncs another storage"),
+            None
+        );
+        assert_eq!(
+            app.remove_storage_connection(&storage_id)
+                .expect("forget the storage's server"),
+            Some(endpoint.clone())
+        );
+        assert!(app
+            .repository
+            .snapshot()
+            .expect("config snapshot")
+            .config()
+            .connections
+            .is_empty());
+        assert_eq!(
+            app.remove_storage_connection(&storage_id)
+                .expect("forgetting twice is a no-op"),
+            None
+        );
+    }
+
+    #[tokio::test]
     async fn forgetting_a_changed_server_lets_it_be_pinned_again() {
         let dir = tempfile::tempdir().expect("temp dir");
         let app = trusting_client(&dir);
@@ -1644,6 +1625,8 @@ mod tests {
     }
 }
 
+mod connection_removal;
+pub use connection_removal::ConnectionRemoval;
 /// Local vault services, independent of SQLite and native adapters.
 mod kdf_identity;
 pub mod local;
