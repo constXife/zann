@@ -25,7 +25,8 @@ is what lets `tests/flows.rs` drive the flows without a compositor.
 ```
 src/backend/local.rs    the vault on this machine (zann-client-sqlite)
 src/backend/remote.rs   logging in against a server (zann-client)
-src/session.rs          the open database, owned for the app's lifetime
+src/session.rs          the open database and the core's auto-sync schedule,
+                        owned for the app's lifetime
 src/screens/*.rs        one module per screen
 ```
 
@@ -39,6 +40,12 @@ shell acts on. Two rules keep this from eroding:
   field, it belongs to neither;
 - no `Option` for something that always exists once the app is running, which is
   why `Session` is not optional and a missing database is a separate shell state.
+
+While a vault is open it syncs on the core's `AutoSyncSchedule`: at once on
+unlock (unless the first sync after a login just ran), a couple of seconds after
+each save, and every minute otherwise. The vault screen keeps one timer armed
+for it; Settings → Sync now takes the same one-sync-at-a-time admission, and a
+lock forgets what was due and cancels a sync in flight.
 
 ## Prereqs
 
@@ -131,8 +138,8 @@ one-time code, so the detail drawer has something to hide and to count down.
 `tools/mock-server` answers the endpoints a password login needs
 (`/v1/system/info`, `/v1/auth/prelogin`, `/v1/auth/register`, `/v1/auth/login`,
 `/v1/vaults/personal/status`), which is enough to walk the connect screen end to
-end. It does not implement sync, so the pull after unlocking fails — the vault
-still opens and reports it.
+end. It does not implement sync, so the pull after unlocking and every
+automatic sync after it fail — the vault still opens and reports it.
 
 ```bash
 cargo run --manifest-path ../../tools/mock-server/Cargo.toml   # 127.0.0.1:18081

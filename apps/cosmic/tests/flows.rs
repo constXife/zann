@@ -422,13 +422,13 @@ fn master_hands_the_open_vault_to_the_shell() {
     assert!(matches!(failed, master::Outcome::None));
 
     let opened = state.update(
-        master::Message::Opened(Ok((page, Some("offline".to_string())))),
+        master::Message::Opened(Ok((page, Some(Err("offline".to_string()))))),
         &session,
     );
     match opened {
-        master::Outcome::Opened { page, sync_error } => {
+        master::Outcome::Opened { page, synced } => {
             assert_eq!(page.total, 2);
-            assert_eq!(sync_error.as_deref(), Some("offline"));
+            assert_eq!(synced, Some(Err("offline".to_string())));
         }
         _ => panic!("a successful unlock hands the page over"),
     }
@@ -664,4 +664,103 @@ fn saved_item_from_a_destroyed_screen_cannot_replace_the_new_screen_detail() {
     assert!(current.detail().is_none());
     current.update(vault::Message::Saved(current_request, Ok(detail)), &session);
     assert!(current.detail().is_some());
+}
+
+#[test]
+fn a_save_schedules_a_push_and_a_lock_drops_it() {
+    use std::time::Instant;
+    use zann_client::sync::AUTO_SYNC_DEBOUNCE;
+
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    let detail =
+        Detail::parse(local::item_get(&session.facade(), page.items[0].id.clone()).unwrap())
+            .unwrap();
+    // Opening ran a sync, so the next one waits the full interval.
+    session.auto_sync().unlocked(Instant::now(), true);
+    let mut vault = vault::State::new(page, None);
+    vault.update(vault::Message::OpenCreate, &session);
+    let request = vault.editing_request_id();
+    let before = Instant::now();
+    vault.update(vault::Message::Saved(request, Ok(detail)), &session);
+
+    let due = session.auto_sync().next_due().expect("the save is pushed");
+    assert!(due <= Instant::now() + AUTO_SYNC_DEBOUNCE);
+    assert!(due >= before);
+
+    session.lock();
+    assert_eq!(session.auto_sync().next_due(), None);
+}
+
+#[test]
+fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
+    use std::time::Instant;
+
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    let empty = local::ItemsPage {
+        items: Vec::new(),
+        next_cursor: None,
+        total: 0,
+        counts: ItemCounts::default(),
+    };
+    let now = Instant::now();
+    session.auto_sync().unlocked(now, false);
+    let stale = session.auto_sync().take_due(now).expect("due on unlock");
+    session.lock();
+
+    session.auto_sync().unlocked(now, false);
+    let mut vault = vault::State::new(page, None);
+    let ignored = vault.update(
+        vault::Message::AutoSynced {
+            ticket: stale,
+            list_generation: 0,
+            result: Ok(Some(empty.clone())),
+        },
+        &session,
+    );
+    assert!(matches!(ignored, vault::Outcome::None));
+    assert_eq!(vault.visible().len(), 2);
+
+    // This unlock's own sync lands, and the schedule waits for the next one.
+    let current = session.auto_sync().take_due(now).expect("due on unlock");
+    vault.update(
+        vault::Message::AutoSynced {
+            ticket: current,
+            list_generation: 0,
+            result: Ok(Some(empty)),
+        },
+        &session,
+    );
+    assert!(vault.visible().is_empty());
+    assert!(session.auto_sync().next_due().is_some());
+}
+
+#[test]
+fn a_sync_started_under_an_older_search_keeps_the_newer_list() {
+    use std::time::Instant;
+
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    let empty = local::ItemsPage {
+        items: Vec::new(),
+        next_cursor: None,
+        total: 0,
+        counts: ItemCounts::default(),
+    };
+    let now = Instant::now();
+    session.auto_sync().unlocked(now, false);
+    let ticket = session.auto_sync().take_due(now).expect("due on unlock");
+    let mut vault = vault::State::new(page, None);
+    vault.update(vault::Message::QueryInput("mail".to_string()), &session);
+
+    vault.update(
+        vault::Message::AutoSynced {
+            ticket,
+            list_generation: 0,
+            result: Ok(Some(empty)),
+        },
+        &session,
+    );
+    assert!(!vault.visible().is_empty());
 }

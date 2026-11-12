@@ -44,8 +44,9 @@ pub enum Message {
     PasswordInput(String),
     ToggleVisibility,
     Submit,
-    /// The vault contents, plus a sync error that did not stop it opening.
-    Opened(Result<(ItemsPage, Option<String>), String>),
+    /// The vault contents, plus the outcome of the sync that ran on the way
+    /// in, if one did; a failed one did not stop the vault opening.
+    Opened(Result<(ItemsPage, Option<Result<(), String>>), String>),
 }
 
 pub enum Outcome {
@@ -53,7 +54,7 @@ pub enum Outcome {
     Task(Task<Message>),
     Opened {
         page: ItemsPage,
-        sync_error: Option<String>,
+        synced: Option<Result<(), String>>,
     },
 }
 
@@ -117,19 +118,18 @@ impl State {
                             // A vault that came from a server starts empty, so
                             // pull it first. A failed sync is worth reporting
                             // but must not keep the vault shut.
-                            let sync_error = storage
-                                .map(|storage| local::sync_new_server(&facade, storage))
-                                .and_then(Result::err);
-                            local::items(&facade, None, None).map(|page| (page, sync_error))
+                            let synced =
+                                storage.map(|storage| local::sync_new_server(&facade, storage));
+                            local::items(&facade, None, None).map(|page| (page, synced))
                         })
                         .await,
                     )
                 }));
             }
 
-            Message::Opened(Ok((page, sync_error))) => {
+            Message::Opened(Ok((page, synced))) => {
                 self.busy = false;
-                return Outcome::Opened { page, sync_error };
+                return Outcome::Opened { page, synced };
             }
 
             Message::Opened(Err(err)) => {
@@ -155,10 +155,8 @@ impl State {
             Message::Opened(
                 off_thread(move || {
                     local::unlock_remembered(&facade)?;
-                    let sync_error = storage
-                        .map(|storage| local::sync_new_server(&facade, storage))
-                        .and_then(Result::err);
-                    local::items(&facade, None, None).map(|page| (page, sync_error))
+                    let synced = storage.map(|storage| local::sync_new_server(&facade, storage));
+                    local::items(&facade, None, None).map(|page| (page, synced))
                 })
                 .await,
             )

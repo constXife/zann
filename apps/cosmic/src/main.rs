@@ -21,6 +21,7 @@ use cosmic::iced::{event, keyboard, mouse, window, Event, Length, Size, Subscrip
 use cosmic::prelude::*;
 use cosmic::widget::{menu, nav_bar};
 use cosmic::{executor, widget, Element};
+use zann_client::app::AutoSyncTicket;
 use zann_cosmic::i18n::t;
 use zann_cosmic::preferences::{self, Store};
 use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};
@@ -85,6 +86,9 @@ enum Message {
     Connect(connect::Message),
     Master(master::Message),
     Settings(settings::Message),
+    /// A sync started from Settings ended; the ticket goes back to the
+    /// session's schedule.
+    ManualSynced(AutoSyncTicket, Result<(), String>),
     Vault(vault::Message),
     /// Effects the shell owns because they leave the app.
     Copy(String),
@@ -505,6 +509,19 @@ impl cosmic::Application for App {
                 return self.show_window(activation_token);
             }
             Message::Settings(message) => return self.update_settings(message),
+            Message::ManualSynced(ticket, result) => {
+                let Shell::Ready { session, .. } = &self.shell else {
+                    return Task::none();
+                };
+                if !session
+                    .auto_sync()
+                    .finished(ticket, std::time::Instant::now())
+                {
+                    // Started before a lock; nothing it answered is open now.
+                    return Task::none();
+                }
+                return self.update_settings(settings::Message::Synced(result));
+            }
             Message::Unfocused => {
                 if let Shell::Ready {
                     screen: Screen::Vault(vault) | Screen::Settings { vault, .. },
@@ -625,14 +642,22 @@ impl cosmic::Application for App {
                 match state.update(message, session) {
                     master::Outcome::None => Task::none(),
                     master::Outcome::Task(task) => lift(task, Message::Master),
-                    master::Outcome::Opened { page, sync_error } => {
+                    master::Outcome::Opened { page, synced } => {
                         let load_vaults = vault::State::load_vaults(session);
+                        session
+                            .auto_sync()
+                            .unlocked(std::time::Instant::now(), synced.is_some());
+                        let sync_error = synced.and_then(Result::err);
                         let mut vault = vault::State::new(page, sync_error);
                         vault.set_content_width(content_width);
                         vault.set_auto_lock_minutes(auto_lock_minutes);
                         vault.set_reveal_seconds(reveal_seconds);
+                        let auto_sync = vault.arm_auto_sync(session);
                         *screen = Screen::Vault(Box::new(vault));
-                        lift(load_vaults, Message::Vault)
+                        lift(
+                            cosmic::iced::Task::batch([load_vaults, auto_sync]),
+                            Message::Vault,
+                        )
                     }
                 }
             }
@@ -668,7 +693,8 @@ impl cosmic::Application for App {
             | Message::Activity
             | Message::ClipboardExpired(_)
             | Message::ClipboardRead(_)
-            | Message::Settings(_) => Task::none(),
+            | Message::Settings(_)
+            | Message::ManualSynced(..) => Task::none(),
         }
     }
 
@@ -770,18 +796,23 @@ impl App {
                 let Shell::Ready { session, .. } = &self.shell else {
                     return Task::none();
                 };
+                // One sync at a time, whoever asked for it.
+                let Some(ticket) = session.auto_sync().take_now() else {
+                    return lift(
+                        cosmic::task::message(settings::Message::Synced(Err(t("status.syncing")))),
+                        Message::Settings,
+                    );
+                };
                 let facade = session.facade();
-                lift(
-                    cosmic::task::future(async move {
-                        settings::Message::Synced(
-                            zann_cosmic::backend::off_thread(move || {
-                                zann_cosmic::backend::local::sync(&facade, Some(storage_id))
-                            })
-                            .await,
-                        )
-                    }),
-                    Message::Settings,
-                )
+                cosmic::task::future(async move {
+                    Message::ManualSynced(
+                        ticket,
+                        zann_cosmic::backend::off_thread(move || {
+                            zann_cosmic::backend::local::sync(&facade, Some(storage_id))
+                        })
+                        .await,
+                    )
+                })
             }
             settings::Outcome::Close { page } => {
                 let Shell::Ready { session, screen } = &mut self.shell else {
@@ -810,9 +841,11 @@ impl App {
                 Task::none()
             }
             settings::Outcome::Restored { notice } => {
-                let Shell::Ready { screen, .. } = &mut self.shell else {
+                let Shell::Ready { session, screen } = &mut self.shell else {
                     return Task::none();
                 };
+                // The restore locked the core; nothing scheduled survives it.
+                session.auto_sync().locked();
                 *screen = Screen::Master(Box::new(
                     master::State::new(master::Mode::Unlock, None).with_notice(notice),
                 ));
