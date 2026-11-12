@@ -105,6 +105,10 @@ final class ConnectTests: XCTestCase {
         let deviceB = makeDevice("b")
         try await signIn(deviceB, url: url, email: email, password: account)
         XCTAssertEqual(deviceB.screen, .master(.unlock))
+        // A typo is refused against the account's key and binds nothing.
+        await deviceB.submit(password: master + "x", mode: .unlock)
+        XCTAssertNotNil(deviceB.error)
+        XCTAssertEqual(deviceB.screen, .master(.unlock))
         await deviceB.submit(password: master, mode: .unlock)
         XCTAssertNil(deviceB.error)
         let vaultB = try XCTUnwrap(deviceB.vault)

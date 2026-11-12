@@ -11,6 +11,9 @@ use zann_ffi::{
     CoreFacade, PrepareConnectionOutcomeFfi, PreparedConnectionFfi, SessionOperationFfi,
 };
 
+/// The core runs one sync per process, so these tests take turns.
+static SERVER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn server_url() -> Option<String> {
     std::env::var("ZANN_REMOTE_URL")
         .ok()
@@ -55,6 +58,9 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
         eprintln!("skipping: ZANN_REMOTE_URL not set");
         return;
     };
+    let _turn = SERVER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     let suffix = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
@@ -137,4 +143,99 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
         .expect("device B unlocks again");
     assert_in_personal_vault(&core, &storage_id);
     core.item_get(item_id).expect("the item is still there");
+}
+
+struct Account {
+    email: String,
+    account_password: String,
+    master_password: String,
+    item_id: String,
+}
+
+/// A new account whose first device published one item.
+fn publish_account(url: &str) -> Account {
+    let suffix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_nanos();
+    let account = Account {
+        email: format!("ffi-{suffix}@example.test"),
+        account_password: format!("account-password-{suffix}"),
+        master_password: format!("master-password-{suffix}"),
+        item_id: String::new(),
+    };
+    let device = tempfile::tempdir().expect("tempdir");
+    let core = support::open(&device.path().join("local.sqlite"));
+    let connection = connect(&core, url);
+    core.remote_session()
+        .expect("remote session")
+        .password_register(
+            connection,
+            account.email.clone(),
+            account.account_password.clone(),
+            None,
+            operation(),
+        )
+        .expect("register");
+    core.initialize_master_password(account.master_password.clone())
+        .expect("create the vault");
+    core.remote_sync(None).expect("publish the vault");
+    core.follow_preferred_storage().expect("follow the server");
+    let item_id = core
+        .debug_create_kv_item("pushed".into(), "key".into(), "value".into())
+        .expect("create an item");
+    core.remote_sync(None).expect("push it");
+    Account { item_id, ..account }
+}
+
+/// A mistyped master password on a fresh device must bind nothing: the right
+/// password still opens the account's vault afterwards, and the typo never
+/// opens anything.
+#[test]
+#[ignore]
+fn a_mistyped_master_password_never_binds_a_new_device() {
+    let Some(url) = server_url() else {
+        eprintln!("skipping: ZANN_REMOTE_URL not set");
+        return;
+    };
+    let _turn = SERVER
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let account = publish_account(&url);
+    let typo = format!("{}x", account.master_password);
+
+    let device = tempfile::tempdir().expect("tempdir");
+    let database = device.path().join("local.sqlite");
+    let secrets = Arc::new(support::MemorySecretStore::default());
+    let core = support::open_with_secrets(&database, Arc::default(), Arc::clone(&secrets));
+    let connection = connect(&core, &url);
+    core.remote_session()
+        .expect("remote session")
+        .password_login(
+            connection,
+            account.email.clone(),
+            account.account_password.clone(),
+            operation(),
+        )
+        .expect("log in");
+
+    // The key is checked against the account's vault key before anything
+    // is stored under it, so the device stays as fresh as before.
+    core.unlock(typo.clone())
+        .expect_err("the typo opens nothing on a new device");
+    assert!(!core.app_status().expect("status").initialized);
+
+    drop(core);
+    let core = support::open_with_secrets(&database, Arc::default(), secrets);
+    core.unlock(typo)
+        .expect_err("the typo opens nothing after a restart either");
+    core.unlock(account.master_password.clone())
+        .expect("the right password still opens the device");
+    core.remote_sync(None)
+        .expect("and syncs the account's vault");
+    core.follow_preferred_storage().expect("follow the server");
+    let item = core
+        .item_get(account.item_id)
+        .expect("the account's item is readable");
+    assert_eq!(item.path, "pushed");
 }
