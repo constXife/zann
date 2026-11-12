@@ -3,11 +3,16 @@
 //! The public surface contains bounded domain models and a transactional local
 //! store port. HTTP authorization, wire DTOs and bearer handling stay private.
 
+#[cfg_attr(not(feature = "app"), allow(dead_code))]
+mod account_key;
 mod engine;
 mod model;
 mod transport;
 mod wire;
 
+#[cfg(feature = "app")]
+pub(crate) use account_key::verify_with_session;
+pub use account_key::AccountKeyCheck;
 #[cfg(feature = "app")]
 pub(crate) use engine::SyncEngine;
 pub use model::{
