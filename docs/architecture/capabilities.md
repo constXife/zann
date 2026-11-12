@@ -181,11 +181,17 @@ default defined by `zann-ui-core::settings`.
   feature in production. A missing runtime fails before mutation, an observed
   task failure is `CommitOutcomeUnknown`, and runtime/process shutdown is
   recovered from the durable generation and checkpoint without blind replay.
-  Before a local adapter opens that projection, Config v2 binds the connection's
-  `expected_master_key_fp` through a repository-bound credential-profile
-  anchor. The metadata CAS accepts only the canonical 12-lowercase-hex value,
-  permits `None -> exact` once, treats `exact -> exact` as a no-write/no-revision
-  idempotent result, and requires an explicit rebind workflow for every other
+  Before a local adapter keeps any projection state, Config v2 binds the
+  connection's `expected_master_key_fp` through a repository-bound
+  credential-profile anchor, and `AppClient::sync` binds an unbound
+  connection only after the catalog proved the key (it opens every published
+  personal vault key, or this device published the first one). Until then the
+  adapter resolves the target with the key as a candidate: it may record the
+  empty storage and generate and check that first key, and refuses every
+  vault, item, history, pending and cursor read or write. The metadata CAS
+  accepts only the canonical 12-lowercase-hex value, permits `None -> exact`
+  once, treats `exact -> exact` as a no-write/no-revision idempotent result,
+  and requires an explicit rebind workflow for every other
   existing value. It rebases only while endpoint, storage, account/auth,
   credential, expiry and the previously observed master-key binding remain
   exact; legacy arbitrary values stay parseable but cannot be silently replaced.

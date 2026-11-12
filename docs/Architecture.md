@@ -273,6 +273,16 @@ first checks the derived key against the account's personal vault keys
 (`AppClient::verify_account_key`) and stores nothing on a mismatch. That first
 unlock needs the server; every later one is checked locally.
 
+`AppClient::sync` enforces the same rule for every caller. A connection with no
+`expected_master_key_fp` first runs the sync up to the catalog and binds the
+key only once the catalog proves it: the key opens every published personal
+vault key, or this device publishes the account's first one through the
+server's initialize-once CAS. A refused key fails the sync with nothing bound
+and no catalog state kept, so of two new devices racing with different master
+passwords only the one whose key the account now uses binds. A server without
+personal vaults wraps nothing with the key and binds it without proof. The
+sync then runs on a fresh store lease under the newly bound config generation.
+
 Before an existing refresh secret is read or sent, `AppSession` probes the
 canonical endpoint and verifies the exact stored address, server identity and
 fingerprint binding. In protocol v1 the fingerprint is unsigned TOFU metadata

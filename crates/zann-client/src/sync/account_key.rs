@@ -1,13 +1,13 @@
-//! Checking a master key against the account's published personal vault key
-//! before a new device keeps anything derived from it. The first sync binds
-//! the key's fingerprint to the connection, so a key that was never checked
-//! would bind a mistyped master password for good.
+//! Checking a master key against the account's published personal vault
+//! keys. A new device checks before it keeps anything derived from the key,
+//! and a connection's first sync checks again before it binds the key's
+//! fingerprint, so a mistyped master password is never bound.
 
 use zann_crypto::vault_crypto;
 use zann_crypto::SecretKey;
 
 use super::engine::{await_remote, map_session_error, request_timeout, SyncAuthorizer};
-use super::model::{SyncError, SyncErrorKind, SyncStage, VaultPlane};
+use super::model::{CatalogSnapshot, SyncError, SyncErrorKind, SyncStage, VaultPlane};
 use super::transport::{HttpSyncRemote, SyncRemote};
 use crate::session::{AppSession, SessionOperation, SessionTarget};
 
@@ -58,8 +58,13 @@ async fn verify_account_key(
         remote.fetch_catalog(&access, timeout),
     )
     .await?;
-    // Every personal vault key of one account is wrapped by the same master
-    // key, so the key must open each of them.
+    Ok(check_catalog(master_key, &catalog))
+}
+
+/// What one catalog's personal vault keys say about `master_key`. Every
+/// personal vault key of one account is wrapped by the same master key, so
+/// the key must open each published one.
+pub(super) fn check_catalog(master_key: &SecretKey, catalog: &CatalogSnapshot) -> AccountKeyCheck {
     let mut check = AccountKeyCheck::Unpublished;
     for vault in catalog.vaults() {
         if vault.plane() != VaultPlane::PersonalClient || vault.vault_key_envelope().is_empty() {
@@ -68,11 +73,11 @@ async fn verify_account_key(
         if vault_crypto::decrypt_vault_key(master_key, vault.id(), vault.vault_key_envelope())
             .is_err()
         {
-            return Ok(AccountKeyCheck::Mismatch);
+            return AccountKeyCheck::Mismatch;
         }
         check = AccountKeyCheck::Matches;
     }
-    Ok(check)
+    check
 }
 
 #[cfg(test)]

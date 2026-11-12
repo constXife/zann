@@ -17,6 +17,7 @@ pub mod local_vault;
 pub mod maintenance;
 pub use zann_db::SqliteFileLocation;
 
+mod master_key;
 #[cfg(test)]
 mod test_support;
 
@@ -53,6 +54,8 @@ use zann_db::local::{
     ResetProjection,
 };
 use zann_db::{ExistingSqliteDatabase, SqlitePool};
+
+use master_key::{master_key_binding, MasterKeyBinding};
 
 const MAX_ITEM_STATE_IDS: usize = 64;
 const MAX_PENDING_CHANGES: u32 = 64;
@@ -199,7 +202,7 @@ struct TargetBinding {
     server_id: String,
     server_fingerprint: String,
     storage_id: Uuid,
-    master_key_fingerprint: String,
+    master_key: MasterKeyBinding,
     account_subject: String,
     auth_method: AuthMethod,
 }
@@ -357,6 +360,17 @@ impl SqliteSyncStore {
             .ok_or_else(|| store_error(SyncStoreErrorKind::StaleCheckpoint))
     }
 
+    /// The installed authorization, provided its connection has bound this
+    /// store's master key. A candidate key may only take part in proving
+    /// itself, so it never reads or keeps projection state.
+    fn bound(&self) -> Result<&InstalledAuthorization, SyncStoreError> {
+        let installed = self.installed()?;
+        if installed.expected.master_key != MasterKeyBinding::Bound {
+            return Err(store_error(SyncStoreErrorKind::StaleKeyBinding));
+        }
+        Ok(installed)
+    }
+
     fn try_acquire_terminal_mutation(&self) -> Result<MutationPermit, SyncStoreError> {
         MutationPermit::try_acquire()
     }
@@ -393,7 +407,7 @@ impl SqliteSyncStore {
     }
 
     async fn ensure_scope(&self, scope: SyncScope) -> Result<LocalStorage, SyncStoreError> {
-        let installed = self.installed()?;
+        let installed = self.bound()?;
         if scope.storage_id() != installed.expected.storage_id {
             return Err(store_error(SyncStoreErrorKind::InvalidData));
         }
@@ -466,7 +480,7 @@ impl SqliteSyncStore {
         target: &ResolvedSyncTarget,
         catalog: &CatalogSnapshot,
     ) -> Result<ReconciledCatalog, SyncStoreError> {
-        let installed = self.installed()?;
+        let installed = self.bound()?;
         let generation = installed
             .generation
             .as_ref()
@@ -567,7 +581,7 @@ impl SqliteSyncStore {
         self: &Arc<Self>,
         commit: PullPageCommit,
     ) -> Result<PullCommitReceipt, SyncStoreError> {
-        let installed = self.installed()?;
+        let installed = self.bound()?;
         let generation = installed
             .generation
             .as_ref()
@@ -642,7 +656,7 @@ impl SqliteSyncStore {
         self: &Arc<Self>,
         commit: PushCommitPlan,
     ) -> Result<PushCommitReceipt, SyncStoreError> {
-        let installed = self.installed()?;
+        let installed = self.bound()?;
         let generation = installed
             .generation
             .as_ref()
@@ -1347,13 +1361,7 @@ fn target_binding_from_anchor_for_test(
     {
         return Err(store_error(SyncStoreErrorKind::InvalidData));
     }
-    let expected_master = required(anchor.expected_master_key_fp())?;
-    if !canonical_cache_fingerprint(expected_master) {
-        return Err(store_error(SyncStoreErrorKind::InvalidData));
-    }
-    if expected_master != zann_crypto::cache_key_fingerprint(master_key) {
-        return Err(store_error(SyncStoreErrorKind::StaleKeyBinding));
-    }
+    let master_key = master_key_binding(anchor.expected_master_key_fp(), master_key)?;
     Ok(TargetBinding {
         connection_id: target.connection_id().clone(),
         profile_name: target.profile_name().to_string(),
@@ -1362,7 +1370,7 @@ fn target_binding_from_anchor_for_test(
         server_id: server_id.to_string(),
         server_fingerprint: server_fingerprint.to_string(),
         storage_id,
-        master_key_fingerprint: expected_master.to_string(),
+        master_key,
         account_subject: account_subject.to_string(),
         auth_method,
     })
@@ -1390,13 +1398,7 @@ fn target_binding_from_generation(
     let auth_method = generation
         .auth_method()
         .ok_or_else(|| store_error(SyncStoreErrorKind::InvalidData))?;
-    let expected_master = required(generation.expected_master_key_fingerprint())?;
-    if !canonical_cache_fingerprint(expected_master) {
-        return Err(store_error(SyncStoreErrorKind::InvalidData));
-    }
-    if expected_master != zann_crypto::cache_key_fingerprint(master_key) {
-        return Err(store_error(SyncStoreErrorKind::StaleKeyBinding));
-    }
+    let master_key = master_key_binding(generation.expected_master_key_fingerprint(), master_key)?;
     Ok(TargetBinding {
         connection_id: target.connection_id().clone(),
         profile_name: target.profile_name().to_string(),
@@ -1405,7 +1407,7 @@ fn target_binding_from_generation(
         server_id: server_id.to_string(),
         server_fingerprint: server_fingerprint.to_string(),
         storage_id,
-        master_key_fingerprint: expected_master.to_string(),
+        master_key,
         account_subject: account_subject.to_string(),
         auth_method,
     })
@@ -1728,6 +1730,7 @@ mod tests {
     };
     use zann_db::local::{LocalSyncCheckpoint, SyncCursorRepo};
 
+    mod candidate_key;
     mod multi_storage;
 
     #[derive(Default)]
@@ -1826,6 +1829,10 @@ mod tests {
     }
 
     fn configured_fixture() -> ConfigFixture {
+        configured_fixture_with_master_key_bound(true)
+    }
+
+    fn configured_fixture_with_master_key_bound(bound: bool) -> ConfigFixture {
         let temp = CanonicalTempDir::new("temporary adapter root");
         let paths = ClientPaths::new(temp.path());
         let repository = ConfigRepository::new(paths.clone());
@@ -1846,7 +1853,8 @@ mod tests {
         metadata.server_id = Some("server-identity-binding".to_string());
         metadata.server_fingerprint = Some("server-fingerprint-binding".to_string());
         metadata.storage_id = Some(storage_id.to_string());
-        metadata.expected_master_key_fp = Some(zann_crypto::cache_key_fingerprint(&master_key));
+        metadata.expected_master_key_fp =
+            bound.then(|| zann_crypto::cache_key_fingerprint(&master_key));
         repository
             .upsert_connection(connection_id.clone(), metadata)
             .expect("insert pinned connection");

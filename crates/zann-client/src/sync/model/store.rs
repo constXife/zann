@@ -64,6 +64,14 @@ pub type SyncFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, SyncError>> +
 
 /// Transactional local projection port. Implementations may use SQLite, but this crate cannot.
 pub trait SyncLocalStore: Send + Sync {
+    /// Resolves the target's projection for one authorized config generation.
+    ///
+    /// A generation that binds no master key yet comes from a sync proving
+    /// the store's key against the account's catalog before the connection
+    /// binds it. The store may then record the target's empty storage and
+    /// generate and check the account's first personal vault key, but must
+    /// refuse every read or write of vault, item, history, pending or cursor
+    /// state until a later operation resolves a generation that binds it.
     fn resolve_target<'a>(
         &'a self,
         target: &'a SessionTarget,

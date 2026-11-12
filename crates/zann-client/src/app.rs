@@ -17,6 +17,8 @@ pub use crate::config::{
     CredentialPortError, CredentialPortErrorKind, CredentialSecret, CredentialStore,
     LegacyCredentialSource,
 };
+use crate::config::{ConfigError, ConfigRepository};
+use crate::remote::auth::AuthHttpTransport;
 use crate::session::AppSession;
 pub use crate::session::{
     AccessSource, LegacySessionImport, LocalLogoutStatus, LoginPassword, LogoutOutcome,
@@ -30,7 +32,6 @@ pub use crate::sync::{
     SyncProgressPhase, SyncProgressSink, SyncStage,
 };
 use crate::sync::{SyncEngine, SyncFuture};
-use crate::{config::ConfigRepository, remote::auth::AuthHttpTransport};
 
 /// Narrow persistence-adapter SPI. It contains bounded plans, opaque proofs
 /// and the transactional local-store port, but no session or sync owner.
@@ -477,6 +478,13 @@ impl AppClient {
     /// in the process; a contender fails before opening local state. The
     /// returned future must be polled on a Tokio runtime with its time driver
     /// enabled.
+    ///
+    /// A connection binds its master key's fingerprint for good, so one that
+    /// has not bound it yet binds it only after the server's catalog proves
+    /// the key: it opens every published personal vault key, or this device
+    /// publishes the account's first one. A key the catalog refuses fails the
+    /// sync with nothing bound and no catalog state kept. The sync itself then
+    /// runs on a fresh store lease under the newly bound config generation.
     pub fn sync(
         &self,
         target: SessionTarget,
@@ -489,17 +497,25 @@ impl AppClient {
         }
         let master_key_fingerprint = zann_crypto::cache_key_fingerprint(&master_key);
         let permit = match AppSyncPermit::try_acquire() {
-            Ok(permit) => permit,
+            Ok(permit) => Arc::new(permit),
             Err(()) => {
                 return ready_sync_error(operation_id, SyncErrorKind::Local);
             }
         };
 
+        let master_key = Arc::new(master_key);
         let paths = self.paths.clone();
         let factory = Arc::clone(&self.sync_store_factory);
         let repository = self.repository.clone();
         let session = self.session.clone();
         let progress = self.sync_progress.clone();
+        let engine = move |local: Arc<dyn SyncLocalStore>| {
+            let engine = SyncEngine::new(session.clone(), local);
+            match &progress {
+                Some(progress) => engine.with_progress(Arc::clone(progress)),
+                None => engine,
+            }
+        };
         Box::pin(async move {
             ensure_operation_dispatchable(&operation)?;
             if tokio::runtime::Handle::try_current().is_err() {
@@ -509,62 +525,50 @@ impl AppClient {
                     SyncStage::ResolveTarget,
                 ));
             }
-
-            let open = factory.open_existing(paths, target.clone(), Arc::new(master_key));
-            tokio::pin!(open);
-            let deadline = tokio::time::sleep_until(operation.deadline().into());
-            tokio::pin!(deadline);
-            let local = tokio::select! {
-                biased;
-                () = operation.cancelled() => {
-                    return Err(SyncError::new(
-                        operation_id,
-                        SyncErrorKind::Cancelled,
-                        SyncStage::ResolveTarget,
-                    ));
-                }
-                () = &mut deadline => {
-                    return Err(SyncError::new(
-                        operation_id,
-                        SyncErrorKind::DeadlineExceeded,
-                        SyncStage::ResolveTarget,
-                    ));
-                }
-                result = &mut open => result.map_err(|error| {
-                    map_factory_error(operation_id, error)
-                })?,
+            let open = || {
+                open_operation_store(
+                    Arc::clone(&factory),
+                    paths.clone(),
+                    target.clone(),
+                    Arc::clone(&master_key),
+                    Arc::clone(&permit),
+                    &operation,
+                )
             };
-            ensure_operation_dispatchable(&operation)?;
 
+            let local = open().await?;
             let anchor = repository
                 .resolve_credential_profile_anchor(target.connection_id(), target.profile_name())
                 .map_err(|_| {
                     SyncError::new(operation_id, SyncErrorKind::Local, SyncStage::ResolveTarget)
                 })?;
-            repository
-                .bind_expected_master_key_fingerprint_if_profile_matches(
-                    &anchor,
-                    master_key_fingerprint,
+            let crypto_error = || {
+                SyncError::new(
+                    operation_id,
+                    SyncErrorKind::Crypto,
+                    SyncStage::ResolveTarget,
                 )
-                .map_err(|_| {
-                    SyncError::new(
-                        operation_id,
-                        SyncErrorKind::Crypto,
-                        SyncStage::ResolveTarget,
-                    )
-                })?;
-
-            let local: Arc<dyn SyncLocalStore> = Arc::new(AppOperationStore {
-                inner: local,
-                _permit: permit,
-            });
-            let engine = SyncEngine::new(session, local);
-            let engine = if let Some(progress) = progress {
-                engine.with_progress(progress)
-            } else {
-                engine
             };
-            engine.pull(&target, operation).await
+            let local = match anchor.expected_master_key_fp() {
+                Some(bound) if bound == master_key_fingerprint => local,
+                Some(_) => return Err(crypto_error()),
+                None => {
+                    engine(local)
+                        .prove_and_bind_master_key(&target, &master_key, &operation, |access| {
+                            bind_proven_master_key(
+                                &repository,
+                                &target,
+                                access,
+                                &master_key_fingerprint,
+                            )
+                        })
+                        .await?;
+                    // The proof's lease resolved the unbound generation, which
+                    // the bind has just superseded.
+                    open().await?
+                }
+            };
+            engine(local).pull(&target, operation).await
         })
     }
 
@@ -641,7 +645,7 @@ struct AppOperationStore {
     // Field order is intentional: release the underlying operation store and
     // its key before reopening process-wide facade admission.
     inner: Arc<dyn SyncLocalStore>,
-    _permit: AppSyncPermit,
+    _permit: Arc<AppSyncPermit>,
 }
 
 impl SyncLocalStore for AppOperationStore {
@@ -744,6 +748,83 @@ impl fmt::Debug for AppOperationStore {
             .debug_struct("AppOperationStore")
             .finish_non_exhaustive()
     }
+}
+
+/// Binds the fingerprint of a master key the catalog has just proved for
+/// `access`. The anchor is read afresh because authorizing the proof may have
+/// rotated the profile's credentials, and the connection must still be the
+/// account and storage the key was proved for.
+fn bind_proven_master_key(
+    repository: &ConfigRepository,
+    target: &SessionTarget,
+    access: &SessionAccess,
+    fingerprint: &str,
+) -> Result<(), SyncError> {
+    let error = |kind| SyncError::new(access.operation_id(), kind, SyncStage::ResolveTarget);
+    let anchor = repository
+        .resolve_credential_profile_anchor(target.connection_id(), target.profile_name())
+        .map_err(|_| error(SyncErrorKind::Local))?;
+    if anchor.storage_id() != access.storage_id()
+        || anchor.server_fingerprint() != Some(access.server_fingerprint())
+        || anchor.account_subject() != access.account_subject()
+        || anchor.auth_method() != access.auth_method()
+    {
+        return Err(error(SyncErrorKind::ConcurrentLocalChange));
+    }
+    repository
+        .bind_expected_master_key_fingerprint_if_profile_matches(&anchor, fingerprint)
+        .map(|_| ())
+        .map_err(|bind| error(map_bind_error(&bind)))
+}
+
+/// Only another key already bound is a key problem; a connection that
+/// changed under the bind is a local race, anything else a local failure.
+const fn map_bind_error(error: &ConfigError) -> SyncErrorKind {
+    match error {
+        ConfigError::MasterKeyFingerprintRebindRequired { .. } => SyncErrorKind::Crypto,
+        ConfigError::CredentialProfileAnchorConflict { .. } => SyncErrorKind::ConcurrentLocalChange,
+        _ => SyncErrorKind::Local,
+    }
+}
+
+/// Opens one operation-scoped store lease, raced against the operation's
+/// cancellation and deadline, that keeps facade admission alive.
+async fn open_operation_store(
+    factory: Arc<dyn AppSyncStoreFactory>,
+    paths: ClientPaths,
+    target: SessionTarget,
+    master_key: Arc<SecretKey>,
+    permit: Arc<AppSyncPermit>,
+    operation: &SessionOperation,
+) -> Result<Arc<dyn SyncLocalStore>, SyncError> {
+    let operation_id = operation.operation_id();
+    let open = factory.open_existing(paths, target, master_key);
+    tokio::pin!(open);
+    let deadline = tokio::time::sleep_until(operation.deadline().into());
+    tokio::pin!(deadline);
+    let inner = tokio::select! {
+        biased;
+        () = operation.cancelled() => {
+            return Err(SyncError::new(
+                operation_id,
+                SyncErrorKind::Cancelled,
+                SyncStage::ResolveTarget,
+            ));
+        }
+        () = &mut deadline => {
+            return Err(SyncError::new(
+                operation_id,
+                SyncErrorKind::DeadlineExceeded,
+                SyncStage::ResolveTarget,
+            ));
+        }
+        result = &mut open => result.map_err(|error| map_factory_error(operation_id, error))?,
+    };
+    ensure_operation_dispatchable(operation)?;
+    Ok(Arc::new(AppOperationStore {
+        inner,
+        _permit: permit,
+    }))
 }
 
 fn ensure_operation_dispatchable(operation: &SessionOperation) -> Result<(), SyncError> {
@@ -1157,7 +1238,7 @@ mod tests {
         let catalog_inner = Arc::new(TerminalStore::new());
         let catalog_store = Arc::new(AppOperationStore {
             inner: catalog_inner.clone(),
-            _permit: AppSyncPermit::try_acquire().expect("acquire catalog operation"),
+            _permit: Arc::new(AppSyncPermit::try_acquire().expect("acquire catalog operation")),
         });
         let catalog_task = tokio::spawn(catalog_store.clone().reconcile_catalog(
             resolved_target(),
@@ -1193,7 +1274,9 @@ mod tests {
         let pull_inner = Arc::new(TerminalStore::new());
         let pull_store = Arc::new(AppOperationStore {
             inner: pull_inner.clone(),
-            _permit: AppSyncPermit::try_acquire().expect("catalog completion releases admission"),
+            _permit: Arc::new(
+                AppSyncPermit::try_acquire().expect("catalog completion releases admission"),
+            ),
         });
         let pull_task = tokio::spawn(pull_store.clone().commit_pull_page(empty_pull_commit()));
         drop(pull_store);
@@ -1221,6 +1304,29 @@ mod tests {
 
         let released = AppSyncPermit::try_acquire().expect("pull completion releases admission");
         drop(released);
+    }
+
+    #[test]
+    fn only_another_bound_key_fails_a_proven_bind_as_crypto() {
+        let connection_id = target().connection_id().clone();
+        assert_eq!(
+            map_bind_error(&ConfigError::MasterKeyFingerprintRebindRequired {
+                connection_id: connection_id.clone(),
+            }),
+            SyncErrorKind::Crypto
+        );
+        assert_eq!(
+            map_bind_error(&ConfigError::CredentialProfileAnchorConflict {
+                connection_id,
+                profile_name: "profile".to_string(),
+                field: "credentials",
+            }),
+            SyncErrorKind::ConcurrentLocalChange
+        );
+        assert_eq!(
+            map_bind_error(&ConfigError::RevisionOverflow),
+            SyncErrorKind::Local
+        );
     }
 
     #[tokio::test]
