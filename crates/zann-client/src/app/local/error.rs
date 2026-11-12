@@ -33,6 +33,7 @@ fn sync_error_kind_code(kind: SyncErrorKind) -> &'static str {
         SyncErrorKind::Cancelled => "sync_cancelled",
         SyncErrorKind::DeadlineExceeded => "sync_deadline_exceeded",
         SyncErrorKind::Session => "sync_session",
+        SyncErrorKind::ServerIdentityChanged => "server_identity_changed",
         SyncErrorKind::NoLocalTarget => "sync_no_target",
         SyncErrorKind::AccountBindingRequired => "sync_account_binding_required",
         SyncErrorKind::AccountBindingMismatch => "sync_account_binding_mismatch",
@@ -128,6 +129,12 @@ mod tests {
             "sync_local_conflict"
         );
         assert_eq!(sync_error_kind_code(SyncErrorKind::Crypto), "sync_crypto");
+        // A sync and a session refusal of a changed identity read the same,
+        // so a shell recognises either as one recovery.
+        assert_eq!(
+            sync_error_kind_code(SyncErrorKind::ServerIdentityChanged),
+            session_error_kind_code(SessionErrorKind::ServerIdentityChanged)
+        );
     }
 
     #[test]
@@ -136,6 +143,7 @@ mod tests {
             SyncErrorKind::Cancelled,
             SyncErrorKind::DeadlineExceeded,
             SyncErrorKind::Session,
+            SyncErrorKind::ServerIdentityChanged,
             SyncErrorKind::NoLocalTarget,
             SyncErrorKind::AccountBindingRequired,
             SyncErrorKind::AccountBindingMismatch,

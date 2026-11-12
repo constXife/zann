@@ -19,6 +19,9 @@ pub enum SyncErrorKind {
     Cancelled,
     DeadlineExceeded,
     Session,
+    /// The server at the pinned address proves a different `server_id`.
+    /// Retrying cannot help; the recovery is forgetting the server.
+    ServerIdentityChanged,
     NoLocalTarget,
     AccountBindingRequired,
     AccountBindingMismatch,

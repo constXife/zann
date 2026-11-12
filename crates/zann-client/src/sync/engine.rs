@@ -875,6 +875,7 @@ pub(super) fn map_session_error(error: SessionError) -> SyncError {
         SessionErrorKind::Cancelled => SyncErrorKind::Cancelled,
         SessionErrorKind::DeadlineExceeded => SyncErrorKind::DeadlineExceeded,
         SessionErrorKind::SessionExpired => SyncErrorKind::SessionExpired,
+        SessionErrorKind::ServerIdentityChanged => SyncErrorKind::ServerIdentityChanged,
         SessionErrorKind::TransportUnavailable => SyncErrorKind::TransportUnavailable,
         SessionErrorKind::TransportRejected => SyncErrorKind::TransportRejected,
         SessionErrorKind::Protocol => SyncErrorKind::Protocol,
@@ -986,6 +987,17 @@ mod tests {
     };
 
     const ENDPOINT: &str = "https://sync.example.test";
+
+    #[test]
+    fn a_changed_server_identity_survives_the_authorization_stage() {
+        let operation_id = SessionOperationId::new();
+        let refused = map_session_error(SessionError::for_app(
+            operation_id,
+            SessionErrorKind::ServerIdentityChanged,
+        ));
+        assert_eq!(refused.kind(), SyncErrorKind::ServerIdentityChanged);
+        assert_eq!(refused.stage(), SyncStage::Authorization);
+    }
     const FINGERPRINT: &str = "server-fingerprint";
     const TIMESTAMP: &str = "2025-01-02T03:04:05Z";
 
