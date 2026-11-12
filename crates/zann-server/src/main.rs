@@ -62,7 +62,8 @@ async fn main() {
     let settings = match settings {
         Ok(settings) => settings,
         Err(err) => {
-            tracing::error!(event = "config_load_failed", error = %err);
+            // Tracing is not initialised yet: it is configured from these settings.
+            eprintln!("config load failed: {err}");
             std::process::exit(1);
         }
     };
