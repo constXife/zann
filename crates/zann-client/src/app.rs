@@ -1397,6 +1397,137 @@ mod tests {
         first.await.expect_err("aborted reset task");
         assert!(pending_factory.dropped.load(Ordering::Acquire));
     }
+
+    struct NoLegacyCredentials;
+
+    impl LegacyCredentialSource for NoLegacyCredentials {
+        fn get(
+            &self,
+            _locator: &crate::config::LegacyCredentialLocator,
+        ) -> Result<Option<CredentialSecret>, CredentialPortError> {
+            Ok(None)
+        }
+    }
+
+    const CONNECTION_NAME: &str = "Remote";
+
+    fn trusting_client(dir: &tempfile::TempDir) -> AppClient {
+        let app = AppClient::new(
+            ClientPaths::new(dir.path()),
+            Arc::new(EmptyCredentials),
+            SessionClient::new(ClientId::new("app-client-test").expect("valid client id")),
+            Arc::new(ErrorFactory::new(SyncStoreErrorKind::Unavailable)),
+        );
+        app.initialize(&NoLegacyCredentials)
+            .expect("initialize config");
+        app
+    }
+
+    async fn serve_identity(
+        server: &mut mockito::ServerGuard,
+        identity_key: &ed25519_dalek::SigningKey,
+        fingerprint: &str,
+    ) -> mockito::Mock {
+        let info = crate::remote::trust::signed_system_info_for_test(identity_key, fingerprint);
+        server
+            .mock("GET", "/v1/system/info")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&info).expect("system info json"))
+            .create_async()
+            .await
+    }
+
+    fn pinned_identity(app: &AppClient, endpoint: &str) -> (Option<String>, Option<String>) {
+        let snapshot = app.repository.snapshot().expect("config snapshot");
+        let metadata = snapshot
+            .config()
+            .connections
+            .get(&ConnectionId::deterministic(CONNECTION_NAME, endpoint))
+            .expect("pinned connection")
+            .metadata()
+            .clone();
+        (metadata.server_id, metadata.server_fingerprint)
+    }
+
+    async fn first_connect(app: &AppClient, server: &mut mockito::ServerGuard) -> String {
+        let endpoint = server.url();
+        let mock = serve_identity(
+            server,
+            &ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
+            "fingerprint-1",
+        )
+        .await;
+        let outcome = app
+            .prepare_connection(&endpoint, CONNECTION_NAME, "default")
+            .await
+            .expect("first connect");
+        assert!(matches!(outcome, PrepareConnectionOutcome::Ready(_)));
+        mock.remove_async().await;
+        endpoint
+    }
+
+    #[tokio::test]
+    async fn changed_server_id_is_refused_and_keeps_the_pin() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let app = trusting_client(&dir);
+        let mut server = mockito::Server::new_async().await;
+        let endpoint = first_connect(&app, &mut server).await;
+        let pinned = pinned_identity(&app, &endpoint);
+        assert!(pinned.0.is_some(), "first connect pins server_id");
+
+        // A lost identity key and an impostor holding its own key look the same.
+        let _replaced = serve_identity(
+            &mut server,
+            &ed25519_dalek::SigningKey::from_bytes(&[8; 32]),
+            "fingerprint-1",
+        )
+        .await;
+        let error = app
+            .prepare_connection(&endpoint, CONNECTION_NAME, "default")
+            .await
+            .expect_err("a different server_id must be refused");
+
+        assert_eq!(error.kind(), SessionErrorKind::TrustInvalid);
+        assert_eq!(pinned_identity(&app, &endpoint), pinned);
+    }
+
+    #[tokio::test]
+    async fn changed_fingerprint_under_the_pinned_server_id_asks_for_trust() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let app = trusting_client(&dir);
+        let mut server = mockito::Server::new_async().await;
+        let endpoint = first_connect(&app, &mut server).await;
+        let (server_id, _) = pinned_identity(&app, &endpoint);
+
+        let _rotated = serve_identity(
+            &mut server,
+            &ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
+            "fingerprint-2",
+        )
+        .await;
+        let outcome = app
+            .prepare_connection(&endpoint, CONNECTION_NAME, "default")
+            .await
+            .expect("same identity proves itself");
+        let PrepareConnectionOutcome::FingerprintChanged(challenge) = outcome else {
+            panic!("a fingerprint change under the same server_id needs a trust decision");
+        };
+        assert_eq!(challenge.old_fingerprint(), "fingerprint-1");
+        assert_eq!(challenge.new_fingerprint(), "fingerprint-2");
+        assert_eq!(
+            pinned_identity(&app, &endpoint),
+            (server_id.clone(), Some("fingerprint-1".to_string())),
+            "nothing is re-pinned before the user decides"
+        );
+
+        app.trust_connection(*challenge)
+            .expect("explicit trust replaces the fingerprint");
+        assert_eq!(
+            pinned_identity(&app, &endpoint),
+            (server_id, Some("fingerprint-2".to_string()))
+        );
+    }
 }
 
 /// Local vault services, independent of SQLite and native adapters.
