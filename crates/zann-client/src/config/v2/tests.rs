@@ -1954,14 +1954,11 @@ fn removing_a_pinned_connection_without_credentials_needs_no_credential_io() {
     initialize(&repo);
     let store = TestCredentialStore::default();
     let connection_id = ConnectionId::deterministic("pinned", "https://pinned.test");
+    let mut metadata = ConnectionMetadata::new("pinned", "https://pinned.test");
+    metadata.server_id = Some("server-pinned".to_string());
+    metadata.server_fingerprint = Some("pin-pinned".to_string());
     let pinned = repo
-        .pin_verified_connection(
-            0,
-            connection_id.clone(),
-            "pinned".to_string(),
-            &endpoint("https://pinned.test", "server-pinned", "pin-pinned"),
-            Some("storage-pinned".to_string()),
-        )
+        .upsert_connection(connection_id.clone(), metadata)
         .expect("pin connection");
 
     let outcome = repo
