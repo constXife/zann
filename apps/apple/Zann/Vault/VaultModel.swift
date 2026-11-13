@@ -57,14 +57,14 @@ final class VaultModel: ObservableObject {
         let page: ItemPage
         let query: String
         let vaults: [VaultSummaryFfi]
-        let vault: VaultSummaryFfi
+        let vault: VaultSummaryFfi?
     }
 
     /// The vaults of the storage on screen; the picker shows when there are
     /// several.
     @Published private(set) var vaults: [VaultSummaryFfi] = []
     /// The vault whose items are listed.
-    @Published private(set) var vaultID: String
+    @Published private(set) var vaultID: String?
     /// A vault switch is loading.
     @Published private(set) var switching = false
     @Published private(set) var categories: [CategoryViewFfi] = []
@@ -142,7 +142,7 @@ final class VaultModel: ObservableObject {
     private var search: Task<Void, Never>?
     private var counts: ItemCountsFfi
     /// Shared vaults show the infrastructure categories.
-    private var scope: VaultScopeFfi
+    private var scope: VaultScopeFfi?
     /// Bumped on every selection so a slow load cannot show a previous item.
     private var selection = 0
     /// The first sync after signing in failed, so the move to the server's
@@ -157,8 +157,8 @@ final class VaultModel: ObservableObject {
         self.core = core
         self.strings = strings
         counts = contents.page.counts
-        vaultID = contents.vault.id
-        scope = contents.vault.scope
+        vaultID = contents.vault?.id
+        scope = contents.vault?.scope
         categoryID = "all"
         canSync = synced != nil
         followPending = false
@@ -256,7 +256,6 @@ final class VaultModel: ObservableObject {
                     else { throw failure }
                     return .identityChanged(stale)
                 }
-                if follow { try core.followPreferredStorage() }
                 guard follow || outcome.changesCommitted > 0 else { return .unchanged }
                 return .changed(try Self.load(core, query: shown, keeping: loaded))
             }
@@ -319,7 +318,7 @@ final class VaultModel: ObservableObject {
     /// so outside the first sync after connecting the vault on screen is the
     /// one the active connection syncs.
     private nonisolated static func staleServer(_ core: CoreFacade) throws -> StaleServer? {
-        let storageID = core.currentStorageId()
+        let storageID = try core.currentStorageId()
         guard try core.storageSyncState(storageId: storageID).link == .connected else { return nil }
         guard let storage = try core.listStorages().first(where: { $0.id == storageID }) else {
             throw CoreError.InvalidArgument("the vault on screen is not a known storage")
@@ -346,6 +345,9 @@ final class VaultModel: ObservableObject {
         let limit = UInt32(max(Int(itemsPageLimit), keeping))
         let page = try Self.page(core, query: query, cursor: nil, limit: limit)
         let vaults = try core.listVaults()
+        if vaults.isEmpty && core.currentVaultId() == nil {
+            return Contents(page: page, query: query, vaults: vaults, vault: nil)
+        }
         guard let id = core.currentVaultId(), let vault = vaults.first(where: { $0.id == id }) else {
             throw CoreError.InvalidArgument("the open vault is not one of its storage's vaults")
         }
@@ -367,8 +369,8 @@ final class VaultModel: ObservableObject {
     /// Opens another vault of this storage with nothing filtered or
     /// selected. If its items cannot load, the core goes back to the vault
     /// on screen, so the picker and the list keep agreeing.
-    func selectVault(_ id: String) async {
-        guard id != vaultID, editor == nil, !switching else { return }
+    func selectVault(_ requested: String?) async {
+        guard let id = requested, id != vaultID, editor == nil, !switching else { return }
         switching = true
         defer { switching = false }
         let core = core
@@ -405,7 +407,7 @@ final class VaultModel: ObservableObject {
     /// A new item of `typeID`, or of the type zann-ui-core picks for the
     /// selected category.
     func startCreating(typeID: String? = nil) {
-        guard editor == nil else { return }
+        guard editor == nil, vaultID != nil else { return }
         let type = typeID ?? createTypeForCategory(categoryId: categoryID)
         open { try ItemEditorModel.create(typeID: type) }
     }
@@ -514,8 +516,8 @@ final class VaultModel: ObservableObject {
     /// vaults since; one for the query typed now starts again.
     private func apply(_ contents: Contents) {
         vaults = contents.vaults
-        vaultID = contents.vault.id
-        scope = contents.vault.scope
+        vaultID = contents.vault?.id
+        scope = contents.vault?.scope
         search?.cancel()
         search = nil
         searching = false
@@ -540,7 +542,7 @@ final class VaultModel: ObservableObject {
         nextCursor = page.nextCursor
         counts = page.counts
         totalCount = page.totalCount
-        categories = categoryViews(counts: counts, scope: scope)
+        categories = scope.map { categoryViews(counts: counts, scope: $0) } ?? []
         if appliedQuery.isEmpty { folders = buildFolderTree(items: items) }
         refreshVisible()
     }

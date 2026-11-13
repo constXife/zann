@@ -99,23 +99,12 @@ describe("useAppSettingsActions importPlainBackup", () => {
     expect(showToast).toHaveBeenCalledWith(syncError.value, { duration: 2000 });
   });
 
-  it("does not sync for local import and shows success toast", async () => {
+  it("requires an explicit server destination before importing", async () => {
     const { invoke } = await import("@tauri-apps/api/core");
-    (invoke as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      ok: true,
-      data: {
-        imported_items: 1,
-        skipped_existing: 0,
-        skipped_missing_storage: 0,
-        skipped_missing_vault: 0,
-        skipped_deleted: 0,
-      },
-    });
-
     const { actions, showToast, runRemoteSync } = createActions();
-    await actions.importPlainBackup(null, "local");
-
+    expect(await actions.importPlainBackup(null, null)).toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
     expect(runRemoteSync).not.toHaveBeenCalled();
-    expect(showToast).toHaveBeenCalledWith("settings.backups.importSuccess");
+    expect(showToast).not.toHaveBeenCalled();
   });
 });

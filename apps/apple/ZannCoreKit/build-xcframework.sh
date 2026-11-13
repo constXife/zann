@@ -32,10 +32,15 @@ IPHONEOS_DEPLOYMENT_TARGET=$(platform_version ios)
 cd "$repo_root"
 target_dir=$(cargo metadata --format-version 1 --no-deps | jq -r '.target_directory')
 
+fixture_features=()
+if [[ $profile == debug ]]; then
+  fixture_features=(--features test-support)
+fi
+
 targets=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)
 for target in "${targets[@]}"; do
   cargo rustc -p zann-ffi --lib --locked --target "$target" --profile "$cargo_profile" \
-    --crate-type staticlib
+    "${fixture_features[@]}" --crate-type staticlib
 done
 
 rm -rf "$generated"

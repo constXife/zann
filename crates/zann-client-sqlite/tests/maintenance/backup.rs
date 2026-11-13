@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use zann_core::StorageKind;
 #[derive(Serialize, Deserialize)]
 struct PlainBackup {
     version: u32,
@@ -101,10 +102,10 @@ fn reads_metadata_and_streams_items() {
         version: BACKUP_VERSION,
         exported_at: "2024-01-01T00:00:00Z".to_string(),
         storages: vec![PlainBackupStorage {
-            id: Uuid::nil().to_string(),
-            kind: StorageKind::LocalOnly.as_i32(),
+            id: Uuid::from_u128(1).to_string(),
+            kind: StorageKind::Remote.as_i32(),
             name: "Local".to_string(),
-            server_url: None,
+            server_url: Some("https://fixture.example.test".into()),
             server_name: None,
             server_fingerprint: None,
             account_subject: None,
@@ -113,7 +114,7 @@ fn reads_metadata_and_streams_items() {
         }],
         vaults: vec![PlainBackupVault {
             id: Uuid::now_v7().to_string(),
-            storage_id: Uuid::nil().to_string(),
+            storage_id: Uuid::from_u128(1).to_string(),
             name: "Default".to_string(),
             kind: VaultKind::Personal.as_i32(),
             is_default: true,
@@ -121,7 +122,7 @@ fn reads_metadata_and_streams_items() {
         items: vec![
             PlainBackupItem {
                 id: Some(Uuid::now_v7().to_string()),
-                storage_id: Uuid::nil().to_string(),
+                storage_id: Uuid::from_u128(1).to_string(),
                 vault_id: Uuid::now_v7().to_string(),
                 path: "example".to_string(),
                 name: "Example".to_string(),
@@ -133,7 +134,7 @@ fn reads_metadata_and_streams_items() {
             },
             PlainBackupItem {
                 id: Some(Uuid::now_v7().to_string()),
-                storage_id: Uuid::nil().to_string(),
+                storage_id: Uuid::from_u128(1).to_string(),
                 vault_id: Uuid::now_v7().to_string(),
                 path: "example2".to_string(),
                 name: "Example 2".to_string(),
@@ -176,7 +177,7 @@ fn streams_items_async() {
         items: vec![
             PlainBackupItem {
                 id: Some(Uuid::now_v7().to_string()),
-                storage_id: Uuid::nil().to_string(),
+                storage_id: Uuid::from_u128(1).to_string(),
                 vault_id: Uuid::now_v7().to_string(),
                 path: "one".to_string(),
                 name: "One".to_string(),
@@ -188,7 +189,7 @@ fn streams_items_async() {
             },
             PlainBackupItem {
                 id: Some(Uuid::now_v7().to_string()),
-                storage_id: Uuid::nil().to_string(),
+                storage_id: Uuid::from_u128(1).to_string(),
                 vault_id: Uuid::now_v7().to_string(),
                 path: "two".to_string(),
                 name: "Two".to_string(),
@@ -230,10 +231,10 @@ fn streams_items_async() {
 fn writes_backup_streaming() {
     let path = temp_path("backup-write");
     let storages = vec![PlainBackupStorage {
-        id: Uuid::nil().to_string(),
-        kind: StorageKind::LocalOnly.as_i32(),
+        id: Uuid::from_u128(1).to_string(),
+        kind: StorageKind::Remote.as_i32(),
         name: "Local".to_string(),
-        server_url: None,
+        server_url: Some("https://fixture.example.test".into()),
         server_name: None,
         server_fingerprint: None,
         account_subject: None,
@@ -242,7 +243,7 @@ fn writes_backup_streaming() {
     }];
     let vaults = vec![PlainBackupVault {
         id: Uuid::now_v7().to_string(),
-        storage_id: Uuid::nil().to_string(),
+        storage_id: Uuid::from_u128(1).to_string(),
         name: "Default".to_string(),
         kind: VaultKind::Personal.as_i32(),
         is_default: true,
@@ -250,7 +251,7 @@ fn writes_backup_streaming() {
     let items = VecDeque::from(vec![
         PlainBackupItem {
             id: Some(Uuid::now_v7().to_string()),
-            storage_id: Uuid::nil().to_string(),
+            storage_id: Uuid::from_u128(1).to_string(),
             vault_id: Uuid::now_v7().to_string(),
             path: "alpha".to_string(),
             name: "Alpha".to_string(),
@@ -262,7 +263,7 @@ fn writes_backup_streaming() {
         },
         PlainBackupItem {
             id: Some(Uuid::now_v7().to_string()),
-            storage_id: Uuid::nil().to_string(),
+            storage_id: Uuid::from_u128(1).to_string(),
             vault_id: Uuid::now_v7().to_string(),
             path: "beta".to_string(),
             name: "Beta".to_string(),

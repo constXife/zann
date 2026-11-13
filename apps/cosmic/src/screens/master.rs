@@ -102,7 +102,7 @@ impl State {
                 }
                 let facade = session.facade();
                 let password = std::mem::take(&mut self.password);
-                let storage = self.sync_after.take();
+                let storage = self.sync_after.clone();
                 let mode = self.mode;
                 self.busy = true;
                 self.error = None;
@@ -129,6 +129,7 @@ impl State {
 
             Message::Opened(Ok((page, synced))) => {
                 self.busy = false;
+                self.sync_after = None;
                 return Outcome::Opened { page, synced };
             }
 
@@ -148,7 +149,7 @@ impl State {
             return Outcome::None;
         }
         let facade = session.facade();
-        let storage = self.sync_after.take();
+        let storage = self.sync_after.clone();
         self.busy = true;
         self.error = None;
         Outcome::Task(cosmic::task::future(async move {

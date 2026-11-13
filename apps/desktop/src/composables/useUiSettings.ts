@@ -6,7 +6,6 @@ export type UiSettings = {
   sidebarCollapsed: boolean;
   sidebarWidth: number;
   detailsWidth: number;
-  showLocalStorage: boolean;
   listDensity: "comfortable" | "compact";
   defaultVaultId: string | null;
   lastSelectedSection: string;
@@ -28,7 +27,6 @@ const defaults: UiSettings = {
   sidebarCollapsed: false,
   sidebarWidth: 240,
   detailsWidth: 800,
-  showLocalStorage: false,
   listDensity: "comfortable",
   defaultVaultId: null,
   lastSelectedSection: "all",

@@ -4,7 +4,6 @@ import { computed, ref } from "vue";
 import * as appBindings from "../composables/app/actions/useAppBindings";
 import { StorageKind } from "../constants/enums";
 
-const LOCAL_STORAGE_ID = "00000000-0000-0000-0000-000000000000";
 let capturedBindingsOptions: Record<string, unknown> | null = null;
 
 vi.mock("vue-i18n", () => ({
@@ -258,7 +257,6 @@ vi.mock("../composables/app/actions/useAppStorageActions", () => ({
     handleFactoryReset: vi.fn(),
     handleSyncNow: vi.fn(),
     openCreateVault: vi.fn(),
-    openCreateLocalVault: vi.fn(),
     toggleVaultDropdown: vi.fn(),
     closeVaultDropdown: vi.fn(),
     switchVault: vi.fn(),
@@ -311,7 +309,6 @@ vi.mock("../composables/app/actions/useAppPersonalUnlock", () => ({
 vi.mock("../composables/app/actions/useAppAuthFlow", () => ({
   useAppAuthFlow: () => ({
     setupStep: ref(""),
-    setupFlow: ref(""),
     setupOpen: ref(false),
     setupPassword: ref(""),
     setupConfirm: ref(""),
@@ -331,7 +328,6 @@ vi.mock("../composables/app/actions/useAppAuthFlow", () => ({
     passwordLoginBusy: ref(false),
     passwordLoginError: ref(""),
     normalizeServerUrl: vi.fn((value: string) => value),
-    startLocalSetup: vi.fn(),
     startConnect: vi.fn(),
     backToWelcome: vi.fn(),
     createMasterPassword: vi.fn(),

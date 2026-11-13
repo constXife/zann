@@ -28,7 +28,6 @@ enum Symbols {
 
     static func sync(_ state: SyncIndicatorStateFfi) -> String {
         switch state {
-        case .localOnly: return "internaldrive"
         case .disconnected: return "icloud.slash"
         case .syncing: return "arrow.triangle.2.circlepath"
         case .failed: return "exclamationmark.triangle"

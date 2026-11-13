@@ -90,6 +90,10 @@ async fn disable_storage_update_validation_for_corruption_fixture(pool: &SqliteP
     .execute(pool)
     .await
     .expect("disable storage generation trigger for corruption fixture");
+    sqlx_core::query::query::<Sqlite>("DROP TRIGGER IF EXISTS storages_server_only_update")
+        .execute(pool)
+        .await
+        .expect("disable server-only trigger for corruption fixture");
 }
 
 fn remote_storage(id: Uuid, url: &str, fingerprint: &str) -> LocalStorage {
@@ -117,21 +121,6 @@ fn vault(scope: LocalSyncScope, name: &str) -> LocalVault {
         vault_key_enc: vec![7, 8, 9],
         key_wrap_type: KeyWrapType::RemoteStrict,
         cache_key_fp: Some("001122aabbcc".to_string()),
-        last_synced_at: None,
-    }
-}
-
-fn default_local_personal_candidate(id: Uuid) -> LocalVault {
-    LocalVault {
-        id,
-        storage_id: Uuid::nil(),
-        slug: LocalVault::local_slug(id),
-        name: "Personal (Local)".to_string(),
-        kind: VaultKind::Personal,
-        is_default: true,
-        vault_key_enc: vec![1, 2, 3],
-        key_wrap_type: KeyWrapType::Master,
-        cache_key_fp: None,
         last_synced_at: None,
     }
 }
@@ -341,7 +330,7 @@ async fn storage_list_accepts_its_exact_cap_and_rejects_cap_plus_one() {
             .await
             .expect("list exact storage cap")
             .len(),
-        257
+        256
     );
 
     repository
@@ -356,24 +345,7 @@ async fn storage_list_accepts_its_exact_cap_and_rejects_cap_plus_one() {
 }
 
 #[tokio::test]
-async fn storage_list_rejects_unsupported_local_and_remote_topologies() {
-    let local_pool = empty_migrated_pool(1).await;
-    LocalStorageRepo::new(&local_pool)
-        .upsert(&LocalStorage {
-            id: Uuid::now_v7(),
-            kind: StorageKind::LocalOnly,
-            name: "Second local".to_string(),
-            server_url: None,
-            server_name: None,
-            server_fingerprint: None,
-            account_subject: None,
-            personal_vaults_enabled: true,
-            auth_method: None,
-        })
-        .await
-        .expect("insert unsupported second local row");
-    assert!(LocalStorageRepo::new(&local_pool).list().await.is_err());
-
+async fn storage_list_rejects_excess_remote_storages() {
     let remote_pool = empty_migrated_pool(1).await;
     LocalStorageRepo::new(&remote_pool)
         .delete(Uuid::nil())
@@ -409,41 +381,50 @@ async fn storage_exact_and_list_reads_fail_before_decoding_huge_dynamic_bodies()
 
     let pool = empty_migrated_pool(1).await;
     let repository = LocalStorageRepo::new(&pool);
-    assert!(repository
-        .get(Uuid::nil())
+    let storage_id = Uuid::now_v7();
+    repository
+        .upsert(&remote_storage(
+            storage_id,
+            "https://exact.example.test",
+            "exact",
+        ))
         .await
-        .expect("generic get supports the local-only row")
+        .expect("storage");
+    assert!(repository
+        .get(storage_id)
+        .await
+        .expect("generic get supports the server row")
         .is_some());
     assert!(repository
-        .get_bounded(Uuid::nil())
+        .get_bounded(storage_id)
         .await
-        .expect("typed bounded get supports the local-only row")
+        .expect("typed bounded get supports the server row")
         .is_some());
 
     sqlx_core::query::query::<Sqlite>("UPDATE storages SET name = zeroblob(?1) WHERE id = ?2")
         .bind(HUGE_BODY_BYTES)
-        .bind(Uuid::nil())
+        .bind(storage_id)
         .execute(&pool)
         .await
         .expect("install huge dynamically typed blob");
-    assert!(repository.get(Uuid::nil()).await.is_err());
-    expect_corrupt_projection(repository.get_bounded(Uuid::nil()).await);
+    assert!(repository.get(storage_id).await.is_err());
+    expect_corrupt_projection(repository.get_bounded(storage_id).await);
     assert!(repository.list().await.is_err());
 
     sqlx_core::query::query::<Sqlite>(
         "UPDATE storages SET name = CAST(zeroblob(?1) AS TEXT) WHERE id = ?2",
     )
     .bind(HUGE_BODY_BYTES)
-    .bind(Uuid::nil())
+    .bind(storage_id)
     .execute(&pool)
     .await
     .expect("install huge dynamically typed text");
-    assert!(repository.get(Uuid::nil()).await.is_err());
-    expect_corrupt_projection(repository.get_bounded(Uuid::nil()).await);
+    assert!(repository.get(storage_id).await.is_err());
+    expect_corrupt_projection(repository.get_bounded(storage_id).await);
     assert!(repository.list().await.is_err());
 
     repository
-        .delete(Uuid::nil())
+        .delete(storage_id)
         .await
         .expect("delete corrupt local row");
     assert!(repository
@@ -561,6 +542,15 @@ async fn checkpoint_pending_reader_materializes_at_most_the_requested_limit() {
 #[tokio::test]
 async fn bounded_projection_readers_reject_oversized_sqlite_bodies_before_decode() {
     let fixture = fixture().await;
+    let unrelated_id = Uuid::now_v7();
+    LocalStorageRepo::new(&fixture.pool)
+        .upsert(&remote_storage(
+            unrelated_id,
+            "https://unrelated.example.test",
+            "unrelated",
+        ))
+        .await
+        .expect("unrelated storage");
     sqlx_core::query::query::<Sqlite>("PRAGMA ignore_check_constraints = ON")
         .execute(&fixture.pool)
         .await
@@ -572,7 +562,7 @@ async fn bounded_projection_readers_reject_oversized_sqlite_bodies_before_decode
     disable_storage_update_validation_for_corruption_fixture(&fixture.pool).await;
 
     sqlx_core::query::query::<Sqlite>("UPDATE storages SET kind = zeroblob(1048576) WHERE id = ?1")
-        .bind(Uuid::nil())
+        .bind(unrelated_id)
         .execute(&fixture.pool)
         .await
         .expect("install oversized unrelated storage kind");
@@ -582,14 +572,14 @@ async fn bounded_projection_readers_reject_oversized_sqlite_bodies_before_decode
             .await,
     );
     sqlx_core::query::query::<Sqlite>("UPDATE storages SET kind = ?2 WHERE id = ?1")
-        .bind(Uuid::nil())
-        .bind(StorageKind::LocalOnly.as_i32())
+        .bind(unrelated_id)
+        .bind(StorageKind::Remote.as_i32())
         .execute(&fixture.pool)
         .await
         .expect("restore unrelated storage kind");
 
     sqlx_core::query::query::<Sqlite>("UPDATE storages SET id = zeroblob(1048576) WHERE id = ?1")
-        .bind(Uuid::nil())
+        .bind(unrelated_id)
         .execute(&fixture.pool)
         .await
         .expect("install oversized unrelated storage id");
@@ -601,7 +591,7 @@ async fn bounded_projection_readers_reject_oversized_sqlite_bodies_before_decode
     sqlx_core::query::query::<Sqlite>(
         "UPDATE storages SET id = ?1 WHERE octet_length(id) = 1048576",
     )
-    .bind(Uuid::nil())
+    .bind(unrelated_id)
     .execute(&fixture.pool)
     .await
     .expect("restore unrelated storage id");
@@ -883,6 +873,15 @@ async fn pull_writer_preflights_corrupt_storage_vault_cursor_item_and_pending_ro
         Corruption::HistoryVaultId,
     ] {
         let fixture = fixture().await;
+        let unrelated_id = Uuid::now_v7();
+        LocalStorageRepo::new(&fixture.pool)
+            .upsert(&remote_storage(
+                unrelated_id,
+                "https://unrelated.example.test",
+                "unrelated",
+            ))
+            .await
+            .expect("unrelated server storage");
         sqlx_core::query::query::<Sqlite>("PRAGMA ignore_check_constraints = ON")
             .execute(&fixture.pool)
             .await
@@ -918,7 +917,7 @@ async fn pull_writer_preflights_corrupt_storage_vault_cursor_item_and_pending_ro
                 sqlx_core::query::query::<Sqlite>(
                     "UPDATE storages SET id = zeroblob(1048576) WHERE id = ?1",
                 )
-                .bind(Uuid::nil())
+                .bind(unrelated_id)
                 .execute(&fixture.pool)
                 .await
                 .expect("install oversized unrelated storage id");
@@ -927,7 +926,7 @@ async fn pull_writer_preflights_corrupt_storage_vault_cursor_item_and_pending_ro
                 sqlx_core::query::query::<Sqlite>(
                     "UPDATE storages SET kind = zeroblob(1048576) WHERE id = ?1",
                 )
-                .bind(Uuid::nil())
+                .bind(unrelated_id)
                 .execute(&fixture.pool)
                 .await
                 .expect("install oversized unrelated storage kind");
@@ -1445,65 +1444,6 @@ async fn concurrent_local_vault_creates_serialize_at_the_hard_cap() {
             .len(),
         200
     );
-}
-
-#[tokio::test]
-async fn concurrent_default_local_personal_ensure_returns_one_row_and_one_id() {
-    let pool = empty_migrated_pool(2).await;
-    let first_pool = pool.clone();
-    let second_pool = pool.clone();
-    let first_candidate = default_local_personal_candidate(Uuid::now_v7());
-    let second_candidate = default_local_personal_candidate(Uuid::now_v7());
-    assert_ne!(first_candidate.id, second_candidate.id);
-
-    let first = tokio::spawn(async move {
-        LocalVaultRepo::new(&first_pool)
-            .ensure_default_local_personal(&first_candidate)
-            .await
-    });
-    let second = tokio::spawn(async move {
-        LocalVaultRepo::new(&second_pool)
-            .ensure_default_local_personal(&second_candidate)
-            .await
-    });
-    let first = first
-        .await
-        .expect("first ensure task")
-        .expect("first ensure");
-    let second = second
-        .await
-        .expect("second ensure task")
-        .expect("second ensure");
-    assert_eq!(first.id, second.id);
-    let listed = LocalVaultRepo::new(&pool)
-        .list_by_storage(Uuid::nil())
-        .await
-        .expect("list local vaults");
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].id, first.id);
-}
-
-#[tokio::test]
-async fn default_local_personal_ensure_rejects_multiple_semantic_defaults() {
-    let pool = empty_migrated_pool(1).await;
-    let repo = LocalVaultRepo::new(&pool);
-    repo.create(&default_local_personal_candidate(Uuid::now_v7()))
-        .await
-        .expect("insert first default");
-    let mut second = default_local_personal_candidate(Uuid::now_v7());
-    second.name = "Another personal default".to_string();
-    repo.create(&second)
-        .await
-        .expect("insert corrupt second default");
-
-    let candidate = default_local_personal_candidate(Uuid::now_v7());
-    let error = repo
-        .ensure_default_local_personal(&candidate)
-        .await
-        .expect_err("multiple semantic defaults must fail closed");
-    assert!(error
-        .to_string()
-        .contains("multiple default local personal vaults"));
 }
 
 #[tokio::test]

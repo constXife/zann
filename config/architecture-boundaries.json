@@ -134,7 +134,7 @@
       "package": "zann-client-sqlite",
       "feature": "default",
       "required_members": [],
-      "forbidden_members": ["local-vault", "dep:zann-keystore", "zann-client/os-credentials"],
+      "forbidden_members": ["local-vault", "test-support", "dep:zann-keystore", "zann-client/os-credentials"],
       "forbidden_packages": ["zann-keystore", "keyring", "ctap-hid-fido2", "hidapi"]
     },
     {
@@ -270,6 +270,14 @@
     }
   ],
   "source_rules": [
+    {
+      "name": "standalone-local-mode-removed",
+      "exception_ids": [],
+      "pattern": "StorageKind(::|[.])LocalOnly|UseLocalVault|new_local_identity|refuse_local_identity_on_server|follow_preferred_storage|has_local_vault|followPreferredStorage|startCreatingVault",
+      "roots": ["crates", "apps/cosmic/src", "apps/desktop/src", "apps/desktop/src-tauri/src", "apps/apple/Zann"],
+      "max_matches": 0,
+      "allowed_files": []
+    },
     {
       "name": "clean-client-no-legacy-api",
       "exception_ids": [],

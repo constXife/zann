@@ -11,9 +11,8 @@ use crate::SqlitePool;
 const MAX_STORAGE_NAME_BYTES: i64 = 200;
 const MAX_SERVER_URL_BYTES: i64 = 2_048;
 const MAX_SERVER_METADATA_BYTES: i64 = 512;
-// Config v2 permits at most 256 remote connections. One additional row is
-// reserved for the local personal storage projection.
-const MAX_LOCAL_STORAGES: i64 = 257;
+// Config v2 permits at most 256 server connections.
+const MAX_LOCAL_STORAGES: i64 = 256;
 
 pub struct LocalStorageRepo<'a> {
     pool: &'a SqlitePool,
@@ -54,7 +53,7 @@ impl<'a> LocalStorageRepo<'a> {
                 CASE WHEN typeof(id) IN ('blob', 'text')
                     THEN octet_length(id) IN (16, 36) ELSE 0 END
                 AND CASE WHEN typeof(kind) = 'integer'
-                    THEN kind IN (1, 2) ELSE 0 END
+                    THEN kind = 2 ELSE 0 END
                 AND CASE WHEN typeof(name) = 'text'
                     THEN octet_length(name) BETWEEN 1 AND ?2 ELSE 0 END
                 AND (server_url IS NULL OR CASE WHEN typeof(server_url) = 'text'
@@ -290,24 +289,6 @@ impl<'a> LocalStorageRepo<'a> {
                 "local storage projection is corrupt".to_string(),
             ));
         }
-        let counts = query!(
-            r#"
-            SELECT
-                COALESCE(SUM(CASE WHEN kind = 1 THEN 1 ELSE 0 END), 0) AS local_count,
-                COALESCE(SUM(CASE WHEN kind = 2 THEN 1 ELSE 0 END), 0) AS remote_count
-            FROM storages
-            "#
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        let local_count: i64 = counts.try_get("local_count")?;
-        let remote_count: i64 = counts.try_get("remote_count")?;
-        if local_count > 1 || remote_count > 256 {
-            tx.rollback().await?;
-            return Err(sqlx_core::Error::Protocol(
-                "unsupported local storage topology".to_string(),
-            ));
-        }
         let storages = query_as!(
             LocalStorage,
             r#"
@@ -367,7 +348,7 @@ async fn storage_rows_corrupt(tx: &mut Transaction<'_, Sqlite>) -> Result<bool, 
             WHEN typeof(id) NOT IN ('blob', 'text') THEN 1
             WHEN octet_length(id) NOT IN (16, 36) THEN 1
             WHEN typeof(kind) != 'integer' THEN 1
-            WHEN kind NOT IN (1, 2) THEN 1
+            WHEN kind != 2 THEN 1
             WHEN typeof(name) != 'text' THEN 1
             WHEN octet_length(name) NOT BETWEEN 1 AND ?1 THEN 1
             WHEN server_url IS NOT NULL AND typeof(server_url) != 'text' THEN 1
@@ -420,7 +401,7 @@ async fn storage_headers_corrupt(
             WHEN typeof(id) NOT IN ('blob', 'text') THEN 1
             WHEN octet_length(id) NOT IN (16, 36) THEN 1
             WHEN typeof(kind) != 'integer' THEN 1
-            WHEN kind NOT IN (1, 2) THEN 1
+            WHEN kind != 2 THEN 1
             WHEN sync_config_repository_fp IS NULL AND (
                 sync_stable_target_fp IS NOT NULL
                 OR sync_config_revision IS NOT NULL

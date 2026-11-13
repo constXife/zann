@@ -43,9 +43,7 @@ const createWrapper = () => {
         onFatalError: vi.fn(),
         onReloadVaults: vi.fn(),
         onReloadItems: vi.fn(),
-        localStorageId: "local",
         onSessionExpired: vi.fn(),
-        localStorageVisible: ref(true),
       });
       api.storages.value = [remoteStorage];
       return () => null;

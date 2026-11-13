@@ -273,67 +273,6 @@ impl<'a> LocalVaultRepo<'a> {
         Ok(true)
     }
 
-    /// Returns the one semantic default local personal vault or creates it.
-    ///
-    /// The writer reservation is acquired before the lookup, so concurrent
-    /// callers cannot both observe absence. Multiple pre-existing defaults are
-    /// treated as corruption instead of choosing one nondeterministically.
-    pub async fn ensure_default_local_personal(
-        &self,
-        candidate: &LocalVault,
-    ) -> Result<LocalVault, sqlx_core::Error> {
-        validate_vault(candidate)?;
-        if candidate.storage_id != Uuid::nil()
-            || candidate.kind != zann_core::VaultKind::Personal
-            || !candidate.is_default
-        {
-            return Err(invalid_vault_input());
-        }
-
-        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let existing = query_as!(
-            LocalVault,
-            r#"
-            SELECT
-                id as "id",
-                storage_id as "storage_id",
-                slug,
-                name,
-                kind,
-                is_default,
-                vault_key_enc,
-                key_wrap_type,
-                cache_key_fp,
-                last_synced_at as "last_synced_at"
-            FROM local_vaults
-            WHERE storage_id = ?1 AND kind = ?2 AND is_default = 1
-            ORDER BY id
-            LIMIT 2
-            "#,
-            Uuid::nil(),
-            zann_core::VaultKind::Personal.as_i32()
-        )
-        .fetch_all(&mut *tx)
-        .await?;
-
-        let result = match existing.as_slice() {
-            [] => {
-                ensure_vault_capacity(&mut tx, candidate.storage_id).await?;
-                insert_vault(&mut tx, candidate).await?;
-                candidate.clone()
-            }
-            [only] => only.clone(),
-            _ => {
-                tx.rollback().await?;
-                return Err(sqlx_core::Error::Protocol(
-                    "multiple default local personal vaults".to_string(),
-                ));
-            }
-        };
-        tx.commit().await?;
-        Ok(result)
-    }
-
     /// Binds an exact key fingerprint to an existing, completely empty vault.
     ///
     /// The encrypted envelope and wrap type are compare-and-swap inputs. The

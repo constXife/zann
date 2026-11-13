@@ -24,7 +24,6 @@ const props = defineProps<{
   selectedItemId: string | null;
   vaultContextLabel: string;
   isSharedVault: boolean;
-  isLocalStorage: boolean;
   syncBusy: boolean;
   onListScroll: () => void;
   selectItem: (itemId: string) => void;
@@ -321,13 +320,13 @@ const handleSelectCreateType = (typeId: string) => {
                     {{ item.name }}
                   </div>
                   <span
-                    v-if="!isLocalStorage && item.sync_status === SyncStatus.Conflict"
+                    v-if="item.sync_status === SyncStatus.Conflict"
                     class="shrink-0 rounded-full bg-red-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400"
                   >
                     {{ t("status.conflict") }}
                   </span>
                   <span
-                    v-else-if="!isLocalStorage && item.sync_status && item.sync_status !== SyncStatus.Synced"
+                    v-else-if="item.sync_status && item.sync_status !== SyncStatus.Synced"
                     class="shrink-0 inline-flex items-center justify-center rounded-full bg-amber-500/15 p-1 text-amber-700 dark:text-amber-400"
                     :title="t('status.pending')"
                     data-testid="item-sync-pending"

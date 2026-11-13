@@ -105,9 +105,11 @@ jobs:
               - 'crates/zann-db/src/services/mod.rs'
               - 'crates/zann-db/src/services/items.rs'
               - 'crates/zann-db/migrations/0002_sync_cursor_last_seq.sql'
+              - 'crates/zann-db/migrations/0004_server_replicas.sql'
               - 'crates/zann-db/tests/local_sqlite_path.rs'
               - 'crates/zann-db/tests/local_sync_transactions.rs'
               - 'crates/zann-db/tests/local_vault_migration.rs'
+              - 'crates/zann-db/tests/server_replicas_migration.rs'
               - 'crates/zann-server/src/domains/auth/core/**'
               - 'crates/zann-server/src/domains/access_control/**'
               - 'crates/zann-server/src/infra/audit.rs'
@@ -349,7 +351,7 @@ jobs:
       - name: Tests (pull-only SQLite sync adapter)
         run: cargo test -p zann-client-sqlite --locked
       - name: Tests (SQLite sync and path seams)
-        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration
+        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration
 
   client-architecture:
     needs: changes

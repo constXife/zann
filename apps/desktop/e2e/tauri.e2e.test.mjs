@@ -4,9 +4,8 @@ import test from "node:test";
 import {
   createSession,
 } from "./tauri.e2e.session.mjs";
-import { e2eEnabled, e2eFlow } from "./tauri.e2e.config.mjs";
+import { e2eEnabled } from "./tauri.e2e.config.mjs";
 import {
-  localOnlyScenario,
   registerAndCreateKvScenario,
   reloginAndRestoreScenario,
 } from "./tauri.e2e.flows.mjs";
@@ -143,13 +142,10 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test("e2e scenario", { timeout: 360000, skip: !e2eEnabled }, async () => {
   const state = { browser: null, label: "init" };
-  const runLocal = e2eFlow === "local" || e2eFlow === "all";
-  const runRemote = e2eFlow === "remote" || e2eFlow === "all";
-  const localTimeoutMs = Number(process.env.TAURI_E2E_LOCAL_TIMEOUT ?? 60000);
   try {
     await withTimeout(
       (async () => {
-        if (runRemote) {
+
           state.browser = await createSession();
           await runScenario(state, "scenario-1", 150000, () =>
             registerAndCreateKvScenario(state.browser),
@@ -163,16 +159,7 @@ test("e2e scenario", { timeout: 360000, skip: !e2eEnabled }, async () => {
           );
           await deleteSessionWithTimeout(state.browser, "scenario-2");
           state.browser = null;
-        }
 
-        if (runLocal) {
-          state.browser = await createSession();
-          await runScenario(state, "scenario-local", localTimeoutMs, () =>
-            localOnlyScenario(state.browser),
-          );
-          await deleteSessionWithTimeout(state.browser, "scenario-local");
-          state.browser = null;
-        }
       })(),
       320000,
       "e2e scenario",

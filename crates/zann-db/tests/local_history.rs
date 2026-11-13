@@ -28,9 +28,9 @@ async fn setup_local() -> (SqlitePool, Uuid, Uuid, SecretKey) {
     let storage_id = Uuid::now_v7();
     let storage = LocalStorage {
         id: storage_id,
-        kind: StorageKind::LocalOnly,
+        kind: StorageKind::Remote,
         name: "Local Test".to_string(),
-        server_url: None,
+        server_url: Some("https://fixture.example.test".into()),
         server_name: None,
         server_fingerprint: None,
         account_subject: None,

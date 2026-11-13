@@ -4,13 +4,12 @@ use uuid::Uuid;
 
 use zann_core::{
     item_subtitle, ChangeType, EncryptedPayload, ItemCounts, ItemDetail, ItemListParams,
-    ItemPreview, ItemPreviewPage, ItemsService, ServiceError, ServiceResult, StorageKind,
-    SyncStatus,
+    ItemPreview, ItemPreviewPage, ItemsService, ServiceError, ServiceResult, SyncStatus,
 };
 
 use crate::local::{
     HistorySource, HistorySyncStatus, LocalItem, LocalItemHistory, LocalItemHistoryRepo,
-    LocalItemRepo, LocalPendingChange, LocalStorageRepo, PendingChangeRepo,
+    LocalItemRepo, LocalPendingChange, PendingChangeRepo,
 };
 
 use super::LocalServices;
@@ -294,16 +293,7 @@ impl<'a> ItemsService for LocalServices<'a> {
         repo.create(&item)
             .await
             .map_err(|err| ServiceError::new("item_create_failed", err.to_string()))?;
-        let storage_repo = LocalStorageRepo::new(self.pool);
-        let is_local_only = match storage_repo.get(storage_id).await {
-            Ok(Some(storage)) => storage.kind == StorageKind::LocalOnly,
-            _ => false,
-        };
-        let (source, sync_status) = if is_local_only {
-            (HistorySource::Local, HistorySyncStatus::Confirmed)
-        } else {
-            (HistorySource::Local, HistorySyncStatus::Pending)
-        };
+        let (source, sync_status) = (HistorySource::Local, HistorySyncStatus::Pending);
         let history_repo = LocalItemHistoryRepo::new(self.pool);
         let history = LocalItemHistory {
             id: Uuid::now_v7(),

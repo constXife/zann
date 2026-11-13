@@ -10,12 +10,10 @@ use crate::{EncryptedPayload, ItemSubtitle, SyncStatus, VaultKind};
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
 #[serde(try_from = "i32", into = "i32")]
 pub enum StorageKind {
-    LocalOnly = 1,
     Remote = 2,
 }
 
 impl StorageKind {
-    pub const LOCAL_ONLY: i32 = Self::LocalOnly as i32;
     pub const REMOTE: i32 = Self::Remote as i32;
 
     #[must_use]
@@ -35,7 +33,6 @@ impl TryFrom<i32> for StorageKind {
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
-            1 => Ok(Self::LocalOnly),
             2 => Ok(Self::Remote),
             _ => Err(crate::EnumParseError::new(
                 "storage_kind",
@@ -177,7 +174,6 @@ pub struct AppStatus {
     pub initialized: bool,
     pub locked: bool,
     pub storages_count: usize,
-    pub has_local_vault: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -192,7 +188,6 @@ pub struct ItemListParams {
 pub trait StoragesService {
     async fn list_storages(&self) -> ServiceResult<Vec<StorageSummary>>;
     async fn get_storage(&self, storage_id: Uuid) -> ServiceResult<StorageSummary>;
-    fn default_storage_id(&self) -> Uuid;
 }
 
 #[async_trait]
@@ -209,14 +204,6 @@ pub trait VaultsService {
         storage_id: Uuid,
         name: &str,
     ) -> ServiceResult<Option<VaultSummary>>;
-    async fn create_vault(
-        &self,
-        storage_id: Uuid,
-        name: &str,
-        kind: VaultKind,
-        is_default: bool,
-    ) -> ServiceResult<VaultSummary>;
-    async fn ensure_default_local_personal(&self) -> ServiceResult<VaultSummary>;
 }
 
 #[async_trait]

@@ -27,11 +27,11 @@ use commands::items::{
 use commands::items_history::{items_history_get, items_history_list, items_history_restore};
 use commands::session::{
     app_status, bootstrap, get_settings, hardware_key_enroll, hardware_key_present,
-    hardware_key_remove, hardware_key_supported, initialize_local_identity,
-    initialize_master_password, keystore_disable, keystore_enable, keystore_status,
-    session_autolock_config, session_lock, session_rebind_biometrics, session_status,
-    session_unlock_with_biometrics, session_unlock_with_hardware_key, session_unlock_with_password,
-    status, system_locale, unlock, update_settings,
+    hardware_key_remove, hardware_key_supported, initialize_master_password, keystore_disable,
+    keystore_enable, keystore_status, session_autolock_config, session_lock,
+    session_rebind_biometrics, session_status, session_unlock_with_biometrics,
+    session_unlock_with_hardware_key, session_unlock_with_password, status, system_locale, unlock,
+    update_settings,
 };
 use commands::shell::open_external_url;
 use commands::storage::{
@@ -105,7 +105,6 @@ fn main() {
             session_status,
             session_unlock_with_password,
             initialize_master_password,
-            initialize_local_identity,
             session_unlock_with_biometrics,
             session_rebind_biometrics,
             session_lock,

@@ -27,14 +27,9 @@ const props = defineProps<{
 const remoteStorages = computed(() =>
   props.storages.filter((storage) => storage.kind === StorageKind.Remote),
 );
-const defaultTarget = computed(() =>
-  remoteStorages.value.length > 0 ? remoteStorages.value[0].id : "local",
-);
-const importTarget = ref<string>(defaultTarget.value);
-watch(defaultTarget, (value) => {
-  if (!importTarget.value || importTarget.value === "local") {
-    importTarget.value = value;
-  }
+const importTarget = ref("");
+watch(remoteStorages, (storages) => {
+  if (!storages.some((storage) => storage.id === importTarget.value)) importTarget.value = "";
 });
 
 const exportBusy = ref(false);
@@ -65,7 +60,7 @@ const runExport = async () => {
 };
 
 const runImport = async () => {
-  if (importBusy.value) return;
+  if (importBusy.value || !importTarget.value) return;
   importError.value = "";
   importResult.value = null;
   importBusy.value = true;
@@ -83,7 +78,7 @@ const runImport = async () => {
 };
 
 const runAppleImport = async () => {
-  if (importAppleBusy.value) return;
+  if (importAppleBusy.value || !importTarget.value) return;
   importAppleError.value = "";
   importAppleResult.value = null;
   importAppleBusy.value = true;
@@ -149,7 +144,7 @@ const runAppleImport = async () => {
           v-model="importTarget"
           class="w-full rounded-lg bg-[var(--bg-tertiary)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500"
         >
-          <option value="local">{{ t("settings.backups.importTargetLocal") }}</option>
+          <option disabled value="">{{ t("settings.backups.importTargetLabel") }}</option>
           <option
             v-for="storage in remoteStorages"
             :key="storage.id"
@@ -163,7 +158,7 @@ const runAppleImport = async () => {
         <button
           type="button"
           class="rounded-lg border border-[var(--border-color)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="importBusy"
+          :disabled="importBusy || !importTarget"
           @click="runImport"
         >
           {{ importBusy ? t("common.loading") : t("settings.backups.importAction") }}
@@ -171,7 +166,7 @@ const runAppleImport = async () => {
         <button
           type="button"
           class="rounded-lg border border-[var(--border-color)] px-4 py-2 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          :disabled="importAppleBusy"
+          :disabled="importAppleBusy || !importTarget"
           @click="runAppleImport"
         >
           {{ importAppleBusy ? t("common.loading") : t("settings.backups.importAppleAction") }}

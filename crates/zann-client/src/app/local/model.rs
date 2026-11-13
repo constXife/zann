@@ -237,8 +237,6 @@ pub struct StorageSummary {
 /// its connection is gone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageLink {
-    /// A storage on this device only; no server ever syncs it.
-    Local,
     /// A server connection syncs the storage.
     Connected,
     /// A server storage no connection syncs: its server was forgotten, or its
@@ -266,7 +264,6 @@ pub struct AppStatus {
     pub initialized: bool, // master password has been set (vaults exist)
     pub locked: bool,
     pub storages_count: u64,
-    pub has_local_vault: bool,
     /// A server is configured, so `remote_sync(None)` has a target.
     pub server_connected: bool,
 }

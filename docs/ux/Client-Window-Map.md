@@ -17,11 +17,11 @@ This is about windows and flows, not visual design details.
 ### 1) App Lock (locked state)
 
 Purpose:
-- Protect local vault content.
+- Protect encrypted cached vault content.
 - Gate all sensitive UI until unlock succeeds.
 
 Entry:
-- App start when a local vault exists.
+- App start when a server replica has cached vaults.
 - Manual lock action.
 - Auto-lock (timeout or OS session lock).
 
@@ -36,35 +36,33 @@ Exit:
 ### 2) Welcome / First Run
 
 Purpose:
-- First-time entry point when no local vault exists.
+- Connect a fresh device to its server.
 
 Entry:
-- App start with no local vault.
+- App start without a synced server replica.
 
 Primary actions:
-- Create local vault (internal auth).
-- Connect to server (OIDC) for shared vaults.
-- Import from file (if supported).
+- Enter the server address.
+- Sign in or register using the methods that server offers.
 
 Exit:
-- After vault creation -> Onboarding.
-- After OIDC connect and first sync -> Onboarding (or Vault Home if onboarding skipped).
+- After authentication -> Master Password -> First Sync -> Vault Home.
 
-### 3) Internal Registration (local vault creation)
+### 3) Account Registration and Master Password
 
 Purpose:
-- Create a local vault with internal credentials.
+- Create an account on the selected server, then unlock its local replica.
 
 Entry:
 - From Welcome / First Run.
 
 Primary actions:
-- Set master password.
-- Confirm password.
-- Optional: set vault name.
+- Register with the server if needed.
+- Set or enter the master password using the account KDF identity.
+- Complete the first sync; no local-only vault is created.
 
 Exit:
-- Success -> Onboarding.
+- Success -> First Sync -> Onboarding.
 - Cancel -> Welcome / First Run.
 
 ### 4) OIDC Authorization (server connect)
@@ -113,12 +111,12 @@ Primary actions:
 - Browse categories/folders and items.
 - Create, edit, delete items.
 - Search.
-- Sync (if server).
+- Sync with the server when connected; keep offline edits pending.
 - Open settings.
 
 Exit:
 - Lock action -> App Lock.
-- Logout/disconnect -> Welcome / First Run.
+- Forget connection -> retain the disconnected offline replica; reconnect from Settings.
 
 ### 7) Import Flow
 
@@ -126,11 +124,11 @@ Purpose:
 - Bring data into the vault (CSV, 1Password, Bitwarden, etc).
 
 Entry:
-- From Welcome / First Run or Settings.
+- From Settings after syncing a destination vault.
 
 Primary actions:
 - Select source format.
-- Choose file.
+- Choose file and an explicit server storage destination.
 - Preview and confirm import.
 
 Exit:

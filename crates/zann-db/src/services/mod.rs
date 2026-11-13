@@ -1,17 +1,14 @@
 use chrono::{Duration as ChronoDuration, Utc};
 use uuid::Uuid;
 
-use zann_core::{
-    ChangeType, EncryptedPayload, ServiceError, ServiceResult, StorageKind, SyncStatus, VaultKind,
-};
+use zann_core::{ChangeType, EncryptedPayload, ServiceError, ServiceResult, SyncStatus, VaultKind};
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::vault_crypto as core_crypto;
 use zeroize::Zeroizing;
 
 use crate::local::{
     HistorySource, HistorySyncStatus, KeyWrapType, LocalItemHistory, LocalItemHistoryRepo,
-    LocalItemRepo, LocalPendingChange, LocalStorageRepo, LocalVault, LocalVaultRepo,
-    PendingChangeRepo,
+    LocalItemRepo, LocalPendingChange, LocalVault, LocalVaultRepo, PendingChangeRepo,
 };
 use crate::SqlitePool;
 
@@ -30,8 +27,6 @@ pub const MAX_ITEM_NAME_LEN: usize = 200;
 pub const MAX_ITEM_PATH_LEN: usize = 500;
 pub const MAX_ITEM_PATH_SEGMENTS: usize = 32;
 pub const MAX_ITEM_PAYLOAD_BYTES: usize = 262_144;
-
-const ITEM_HISTORY_LIMIT: i64 = 5;
 
 impl<'a> LocalServices<'a> {
     fn key_fingerprint(key: &SecretKey) -> String {
@@ -170,10 +165,6 @@ impl<'a> LocalServices<'a> {
         storage_id: Uuid,
         change: LocalPendingChange,
     ) -> ServiceResult<()> {
-        // Only sync remote storages; skip local-only (nil UUID)
-        if storage_id.is_nil() {
-            return Ok(());
-        }
         let repo = PendingChangeRepo::new(self.pool);
         let mut merged = change;
         let existing = repo
@@ -382,16 +373,7 @@ impl<'a> LocalServices<'a> {
             .await
             .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
         if !Self::payloads_equal(&prev_payload, &payload)? {
-            let storage_repo = LocalStorageRepo::new(self.pool);
-            let is_local_only = match storage_repo.get(storage_id).await {
-                Ok(Some(storage)) => storage.kind == StorageKind::LocalOnly,
-                _ => false,
-            };
-            let (source, sync_status) = if is_local_only {
-                (HistorySource::Local, HistorySyncStatus::Confirmed)
-            } else {
-                (HistorySource::Local, HistorySyncStatus::Pending)
-            };
+            let (source, sync_status) = (HistorySource::Local, HistorySyncStatus::Pending);
             let history_repo = LocalItemHistoryRepo::new(self.pool);
             let history = LocalItemHistory {
                 id: Uuid::now_v7(),
@@ -411,11 +393,6 @@ impl<'a> LocalServices<'a> {
                 created_at: now,
             };
             let _ = history_repo.create(&history).await;
-            if is_local_only {
-                let _ = history_repo
-                    .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
-                    .await;
-            }
         }
         self.track_pending(
             storage_id,
@@ -472,16 +449,7 @@ impl<'a> LocalServices<'a> {
 
         let prev_version = item.version;
         let now = Utc::now();
-        let storage_repo = LocalStorageRepo::new(self.pool);
-        let is_local_only = match storage_repo.get(storage_id).await {
-            Ok(Some(storage)) => storage.kind == StorageKind::LocalOnly,
-            _ => false,
-        };
-        let (source, sync_status) = if is_local_only {
-            (HistorySource::Local, HistorySyncStatus::Confirmed)
-        } else {
-            (HistorySource::Local, HistorySyncStatus::Pending)
-        };
+        let (source, sync_status) = (HistorySource::Local, HistorySyncStatus::Pending);
         let history_snapshot = LocalItemHistory {
             id: Uuid::now_v7(),
             storage_id,
@@ -503,12 +471,6 @@ impl<'a> LocalServices<'a> {
             .create(&history_snapshot)
             .await
             .map_err(|err| ServiceError::new("history_create_failed", err.to_string()))?;
-        if is_local_only {
-            history_repo
-                .prune_by_item(storage_id, item.id, ITEM_HISTORY_LIMIT)
-                .await
-                .map_err(|err| ServiceError::new("history_prune_failed", err.to_string()))?;
-        }
 
         let key = self.payload_key_for_id(storage_id, item.vault_id).await?;
         let key_fp = Self::key_fingerprint(&key);

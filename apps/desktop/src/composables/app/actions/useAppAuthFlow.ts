@@ -28,7 +28,7 @@ type AppAuthFlowOptions = {
   appStatus: Ref<AppStatus | null>;
   unlocked: ComputedRef<boolean>;
   selectedStorageId: Ref<string>;
-  localStorageId: string;
+
   showSessionExpiredBanner: ComputedRef<boolean>;
   sessionExpiredStorage: ComputedRef<StorageSummary | undefined>;
   syncError: Ref<string>;
@@ -50,7 +50,7 @@ export function useAppAuthFlow({
   appStatus,
   unlocked,
   selectedStorageId,
-  localStorageId,
+
   showSessionExpiredBanner,
   sessionExpiredStorage,
   syncError,
@@ -66,7 +66,6 @@ export function useAppAuthFlow({
   formatError,
 }: AppAuthFlowOptions) {
   const setupStep = ref<"welcome" | "password" | "connect">("welcome");
-  const setupFlow = ref<"local" | "remote">("remote");
   const setupOpen = ref(false);
   const setupPassword = ref("");
   const setupConfirm = ref("");
@@ -101,13 +100,6 @@ export function useAppAuthFlow({
     return `https://${trimmed}`;
   };
 
-  const startLocalSetup = () => {
-    setupError.value = "";
-    setupFlow.value = "local";
-    setupPasswordMode.value = "create";
-    setupStep.value = "password";
-  };
-
   const startConnect = () => {
     setupError.value = "";
     connectServerUrl.value = "";
@@ -115,7 +107,6 @@ export function useAppAuthFlow({
     connectStatus.value = "";
     connectBusy.value = false;
     connectLoginId.value = "";
-    setupFlow.value = "remote";
     setupPasswordMode.value = "create";
     connectVerification.value = "";
     connectOldFp.value = "";
@@ -147,15 +138,7 @@ export function useAppAuthFlow({
     }
     setupBusy.value = true;
     try {
-      if (setupFlow.value === "local") {
-        const identityResponse = await invoke<ApiResponse<null>>(
-          "initialize_local_identity",
-        );
-        if (!identityResponse.ok) {
-          const key = identityResponse.error?.kind ?? "generic";
-          throw createErrorWithCause(t(`errors.${key}`), identityResponse.error);
-        }
-      }
+
       const response = await invoke<ApiResponse<null>>(
         "initialize_master_password",
         { password: setupPassword.value },
@@ -169,18 +152,15 @@ export function useAppAuthFlow({
       await refreshStatus();
       await refreshAppStatus();
       await loadStorages();
-      if (setupFlow.value === "local") {
-        selectedStorageId.value = localStorageId;
-      }
+
       syncError.value = "";
-      if (setupFlow.value === "remote") {
+
         const syncOk = await runRemoteSync(setupStorageId.value ?? undefined);
         if (!syncOk && syncError.value) {
           setupError.value = syncError.value;
           return;
         }
-      }
-      uiSettings.value.showLocalStorage = true;
+
       if (appStatus.value?.initialized) {
         setupOpen.value = false;
         setupStep.value = "welcome";
@@ -191,7 +171,6 @@ export function useAppAuthFlow({
       setupBusy.value = false;
     }
   };
-
 
   const beginOidcConnect = async () => {
     connectError.value = "";
@@ -366,7 +345,6 @@ export function useAppAuthFlow({
           await refreshAppStatus();
           const needsSetup = !appStatus.value?.initialized;
           if (needsSetup) {
-            setupFlow.value = "remote";
             setupPasswordMode.value = data.personal_key_envelopes_present
               ? "unlock"
               : "create";
@@ -449,7 +427,6 @@ export function useAppAuthFlow({
       await refreshAppStatus();
       const needsSetup = !appStatus.value?.initialized;
       if (needsSetup) {
-        setupFlow.value = "remote";
         setupPasswordMode.value = payload.personal_key_envelopes_present
           ? "unlock"
           : "create";
@@ -529,7 +506,6 @@ export function useAppAuthFlow({
 
   return {
     setupStep,
-    setupFlow,
     setupOpen,
     setupPassword,
     setupConfirm,
@@ -551,7 +527,7 @@ export function useAppAuthFlow({
     passwordLoginBusy,
     passwordLoginError,
     normalizeServerUrl,
-    startLocalSetup,
+
     startConnect,
     backToWelcome,
     createMasterPassword,

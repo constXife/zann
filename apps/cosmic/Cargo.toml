@@ -35,4 +35,5 @@ zann-core = { path = "../../crates/zann-core" }
 zann-ui-core = { path = "../../crates/zann-ui-core" }
 
 [dev-dependencies]
+zann-client-sqlite = { path = "../../crates/zann-client-sqlite", features = ["test-support"] }
 tempfile = "3"

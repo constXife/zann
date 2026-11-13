@@ -4,7 +4,6 @@ import { computed } from "vue";
 type Translator = (key: string, params?: Record<string, unknown>) => string;
 
 const setupStep = defineModel<"welcome" | "password" | "connect">("step", { required: true });
-const setupFlow = defineModel<"local" | "remote">("flow", { required: true });
 const setupPassword = defineModel<string>("setupPassword", { required: true });
 const setupConfirm = defineModel<string>("setupConfirm", { required: true });
 const connectServerUrl = defineModel<string>("connectServerUrl", { required: true });
@@ -24,7 +23,7 @@ const props = defineProps<{
   passwordMode: "create" | "unlock";
   t: Translator;
   normalizeServerUrl: (value: string) => string;
-  startLocalSetup: () => void;
+
   startConnect: () => void;
   backToWelcome: () => void;
   createMasterPassword: () => void;
@@ -54,7 +53,7 @@ const onUrlBlur = () => {
 };
 
 // Progress indicator
-const totalSteps = computed(() => (setupFlow.value === "remote" ? 2 : 1));
+const totalSteps = computed(() => 2);
 
 const currentStep = computed(() => {
   if (setupStep.value === "welcome") return 0;
@@ -134,19 +133,7 @@ const isUnlockExisting = computed(() => props.passwordMode === "unlock");
           >
             {{ t("wizard.connect") }}
           </button>
-          <div>
-            <button
-              type="button"
-              class="w-full rounded-lg border border-[var(--border-color)] px-4 py-3 text-[var(--text-secondary)] hover:bg-[var(--bg-hover)] transition-colors"
-              @click="startLocalSetup"
-              data-testid="wizard-start-local"
-            >
-              {{ t("wizard.useOnThisDevice") }}
-            </button>
-            <p class="mt-2 text-xs text-[var(--text-tertiary)] text-center">
-              {{ t("wizard.connectLater") }}
-            </p>
-          </div>
+
         </div>
       </div>
 

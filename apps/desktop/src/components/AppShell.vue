@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { StorageKind } from "../constants/enums";
 import type { Ref } from "vue";
 import SidebarPanel from "./SidebarPanel.vue";
 import ItemListPanel from "./ItemListPanel.vue";
@@ -18,9 +17,7 @@ type AppShellProps = {
   storageDropdownOpen: unknown;
   storages: unknown;
   remoteStorages: unknown;
-  localStorageRef: unknown;
-  showLocalSection: unknown;
-  hasLocalVaults: unknown;
+
   selectedStorageId: unknown;
   currentStorage: unknown;
   getSyncStatus: unknown;
@@ -29,7 +26,7 @@ type AppShellProps = {
   closeStorageDropdown: unknown;
   openAddStorageWizard: unknown;
   openStorageSettings: unknown;
-  openCreateLocalVault: unknown;
+
   switchStorage: unknown;
   vaultDropdownOpen: unknown;
   vaults: unknown;
@@ -94,7 +91,6 @@ type AppShellProps = {
   createVaultName: unknown;
   createVaultKind: unknown;
   createVaultCachePolicy: unknown;
-  createVaultDefault: unknown;
   showFolderSuggestions: unknown;
   flatFolderPaths: unknown;
   createItemFields: unknown;
@@ -170,10 +166,6 @@ type AppShellProps = {
 
 const props = defineProps<AppShellProps>();
 const t = props.t;
-const isLocalStorage = computed(
-  () => (props.currentStorage as { kind?: number } | null)?.kind === StorageKind.LocalOnly,
-);
-
 const modelRef = <T>(key: keyof AppShellProps) =>
   computed<T>({
     get: () => {
@@ -203,7 +195,6 @@ const typeOptions = modelRef<unknown>("typeOptions");
 const createVaultName = modelRef<unknown>("createVaultName");
 const createVaultKind = modelRef<unknown>("createVaultKind");
 const createVaultCachePolicy = modelRef<unknown>("createVaultCachePolicy");
-const createVaultDefault = modelRef<unknown>("createVaultDefault");
 const showFolderSuggestions = modelRef<unknown>("showFolderSuggestions");
 const query = modelRef<unknown>("query");
 
@@ -377,9 +368,6 @@ const formattedLastSync = computed(() => {
       :storage-dropdown-open="storageDropdownOpen"
       :storages="storages"
       :remote-storages="remoteStorages"
-      :local-storage="localStorageRef"
-      :show-local-section="showLocalSection"
-      :has-local-vaults="hasLocalVaults"
       :selected-storage-id="selectedStorageId"
       :current-storage="currentStorage"
       :get-sync-status="getSyncStatus"
@@ -389,7 +377,6 @@ const formattedLastSync = computed(() => {
       :close-storage-dropdown="closeStorageDropdown"
       :open-add-storage-wizard="openAddStorageWizard"
       :open-storage-settings="openStorageSettings"
-      :open-create-local-vault="openCreateLocalVault"
       :open-settings="openSettings"
       :switch-storage="switchStorage"
       :vault-dropdown-open="vaultDropdownOpen"
@@ -503,7 +490,6 @@ const formattedLastSync = computed(() => {
           :selected-item-id="selectedItemId"
         :vault-context-label="vaultContextLabel"
         :is-shared-vault="isSharedVault"
-        :is-local-storage="isLocalStorage"
         :sync-busy="syncBusy"
         :on-list-scroll="onListScroll"
         :select-item="handleSelectItem"
@@ -538,7 +524,6 @@ const formattedLastSync = computed(() => {
           v-model:create-vault-name="createVaultName"
           v-model:create-vault-kind="createVaultKind"
           v-model:create-vault-cache-policy="createVaultCachePolicy"
-          v-model:create-vault-default="createVaultDefault"
           v-model:show-folder-suggestions="showFolderSuggestions"
           :create-mode="createMode"
           :variant="'panel'"

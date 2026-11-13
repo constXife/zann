@@ -2,23 +2,22 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::SqliteSyncStoreFactory;
-use base64::Engine;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 use zann_client::app::{
-    AccountKeyCheck, AppClient, ClientId, ClientPaths, ConfigIdentity, ConfigKdfParams,
-    CredentialSecret, LegacySessionImport, SessionClient, SessionOperation,
+    AccountKeyCheck, AppClient, ClientId, ClientPaths, ConfigIdentity, CredentialSecret,
+    LegacySessionImport, SessionClient, SessionOperation,
 };
 use zann_client::config::{CredentialStore, LegacyCredentialSource};
-use zann_core::{ItemCounts as DomainItemCounts, ItemListParams, ItemsService, VaultsService};
+use zann_core::{ItemCounts as DomainItemCounts, ItemListParams, ItemsService};
 use zann_crypto::crypto::SecretKey;
 #[cfg(debug_assertions)]
 use zann_crypto::secrets::{FieldKind, FieldValue};
 use zann_crypto::vault_crypto;
 use zann_crypto::EncryptedPayload;
 use zann_db::local::{
-    HistorySyncStatus, LocalItemHistoryRepo, LocalItemRepo, LocalStorage, LocalStorageRepo,
-    LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
+    HistorySyncStatus, LocalItemHistoryRepo, LocalItemRepo, LocalStorageRepo, LocalVaultRepo,
+    PendingChangeRepo, SyncCursorRepo,
 };
 use zann_db::services::LocalServices;
 use zann_db::SqliteFileLocation;
@@ -39,7 +38,7 @@ pub struct LocalVault {
     pool: Mutex<SqlitePool>,
     /// Kept as an exact native path so the pool can be opened again after a restore.
     database_path: PathBuf,
-    storage_id: Mutex<Uuid>,
+    storage_id: Mutex<Option<Uuid>>,
     vault_id: Mutex<Option<Uuid>>,
     master_key: Mutex<Option<Arc<SecretKey>>>,
     /// Cancelled on lock, so no sync keeps the master key past it.
@@ -111,11 +110,14 @@ impl LocalVault {
         self.vault_id
             .lock()
             .expect("lock poisoned")
-            .ok_or(LocalError::Locked)
+            .ok_or_else(|| LocalError::InvalidArgument("select a vault".to_string()))
     }
 
-    fn storage_id(&self) -> Uuid {
-        *self.storage_id.lock().expect("lock poisoned")
+    fn storage_id(&self) -> LocalResult<Uuid> {
+        self.storage_id
+            .lock()
+            .expect("lock poisoned")
+            .ok_or_else(|| LocalError::InvalidArgument("no server storage selected".to_string()))
     }
 
     fn runtime_block_on<F, T>(&self, future: F) -> LocalResult<T>
@@ -139,38 +141,30 @@ impl LocalVault {
                 .block_on(repo.list_by_storage(storage_id))
                 .map_err(|err| LocalError::Service(err.to_string()))
         };
-        let mut storage_id = self.storage_id();
-        let mut vaults = list(storage_id)?;
-        if vaults.is_empty() {
-            // A storage without vaults, such as one whose first sync failed,
-            // has no key to check the password against: open the one a fresh
-            // start would, which holds a vault whenever any storage does.
-            storage_id = resolve_storage_id(&self.runtime, &pool)?;
-            vaults = list(storage_id)?;
-        }
-        let vault_id = match vaults.first() {
-            // No storage holds a vault: nothing local can check this key.
-            None => {
-                self.check_key_for_new_device(&master_key, self.kdf_identity()?.as_ref())?;
-                let services = LocalServices::new(&pool, master_key.as_ref());
-                let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
-                storage_id = vault.storage_id;
-                vault.id
-            }
-            Some(verify) => {
-                vault_crypto::decrypt_vault_key(
-                    master_key.as_ref(),
-                    verify.id,
-                    &verify.vault_key_enc,
-                )
+        let storage_id = match *self.storage_id.lock().expect("lock poisoned") {
+            Some(id) => Some(id),
+            None => resolve_storage_id(&self.runtime, &pool)?,
+        };
+        let vaults = match storage_id {
+            Some(id) => list(id)?,
+            None => Vec::new(),
+        };
+        let vault_id = if let Some(verify) = vaults.first() {
+            vault_crypto::decrypt_vault_key(master_key.as_ref(), verify.id, &verify.vault_key_enc)
                 .map_err(|_| LocalError::InvalidArgument("invalid password".to_string()))?;
-                preferred_vault(&self.runtime, &pool, storage_id, &vaults)?
-                    .expect("vaults not empty")
-            }
+            preferred_vault(
+                &self.runtime,
+                &pool,
+                storage_id.expect("storage with vaults"),
+                &vaults,
+            )?
+        } else {
+            self.check_key_for_new_device(&master_key)?;
+            None
         };
         *self.storage_id.lock().expect("lock poisoned") = storage_id;
         *self.master_key.lock().expect("lock poisoned") = Some(master_key);
-        *self.vault_id.lock().expect("lock poisoned") = Some(vault_id);
+        *self.vault_id.lock().expect("lock poisoned") = vault_id;
         Ok(VaultStatus { unlocked: true })
     }
 
@@ -203,7 +197,7 @@ impl LocalVault {
             },
         );
         let item_id = self.runtime_block_on(services.put_item(
-            self.storage_id(),
+            self.storage_id()?,
             vault_id,
             path,
             "kv".to_string(),
@@ -547,10 +541,8 @@ impl LocalVaultService for LocalVault {
     fn set_current_storage(&self, id: String) -> LocalResult<()> {
         LocalVault::set_current_storage(self, id)
     }
-    fn follow_preferred_storage(&self) -> LocalResult<()> {
-        LocalVault::follow_preferred_storage(self)
-    }
-    fn current_storage_id(&self) -> String {
+
+    fn current_storage_id(&self) -> LocalResult<String> {
         LocalVault::current_storage_id(self)
     }
     fn app_status(&self) -> LocalResult<AppStatus> {
@@ -614,6 +606,7 @@ pub async fn initialize_database(location: &SqliteFileLocation) -> LocalResult<(
 #[cfg(test)]
 mod compatibility_tests {
     use serde::Deserialize;
+    use zann_client::app::ConfigKdfParams;
 
     use crate::test_support::CanonicalTempDir;
 
@@ -703,7 +696,7 @@ mod compatibility_tests {
 
         assert_eq!(core.root, root);
         assert!(db_path.exists(), "SQLite must create the exact path");
-        core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+        core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
             .expect("initialize at exact path");
         assert!(
             core.root.join("client-config.json").exists(),
@@ -733,7 +726,7 @@ mod compatibility_tests {
             db_path.exists(),
             "URI and config root must name one database"
         );
-        core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+        core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
             .expect("initialize at encoded path");
         assert!(root.join("client-config.json").exists());
     }
@@ -782,3 +775,6 @@ mod compatibility_tests {
         }
     }
 }
+
+#[cfg(feature = "test-support")]
+mod test_support;

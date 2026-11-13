@@ -8,13 +8,13 @@
 //! Nothing here touches the OS: callers supply the paths and the unlocked key.
 //! See docs/adr/0002-client-strategy.md.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::fs::File;
 use std::future::Future;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use chrono::Utc;
 use percent_encoding::percent_decode_str;
@@ -26,15 +26,8 @@ use tokio::sync::mpsc;
 use url::Url;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
-use zann_core::vault_crypto as core_crypto;
-use zann_core::{
-    AuthMethod, EncryptedPayload, FieldKind, FieldValue, ItemsService, StorageKind, VaultKind,
-    VaultsService,
-};
-use zann_db::local::{
-    KeyWrapType, LocalItem, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVault,
-    LocalVaultRepo,
-};
+use zann_core::{EncryptedPayload, FieldKind, FieldValue, ItemsService, VaultKind};
+use zann_db::local::{LocalItem, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVaultRepo};
 use zann_db::services::{LocalServices, MAX_ITEM_NAME_LEN};
 use zann_db::SqlitePool;
 

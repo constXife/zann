@@ -35,7 +35,7 @@ type UseCreateModalOptions = {
   loadItems: (options?: { silent?: boolean }) => Promise<void>;
   loadVaults: () => Promise<void>;
   runRemoteSync: (storageId: string | null) => Promise<void>;
-  localStorageId: string;
+
   t: Translator;
   onOptimisticHistory?: (payload: EncryptedPayload) => number | null;
   onOptimisticHistoryRollback?: (version: number) => void;
@@ -60,7 +60,6 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   const createVaultName = ref("");
   const createVaultKind = ref<VaultKind>(VaultKind.Personal);
   const createVaultCachePolicy = ref<CachePolicy>(CachePolicy.Full);
-  const createVaultDefault = ref(false);
   const createVaultError = ref("");
   const createVaultBusy = ref(false);
   const typeOptions = ref<string[]>([]);
@@ -391,9 +390,8 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
   const resetCreateVaultState = () => {
     createVaultName.value = "";
     createVaultKind.value =
-      options.selectedStorageId.value === options.localStorageId ? VaultKind.Personal : VaultKind.Shared;
+      VaultKind.Shared;
     createVaultCachePolicy.value = CachePolicy.Full;
-    createVaultDefault.value = false;
     createVaultError.value = "";
     createVaultBusy.value = false;
   };
@@ -412,9 +410,8 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     if (mode === "vault") {
       createVaultName.value = "";
       createVaultKind.value =
-        options.selectedStorageId.value === options.localStorageId ? VaultKind.Personal : VaultKind.Shared;
+        VaultKind.Shared;
       createVaultCachePolicy.value = CachePolicy.Full;
-      createVaultDefault.value = options.vaults.value.length === 0;
     } else {
       await loadTypeOptions();
       const categoryType = resolveCategoryType(options.selectedCategory.value);
@@ -478,14 +475,13 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createVaultBusy.value = true;
     try {
       const kind =
-        options.selectedStorageId.value === options.localStorageId ? createVaultKind.value : VaultKind.Shared;
+        VaultKind.Shared;
       const response = await invoke<ApiResponse<VaultSummary>>("vault_create", {
         req: {
           storage_id: options.selectedStorageId.value,
           name: createVaultName.value,
           kind,
           cache_policy: createVaultCachePolicy.value,
-          is_default: createVaultDefault.value,
         },
       });
       if (!response.ok || !response.data) {
@@ -838,9 +834,9 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
         await nextTick();
       }
       options.selectedItemId.value = response.data;
-      if (options.selectedStorageId.value !== options.localStorageId) {
+
         await options.runRemoteSync(options.selectedStorageId.value);
-      }
+
     } catch (err) {
       if (optimisticVersion !== null) {
         options.onOptimisticHistoryRollback?.(optimisticVersion);
@@ -920,7 +916,6 @@ export const useCreateModal = (options: UseCreateModalOptions) => {
     createVaultName,
     createVaultKind,
     createVaultCachePolicy,
-    createVaultDefault,
     createVaultError,
     createVaultBusy,
     createVaultValid,

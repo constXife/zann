@@ -1,7 +1,7 @@
 use tauri::State;
 use tauri_plugin_biometry::BiometryExt;
 use uuid::Uuid;
-use zann_core::{StorageKind, StoragesService};
+use zann_core::StoragesService;
 use zann_db::local::{
     LocalItemRepo, LocalStorageRepo, LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
 };
@@ -52,41 +52,29 @@ pub async fn storage_info(
         Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
     };
 
-    let mut file_path = None;
-    let mut file_size = None;
-    let mut last_modified = None;
+    let file_path = None;
+    let file_size = None;
+    let last_modified = None;
     let mut last_synced = None;
-    let mut fingerprint = None;
+    let fingerprint;
 
-    if storage.kind == StorageKind::LocalOnly {
-        let db_path = crate::state::local_db_path(&state.root);
-        file_path = Some(db_path.display().to_string());
-        if let Ok(metadata) = std::fs::metadata(&db_path) {
-            file_size = Some(metadata.len());
-            if let Ok(modified) = metadata.modified() {
-                let datetime: chrono::DateTime<chrono::Utc> = modified.into();
-                last_modified = Some(datetime.to_rfc3339());
-            }
-        }
-    } else {
-        let cursor_repo = SyncCursorRepo::new(&state.pool);
-        let vault_repo = LocalVaultRepo::new(&state.pool);
-        if let Ok(vaults) = vault_repo.list_by_storage(storage_uuid).await {
-            let mut latest_sync: Option<chrono::DateTime<chrono::Utc>> = None;
-            for vault in vaults {
-                if let Ok(Some(cursor)) = cursor_repo.get(storage_uuid, vault.id).await {
-                    if let Some(sync_at) = cursor.last_sync_at {
-                        if latest_sync.is_none() || sync_at > latest_sync.unwrap() {
-                            latest_sync = Some(sync_at);
-                        }
+    let cursor_repo = SyncCursorRepo::new(&state.pool);
+    let vault_repo = LocalVaultRepo::new(&state.pool);
+    if let Ok(vaults) = vault_repo.list_by_storage(storage_uuid).await {
+        let mut latest_sync: Option<chrono::DateTime<chrono::Utc>> = None;
+        for vault in vaults {
+            if let Ok(Some(cursor)) = cursor_repo.get(storage_uuid, vault.id).await {
+                if let Some(sync_at) = cursor.last_sync_at {
+                    if latest_sync.is_none() || sync_at > latest_sync.unwrap() {
+                        latest_sync = Some(sync_at);
                     }
                 }
             }
-            last_synced = latest_sync.map(|dt| dt.to_rfc3339());
         }
-
-        fingerprint = storage.server_fingerprint.clone();
+        last_synced = latest_sync.map(|dt| dt.to_rfc3339());
     }
+
+    fingerprint = storage.server_fingerprint.clone();
 
     Ok(ApiResponse::ok(StorageInfoResponse {
         id: storage.id.to_string(),
@@ -112,7 +100,7 @@ pub async fn storage_delete(
     let storage_uuid = Uuid::parse_str(&storage_id).map_err(|_| "invalid storage id")?;
 
     let storage_repo = LocalStorageRepo::new(&state.pool);
-    let storage = match storage_repo.get(storage_uuid).await {
+    let _storage = match storage_repo.get(storage_uuid).await {
         Ok(Some(s)) => s,
         Ok(None) => return Ok(ApiResponse::err("storage_not_found", "storage not found")),
         Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
@@ -154,23 +142,21 @@ pub async fn storage_delete(
         ));
     }
 
-    if storage.kind == StorageKind::Remote {
-        if let Ok(mut config) = load_config(&state.root) {
-            let contexts_to_remove: Vec<String> = config
-                .contexts
-                .iter()
-                .filter(|(_, ctx)| ctx.storage_id.as_deref() == Some(&storage_id))
-                .map(|(name, _)| name.clone())
-                .collect();
+    if let Ok(mut config) = load_config(&state.root) {
+        let contexts_to_remove: Vec<String> = config
+            .contexts
+            .iter()
+            .filter(|(_, ctx)| ctx.storage_id.as_deref() == Some(&storage_id))
+            .map(|(name, _)| name.clone())
+            .collect();
 
-            for name in contexts_to_remove {
-                config.contexts.remove(&name);
-                if config.current_context.as_deref() == Some(&name) {
-                    config.current_context = None;
-                }
+        for name in contexts_to_remove {
+            config.contexts.remove(&name);
+            if config.current_context.as_deref() == Some(&name) {
+                config.current_context = None;
             }
-            let _ = save_config(&state.root, &config);
         }
+        let _ = save_config(&state.root, &config);
     }
 
     let _ = move_to_trash;
@@ -186,7 +172,7 @@ pub async fn storage_disconnect(
     let storage_uuid = Uuid::parse_str(&storage_id).map_err(|_| "invalid storage id")?;
 
     let storage_repo = LocalStorageRepo::new(&state.pool);
-    let storage = match storage_repo.get(storage_uuid).await {
+    let _storage = match storage_repo.get(storage_uuid).await {
         Ok(Some(s)) => s,
         Ok(None) => return Ok(ApiResponse::err("storage_not_found", "storage not found")),
         Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
@@ -228,23 +214,21 @@ pub async fn storage_disconnect(
         ));
     }
 
-    if storage.kind == StorageKind::Remote {
-        if let Ok(mut config) = load_config(&state.root) {
-            let contexts_to_remove: Vec<String> = config
-                .contexts
-                .iter()
-                .filter(|(_, ctx)| ctx.storage_id.as_deref() == Some(&storage_id))
-                .map(|(name, _)| name.clone())
-                .collect();
+    if let Ok(mut config) = load_config(&state.root) {
+        let contexts_to_remove: Vec<String> = config
+            .contexts
+            .iter()
+            .filter(|(_, ctx)| ctx.storage_id.as_deref() == Some(&storage_id))
+            .map(|(name, _)| name.clone())
+            .collect();
 
-            for name in contexts_to_remove {
-                config.contexts.remove(&name);
-                if config.current_context.as_deref() == Some(&name) {
-                    config.current_context = None;
-                }
+        for name in contexts_to_remove {
+            config.contexts.remove(&name);
+            if config.current_context.as_deref() == Some(&name) {
+                config.current_context = None;
             }
-            let _ = save_config(&state.root, &config);
         }
+        let _ = save_config(&state.root, &config);
     }
 
     Ok(ApiResponse::ok(()))
@@ -259,18 +243,11 @@ pub async fn storage_reveal(
     let storage_uuid = Uuid::parse_str(&storage_id).map_err(|_| "invalid storage id")?;
 
     let storage_repo = LocalStorageRepo::new(&state.pool);
-    let storage = match storage_repo.get(storage_uuid).await {
+    let _storage = match storage_repo.get(storage_uuid).await {
         Ok(Some(s)) => s,
         Ok(None) => return Ok(ApiResponse::err("storage_not_found", "storage not found")),
         Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
     };
-
-    if storage.kind != StorageKind::LocalOnly {
-        return Ok(ApiResponse::err(
-            "not_local",
-            "can only reveal local storages",
-        ));
-    }
 
     let db_path = crate::state::local_db_path(&state.root);
 
@@ -314,18 +291,11 @@ pub async fn storage_sign_out(
     let storage_uuid = Uuid::parse_str(&storage_id).map_err(|_| "invalid storage id")?;
 
     let storage_repo = LocalStorageRepo::new(&state.pool);
-    let storage = match storage_repo.get(storage_uuid).await {
+    let _storage = match storage_repo.get(storage_uuid).await {
         Ok(Some(s)) => s,
         Ok(None) => return Ok(ApiResponse::err("storage_not_found", "storage not found")),
         Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
     };
-
-    if storage.kind != StorageKind::Remote {
-        return Ok(ApiResponse::err(
-            "not_remote",
-            "sign out only works for remote storages",
-        ));
-    }
 
     if let Ok(mut config) = load_config(&state.root) {
         for (_, ctx) in config.contexts.iter_mut() {
@@ -375,22 +345,14 @@ pub async fn local_clear_data(
     let storages = storage_repo.list().await.map_err(|e| e.to_string())?;
 
     for storage in &storages {
-        let should_clear = if storage.kind == StorageKind::LocalOnly {
-            true
-        } else {
-            also_clear_remote_cache
-        };
-
-        if should_clear {
+        if also_clear_remote_cache {
             let _ = pending_repo.delete_by_storage(storage.id).await;
             let _ = cursor_repo.delete_by_storage(storage.id).await;
             let _ = item_repo.delete_by_storage(storage.id).await;
             let _ = vault_repo.delete_by_storage(storage.id).await;
         }
 
-        if storage.kind == StorageKind::LocalOnly
-            || (storage.kind == StorageKind::Remote && also_remove_connections)
-        {
+        if also_remove_connections {
             let _ = storage_repo.delete(storage.id).await;
         }
     }

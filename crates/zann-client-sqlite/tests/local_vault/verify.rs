@@ -17,7 +17,7 @@ fn db_url(root: &std::path::Path) -> String {
 fn a_healthy_vault_reports_clean() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
         .expect("create item");
@@ -41,7 +41,7 @@ fn a_healthy_vault_reports_clean() {
 fn a_locked_vault_cannot_be_verified() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
     core.lock().expect("lock");
 
@@ -58,14 +58,15 @@ fn a_damaged_payload_is_reported_through_the_facade() {
     let root = CanonicalTempDir::new();
     let password = format!("pw-{}", Uuid::now_v7());
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     let item_id = core
         .debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
         .expect("create item");
     assert!(core.verify().expect("verify").problems.is_empty());
     let item_id = Uuid::parse_str(&item_id).expect("item ID");
-    let storage_id = Uuid::parse_str(&core.current_storage_id()).expect("storage ID");
+    let storage_id = Uuid::parse_str(&core.current_storage_id().expect("selected server storage"))
+        .expect("storage ID");
     drop(core);
 
     // Corrupt the stored payload behind the app's back, the way a bad disk

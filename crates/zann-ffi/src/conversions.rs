@@ -490,7 +490,6 @@ impl From<native::StorageSyncState> for StorageSyncStateFfi {
     fn from(value: native::StorageSyncState) -> Self {
         Self {
             link: match value.link {
-                native::StorageLink::Local => crate::SyncLinkFfi::Local,
                 native::StorageLink::Connected => crate::SyncLinkFfi::Connected,
                 native::StorageLink::Disconnected => crate::SyncLinkFfi::Disconnected,
             },
@@ -517,7 +516,6 @@ impl From<native::AppStatus> for AppStatusFfi {
             initialized: value.initialized,
             locked: value.locked,
             storages_count: value.storages_count,
-            has_local_vault: value.has_local_vault,
             server_connected: value.server_connected,
         }
     }
@@ -529,7 +527,6 @@ impl From<AppStatusFfi> for native::AppStatus {
             initialized: value.initialized,
             locked: value.locked,
             storages_count: value.storages_count,
-            has_local_vault: value.has_local_vault,
             server_connected: value.server_connected,
         }
     }

@@ -15,7 +15,6 @@ pub struct AppStatusResponse {
     pub initialized: bool,
     pub locked: bool,
     pub storages_count: usize,
-    pub has_local_vault: bool,
 }
 
 #[derive(Serialize)]

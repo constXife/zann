@@ -13,7 +13,7 @@ impl State {
         cosmic::task::future(async move {
             Message::SyncStateLoaded(
                 off_thread(move || {
-                    let storage_id = local::current_storage_id(&facade);
+                    let storage_id = local::current_storage_id(&facade)?;
                     local::sync_state(&facade, storage_id)
                 })
                 .await,
@@ -26,7 +26,6 @@ impl State {
         let state = self.sync_state.as_ref()?;
         Some(sync_indicator(SyncStatusInput {
             link: match state.link {
-                StorageLink::Local => SyncLink::Local,
                 StorageLink::Connected => SyncLink::Connected,
                 StorageLink::Disconnected => SyncLink::Disconnected,
             },
@@ -56,8 +55,11 @@ impl State {
                         let Some(state) = self.sync_state.as_ref() else {
                             return Outcome::None;
                         };
+                        let Ok(storage_id) = local::current_storage_id(&session.facade()) else {
+                            return Outcome::None;
+                        };
                         return Outcome::StaleServer(
-                            local::current_storage_id(&session.facade()),
+                            storage_id,
                             local::SyncFailure::Disconnected {
                                 server_url: state.server_url.clone(),
                                 pending_changes: state.pending_changes,
@@ -83,7 +85,6 @@ impl State {
             .collect::<Vec<_>>();
         let label = t_args(indicator.label_key(), &args);
         let icon = match indicator {
-            SyncIndicator::LocalOnly => "drive-harddisk-symbolic",
             SyncIndicator::Disconnected { .. } => "network-offline-symbolic",
             SyncIndicator::Syncing { .. } => "emblem-synchronizing-symbolic",
             SyncIndicator::Failed { .. } => "dialog-warning-symbolic",
@@ -139,7 +140,7 @@ impl State {
     /// When the storage last synced, and what pressing the indicator does.
     fn sync_details(&self, indicator: &SyncIndicator) -> String {
         let mut lines = Vec::with_capacity(2);
-        if !matches!(indicator, SyncIndicator::LocalOnly) {
+        {
             let synced = self
                 .sync_state
                 .as_ref()

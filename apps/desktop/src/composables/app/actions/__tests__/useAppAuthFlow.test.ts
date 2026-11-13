@@ -45,7 +45,6 @@ const createWrapper = (options?: {
         appStatus,
         unlocked,
         selectedStorageId,
-        localStorageId: "local",
         showSessionExpiredBanner,
         sessionExpiredStorage,
         syncError,

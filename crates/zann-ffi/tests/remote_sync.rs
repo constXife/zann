@@ -40,7 +40,10 @@ fn operation() -> Arc<SessionOperationFfi> {
 /// After the first sync the core moves the empty session to the server's
 /// personal vault; the shell never picks a storage.
 fn assert_in_personal_vault(core: &CoreFacade, storage_id: &str) {
-    assert_eq!(core.current_storage_id(), storage_id);
+    assert_eq!(
+        core.current_storage_id().expect("selected server storage"),
+        storage_id
+    );
     let current = core.current_vault_id().expect("a vault is open");
     let vault = core
         .list_vaults()
@@ -91,7 +94,6 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
         .expect("device A creates the vault");
     core.remote_sync(None)
         .expect("device A publishes the personal vault");
-    core.follow_preferred_storage().expect("follow the server");
     assert_in_personal_vault(&core, &storage_id);
 
     // Every storage is still empty; a restart keeps the server's vault
@@ -129,7 +131,6 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
     core.unlock(master_password.clone())
         .expect("device B derives the account's master key");
     core.remote_sync(None).expect("device B pulls");
-    core.follow_preferred_storage().expect("follow the server");
     assert_in_personal_vault(&core, &storage_id);
     let item = core
         .item_get(item_id.clone())
@@ -180,7 +181,6 @@ fn publish_account(url: &str) -> Account {
     core.initialize_master_password(account.master_password.clone())
         .expect("create the vault");
     core.remote_sync(None).expect("publish the vault");
-    core.follow_preferred_storage().expect("follow the server");
     let item_id = core
         .debug_create_kv_item("pushed".into(), "key".into(), "value".into())
         .expect("create an item");
@@ -233,7 +233,6 @@ fn a_mistyped_master_password_never_binds_a_new_device() {
         .expect("the right password still opens the device");
     core.remote_sync(None)
         .expect("and syncs the account's vault");
-    core.follow_preferred_storage().expect("follow the server");
     let item = core
         .item_get(account.item_id)
         .expect("the account's item is readable");
