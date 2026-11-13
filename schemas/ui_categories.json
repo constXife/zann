@@ -77,7 +77,7 @@
     {
       "id": "infra",
       "labels": [{ "key": "nav.infrastructure" }],
-      "icon": "network",
+      "icon": "server",
       "view": "items_list",
       "scope": "both",
       "group": "items",

@@ -12,6 +12,7 @@ enum Symbols {
         case "card": return "creditcard.fill"
         case "person": return "person.crop.circle.fill"
         case "network": return "network"
+        case "server": return "server.rack"
         case "list": return "list.bullet"
         case "trash": return "trash"
         default: return "folder"
