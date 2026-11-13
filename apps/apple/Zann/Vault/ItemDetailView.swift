@@ -97,9 +97,11 @@ private struct ItemDetailContent: View {
         }
     }
 
+    /// The type, after the folder the item lives in. `path` ends with the
+    /// item's own name, which the title already shows.
     private var subtitle: String {
         let type = strings.typeLabel(detail.typeID)
-        return detail.path.isEmpty ? type : "\(detail.path) · \(type)"
+        return folderOf(path: detail.path).map { "\($0) · \(type)" } ?? type
     }
 
     private func copy(_ value: String, index: Int) {
