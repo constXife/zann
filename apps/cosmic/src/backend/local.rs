@@ -5,6 +5,7 @@ use zann_client_sqlite::local_vault::open_vault_at_file_location;
 use std::sync::Arc;
 use zann_client::app::local::LocalVaultService;
 
+pub use zann_client::app::local::StorageSyncState;
 use zann_client::app::local::{
     AppStatus, ApplePasswordsImportReport, ApplePasswordsPreflight, BackupExportReport,
     BackupImportOptions, HardwareKey, ItemCreate, ItemDetail, ItemHistoryDetail,
@@ -129,17 +130,22 @@ const SERVER_IDENTITY_CHANGED: &str = "server_identity_changed";
 /// before anything contacts a server: its changes would otherwise wait
 /// unseen.
 fn syncs(facade: &Facade, storage_id: String) -> Result<bool, SyncFailure> {
-    match facade.storage_link(storage_id)? {
+    let state = facade.storage_sync_state(storage_id)?;
+    match state.link {
         StorageLink::Local => Ok(false),
         StorageLink::Connected => Ok(true),
-        StorageLink::Disconnected {
-            server_url,
-            pending_changes,
-        } => Err(SyncFailure::Disconnected {
-            server_url,
-            pending_changes,
+        StorageLink::Disconnected => Err(SyncFailure::Disconnected {
+            server_url: state.server_url,
+            pending_changes: state.pending_changes,
         }),
     }
+}
+
+/// What the sync indicator shows about this storage.
+pub fn sync_state(facade: &Facade, storage_id: String) -> Result<StorageSyncState, String> {
+    facade
+        .storage_sync_state(storage_id)
+        .map_err(|err| err.to_string())
 }
 
 pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailure> {

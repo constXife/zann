@@ -211,54 +211,12 @@ impl cosmic::Application for App {
         &mut self.core
     }
 
-    /// App-level actions live beside the nav toggle instead of taking room
-    /// from the item list. The menu stays the same shape while commands that
-    /// do not apply to the current screen become disabled.
     fn header_start(&self) -> Vec<Element<'_, Self::Message>> {
-        if matches!(self.shell, Shell::Blocked(_)) {
-            return Vec::new();
-        }
+        self.header_menu()
+    }
 
-        let lock = if self.is_unlocked() {
-            menu::Item::Button
-        } else {
-            menu::Item::ButtonDisabled
-        }(
-            t("common.lock"),
-            Some(widget::icon::from_name("system-lock-screen-symbolic").handle()),
-            Action::Lock,
-        );
-        let settings = if self.can_open_settings() {
-            menu::Item::Button
-        } else {
-            menu::Item::ButtonDisabled
-        }(
-            t("common.settings"),
-            Some(widget::icon::from_name("preferences-system-symbolic").handle()),
-            Action::Settings,
-        );
-        let items = menu::items(
-            key_binds(),
-            vec![
-                lock,
-                settings,
-                menu::Item::Divider,
-                menu::Item::Button(
-                    t("common.quit"),
-                    Some(widget::icon::from_name("application-exit-symbolic").handle()),
-                    Action::Quit,
-                ),
-            ],
-        );
-        let root = widget::button::icon(widget::icon::from_name("open-menu-symbolic"))
-            .class(cosmic::theme::Button::MenuRoot)
-            .apply(Element::from)
-            .apply(widget::RcElementWrapper::new);
-
-        vec![menu::bar(vec![menu::Tree::with_children(root, items)])
-            .item_width(menu::ItemWidth::Uniform(240))
-            .item_height(menu::ItemHeight::Uniform(36))
-            .into()]
+    fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
+        self.header_sync_status()
     }
 
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
@@ -990,4 +948,5 @@ fn blocked_view(reason: &str) -> Element<'_, Message> {
     )
 }
 
+mod header;
 mod window_lifecycle;

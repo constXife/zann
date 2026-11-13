@@ -23,10 +23,37 @@ impl State {
         })
     }
 
-    /// A local write committed: the schedule pushes it shortly.
+    /// A local write committed: the schedule pushes it shortly, and the
+    /// indicator counts it until then.
     pub(super) fn local_change(&mut self, session: &Session) -> Task<Message> {
         session.auto_sync().local_change(Instant::now());
-        self.arm_auto_sync(session)
+        Task::batch([self.arm_auto_sync(session), Self::load_sync_state(session)])
+    }
+
+    /// Runs the sync the schedule admitted with `ticket`, scheduled or asked
+    /// for, and shows it as running until it ends.
+    pub(super) fn start_sync(
+        &mut self,
+        ticket: AutoSyncTicket,
+        session: &Session,
+    ) -> Task<Message> {
+        self.syncing = true;
+        let facade = session.facade();
+        let storage_id = local::current_storage_id(&facade);
+        let list_generation = self.list_generation;
+        let query = (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
+        cosmic::task::future(async move {
+            let synced = storage_id.clone();
+            let result = off_thread(move || Ok(local::sync_and_reload(&facade, synced, query)))
+                .await
+                .unwrap_or_else(|err| Err(local::SyncFailure::Other(err)));
+            Message::AutoSynced {
+                ticket,
+                storage_id,
+                list_generation,
+                result,
+            }
+        })
     }
 
     pub(super) fn update_auto_sync(&mut self, message: Message, session: &Session) -> Outcome {
@@ -38,23 +65,7 @@ impl State {
                 let Some(ticket) = session.auto_sync().take_due(Instant::now()) else {
                     return Outcome::Task(self.arm_auto_sync(session));
                 };
-                let facade = session.facade();
-                let storage_id = local::current_storage_id(&facade);
-                let list_generation = self.list_generation;
-                let query = (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
-                return Outcome::Task(cosmic::task::future(async move {
-                    let synced = storage_id.clone();
-                    let result =
-                        off_thread(move || Ok(local::sync_and_reload(&facade, synced, query)))
-                            .await
-                            .unwrap_or_else(|err| Err(local::SyncFailure::Other(err)));
-                    Message::AutoSynced {
-                        ticket,
-                        storage_id,
-                        list_generation,
-                        result,
-                    }
-                }));
+                return Outcome::Task(self.start_sync(ticket, session));
             }
 
             Message::AutoSynced {
@@ -67,7 +78,9 @@ impl State {
                     // Started before a lock; this vault never asked for it.
                     return Outcome::None;
                 }
-                let arm = self.arm_auto_sync(session);
+                self.syncing = false;
+                let arm =
+                    Task::batch([self.arm_auto_sync(session), Self::load_sync_state(session)]);
                 let page = match result {
                     Ok(page) => {
                         if self.error.is_some() && self.error == self.sync_error {
