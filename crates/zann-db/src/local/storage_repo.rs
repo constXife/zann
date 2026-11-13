@@ -227,13 +227,15 @@ impl<'a> LocalStorageRepo<'a> {
         name: &str,
         server_fingerprint: &str,
         auth_method: AuthMethod,
+        account_subject: &str,
     ) -> Result<bool, sqlx_core::Error> {
         query!(
             r#"
             UPDATE storages
             SET name = ?1,
                 server_fingerprint = ?2,
-                auth_method = ?3
+                auth_method = ?3,
+                account_subject = ?13
             WHERE id = ?4
               AND kind = ?5
               AND sync_config_repository_fp IS NULL
@@ -256,7 +258,8 @@ impl<'a> LocalStorageRepo<'a> {
             expected.server_fingerprint.as_deref(),
             expected.account_subject.as_deref(),
             expected.personal_vaults_enabled,
-            expected.auth_method.map(|value| value.as_i32())
+            expected.auth_method.map(|value| value.as_i32()),
+            account_subject
         )
         .execute(self.pool)
         .await

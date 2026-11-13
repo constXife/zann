@@ -489,6 +489,12 @@ impl SqliteSyncStore {
         personal_vaults_enabled: bool,
     ) -> Result<ResolvedSyncTarget, SyncStoreError> {
         let expected = target_binding_from_generation(target, &generation, &self.master_key)?;
+        let snapshot = self.config.snapshot().map_err(map_config_lease_error)?;
+        let identity_email = snapshot
+            .config()
+            .identity
+            .as_ref()
+            .and_then(|identity| identity.email.as_deref());
         self.database.verify_identity().await?;
         let storage_repository = LocalStorageRepo::new(self.database.pool());
         let stored = storage_repository
@@ -499,7 +505,7 @@ impl SqliteSyncStore {
             if ensure_storage_matches_target(&stored, &expected).is_err()
                 && stored.kind == StorageKind::Remote
                 && stored.server_url.as_deref() == Some(expected.address.as_str())
-                && stored.account_subject.as_deref() == Some(expected.account_subject.as_str())
+                && same_account(&stored, &expected.account_subject, identity_email)
             {
                 // A storage a new connection took over (see
                 // `AppSyncStoreFactory::release_storage`) learns what its
@@ -511,6 +517,7 @@ impl SqliteSyncStore {
                         &expected.display_name,
                         &expected.server_fingerprint,
                         expected.auth_method,
+                        &expected.account_subject,
                     )
                     .await
                     .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
@@ -1520,6 +1527,23 @@ fn local_generation_proof(generation: &AuthorizedTargetGeneration) -> LocalSyncG
     )
 }
 
+/// Whether a storage a new connection takes over belongs to the account it
+/// authorized: the same canonical account subject, or, for a storage the
+/// legacy desktop app recorded under the account's email rather than its
+/// subject, that email as this client's account identity names it. A
+/// canonical subject never matches by email.
+fn same_account(
+    stored: &LocalStorage,
+    account_subject: &str,
+    identity_email: Option<&str>,
+) -> bool {
+    match stored.account_subject.as_deref() {
+        Some(subject) if subject == account_subject => true,
+        Some(subject) => Uuid::parse_str(subject).is_err() && identity_email == Some(subject),
+        None => false,
+    }
+}
+
 fn ensure_storage_matches_target(
     storage: &LocalStorage,
     target: &TargetBinding,
@@ -1977,6 +2001,39 @@ mod tests {
             storage_id,
             account_subject,
         }
+    }
+
+    #[test]
+    fn a_legacy_storage_matches_its_account_only_through_the_identity_email() {
+        let fixture = configured_fixture();
+        let subject = fixture.account_subject.to_string();
+        let with = |account_subject: Option<&str>| LocalStorage {
+            account_subject: account_subject.map(str::to_string),
+            ..matching_storage(&fixture)
+        };
+        let email = Some("owner@example.test");
+
+        assert!(same_account(&with(Some(&subject)), &subject, None));
+        assert!(same_account(
+            &with(Some("owner@example.test")),
+            &subject,
+            email
+        ));
+        assert!(!same_account(
+            &with(Some("other@example.test")),
+            &subject,
+            email
+        ));
+        assert!(!same_account(
+            &with(Some("owner@example.test")),
+            &subject,
+            None
+        ));
+        assert!(
+            !same_account(&with(Some(&Uuid::now_v7().to_string())), &subject, email),
+            "another account's subject never matches by email"
+        );
+        assert!(!same_account(&with(None), &subject, email));
     }
 
     #[test]

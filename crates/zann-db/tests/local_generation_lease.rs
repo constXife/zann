@@ -371,7 +371,8 @@ async fn a_released_storage_is_claimed_again_with_its_projection() {
             &fixture.storage,
             "Renamed",
             "new-fingerprint",
-            AuthMethod::Oidc
+            AuthMethod::Oidc,
+            "rebound-subject"
         )
         .await
         .expect("refused rebind"));
@@ -389,7 +390,8 @@ async fn a_released_storage_is_claimed_again_with_its_projection() {
             &fixture.storage,
             "Renamed",
             "new-fingerprint",
-            AuthMethod::Oidc
+            AuthMethod::Oidc,
+            "rebound-subject"
         )
         .await
         .expect("rebind released storage"));
@@ -399,7 +401,8 @@ async fn a_released_storage_is_claimed_again_with_its_projection() {
                 &fixture.storage,
                 "Renamed",
                 "new-fingerprint",
-                AuthMethod::Oidc
+                AuthMethod::Oidc,
+                "rebound-subject"
             )
             .await
             .expect("stale rebind"),
@@ -417,7 +420,7 @@ async fn a_released_storage_is_claimed_again_with_its_projection() {
     );
     assert_eq!(rebound.auth_method, Some(AuthMethod::Oidc));
     assert_eq!(rebound.server_url, fixture.storage.server_url);
-    assert_eq!(rebound.account_subject, fixture.storage.account_subject);
+    assert_eq!(rebound.account_subject.as_deref(), Some("rebound-subject"));
 
     let claimed = vaults
         .bind_cache_key_fingerprints_leased(&proof(&rebound), &other_target, &bindings)
