@@ -278,6 +278,17 @@ impl SyncEngine {
         let vault_count = reconciled.vaults().len();
         let mut pages_committed = 0_usize;
         let mut changes_committed = 0_usize;
+        self.progress.report(
+            SyncProgress::new(
+                operation_id,
+                SyncProgressPhase::CatalogCommitted,
+                0,
+                vault_count,
+                0,
+                0,
+            )
+            .with_storage(resolved.storage_id()),
+        );
         // Catalog reconciliation may already have committed metadata or key
         // state. Cancellation after it is therefore a successful partial
         // outcome even before the first pull page.
@@ -626,6 +637,18 @@ impl SyncEngine {
                 changes_committed = next_total;
                 cursor = Some(next_cursor);
                 last_seq = page_last_seq;
+
+                self.progress.report(
+                    SyncProgress::new(
+                        operation_id,
+                        SyncProgressPhase::PageCommitted,
+                        vault_index,
+                        vault_count,
+                        pages_committed,
+                        changes_committed,
+                    )
+                    .with_storage(resolved.storage_id()),
+                );
 
                 if !has_more {
                     break;
@@ -1021,6 +1044,8 @@ mod tests {
         assert_eq!(refused.kind(), SyncErrorKind::ServerIdentityChanged);
         assert_eq!(refused.stage(), SyncStage::Authorization);
     }
+    mod progress_tests;
+
     const FINGERPRINT: &str = "server-fingerprint";
     const TIMESTAMP: &str = "2025-01-02T03:04:05Z";
 

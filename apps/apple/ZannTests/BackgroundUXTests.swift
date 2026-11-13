@@ -19,10 +19,10 @@ class UXDelayedCore: CoreFacade {
 
     override func storageSyncState(storageId: String) throws -> StorageSyncStateFfi {
         StorageSyncStateFfi(link: .connected, serverUrl: "https://fixture.example.test",
-                            pendingChanges: 0, lastSyncedAt: nil)
+                            pendingChanges: 0, lastSyncedAt: "2026-11-13T00:00:00Z")
     }
 
-    override func remoteSync(storageId: String?) throws -> SyncOutcomeFfi {
+    override func remoteSync(storageId: String?, progress: SyncCommitObserver?) throws -> SyncOutcomeFfi {
         onSync?()
         onSyncStorage?(storageId)
         if let syncGate, syncGate.wait(timeout: .now() + 5) != .success {
@@ -72,8 +72,8 @@ private final class BootstrapCore: UXDelayedCore {
         status.serverConnected = true
         return status
     }
-    override func remoteSync(storageId: String?) throws -> SyncOutcomeFfi {
-        let result = try super.remoteSync(storageId: storageId)
+    override func remoteSync(storageId: String?, progress: SyncCommitObserver?) throws -> SyncOutcomeFfi {
+        let result = try super.remoteSync(storageId: storageId, progress: progress)
         stateLock.lock()
         catalogReady = true
         stateLock.unlock()

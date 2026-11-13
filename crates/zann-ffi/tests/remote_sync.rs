@@ -92,7 +92,7 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
     let storage_id = connection.storage_id();
     core.initialize_master_password(master_password.clone())
         .expect("device A creates the vault");
-    core.remote_sync(None)
+    core.remote_sync(None, None)
         .expect("device A publishes the personal vault");
     assert_in_personal_vault(&core, &storage_id);
 
@@ -106,7 +106,7 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
     let item_id = core
         .debug_create_kv_item("pushed".into(), "key".into(), "value".into())
         .expect("device A creates an item");
-    core.remote_sync(None).expect("device A pushes it");
+    core.remote_sync(None, None).expect("device A pushes it");
 
     let device_b = tempfile::tempdir().expect("tempdir");
     let database_b = device_b.path().join("local.sqlite");
@@ -130,7 +130,7 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
     let storage_id = connection.storage_id();
     core.unlock(master_password.clone())
         .expect("device B derives the account's master key");
-    core.remote_sync(None).expect("device B pulls");
+    core.remote_sync(None, None).expect("device B pulls");
     assert_in_personal_vault(&core, &storage_id);
     let item = core
         .item_get(item_id.clone())
@@ -180,11 +180,11 @@ fn publish_account(url: &str) -> Account {
         .expect("register");
     core.initialize_master_password(account.master_password.clone())
         .expect("create the vault");
-    core.remote_sync(None).expect("publish the vault");
+    core.remote_sync(None, None).expect("publish the vault");
     let item_id = core
         .debug_create_kv_item("pushed".into(), "key".into(), "value".into())
         .expect("create an item");
-    core.remote_sync(None).expect("push it");
+    core.remote_sync(None, None).expect("push it");
     Account { item_id, ..account }
 }
 
@@ -231,7 +231,7 @@ fn a_mistyped_master_password_never_binds_a_new_device() {
         .expect_err("the typo opens nothing after a restart either");
     core.unlock(account.master_password.clone())
         .expect("the right password still opens the device");
-    core.remote_sync(None)
+    core.remote_sync(None, None)
         .expect("and syncs the account's vault");
     let item = core
         .item_get(account.item_id)

@@ -45,6 +45,11 @@ ownership.
   Server/vault selectors remain usable during network sync. Progress belongs
   to the storage being synced; completion must preserve explicit navigation,
   including when the user leaves a context and returns before an old read ends.
+- On a new device, macOS shows an explicit first-sync explanation before the
+  first cache exists. Committed catalog metadata exposes server/vault navigation
+  immediately; committed pull pages progressively populate the current list.
+  An unfinished first pull must not be presented as an empty vault. Subsequent
+  background sync keeps the compact sidebar indicator and usable cached content.
 - macOS keeps the detail layout stable while replacing an item. Retained
   content is masked and inactive until the requested item is ready; reveal and
   copy feedback never carry across selections.

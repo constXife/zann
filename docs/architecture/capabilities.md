@@ -145,6 +145,12 @@ default defined by `zann-ui-core::settings`.
   interrupt them. Runtime/process shutdown is recovered by reading the atomic
   `(cursor, last_seq)` checkpoint before any retry; an ambiguous live COMMIT
   result is surfaced as `CommitOutcomeUnknown` and is never blindly retried.
+  Durable `CatalogCommitted` and `PageCommitted` progress is emitted only after
+  validated commit receipts. Notices expose the local storage identity and
+  counters, never item data. The native local port coalesces notices and
+  publishes first-catalog selection outside the Tokio entry context under the
+  existing key-identity/generation lease. FFI forwards metadata callbacks;
+  shells coalesce bounded SQLite projection reads and preserve navigation.
   Catalog reconciliation requests exactly the first 200 entries with explicit
   offset and ascending order, and accepts only a short page (at most 199): a
   full page is treated as potentially truncated and causes zero reconciliation.

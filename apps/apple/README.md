@@ -95,9 +95,9 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   While unlocked the vault syncs on the core's `AutoSyncSchedule`: a couple
   of seconds after each save and every minute otherwise, one sync at a time;
   ⌘R syncs on demand and lock stops it. Lock is available through ⌘L and
-  the Vault menu; it has no toolbar button. A vault that only lives on this Mac
-  has no sync. The sidebar header selects the server/account storage with its
-  compact sync icon; the vault selector stays in the row below.
+  the Vault menu; it has no toolbar button. The sidebar header selects the
+  server/account storage with its compact sync icon; the vault selector stays
+  in the row below.
   Sync progress stays in that icon. Clicking it shows the server address, last
   completed sync, errors and sync/reconnect/forget actions; no workspace banner
   appears during synchronization.
@@ -105,6 +105,12 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   follows its original server; a late completion reloads only the current
   context and never restores a previous selection. Explicit navigation also
   is preserved when the first catalog arrives.
+  The local port reports durable catalog/page commits through a metadata-only
+  FFI callback. The first catalog exposes server/vault selectors before the
+  pull completes; each committed page can refresh the current list. Both the
+  Rust bridge and Swift relay retain only the latest pending notice, with one
+  UI reload at a time. First-sync empty views explain that items are arriving;
+  cached background sync does not replace the workspace with a loading screen.
 
 - `Zann/SettingsView.swift` is the Settings window (⌘,) over the shared
   device preferences. `Zann/PreferencesFile.swift` keeps them in this app's

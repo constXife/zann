@@ -15,7 +15,21 @@ struct ItemList: View {
                 }
         }
         .overlay {
-            if vault.visibleItems.isEmpty && (vault.searching || vault.loadingMore || vault.switching) {
+            if vault.visibleItems.isEmpty && vault.awaitingFirstSync {
+                VStack(spacing: 12) {
+                    if let error = vault.syncError, !vault.syncing {
+                        Text(strings("status.syncError")).font(.headline)
+                        Text(error).foregroundStyle(.secondary)
+                        Button(strings("common.retry")) { Task { await vault.sync() } }
+                    } else {
+                        ProgressView()
+                        Text(strings("sync.firstSyncTitle")).font(.headline)
+                        Text(strings("sync.firstSyncBody")).foregroundStyle(.secondary)
+                    }
+                }
+                .multilineTextAlignment(.center)
+                .padding(24)
+            } else if vault.visibleItems.isEmpty && (vault.searching || vault.loadingMore || vault.switching) {
                 ProgressView()
             } else if vault.visibleItems.isEmpty {
                 VStack(spacing: 12) {

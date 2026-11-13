@@ -30,6 +30,8 @@ struct ItemDetailView: View {
                     if showLoadingIndicator { ProgressView() }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if vault.awaitingFirstSync && vault.visibleItems.isEmpty {
+                Color.clear
             } else {
                 placeholder(strings("items.detailsHint"))
             }

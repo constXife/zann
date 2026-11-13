@@ -152,7 +152,7 @@ pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailu
         syncs(facade, storage_id)?;
     }
     facade
-        .remote_sync(storage_id)
+        .remote_sync(storage_id, None)
         .map(|_| ())
         .map_err(SyncFailure::from)
 }
@@ -170,7 +170,7 @@ pub fn sync_and_reload(
     if !syncs(facade, storage_id.clone())? {
         return Ok(None);
     }
-    let outcome = facade.remote_sync(Some(storage_id))?;
+    let outcome = facade.remote_sync(Some(storage_id), None)?;
     if outcome.changes_committed == 0 {
         return Ok(None);
     }
@@ -183,7 +183,7 @@ pub fn sync_and_reload(
 /// still-empty session to that server's personal vault.
 pub fn sync_new_server(facade: &Facade, storage_id: String) -> Result<(), String> {
     facade
-        .remote_sync(Some(storage_id))
+        .remote_sync(Some(storage_id), None)
         .map(|_| ())
         .map_err(|err| err.to_string())
 }
