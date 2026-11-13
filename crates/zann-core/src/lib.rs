@@ -8,6 +8,7 @@
 pub mod api;
 pub mod auth;
 pub mod constants;
+pub mod item_subtitle;
 pub mod models;
 pub mod security_profile;
 pub mod services;
@@ -15,6 +16,7 @@ pub mod services;
 pub use crate::api::*;
 pub use crate::auth::*;
 pub use crate::constants::*;
+pub use crate::item_subtitle::{item_subtitle, ItemSubtitle};
 pub use crate::models::*;
 pub use crate::security_profile::*;
 pub use crate::services::*;

@@ -3,8 +3,9 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use zann_core::{
-    ChangeType, EncryptedPayload, ItemCounts, ItemDetail, ItemListParams, ItemPreview,
-    ItemPreviewPage, ItemsService, ServiceError, ServiceResult, StorageKind, SyncStatus,
+    item_subtitle, ChangeType, EncryptedPayload, ItemCounts, ItemDetail, ItemListParams,
+    ItemPreview, ItemPreviewPage, ItemsService, ServiceError, ServiceResult, StorageKind,
+    SyncStatus,
 };
 
 use crate::local::{
@@ -139,18 +140,31 @@ impl<'a> ItemsService for LocalServices<'a> {
         } else {
             None
         };
+        // Subtitles decrypt only the page returned, with the vault key
+        // unwrapped once; a vault whose key does not open fails the list, as
+        // it fails every item. A single payload that does not open leaves its
+        // row without a subtitle, and opening the item reports the error, so
+        // one damaged item never hides the rest.
+        let keys = self.vault_payload_keys(storage_id, vault_id).await?;
         Ok(ItemPreviewPage {
             items: items
                 .into_iter()
-                .map(|item| ItemPreview {
-                    id: item.id,
-                    vault_id: item.vault_id,
-                    path: item.path,
-                    name: item.name,
-                    type_id: item.type_id,
-                    sync_status: item.sync_status,
-                    updated_at: item.updated_at,
-                    deleted_at: item.deleted_at,
+                .map(|item| {
+                    let subtitle = self
+                        .open_payload(&keys, item.id, &item.payload_enc)
+                        .ok()
+                        .and_then(|payload| item_subtitle(&item.type_id, &payload));
+                    ItemPreview {
+                        id: item.id,
+                        vault_id: item.vault_id,
+                        path: item.path,
+                        name: item.name,
+                        type_id: item.type_id,
+                        subtitle,
+                        sync_status: item.sync_status,
+                        updated_at: item.updated_at,
+                        deleted_at: item.deleted_at,
+                    }
                 })
                 .collect(),
             next_cursor,

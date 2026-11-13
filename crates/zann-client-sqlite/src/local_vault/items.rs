@@ -23,6 +23,7 @@ impl LocalVault {
                     title: item.name,
                     path: item.path,
                     type_id: item.type_id,
+                    subtitle: item.subtitle,
                     deleted: item.deleted_at.is_some(),
                 })
                 .collect(),

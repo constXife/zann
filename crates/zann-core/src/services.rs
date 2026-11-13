@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{EncryptedPayload, SyncStatus, VaultKind};
+use crate::{EncryptedPayload, ItemSubtitle, SyncStatus, VaultKind};
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema)]
@@ -138,6 +138,8 @@ pub struct ItemPreview {
     pub path: String,
     pub name: String,
     pub type_id: String,
+    /// Who or where the item is for, from its payload; see `item_subtitle`.
+    pub subtitle: Option<ItemSubtitle>,
     pub sync_status: SyncStatus,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
