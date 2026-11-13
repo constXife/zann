@@ -4,7 +4,7 @@
 //! frontend: the navigation categories described by `schemas/ui_categories.json`,
 //! the folder tree derived from item paths, the client-side item filter, TOTP
 //! code generation, item-detail field projection, server URL normalization,
-//! settings semantics and the translation catalogue.
+//! settings semantics, the sync status indicator and the translation catalogue.
 //!
 //! It uses canonical domain payload types from `zann-core`, with no database
 //! adapter, HTTP client, UI toolkit or FFI. Callers adapt their own list item
@@ -20,6 +20,7 @@ pub mod item_detail;
 pub mod item_editor;
 pub mod server_url;
 pub mod settings;
+pub mod sync_status;
 pub mod totp;
 
 pub use categories::{
@@ -34,4 +35,5 @@ pub use item::{ItemLike, ItemView};
 pub use item_detail::{project_item_fields, ItemDetailField, MASKED_VALUE};
 pub use server_url::normalize_server_url;
 pub use settings::{DevicePreferences, SettingsSection};
+pub use sync_status::{sync_indicator, SyncAction, SyncIndicator, SyncLink, SyncStatusInput};
 pub use totp::{generate_totp, TotpCode, TotpError, TotpParams};
