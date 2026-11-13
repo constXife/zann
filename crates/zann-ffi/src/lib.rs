@@ -5,6 +5,8 @@ use zann_client_sqlite::local_vault as native;
 
 mod records;
 pub use records::*;
+mod sync_progress;
+pub use sync_progress::*;
 mod auto_sync;
 pub use auto_sync::*;
 mod conversions;
@@ -299,12 +301,6 @@ impl CoreFacade {
     pub fn initialize_master_password(&self, password: String) -> CoreResult<VaultStatus> {
         self.inner
             .initialize_master_password(password)
-            .map(|value| value.into())
-            .map_err(Into::into)
-    }
-    pub fn remote_sync(&self, storage_id: Option<String>) -> CoreResult<SyncOutcomeFfi> {
-        self.inner
-            .remote_sync(storage_id)
             .map(|value| value.into())
             .map_err(Into::into)
     }

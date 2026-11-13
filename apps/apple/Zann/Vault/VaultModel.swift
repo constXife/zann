@@ -102,6 +102,13 @@ final class VaultModel: ObservableObject {
     @Published private(set) var editor: ItemEditorModel?
     /// Whether a server holds this vault's storage, so syncing means something.
     @Published private(set) var canSync: Bool
+    /// The selected server has not committed its first cache checkpoint yet.
+    var awaitingFirstSync: Bool {
+        guard canSync else { return false }
+        if storageID == nil { return true }
+        return !vaults.isEmpty && syncState?.link == .connected &&
+            syncState?.lastSyncedAt == nil && (running == nil || syncing)
+    }
     @Published private(set) var syncingStorageID: String?
     /// Progress belongs to its server, even after navigation moves elsewhere.
     var syncing: Bool { running != nil && syncingStorageID == storageID }
@@ -137,11 +144,14 @@ final class VaultModel: ObservableObject {
     private var autoSync: Task<Void, Never>?
     /// The sync the schedule admitted, until it ends.
     @Published private var running: Task<Void, Never>?
+    private var syncRunID: UUID?
+    private var syncRelay: SyncCommitRelay?
     /// Invalidates UI reads across vault/storage switches, including A → B → A.
     private var contextGeneration = 0
     /// A completed pull may need a fresh page after a local switch finishes.
     private struct SyncRefresh { let storageID: String? }
     private var syncRefreshContext: SyncRefresh?
+    private var refreshingSync = false
     /// The loaded pages of the list for `appliedQuery`.
     private var items: [ItemSummary] = []
     private var nextCursor: String?
@@ -207,6 +217,9 @@ final class VaultModel: ObservableObject {
     /// The vault is locking: nothing more is due, and a sync still running
     /// (which the core's lock cancels) schedules nothing.
     func stopAutoSync() {
+        contextGeneration += 1
+        syncRunID = nil
+        syncRelay?.cancel()
         detailLoader.cancel()
         detailLoading = false
         autoSync?.cancel()
@@ -248,7 +261,22 @@ final class VaultModel: ObservableObject {
     /// screen if anything changed; the core picks the server and the vault to
     /// show. A Mac that never signed in to a server has nothing to sync.
     private func run(_ ticket: AutoSyncTicketFfi, storage wantedStorage: String?) async {
+        let runID = UUID()
+        syncRunID = runID
+        let bootstrapGeneration = contextGeneration
+        let relay = SyncCommitRelay { [weak self] update in
+            guard let self, self.syncRunID == runID else { return }
+            if self.syncingStorageID == nil { self.syncingStorageID = update.storageId }
+            guard self.storageID == update.storageId ||
+                (self.storageID == nil && self.contextGeneration == bootstrapGeneration) else { return }
+            self.syncRefreshContext = SyncRefresh(storageID: self.storageID)
+            await self.refreshSyncedContents(reloadDetail: false)
+        }
+        syncRelay = relay
         defer {
+            relay.cancel()
+            syncRelay = nil
+            syncRunID = nil
             running = nil
             syncingStorageID = nil
             schedule.finished(ticket: ticket)
@@ -264,7 +292,7 @@ final class VaultModel: ObservableObject {
                 } else if try !core.appStatus().serverConnected { return .noServer }
                 let outcome: SyncOutcomeFfi
                 do {
-                    outcome = try core.remoteSync(storageId: wantedStorage)
+                    outcome = try core.remoteSync(storageId: wantedStorage, progress: relay)
                 } catch let failure as CoreError {
                     guard case .Sync(serverIdentityChanged, _) = failure,
                           let wantedStorage, let stale = try Self.staleServer(core, storageID: wantedStorage)
@@ -274,12 +302,13 @@ final class VaultModel: ObservableObject {
                 return .completed(changed: outcome.changesCommitted > 0)
             }
         }.value
-        guard wantedStorage == storageID else { return }
+        await relay.finish()
+        guard syncRunID == runID, syncingStorageID == storageID else { return }
         switch result {
         case .success(.completed(let changed)):
             succeeded()
             if changed || wantedStorage == nil || vaultID == nil {
-                syncRefreshContext = SyncRefresh(storageID: wantedStorage)
+                syncRefreshContext = SyncRefresh(storageID: storageID)
                 await refreshSyncedContents()
             }
         case .success(.noServer):
@@ -311,14 +340,17 @@ final class VaultModel: ObservableObject {
 
     /// Reload the context on screen, never the vault a sync started from.
     /// If navigation supersedes this read, its completion drains the refresh.
-    private func refreshSyncedContents() async {
-        guard let refresh = syncRefreshContext, !switching else { return }
+    private func refreshSyncedContents(reloadDetail: Bool = true) async {
+        guard !refreshingSync, let refresh = syncRefreshContext, !switching else { return }
+        refreshingSync = true
+        defer { refreshingSync = false }
         let wanted = refresh.storageID
         guard wanted == storageID, contextReady else {
             syncRefreshContext = nil
             return
         }
         let generation = contextGeneration
+        let revision = listGeneration
         let core = core
         let shown = trimmedQuery
         let loaded = items.count
@@ -329,8 +361,15 @@ final class VaultModel: ObservableObject {
         syncRefreshContext = nil
         switch result {
         case .success(let contents):
-            apply(contents)
-            if let selectedItemID { loadDetail(selectedItemID) }
+            if revision == listGeneration, shown == trimmedQuery {
+                apply(contents)
+                if reloadDetail, let selectedItemID { loadDetail(selectedItemID) }
+            } else {
+                // Search/pagination owns the newer list. Its revision must not
+                // prevent the first committed server/vault context appearing.
+                applyContext(contents)
+                categories = scope.map { categoryViews(counts: counts, scope: $0) } ?? []
+            }
         case .failure(let failure): syncError = strings.message(for: failure)
         }
     }
@@ -583,7 +622,7 @@ final class VaultModel: ObservableObject {
     /// Shows `contents` in place of everything loaded. A search started for
     /// the list it replaces is dropped, since the core may have switched
     /// vaults since; one for the query typed now starts again.
-    private func apply(_ contents: Contents) {
+    private func applyContext(_ contents: Contents) {
         vaults = contents.vaults
         vaultID = contents.vault?.id
         storages = contents.storages
@@ -593,6 +632,10 @@ final class VaultModel: ObservableObject {
         if let state = contents.syncState { applySyncState(state) }
         contextReady = true
         scope = contents.vault?.scope
+    }
+
+    private func apply(_ contents: Contents) {
+        applyContext(contents)
         search?.cancel()
         search = nil
         searching = false

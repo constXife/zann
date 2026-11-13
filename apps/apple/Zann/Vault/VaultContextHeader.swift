@@ -10,19 +10,25 @@ struct VaultContextHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Picker(strings("nav.serverAccount"), selection: storageSelection) {
-                    if vault.storageID == nil { Text(strings("nav.serverAccount")).tag(String?.none) }
-                    ForEach(vault.storages, id: \.id) { storage in
-                        Label(storage.displayName, systemImage: storage.serverUrl == nil ? "desktopcomputer" : "server.rack")
-                            .lineLimit(1)
-                            .tag(Optional(storage.id))
+                if vault.storages.isEmpty && vault.awaitingFirstSync {
+                    Label(strings("sync.firstSyncTitle"), systemImage: "server.rack")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Picker(strings("nav.serverAccount"), selection: storageSelection) {
+                        if vault.storageID == nil { Text(strings("nav.serverAccount")).tag(String?.none) }
+                        ForEach(vault.storages, id: \.id) { storage in
+                            Label(storage.displayName, systemImage: storage.serverUrl == nil ? "desktopcomputer" : "server.rack")
+                                .lineLimit(1)
+                                .tag(Optional(storage.id))
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                    .disabled(vault.editor != nil || vault.switching)
+                    .help(vault.storages.first(where: { $0.id == vault.storageID })?.serverUrl ?? strings("nav.serverAccount"))
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
-                .disabled(vault.editor != nil || vault.switching)
-                .help(vault.storages.first(where: { $0.id == vault.storageID })?.serverUrl ?? strings("nav.serverAccount"))
                 if let indicator = vault.indicator {
                     SyncIndicatorButton(
                         indicator: indicator, syncState: vault.syncState,

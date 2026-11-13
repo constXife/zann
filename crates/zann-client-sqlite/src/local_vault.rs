@@ -422,6 +422,7 @@ pub use ports::*;
 mod unlock;
 
 mod session;
+mod sync_progress;
 
 mod items;
 
@@ -579,8 +580,12 @@ impl LocalVaultService for LocalVault {
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus> {
         LocalVault::initialize_master_password(self, password)
     }
-    fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome> {
-        LocalVault::remote_sync(self, storage_id)
+    fn remote_sync(
+        &self,
+        storage_id: Option<String>,
+        progress: Option<&LocalSyncObserver>,
+    ) -> LocalResult<LocalSyncOutcome> {
+        LocalVault::remote_sync(self, storage_id, progress)
     }
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()> {
         LocalVault::sync_reset(self, storage_id)

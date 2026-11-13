@@ -2,6 +2,10 @@
 
 use super::*;
 
+/// Metadata-only durable sync notifications, delivered outside the async runtime
+/// and after releasing selection locks. Consumers may read the committed cache.
+pub type LocalSyncObserver = dyn Fn(crate::app::SyncProgress) + Send + Sync;
+
 pub trait LocalVaultService: Send + Sync {
     #[cfg(debug_assertions)]
     fn debug_create_kv_item(&self, path: String, key: String, value: String)
@@ -71,7 +75,11 @@ pub trait LocalVaultService: Send + Sync {
     fn current_storage_id(&self) -> Option<String>;
     fn app_status(&self) -> LocalResult<AppStatus>;
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus>;
-    fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome>;
+    fn remote_sync(
+        &self,
+        storage_id: Option<String>,
+        progress: Option<&LocalSyncObserver>,
+    ) -> LocalResult<LocalSyncOutcome>;
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()>;
     /// Whether a server connection syncs this storage (none does after
     /// [`Self::forget_server`] until the user connects again), with what a

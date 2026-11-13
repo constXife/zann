@@ -747,6 +747,8 @@
     "pending": "Pending"
   },
   "sync": {
+    "firstSyncTitle": "First sync",
+    "firstSyncBody": "Downloading your vaults. Items will appear as they arrive.",
     "details": "Sync details",
     "disconnected": "Not connected · {count} unsent",
     "syncing": "Syncing with {server}…",
