@@ -82,8 +82,12 @@ impl State {
                             t_args("items.syncFailed", &[("error", &failure.to_string())]);
                         self.error = Some(message.clone());
                         self.sync_error = Some(message);
-                        self.stale_server =
-                            (failure == local::SyncFailure::IdentityChanged).then_some(storage_id);
+                        self.stale_server = matches!(
+                            failure,
+                            local::SyncFailure::IdentityChanged
+                                | local::SyncFailure::Disconnected { .. }
+                        )
+                        .then(|| (storage_id, failure));
                         None
                     }
                 };
@@ -106,8 +110,8 @@ impl State {
 
             // Settings owns the recovery, the same one its own sync offers.
             Message::ReviewStaleServer => {
-                if let Some(storage_id) = self.stale_server_banner() {
-                    return Outcome::StaleServer(storage_id.to_string());
+                if let Some((storage_id, failure)) = self.stale_server_banner() {
+                    return Outcome::StaleServer(storage_id.clone(), failure.clone());
                 }
             }
 
@@ -129,9 +133,9 @@ impl State {
     }
 
     /// The stale server, while the banner its refusal left is still shown.
-    pub(super) fn stale_server_banner(&self) -> Option<&str> {
+    pub(super) fn stale_server_banner(&self) -> Option<&(String, local::SyncFailure)> {
         self.stale_server
-            .as_deref()
+            .as_ref()
             .filter(|_| self.error.is_some() && self.error == self.sync_error)
     }
 

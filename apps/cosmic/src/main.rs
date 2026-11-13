@@ -90,9 +90,9 @@ enum Message {
     /// A sync started from Settings ended; the ticket goes back to the
     /// session's schedule.
     ManualSynced(AutoSyncTicket, String, Result<(), SyncFailure>),
-    /// A scheduled sync found this storage's server changed its identity;
-    /// show the recovery Settings offers for it.
-    ReviewStaleServer(String),
+    /// A scheduled sync met a refusal only Settings recovers (a changed
+    /// server identity, or no connection left); show it there.
+    ReviewStaleServer(String, SyncFailure),
     Vault(vault::Message),
     /// Effects the shell owns because they leave the app.
     Copy(String),
@@ -481,14 +481,12 @@ impl cosmic::Application for App {
             }
             Message::Lock => return self.lock(),
             Message::OpenSettings => return self.open_settings(),
-            Message::ReviewStaleServer(storage_id) => {
+            Message::ReviewStaleServer(storage_id, failure) => {
                 let open = self.open_settings();
                 let section =
                     self.update_settings(settings::Message::Select(SettingsSection::Accounts));
-                let refusal = self.update_settings(settings::Message::Synced(
-                    storage_id,
-                    Err(SyncFailure::IdentityChanged),
-                ));
+                let refusal =
+                    self.update_settings(settings::Message::Synced(storage_id, Err(failure)));
                 return Task::batch([open, section, refusal]);
             }
             Message::Quit => return self.quit(),
@@ -689,8 +687,8 @@ impl cosmic::Application for App {
                         lift(feedback, Message::Vault),
                     ]),
                     vault::Outcome::Locked => cosmic::task::message(Message::Lock),
-                    vault::Outcome::StaleServer(storage_id) => {
-                        cosmic::task::message(Message::ReviewStaleServer(storage_id))
+                    vault::Outcome::StaleServer(storage_id, failure) => {
+                        cosmic::task::message(Message::ReviewStaleServer(storage_id, failure))
                     }
                 }
             }
@@ -700,7 +698,7 @@ impl cosmic::Application for App {
             | Message::OpenUrl(_)
             | Message::Lock
             | Message::OpenSettings
-            | Message::ReviewStaleServer(_)
+            | Message::ReviewStaleServer(..)
             | Message::Quit
             | Message::CloseRequested
             | Message::WindowClosed(_)

@@ -239,6 +239,14 @@ impl State {
                 section = section.add(self.stale_server_row(storage, stale));
                 continue;
             }
+            if let Some(gone) = self
+                .disconnected
+                .as_ref()
+                .filter(|gone| gone.storage_id == storage.id)
+            {
+                section = section.add(self.disconnected_row(storage, gone));
+                continue;
+            }
             let mut sync = widget::button::standard(t("settings.accounts.syncNow"));
             if !self.syncing {
                 sync = sync.on_press(Message::SyncNow(storage.id.clone()));
@@ -254,6 +262,30 @@ impl State {
                 .control(widget::button::standard(t("common.create")).on_press(Message::AddServer)),
         );
         widget::settings::view_column(vec![section.into()]).into()
+    }
+
+    /// The server storage no connection syncs: why, with its unsent changes,
+    /// in place of its sync control, and the way back to its server.
+    fn disconnected_row<'a>(
+        &self,
+        storage: &'a StorageSummary,
+        gone: &Disconnected,
+    ) -> Element<'a, Message> {
+        let mut reconnect = widget::button::suggested(t("settings.accounts.reconnect"));
+        if !self.busy && !self.syncing {
+            reconnect = reconnect.on_press(Message::Reconnect);
+        }
+        let reason = local::SyncFailure::Disconnected {
+            server_url: gone.server_url.clone(),
+            pending_changes: gone.pending_changes,
+        };
+        widget::column::with_capacity(3)
+            .push(widget::text::body(storage.name.clone()))
+            .push(widget::text::caption(reason.to_string()))
+            .push(reconnect)
+            .spacing(theme::spacing().space_xxs)
+            .width(Length::Fill)
+            .into()
     }
 
     /// The account whose server changed its identity: the error in place of

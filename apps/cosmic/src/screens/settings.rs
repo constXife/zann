@@ -53,6 +53,18 @@ pub struct State {
     verified: Option<Box<VerifyReport>>,
     /// A server that refused to sync because its identity changed.
     stale_server: Option<StaleServer>,
+    /// A server storage no connection syncs any more.
+    disconnected: Option<Disconnected>,
+}
+
+/// A server storage whose connection is gone: its items and unsent changes
+/// stay here, and reach the server again once the user connects to the same
+/// address and account, which takes the storage over.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Disconnected {
+    pub storage_id: String,
+    pub server_url: Option<String>,
+    pub pending_changes: u64,
 }
 
 /// A server whose identity changed, and what forgetting it leaves behind.
@@ -116,6 +128,8 @@ pub enum Message {
     CancelForget,
     ConfirmForget,
     Forgotten(Result<Option<String>, String>),
+    /// Connect again to the disconnected storage's server.
+    Reconnect,
     AddServer,
     Open(String),
     Close,
@@ -128,8 +142,8 @@ pub enum Outcome {
     Changed(Change),
     Sync(String),
     AddServer,
-    /// The stale server is forgotten; connect again, starting from the
-    /// address it was pinned to when there was one.
+    /// The stale server is forgotten, or the storage's connection is gone;
+    /// connect again, starting from its address when there is one.
     Reconnect {
         server_url: Option<String>,
     },
@@ -168,7 +182,12 @@ impl State {
             confirming: None,
             verified: None,
             stale_server: None,
+            disconnected: None,
         }
+    }
+
+    pub fn disconnected(&self) -> Option<&Disconnected> {
+        self.disconnected.as_ref()
     }
 
     pub fn stale_server(&self) -> Option<&StaleServer> {
@@ -526,6 +545,13 @@ impl State {
             }
             Message::Synced(storage_id, result) => {
                 self.syncing = false;
+                if self
+                    .disconnected
+                    .as_ref()
+                    .is_some_and(|gone| gone.storage_id == storage_id)
+                {
+                    self.disconnected = None;
+                }
                 match result {
                     Ok(()) => {
                         if self
@@ -535,6 +561,16 @@ impl State {
                         {
                             self.stale_server = None;
                         }
+                    }
+                    Err(local::SyncFailure::Disconnected {
+                        server_url,
+                        pending_changes,
+                    }) => {
+                        self.disconnected = Some(Disconnected {
+                            storage_id,
+                            server_url,
+                            pending_changes,
+                        });
                     }
                     Err(local::SyncFailure::IdentityChanged) => {
                         self.stale_server = Some(StaleServer {
@@ -622,6 +658,13 @@ impl State {
             Message::Forgotten(Err(err)) => {
                 self.busy = false;
                 self.error = Some(err);
+            }
+            Message::Reconnect => {
+                if let Some(gone) = self.disconnected.take() {
+                    return Outcome::Reconnect {
+                        server_url: gone.server_url,
+                    };
+                }
             }
             Message::AddServer => return Outcome::AddServer,
             Message::Open(target) => return Outcome::Open(target),

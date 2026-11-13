@@ -9,12 +9,12 @@ use zann_client::app::local::{
     AppStatus, ApplePasswordsImportReport, ApplePasswordsPreflight, BackupExportReport,
     BackupImportOptions, HardwareKey, ItemCreate, ItemDetail, ItemHistoryDetail,
     ItemHistorySummary, ItemSummary, ItemUpdate, ItemsFilter, LocalError, Page, RememberedUnlock,
-    Snapshot, SnapshotRestore, StorageSummary, VaultSummary, VerifyReport,
+    Snapshot, SnapshotRestore, StorageLink, StorageSummary, VaultSummary, VerifyReport,
 };
 use zann_ui_core::ItemCounts;
 
 use super::DatabaseLocation;
-use crate::i18n::t;
+use crate::i18n::{t, t_args};
 
 /// How many items a single `items_list` call pages in.
 pub const PAGE_LIMIT: u32 = 200;
@@ -83,6 +83,13 @@ pub enum SyncFailure {
     /// The server proves a different identity than the one this device
     /// pinned. Retrying cannot help; the only recovery is forgetting it.
     IdentityChanged,
+    /// No connection syncs this server storage, so nothing it holds reaches
+    /// the server. Connecting to `server_url` again with the same account
+    /// takes the storage and its pending changes over.
+    Disconnected {
+        server_url: Option<String>,
+        pending_changes: u64,
+    },
     Other(String),
 }
 
@@ -101,6 +108,15 @@ impl std::fmt::Display for SyncFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::IdentityChanged => f.write_str(&t("errors.server_identity_changed")),
+            Self::Disconnected {
+                pending_changes: 0, ..
+            } => f.write_str(&t("errors.server_disconnected")),
+            Self::Disconnected {
+                pending_changes, ..
+            } => f.write_str(&t_args(
+                "errors.server_disconnected_pending",
+                &[("count", &pending_changes.to_string())],
+            )),
             Self::Other(message) => f.write_str(message),
         }
     }
@@ -109,7 +125,27 @@ impl std::fmt::Display for SyncFailure {
 /// The stable code `zann-client` reports for a changed server identity.
 const SERVER_IDENTITY_CHANGED: &str = "server_identity_changed";
 
+/// Whether a server syncs the storage, refusing one whose connection is gone
+/// before anything contacts a server: its changes would otherwise wait
+/// unseen.
+fn syncs(facade: &Facade, storage_id: String) -> Result<bool, SyncFailure> {
+    match facade.storage_link(storage_id)? {
+        StorageLink::Local => Ok(false),
+        StorageLink::Connected => Ok(true),
+        StorageLink::Disconnected {
+            server_url,
+            pending_changes,
+        } => Err(SyncFailure::Disconnected {
+            server_url,
+            pending_changes,
+        }),
+    }
+}
+
 pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailure> {
+    if let Some(storage_id) = storage_id.clone() {
+        syncs(facade, storage_id)?;
+    }
     facade
         .remote_sync(storage_id)
         .map(|_| ())
@@ -117,16 +153,16 @@ pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailu
 }
 
 /// A scheduled sync of the open storage, the one "Sync now" in Settings runs
-/// for it, so a refusal names the storage its recovery acts on. `None` when
-/// no server syncs the storage (a local one, or one whose server was
-/// forgotten) or the sync changed nothing; otherwise the first page again,
-/// for `query`.
+/// for it, so a refusal names the storage its recovery acts on. `None` for a
+/// local storage or a sync that changed nothing; otherwise the first page
+/// again, for `query`. A server storage whose connection is gone is refused
+/// as [`SyncFailure::Disconnected`].
 pub fn sync_and_reload(
     facade: &Facade,
     storage_id: String,
     query: Option<String>,
 ) -> Result<Option<ItemsPage>, SyncFailure> {
-    if !facade.syncs_storage(storage_id.clone())? {
+    if !syncs(facade, storage_id.clone())? {
         return Ok(None);
     }
     let outcome = facade.remote_sync(Some(storage_id))?;
