@@ -1,6 +1,6 @@
 mod support;
 
-use zann_ffi::{CoreError, ItemCreate, ItemsFilter, Page};
+use zann_ffi::{CoreError, ItemCreate, ItemsFilter, Page, StorageLinkFfi};
 
 #[test]
 fn ffi_projects_local_commands_results_and_errors() {
@@ -54,7 +54,10 @@ fn a_storage_no_server_syncs_has_no_server_to_forget() {
         .expect("initialize");
     let storage = core.current_storage_id();
 
-    assert!(!core.syncs_storage(storage.clone()).expect("syncs storage"));
+    assert_eq!(
+        core.storage_link(storage.clone()).expect("storage link"),
+        StorageLinkFfi::Local
+    );
     assert_eq!(
         core.pending_change_count(storage.clone())
             .expect("pending count"),
@@ -70,4 +73,24 @@ fn a_storage_no_server_syncs_has_no_server_to_forget() {
         core.pending_change_count("not-a-storage".into()),
         Err(CoreError::InvalidArgument(_))
     ));
+}
+
+#[test]
+fn a_storage_without_its_connection_projects_what_waits_for_its_server() {
+    use zann_client::app::local::StorageLink;
+
+    assert_eq!(
+        StorageLinkFfi::from(StorageLink::Disconnected {
+            server_url: Some("https://zann.example.test".into()),
+            pending_changes: 3,
+        }),
+        StorageLinkFfi::Disconnected {
+            server_url: Some("https://zann.example.test".into()),
+            pending_changes: 3,
+        }
+    );
+    assert_eq!(
+        StorageLinkFfi::from(StorageLink::Connected),
+        StorageLinkFfi::Connected
+    );
 }

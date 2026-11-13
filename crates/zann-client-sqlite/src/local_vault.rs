@@ -546,8 +546,8 @@ impl LocalVaultService for LocalVault {
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()> {
         LocalVault::sync_reset(self, storage_id)
     }
-    fn syncs_storage(&self, storage_id: String) -> LocalResult<bool> {
-        LocalVault::syncs_storage(self, storage_id)
+    fn storage_link(&self, storage_id: String) -> LocalResult<StorageLink> {
+        LocalVault::storage_link(self, storage_id)
     }
     fn pending_change_count(&self, storage_id: String) -> LocalResult<u64> {
         LocalVault::pending_change_count(self, storage_id)

@@ -32,6 +32,15 @@ final class VaultModel: ObservableObject {
         let pendingChanges: UInt64
     }
 
+    /// The vault on screen is a server's, but no connection syncs it any
+    /// more: its server was forgotten, or its sign-in never reached this
+    /// Mac's config. Its unsent changes wait until the user connects to
+    /// `serverURL` again with the same account, which takes the vault over.
+    struct Disconnected: Equatable {
+        let serverURL: String?
+        let pendingChanges: UInt64
+    }
+
     /// The open vault's first page with the storage's vaults, loaded
     /// together so the picker and the list never disagree.
     struct Contents {
@@ -78,6 +87,8 @@ final class VaultModel: ObservableObject {
     @Published private(set) var syncError: String?
     /// Set while the last sync was refused for a changed server identity.
     @Published private(set) var staleServer: StaleServer?
+    /// Set while the last sync found the vault's server connection gone.
+    @Published private(set) var disconnected: Disconnected?
 
     private let core: CoreFacade
     private let strings: Strings
@@ -161,6 +172,7 @@ final class VaultModel: ObservableObject {
         case unchanged
         case changed(Contents)
         case identityChanged(StaleServer)
+        case disconnected(Disconnected)
     }
 
     /// Pushes local changes and pulls the server's, then reloads the page if
@@ -177,6 +189,7 @@ final class VaultModel: ObservableObject {
         let follow = followPending
         let result = await Task.detached(priority: .userInitiated) {
             Result { () -> Synced in
+                if let gone = try Self.disconnected(core) { return .disconnected(gone) }
                 guard try core.appStatus().serverConnected else { return .noServer }
                 let outcome: SyncOutcomeFfi
                 do {
@@ -203,14 +216,26 @@ final class VaultModel: ObservableObject {
         case .success(.noServer):
             canSync = false
             staleServer = nil
+            disconnected = nil
         case .success(.identityChanged(let stale)):
             canSync = true
             syncError = strings("errors.\(serverIdentityChanged)")
             staleServer = stale
+            disconnected = nil
+        case .success(.disconnected(let gone)):
+            canSync = true
+            syncError = gone.pendingChanges == 0
+                ? strings("errors.server_disconnected")
+                : strings(
+                    "errors.server_disconnected_pending", ["count": String(gone.pendingChanges)]
+                )
+            staleServer = nil
+            disconnected = gone
         case .failure(let failure):
             canSync = true
             syncError = strings.message(for: failure)
             staleServer = nil
+            disconnected = nil
         }
     }
 
@@ -219,6 +244,16 @@ final class VaultModel: ObservableObject {
         followPending = false
         syncError = nil
         staleServer = nil
+        disconnected = nil
+    }
+
+    /// The vault on screen when it is a server's and no connection syncs it,
+    /// checked before anything picks a server: otherwise its unsent changes
+    /// would wait unseen.
+    private nonisolated static func disconnected(_ core: CoreFacade) throws -> Disconnected? {
+        let link = try core.storageLink(storageId: core.currentStorageId())
+        guard case .disconnected(let serverURL, let pendingChanges) = link else { return nil }
+        return Disconnected(serverURL: serverURL, pendingChanges: pendingChanges)
     }
 
     /// The vault on screen and what forgetting its server leaves behind, or
@@ -228,7 +263,7 @@ final class VaultModel: ObservableObject {
     /// one the active connection syncs.
     private nonisolated static func staleServer(_ core: CoreFacade) throws -> StaleServer? {
         let storageID = core.currentStorageId()
-        guard try core.syncsStorage(storageId: storageID) else { return nil }
+        guard try core.storageLink(storageId: storageID) == .connected else { return nil }
         guard let storage = try core.listStorages().first(where: { $0.id == storageID }) else {
             throw CoreError.InvalidArgument("the vault on screen is not a known storage")
         }

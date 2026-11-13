@@ -379,14 +379,29 @@ fn validate_sqlite_sidecars(database_path: &Path) -> Result<(), sqlx_core::Error
         #[cfg(unix)]
         {
             use std::os::unix::fs::{MetadataExt, PermissionsExt};
-            if metadata.nlink() != 1 {
-                return Err(invalid_sqlite_location(
-                    "SQLite sidecar path must not have hard links",
-                ));
+            // SQLite removes the WAL and shared-memory files when another
+            // connection to the database closes. A sidecar unlinked while
+            // this check runs has no name left (no links at all): it is gone,
+            // exactly as if it had not been found, and not a hard link.
+            match metadata.nlink() {
+                0 => continue,
+                1 => {}
+                _ => {
+                    return Err(invalid_sqlite_location(
+                        "SQLite sidecar path must not have hard links",
+                    ))
+                }
             }
             if metadata.permissions().mode() & 0o177 != 0 {
-                fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o600))?;
-                metadata = fs::symlink_metadata(&sidecar)?;
+                match fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o600)) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    result => result?,
+                }
+                metadata = match fs::symlink_metadata(&sidecar) {
+                    Ok(metadata) => metadata,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                    Err(error) => return Err(error.into()),
+                };
             }
             if metadata.permissions().mode() & 0o177 != 0 {
                 return Err(invalid_sqlite_location(

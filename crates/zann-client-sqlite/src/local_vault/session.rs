@@ -174,10 +174,29 @@ impl LocalVault {
             .map_err(LocalError::from)
     }
 
-    pub fn syncs_storage(&self, storage_id: String) -> LocalResult<bool> {
-        self.app_client()?
+    pub fn storage_link(&self, storage_id: String) -> LocalResult<StorageLink> {
+        let id = Uuid::parse_str(&storage_id)
+            .map_err(|_| LocalError::InvalidArgument("invalid storage id".to_string()))?;
+        let pool = self.pool();
+        let storage = self
+            .runtime
+            .block_on(LocalStorageRepo::new(&pool).get(id))
+            .map_err(|err| LocalError::Service(err.to_string()))?
+            .ok_or_else(|| LocalError::InvalidArgument("storage not found".to_string()))?;
+        if storage.kind == zann_core::StorageKind::LocalOnly {
+            return Ok(StorageLink::Local);
+        }
+        if self
+            .app_client()?
             .syncs_storage(&storage_id)
-            .map_err(LocalError::from)
+            .map_err(LocalError::from)?
+        {
+            return Ok(StorageLink::Connected);
+        }
+        Ok(StorageLink::Disconnected {
+            server_url: storage.server_url,
+            pending_changes: self.pending_change_count(storage_id)?,
+        })
     }
 
     pub fn pending_change_count(&self, storage_id: String) -> LocalResult<u64> {

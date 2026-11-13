@@ -922,19 +922,20 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
         },
         &session,
     );
-    let vault::Outcome::StaleServer(storage_id) =
+    let vault::Outcome::StaleServer(storage_id, failure) =
         vault.update(vault::Message::ReviewStaleServer, &session)
     else {
         panic!("the refusal leads to the recovery");
     };
     assert_eq!(storage_id, STORAGE);
+    assert_eq!(failure, local::SyncFailure::IdentityChanged);
 
     // Settings takes it as the refusal its own sync would have met.
     let mut state = settings_for(&dir);
     assert!(matches!(
         state.update(
-            settings::Message::Synced(storage_id, Err(local::SyncFailure::IdentityChanged)),
-            &session,
+            settings::Message::Synced(storage_id, Err(failure)),
+            &session
         ),
         settings::Outcome::Task(_)
     ));
@@ -963,6 +964,83 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
             vault::Outcome::None
         ));
     }
+}
+
+#[test]
+fn a_storage_without_its_connection_leads_to_connecting_its_server_again() {
+    use std::time::Instant;
+
+    let (dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    const STORAGE: &str = "remote-storage";
+    let gone = local::SyncFailure::Disconnected {
+        server_url: Some("https://zann.example.test".to_string()),
+        pending_changes: 399,
+    };
+    assert!(
+        gone.to_string().contains("399"),
+        "the banner counts what waits"
+    );
+
+    let now = Instant::now();
+    session.auto_sync().unlocked(now, false);
+    let mut vault = vault::State::new(page, None);
+    let ticket = session.auto_sync().take_due(now).expect("due on unlock");
+    vault.update(
+        vault::Message::AutoSynced {
+            ticket,
+            storage_id: STORAGE.to_string(),
+            list_generation: 0,
+            result: Err(gone.clone()),
+        },
+        &session,
+    );
+    let vault::Outcome::StaleServer(storage_id, failure) =
+        vault.update(vault::Message::ReviewStaleServer, &session)
+    else {
+        panic!("the scheduled sync's refusal is not silent");
+    };
+    assert_eq!(failure, gone);
+
+    let mut state = settings_for(&dir);
+    // Nothing to reconnect before a refusal.
+    assert!(matches!(
+        state.update(settings::Message::Reconnect, &session),
+        settings::Outcome::None
+    ));
+    state.update(
+        settings::Message::Synced(storage_id, Err(failure)),
+        &session,
+    );
+    assert_eq!(
+        state.disconnected(),
+        Some(&settings::Disconnected {
+            storage_id: STORAGE.to_string(),
+            server_url: Some("https://zann.example.test".to_string()),
+            pending_changes: 399,
+        })
+    );
+    assert_eq!(state.error(), None, "the account row carries the reason");
+    assert!(state.stale_server().is_none(), "nothing to forget");
+
+    let settings::Outcome::Reconnect { server_url } =
+        state.update(settings::Message::Reconnect, &session)
+    else {
+        panic!("the row leads to connecting again");
+    };
+    assert_eq!(server_url.as_deref(), Some("https://zann.example.test"));
+    assert!(state.disconnected().is_none());
+
+    // A later sync of that storage replaces the row's state.
+    state.update(
+        settings::Message::Synced(STORAGE.to_string(), Err(gone)),
+        &session,
+    );
+    state.update(
+        settings::Message::Synced(STORAGE.to_string(), Ok(())),
+        &session,
+    );
+    assert!(state.disconnected().is_none());
 }
 
 #[test]

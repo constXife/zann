@@ -121,9 +121,10 @@ pub struct State {
     sync_timer: u64,
     /// The banner a failed sync left, cleared by the next one that succeeds.
     sync_error: Option<String>,
-    /// The storage whose server refused the last scheduled sync because its
-    /// identity changed; the banner then leads to the recovery in Settings.
-    stale_server: Option<String>,
+    /// The storage whose last scheduled sync only Settings can recover (its
+    /// server changed its identity, or no connection syncs it any more), with
+    /// that refusal; the banner then leads there.
+    stale_server: Option<(String, local::SyncFailure)>,
 }
 
 #[derive(Clone, Debug)]
@@ -198,9 +199,9 @@ pub enum Outcome {
         feedback: Task<Message>,
     },
     Locked,
-    /// The server syncing this storage changed its identity; Settings offers
-    /// to forget it.
-    StaleServer(String),
+    /// The storage's server changed its identity or its connection is gone;
+    /// Settings offers the way out of that refusal.
+    StaleServer(String, local::SyncFailure),
 }
 
 impl State {

@@ -218,10 +218,26 @@ final class AppModel: ObservableObject {
     /// password, and the connect screen opens at the forgotten address.
     func forgetStaleServer() async {
         guard let core, let stale = vault?.staleServer, !busy else { return }
-        vault?.stopAutoSync()
         let storageID = stale.storageID
+        await reconnect { try core.forgetServer(storageId: storageID) }
+    }
+
+    /// Connects again to the server of a vault whose connection is gone;
+    /// connecting with the same account takes the vault and its unsent
+    /// changes over. Like forgetting a server, it locks the vault first.
+    func reconnectServer() async {
+        guard let gone = vault?.disconnected, !busy else { return }
+        let serverURL = gone.serverURL
+        await reconnect { serverURL }
+    }
+
+    /// Locks the vault, since connecting ends at the master password, and
+    /// opens the connect screen at the address `address` returns.
+    private func reconnect(_ address: @escaping () throws -> String?) async {
+        guard let core else { return }
+        vault?.stopAutoSync()
         guard let serverURL = await perform({ () -> String? in
-            let serverURL = try core.forgetServer(storageId: storageID)
+            let serverURL = try address()
             _ = try core.lock()
             return serverURL
         }) else {

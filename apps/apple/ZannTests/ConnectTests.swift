@@ -183,9 +183,9 @@ final class ConnectTests: XCTestCase {
         XCTAssertNil(deviceB.vault)
     }
 
-    /// Forgetting the server keeps the vault and its items on this Mac and
-    /// leaves nothing to sync until the user connects again; connecting to
-    /// the same server and account then sends what was saved meanwhile.
+    /// Forgetting the server keeps the vault and its items on this Mac, and
+    /// the vault then says that nothing syncs it and what waits for the
+    /// server; connecting to the same server and account sends it.
     func testForgettingTheServerKeepsTheVaultUntilItConnectsAgain() async throws {
         guard let url = ProcessInfo.processInfo.environment["ZANN_REMOTE_URL"], !url.isEmpty
         else { throw XCTSkip("ZANN_REMOTE_URL is not set") }
@@ -208,22 +208,32 @@ final class ConnectTests: XCTestCase {
 
         let core = try XCTUnwrap(cores["forget"])
         let storage = core.currentStorageId()
-        XCTAssertTrue(try core.syncsStorage(storageId: storage))
+        XCTAssertEqual(try core.storageLink(storageId: storage), .connected)
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 0)
         XCTAssertEqual(try core.forgetServer(storageId: storage), url)
-        XCTAssertFalse(try core.syncsStorage(storageId: storage))
+        guard case .disconnected(let kept, 0) = try core.storageLink(storageId: storage) else {
+            return XCTFail("a forgotten server's vault stays a server's")
+        }
+        XCTAssertNotNil(kept)
         XCTAssertNil(try core.forgetServer(storageId: storage))
 
         await vault.sync()
-        XCTAssertFalse(vault.canSync)
-        XCTAssertNil(vault.syncError)
+        XCTAssertEqual(vault.disconnected, .init(serverURL: kept, pendingChanges: 0))
+        XCTAssertNotNil(vault.syncError, "a vault nothing syncs says so")
         XCTAssertNil(vault.staleServer)
         XCTAssertEqual(vault.visibleItems.map(\.path), ["Kept/Local"])
         vault.startCreating(typeID: "note")
         try XCTUnwrap(vault.editor).setPath("Kept/Unsent")
         await vault.saveEditor()
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 1)
-        await device.lock()
+        await vault.sync()
+        XCTAssertEqual(vault.disconnected, .init(serverURL: kept, pendingChanges: 1))
+
+        await device.reconnectServer()
+        XCTAssertNil(device.vault, "connecting again ends at the master password")
+        XCTAssertEqual(device.screen, .connect)
+        XCTAssertEqual(device.connect?.url, kept, "the connect screen starts at the vault's server")
+        device.leaveConnecting()
 
         try await signIn(device, url: url, email: email, password: account)
         await device.submit(password: master, mode: .unlock)

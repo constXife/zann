@@ -6,6 +6,7 @@ use crate::support::CanonicalTempDir;
 use zann_client_sqlite::local_vault::open_vault as create_core;
 
 use uuid::Uuid;
+use zann_client::app::local::StorageLink;
 
 #[test]
 fn a_server_storage_without_a_connection_is_not_synced() {
@@ -44,12 +45,21 @@ fn a_server_storage_without_a_connection_is_not_synced() {
     core.unlock(password).expect("unlock");
     let storage_id = remote.id.to_string();
 
-    assert!(!core
-        .syncs_storage(storage_id.clone())
-        .expect("no connection is an answer, not an error"));
-    assert!(!core
-        .syncs_storage(Uuid::nil().to_string())
-        .expect("the local storage"));
+    assert_eq!(
+        core.storage_link(storage_id.clone())
+            .expect("no connection is an answer, not an error"),
+        StorageLink::Disconnected {
+            server_url: Some("https://zann.example.test".to_string()),
+            pending_changes: 0,
+        }
+    );
+    assert_eq!(
+        core.storage_link(Uuid::nil().to_string())
+            .expect("the local storage"),
+        StorageLink::Local
+    );
+    core.storage_link(Uuid::now_v7().to_string())
+        .expect_err("an unknown storage is not a local one");
     // An explicit sync still says why it cannot run.
     core.remote_sync(Some(storage_id))
         .expect_err("no server to sync with");
