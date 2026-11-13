@@ -33,7 +33,7 @@ fn the_remembered_unlock_is_kept_out_of_the_client_config() {
     let password = format!("test-master-password-{}", Uuid::now_v7());
 
     let core = create_core(db_url.clone()).expect("create core");
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
 
     // Persists through the remembered-unlock path.

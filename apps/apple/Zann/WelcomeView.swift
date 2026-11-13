@@ -6,12 +6,9 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("Zann").font(.largeTitle.bold())
-            Text("Keep a vault on this Mac, encrypted with your master password.")
+            Text("Connect to your Zann server. Your encrypted vault stays available offline.")
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-            Button("Create a Local Vault") { model.startCreatingVault() }
-                .keyboardShortcut(.defaultAction)
-                .controlSize(.large)
             Button(model.strings("wizard.connect")) { model.startConnecting() }
                 .controlSize(.large)
             if let error = model.error {

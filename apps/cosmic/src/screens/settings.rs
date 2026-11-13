@@ -208,7 +208,7 @@ impl State {
                         Ok(Loaded {
                             remembered: local::remembered_unlock(&facade)?,
                             storages: local::storages(&facade)?,
-                            current_storage_id: local::current_storage_id(&facade),
+                            current_storage_id: local::current_storage_id(&facade)?,
                         })
                     })
                     .await,

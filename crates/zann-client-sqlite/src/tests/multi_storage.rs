@@ -1,5 +1,5 @@
 //! Several configured connections sync into one database. Every remote
-//! storage and the local storage reuse the same vault and item identifiers to
+//! storage and a disconnected server replica reuse the same vault and item identifiers to
 //! prove that projections are isolated by `(storage_id, id)`.
 
 use super::*;
@@ -154,11 +154,31 @@ async fn sync_shared_vault(
         .expect("pull into this storage despite identical ids elsewhere");
 }
 
-async fn seed_local_vault(pool: &SqlitePool, vault_id: Uuid, item_id: Uuid, payload: &[u8]) {
+async fn seed_disconnected_replica(
+    pool: &SqlitePool,
+    vault_id: Uuid,
+    item_id: Uuid,
+    payload: &[u8],
+) -> Uuid {
+    let storage_id = Uuid::now_v7();
+    LocalStorageRepo::new(pool)
+        .upsert(&LocalStorage {
+            id: storage_id,
+            kind: StorageKind::Remote,
+            name: "Disconnected".into(),
+            server_url: Some("https://disconnected.test".into()),
+            server_name: None,
+            server_fingerprint: None,
+            account_subject: None,
+            personal_vaults_enabled: true,
+            auth_method: None,
+        })
+        .await
+        .expect("disconnected server storage");
     LocalVaultRepo::new(pool)
         .create(&LocalVault {
             id: vault_id,
-            storage_id: Uuid::nil(),
+            storage_id,
             slug: LocalVault::local_slug(vault_id),
             name: "Local".to_string(),
             kind: VaultKind::Personal,
@@ -173,7 +193,7 @@ async fn seed_local_vault(pool: &SqlitePool, vault_id: Uuid, item_id: Uuid, payl
     LocalItemRepo::new(pool)
         .create(&LocalItem {
             id: item_id,
-            storage_id: Uuid::nil(),
+            storage_id,
             vault_id,
             path: "accounts/shared".to_string(),
             name: "shared".to_string(),
@@ -187,7 +207,8 @@ async fn seed_local_vault(pool: &SqlitePool, vault_id: Uuid, item_id: Uuid, payl
             sync_status: SyncStatus::Modified,
         })
         .await
-        .expect("insert local item");
+        .expect("insert cached item");
+    storage_id
 }
 
 async fn stored_payload(pool: &SqlitePool, storage_id: Uuid, item_id: Uuid) -> Option<Vec<u8>> {
@@ -199,7 +220,7 @@ async fn stored_payload(pool: &SqlitePool, storage_id: Uuid, item_id: Uuid) -> O
 }
 
 #[test]
-fn two_remote_storages_and_the_local_storage_share_ids_in_isolation() {
+fn two_connected_and_one_disconnected_server_replicas_isolate_identical_ids() {
     let _serial = TERMINAL_MUTATION_TEST_LOCK
         .lock()
         .expect("serialize process-global terminal admission test");
@@ -225,7 +246,7 @@ fn two_remote_storages_and_the_local_storage_share_ids_in_isolation() {
             &[2],
         )
         .await;
-        seed_local_vault(&pool, vault_id, item_id, &[3]).await;
+        let disconnected = seed_disconnected_replica(&pool, vault_id, item_id, &[3]).await;
 
         assert_eq!(
             stored_payload(&pool, first.id, item_id).await,
@@ -236,7 +257,7 @@ fn two_remote_storages_and_the_local_storage_share_ids_in_isolation() {
             Some(vec![2])
         );
         assert_eq!(
-            stored_payload(&pool, Uuid::nil(), item_id).await,
+            stored_payload(&pool, disconnected, item_id).await,
             Some(vec![3])
         );
 
@@ -278,7 +299,7 @@ fn two_remote_storages_and_the_local_storage_share_ids_in_isolation() {
             Some(vec![1])
         );
         assert_eq!(
-            stored_payload(&pool, Uuid::nil(), item_id).await,
+            stored_payload(&pool, disconnected, item_id).await,
             Some(vec![3])
         );
         assert!(LocalVaultRepo::new(&pool)

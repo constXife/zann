@@ -55,3 +55,7 @@ are included in the sensitive review surface.
 
 The remote-only `zann-client::server` capability and the decomposed
 `zann-client/src/config/v2/**` modules retain the same sensitive review gates.
+
+Server-replica cutover: `crates/zann-db/migrations/0004_server_replicas.sql`
+and `crates/zann-db/tests/server_replicas_migration.rs` preserve legacy data
+on refusal and retain server ciphertext and pending changes during upgrade.

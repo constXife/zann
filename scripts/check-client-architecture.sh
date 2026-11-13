@@ -191,7 +191,9 @@ check_dependencies() {
       && jq -e --arg dependency "$dependency_name" '.forbidden_shared_dependencies | index($dependency) != null' "$boundaries_file" >/dev/null; then
       record_violation "UI/shell dependency leaked into shared crate: $package_name -> $dependency_name"
     fi
-  done < <(jq -r '.[] | .name as $package | .dependencies[] | [$package, .name] | @tsv' "$packages_json")
+  # A self dev-dependency only enables explicit fixtures for integration tests;
+  # it adds no production package edge. All other dev dependencies stay checked.
+  done < <(jq -r '.[] | .name as $package | .dependencies[] | select(.kind != "dev" or .name != $package) | [$package, .name] | @tsv' "$packages_json")
 
   if [[ -s "$graph_edges" ]] && ! tsort "$graph_edges" >/dev/null 2>&1; then
     record_violation "cycle detected in internal package dependency graph"

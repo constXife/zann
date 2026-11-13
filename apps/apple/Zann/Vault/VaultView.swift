@@ -130,7 +130,7 @@ private struct SyncIndicatorButton: View {
     /// pressing the indicator does.
     private var details: String {
         var lines = [label]
-        if indicator.state != .localOnly {
+        do {
             if let at = vault.syncState?.lastSyncedAt.flatMap(Self.parse) {
                 let time = Calendar.current.isDateInToday(at)
                     ? at.formatted(date: .omitted, time: .shortened)
@@ -315,7 +315,7 @@ private struct VaultPicker: View {
                     "\(summary.name) (\(summary.itemCount))",
                     systemImage: Symbols.vault(summary.scope)
                 )
-                .tag(summary.id)
+                .tag(Optional(summary.id))
             }
         }
         .pickerStyle(.menu)
@@ -325,7 +325,7 @@ private struct VaultPicker: View {
         .padding(.vertical, 6)
     }
 
-    private var selection: Binding<String> {
+    private var selection: Binding<String?> {
         Binding(
             get: { vault.vaultID },
             set: { id in Task { await vault.selectVault(id) } }

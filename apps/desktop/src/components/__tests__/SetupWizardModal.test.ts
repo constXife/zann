@@ -14,14 +14,12 @@ const renderModal = (options?: {
     components: { SetupWizardModal },
     setup() {
       const step = ref<"welcome" | "password" | "connect">("connect");
-      const flow = ref<"local" | "remote">("remote");
       const setupPassword = ref("");
       const setupConfirm = ref("");
       const connectUrl = ref(connectServerUrl);
 
       return {
         step,
-        flow,
         setupPassword,
         setupConfirm,
         connectUrl,
@@ -29,7 +27,6 @@ const renderModal = (options?: {
         t: (key: string) => key,
         normalizeServerUrl: (value: string) =>
           value.startsWith("https://") ? value : `https://${value}`,
-        startLocalSetup: vi.fn(),
         startConnect: vi.fn(),
         backToWelcome: vi.fn(),
         createMasterPassword: vi.fn(),
@@ -43,7 +40,6 @@ const renderModal = (options?: {
       <SetupWizardModal
         :open="true"
         v-model:step="step"
-        v-model:flow="flow"
         v-model:setup-password="setupPassword"
         v-model:setup-confirm="setupConfirm"
         v-model:connect-server-url="connectUrl"
@@ -60,7 +56,6 @@ const renderModal = (options?: {
         connect-login-id=""
         :t="t"
         :normalize-server-url="normalizeServerUrl"
-        :start-local-setup="startLocalSetup"
         :start-connect="startConnect"
         :back-to-welcome="backToWelcome"
         :create-master-password="createMasterPassword"

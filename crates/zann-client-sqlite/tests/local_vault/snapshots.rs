@@ -37,7 +37,7 @@ fn a_snapshot_is_a_working_copy_that_still_holds_the_data() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/api".into(), "token".into(), "s3cr3t".into())
         .expect("create item");
@@ -72,7 +72,7 @@ fn a_snapshot_is_a_working_copy_that_still_holds_the_data() {
 fn taking_a_snapshot_leaves_the_original_usable() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
         .expect("create item");
@@ -94,7 +94,7 @@ fn taking_a_snapshot_leaves_the_original_usable() {
 fn a_locked_vault_can_still_be_snapshotted() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
     core.lock().expect("lock");
 
@@ -106,7 +106,7 @@ fn a_locked_vault_can_still_be_snapshotted() {
 fn listing_reports_what_was_taken() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
 
     assert!(core.snapshot_list().expect("list").is_empty());
@@ -121,7 +121,7 @@ fn listing_reports_what_was_taken() {
 fn nothing_is_due_right_after_a_snapshot() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
 
     // Nothing taken yet, so the first call takes one.
@@ -141,7 +141,7 @@ fn nothing_is_due_right_after_a_snapshot() {
 fn retention_bounds_how_many_are_kept() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
 
     let keep_one = Some(Retention {
@@ -175,7 +175,7 @@ fn restoring_brings_back_the_snapshotted_items_without_reopening() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/keep".into(), "token".into(), "kept".into())
         .expect("create item");
@@ -217,7 +217,7 @@ fn a_restore_can_itself_be_undone() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
         .expect("create item");
@@ -249,7 +249,7 @@ fn a_damaged_salt_beside_a_snapshot_stops_the_restore() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
         .expect("create item");
@@ -281,7 +281,7 @@ fn restoring_something_that_is_not_a_vault_is_refused() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
         .expect("create item");

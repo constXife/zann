@@ -17,7 +17,7 @@ Self-hosted password manager for individuals and small teams.
 - **Client-side encryption** - personal vaults are encrypted on the client
 - **Shared vaults** - shared vaults for small teams
 - **CI/CD CLI** - service account tokens, server fingerprint pinning
-- **Desktop app** - offline-first, works without a server (macOS, Windows)
+- **Native clients** - server-connected setup, encrypted offline replicas (Linux, macOS, Windows)
 - **Hybrid auth** - OIDC + built-in authentication
 
 ## Stability
@@ -44,11 +44,17 @@ for:
 
 ## Quick start
 
-### Option 1: Local use (no server)
+### Connect a native client
 
 1. Download the desktop app for your platform from [Releases](https://github.com/constXife/zann/releases)
-2. Launch the app - it works offline-first
-3. Create a personal vault and start using it
+2. Connect to a Zann server and sign in or register
+3. Unlock with your master password and complete the first sync
+
+After that, unlock, read, search, edit, export, snapshot and verify work offline.
+Edits stay pending until the server confirms them. Forgetting a connection keeps
+its encrypted cache and unsent changes; reconnect to resume syncing.
+Standalone serverless vault creation is no longer supported. Before upgrading an
+old local-only vault, see [the cutover guide](docs/migrations/server-first-clients.md).
 
 If your platform is not listed in Releases, build the desktop app from source
 (requires Rust toolchain, Bun, and Tauri system dependencies):
@@ -63,7 +69,7 @@ See `CONTRIBUTING.md` for platform-specific Tauri prerequisites.
 
 Full install guide: `docs/INSTALL.md`.
 
-### Option 2: Local server via Docker Compose (development quickstart)
+### Run a server via Docker Compose (development quickstart)
 
 The bundled `compose.yaml` is a local development quickstart, not a production
 setup. For real self-hosting start from `config/config.example.yaml` and supply
@@ -103,7 +109,7 @@ flowchart TB
 
     Server["Zann Server<br/>(Axum + PostgreSQL)"]
 
-    Desktop -.->|optional| Server
+    Desktop -->|setup and sync| Server
     CLI -->|required| Server
 
     classDef clientBox fill:#3b82f6,stroke:#1d4ed8,stroke-width:2px,color:#fff

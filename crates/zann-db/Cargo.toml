@@ -27,3 +27,6 @@ default = []
 postgres = ["dep:sqlx-postgres"]
 sqlite = ["dep:same-file", "dep:sqlx-sqlite"]
 postgres-tests = []
+
+[dev-dependencies]
+tempfile = "3"

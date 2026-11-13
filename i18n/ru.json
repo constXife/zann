@@ -300,13 +300,10 @@
   "wizard": {
     "loading": "Загрузка...",
     "title": "Добро пожаловать в Zann",
-    "subtitle": "Начните за минуту.",
-    "startLocal": "Начать локально",
+    "subtitle": "Подключитесь к серверу Zann и работайте с хранилищем офлайн.",
     "restore": "Восстановить из бэкапа",
     "connect": "Подключить сервер",
     "useOfflineOnly": "Использовать офлайн",
-    "useOnThisDevice": "Использовать на этом устройстве",
-    "connectLater": "Сервер можно подключить позже.",
     "stepOf": "Шаг {current} из {total}",
     "stepConnect": "Подключение",
     "stepSecure": "Защита устройства",
@@ -441,7 +438,6 @@
       "importTitle": "Импорт",
       "importDesc": "Импортировать plain JSON копию. Существующие секреты пропускаются.",
       "importTargetLabel": "Куда импортировать",
-      "importTargetLocal": "Локально (это устройство)",
       "importPathLabel": "Путь к файлу импорта",
       "importPathPlaceholder": "Вставьте путь к файлу .json",
       "importAction": "Импорт JSON",
@@ -599,6 +595,7 @@
     }
   },
   "errors": {
+    "import_target_required": "Выберите серверное хранилище для импорта.",
     "generic": "Что-то пошло не так",
     "remote_error": "Ошибка сервера",
     "status_error": "Ошибка проверки статуса",
@@ -676,14 +673,10 @@
     "addServer": "Добавить сервер",
     "servers": "Серверы",
     "noServers": "Нет подключённых серверов",
-    "onThisDevice": "На этом устройстве",
-    "createLocalVault": "Создать локальное хранилище",
     "showLocalVaults": "Показать локальные хранилища",
-    "notSynced": "Не синхронизируется",
     "settings": "Настройки хранилищ",
     "localVault": "Локальное хранилище",
     "remoteServer": "Удалённый сервер",
-    "localVaults": "Локальные хранилища",
     "remoteServers": "Удалённые серверы",
     "reveal": "Показать в Finder",
     "disconnect": "Отключить",
@@ -727,7 +720,6 @@
     "pending": "Ожидает синхронизации"
   },
   "sync": {
-    "localOnly": "На этом устройстве",
     "disconnected": "Нет подключения · не отправлено: {count}",
     "syncing": "Синхронизация с {server}…",
     "failed": "{server} · ошибка синхронизации",

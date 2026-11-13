@@ -1,6 +1,3 @@
-use base64::Engine;
-use rand::rngs::OsRng;
-use rand::RngCore;
 use tauri::{Emitter, State};
 use tauri_plugin_biometry::{AuthOptions, BiometryExt};
 
@@ -17,26 +14,11 @@ use crate::types::{
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
 use zann_core::VaultEncryptionType;
-use zann_core::{AppService, StorageKind, VaultKind};
+use zann_core::{AppService, VaultKind};
 use zann_db::local::LocalVault;
 use zann_db::local::{KeyWrapType, LocalItemRepo, LocalStorageRepo, LocalVaultRepo, MetadataRepo};
 use zann_db::services::LocalServices;
 use zann_keystore::{default_authenticator, default_keystore, Keystore, KeystoreError};
-
-fn default_local_kdf_params() -> zann_core::api::auth::KdfParams {
-    zann_core::api::auth::KdfParams {
-        algorithm: "argon2id".to_string(),
-        iterations: 3,
-        memory_kb: 65536,
-        parallelism: 4,
-    }
-}
-
-fn generate_kdf_salt() -> String {
-    let mut salt = [0u8; 32];
-    OsRng.fill_bytes(&mut salt);
-    base64::engine::general_purpose::STANDARD.encode(salt)
-}
 
 async fn fetch_personal_status(
     client: &reqwest::Client,
@@ -85,17 +67,20 @@ async fn verify_remote_master_password(
         load_config(&state.root).map_err(|err| ("config_error".to_string(), err.to_string()))?;
     let context_name = match config.current_context.clone() {
         Some(value) => value,
-        None => return Ok(()),
+        None => return Err(("session_expired".into(), "sign in to a server first".into())),
     };
     let Some(context) = config.contexts.get(&context_name).cloned() else {
-        return Ok(());
+        return Err(("session_expired".into(), "server context missing".into()));
     };
     if context.current_token.is_none() {
-        return Ok(());
+        return Err((
+            "session_expired".into(),
+            "sign in to the server again".into(),
+        ));
     }
     let addr = context.addr.clone();
     if addr.trim().is_empty() {
-        return Ok(());
+        return Err(("context_missing".into(), "server address missing".into()));
     }
 
     let client = reqwest::Client::new();
@@ -141,7 +126,13 @@ async fn verify_remote_master_password(
     if encryption_type == VaultEncryptionType::Client && kind == VaultKind::Personal {
         let local_vault = LocalVault {
             id: vault_id,
-            storage_id: Uuid::nil(),
+            storage_id: context
+                .storage_id
+                .as_deref()
+                .ok_or_else(|| ("context_missing".into(), "server storage missing".into()))
+                .and_then(|id| {
+                    Uuid::parse_str(id).map_err(|err| ("context_invalid".into(), err.to_string()))
+                })?,
             slug: vault.slug.clone(),
             name: vault.name.clone(),
             kind,
@@ -160,24 +151,6 @@ async fn verify_remote_master_password(
     }
 
     Ok(())
-}
-
-pub async fn initialize_local_identity(
-    state: State<'_, AppState>,
-) -> Result<ApiResponse<()>, String> {
-    let mut config = load_config(&state.root).map_err(|err| err.to_string())?;
-    if config.identity.is_some() {
-        return Ok(ApiResponse::ok(()));
-    }
-    config.identity = Some(crate::state::IdentityConfig {
-        kdf_salt: generate_kdf_salt(),
-        kdf_params: default_local_kdf_params(),
-        salt_fingerprint: None,
-        first_seen_at: None,
-        email: None,
-    });
-    save_config(&state.root, &config).map_err(|err| err.to_string())?;
-    Ok(ApiResponse::ok(()))
 }
 
 pub async fn bootstrap(state: State<'_, AppState>) -> Result<BootstrapResponse, String> {
@@ -221,7 +194,6 @@ pub async fn app_status(
         initialized: status.initialized,
         locked: status.locked,
         storages_count: status.storages_count,
-        has_local_vault: status.has_local_vault,
     }))
 }
 
@@ -612,9 +584,6 @@ async fn handle_master_key_change(
             let item_repo = LocalItemRepo::new(&state.pool);
             let storages = storage_repo.list().await.map_err(|err| err.to_string())?;
             for storage in storages {
-                if storage.kind != StorageKind::Remote {
-                    continue;
-                }
                 let vaults = vault_repo
                     .list_by_storage(storage.id)
                     .await
@@ -649,6 +618,7 @@ fn log_master_key_context(_label: &str, _password: &str, _identity: &crate::stat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use std::sync::Mutex;
     use zann_keystore::{KeystoreStatus, KeystoreStatusReason, RememberedUnlock};
 

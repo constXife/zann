@@ -48,8 +48,4 @@ impl<'a> StoragesService for LocalServices<'a> {
             auth_method: storage.auth_method,
         })
     }
-
-    fn default_storage_id(&self) -> Uuid {
-        Uuid::nil()
-    }
 }

@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use zann_db::services::LocalServices;
 
 use serde::Deserialize;
 use tauri::State;
@@ -14,12 +15,11 @@ use crate::types::{
 };
 use zann_core::crypto::SecretKey;
 use zann_core::vault_crypto as core_crypto;
-use zann_core::{CachePolicy, StorageKind, VaultKind, VaultsService};
+use zann_core::{CachePolicy, VaultKind, VaultsService};
 use zann_db::local::{
     KeyWrapType, LocalItemRepo, LocalStorageRepo, LocalVault, LocalVaultRepo, PendingChangeRepo,
     SyncCursorRepo,
 };
-use zann_db::services::LocalServices;
 
 pub async fn vault_list(
     state: State<'_, AppState>,
@@ -63,35 +63,19 @@ pub async fn vault_create(
         .await
         .map_err(|err| err.to_string())?
         .ok_or_else(|| "storage not found".to_string())?;
-    if storage.kind == StorageKind::Remote {
-        match create_remote_vault(
-            &state,
-            &storage,
-            master_key.as_ref(),
-            name,
-            kind,
-            cache_policy,
-        )
-        .await
-        {
-            Ok(vault) => Ok(ApiResponse::ok(vault)),
-            Err(err) => Ok(ApiResponse::err("remote_error", &err)),
-        }
-    } else {
-        let is_default = req.is_default.unwrap_or(false);
-        let services = LocalServices::new(&state.pool, master_key.as_ref());
-        match services
-            .create_vault(storage_id, name, kind, is_default)
-            .await
-        {
-            Ok(vault) => Ok(ApiResponse::ok(VaultSummary {
-                id: vault.id.to_string(),
-                name: vault.name,
-                kind: vault.kind.as_i32(),
-                is_default: vault.is_default,
-            })),
-            Err(err) => Ok(ApiResponse::err(&err.kind, &err.message)),
-        }
+
+    match create_remote_vault(
+        &state,
+        &storage,
+        master_key.as_ref(),
+        name,
+        kind,
+        cache_policy,
+    )
+    .await
+    {
+        Ok(vault) => Ok(ApiResponse::ok(vault)),
+        Err(err) => Ok(ApiResponse::err("remote_error", &err)),
     }
 }
 
@@ -107,12 +91,6 @@ pub async fn vault_reset_personal(
         .await
         .map_err(|err| err.to_string())?
         .ok_or_else(|| "storage not found".to_string())?;
-    if storage.kind != StorageKind::Remote {
-        return Ok(ApiResponse::err(
-            "storage_not_remote",
-            "storage is not remote",
-        ));
-    }
 
     let mut config = load_config(&state.root).unwrap_or_default();
     let context_name = config

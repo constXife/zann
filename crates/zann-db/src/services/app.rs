@@ -1,13 +1,8 @@
 use async_trait::async_trait;
-use uuid::Uuid;
 
-use zann_core::{
-    AppService, AppStatus, ServiceError, ServiceResult, StoragesService, VaultsService,
-};
-use zann_crypto::crypto::SecretKey;
-use zann_crypto::vault_crypto as core_crypto;
+use zann_core::{AppService, AppStatus, ServiceError, ServiceResult, StoragesService};
 
-use crate::local::{LocalVault, MetadataRepo};
+use crate::local::MetadataRepo;
 
 use super::LocalServices;
 
@@ -22,16 +17,10 @@ impl<'a> AppService for LocalServices<'a> {
             .map(|value| value == "true")
             .unwrap_or(false);
         let storages_count = self.list_storages().await?.len();
-        let has_local_vault = self
-            .list_vaults(Uuid::nil())
-            .await
-            .map(|vaults| !vaults.is_empty())
-            .unwrap_or(false);
         Ok(AppStatus {
             initialized,
             locked,
             storages_count,
-            has_local_vault,
         })
     }
 
@@ -64,64 +53,6 @@ impl<'a> AppService for LocalServices<'a> {
                 "already_initialized",
                 "already initialized",
             ));
-        }
-
-        let storage_id = Uuid::nil();
-        sqlx_core::query::query::<Sqlite>(
-            r#"
-            INSERT INTO storages (id, kind, name)
-            VALUES (?1, 1, 'Local')
-            ON CONFLICT(id) DO UPDATE SET kind = 1, name = 'Local'
-            "#,
-        )
-        .bind(storage_id)
-        .execute(&mut *tx)
-        .await
-        .map_err(|err| ServiceError::new("storage_write_failed", err.to_string()))?;
-
-        let existing_vault = sqlx_core::query::query::<Sqlite>(
-            r#"
-            SELECT id
-            FROM local_vaults
-            WHERE storage_id = ?1 AND name = 'Personal (Local)'
-            ORDER BY slug
-            LIMIT 1
-            "#,
-        )
-        .bind(storage_id)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(|err| ServiceError::new("vault_lookup_failed", err.to_string()))?;
-
-        if existing_vault.is_none() {
-            let vault_key = SecretKey::generate();
-            let vault_id = Uuid::now_v7();
-            let payload = core_crypto::encrypt_vault_key(self.master_key, vault_id, &vault_key)
-                .map_err(|err| ServiceError::new("vault_key_encrypt_failed", err.to_string()))?;
-            sqlx_core::query::query::<Sqlite>(
-                r#"
-                INSERT INTO local_vaults (
-                    id,
-                    storage_id,
-                    slug,
-                    name,
-                    kind,
-                    is_default,
-                    vault_key_enc,
-                    key_wrap_type,
-                    cache_key_fp,
-                    last_synced_at
-                )
-                VALUES (?1, ?2, ?3, 'Personal (Local)', 1, 1, ?4, 1, NULL, NULL)
-                "#,
-            )
-            .bind(vault_id)
-            .bind(storage_id)
-            .bind(LocalVault::local_slug(vault_id))
-            .bind(payload)
-            .execute(&mut *tx)
-            .await
-            .map_err(|err| ServiceError::new("vault_create_failed", err.to_string()))?;
         }
 
         sqlx_core::query::query::<Sqlite>(

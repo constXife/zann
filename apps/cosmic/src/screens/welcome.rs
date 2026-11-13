@@ -1,4 +1,4 @@
-//! First run: keep the vault local, or connect it to a server.
+//! First run: connect to a server before unlocking its offline replica.
 //!
 //! Stateless, so it has no `State` and no `update` — the shell acts on the
 //! message directly.
@@ -11,7 +11,6 @@ use crate::i18n::t;
 
 #[derive(Clone, Debug)]
 pub enum Message {
-    UseLocalVault,
     ConnectToServer,
 }
 
@@ -25,11 +24,6 @@ pub fn view<'a>() -> Element<'a, Message> {
                 widget::button::suggested(t("wizard.connect"))
                     .width(Length::Fill)
                     .on_press(Message::ConnectToServer),
-            )
-            .push(
-                widget::button::standard(t("wizard.startLocal"))
-                    .width(Length::Fill)
-                    .on_press(Message::UseLocalVault),
             )
             .spacing(spacing.space_s)
             .width(Length::Fixed(360.0)),

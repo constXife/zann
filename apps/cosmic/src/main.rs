@@ -562,9 +562,6 @@ impl cosmic::Application for App {
                     return Task::none();
                 }
                 *screen = match message {
-                    welcome::Message::UseLocalVault => {
-                        Screen::Master(Box::new(master::State::new(master::Mode::Create, None)))
-                    }
                     welcome::Message::ConnectToServer => Screen::Connect {
                         state: Box::default(),
                         return_to: None,

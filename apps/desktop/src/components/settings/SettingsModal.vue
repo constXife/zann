@@ -33,8 +33,7 @@ const props = defineProps<{
   onTestBiometrics: () => void;
   onRebindBiometrics: () => void;
   storages: StorageSummary[];
-  showLocalSection: boolean;
-  hasLocalVaults: boolean;
+
   getStorageInfo: (storageId: string) => Promise<StorageInfo | null>;
   onSignOut: (storageId: string, eraseCache: boolean) => Promise<void>;
   onSignIn: (storageId: string) => Promise<void>;
@@ -43,7 +42,7 @@ const props = defineProps<{
   onFactoryReset: () => Promise<void>;
   onRevealStorage: (storageId: string) => void;
   onAddServer: () => void;
-  onCreateLocalVault: () => void;
+
   onSyncNow: (storageId: string) => Promise<void>;
   onResetSyncCursor: (storageId: string) => Promise<void>;
   onExportPlain: (path?: string | null) => Promise<PlainBackupExportResponse | null | undefined>;
@@ -71,9 +70,6 @@ const tabs: { id: Tab; icon: string; labelKey: string }[] = [
   { id: "about", icon: "M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z", labelKey: "settings.tabs.about" },
 ];
 
-const localStorage = computed(() =>
-  props.storages.find((s) => s.kind === StorageKind.LocalOnly),
-);
 const remoteStorages = computed(() =>
   props.storages.filter((s) => s.kind === StorageKind.Remote),
 );
@@ -151,10 +147,7 @@ watch(() => props.open, (isOpen) => {
           />
           <SettingsTabAccounts
             v-else-if="activeTab === 'accounts'"
-            :local-storage="localStorage ?? null"
             :remote-storages="remoteStorages"
-            :show-local-section="showLocalSection"
-            :has-local-vaults="hasLocalVaults"
             :error="error"
             :t="t"
             :get-storage-info="getStorageInfo"
@@ -165,7 +158,6 @@ watch(() => props.open, (isOpen) => {
             :on-factory-reset="onFactoryReset"
             :on-reveal-storage="onRevealStorage"
             :on-add-server="onAddServer"
-            :on-create-local-vault="onCreateLocalVault"
             :on-sync-now="onSyncNow"
             :on-reset-sync-cursor="onResetSyncCursor"
           />

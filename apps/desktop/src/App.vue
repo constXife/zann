@@ -33,7 +33,6 @@ import { useClipboard } from "./composables/useClipboard";
 import { useBootstrap } from "./composables/useBootstrap";
 import { usePalette } from "./composables/usePalette";
 import { useSession } from "./composables/useSession";
-import { StorageKind } from "./constants/enums";
 import logoUrl from "./assets/logo.png";
 import AppShell from "./components/AppShell.vue";
 import AppModals from "./components/AppModals.vue";
@@ -41,8 +40,6 @@ import type {
   ApiResponse,
   KeystoreStatus,
 } from "./types";
-
-const LOCAL_STORAGE_ID = "00000000-0000-0000-0000-000000000000";
 
 const { t, locale } = useI18n();
 const { settings: uiSettings } = useUiSettings();
@@ -52,7 +49,7 @@ const error = ref("");
 const identityAlertOpen = ref(false);
 const identityAlertTitle = ref("");
 const identityAlertMessage = ref("");
-const initialStorageId = uiSettings.value.lastSelectedStorageId ?? LOCAL_STORAGE_ID;
+const initialStorageId = uiSettings.value.lastSelectedStorageId ?? "";
 const selectedStorageId = ref(initialStorageId);
 const selectedVaultId = ref<string | null>(
   uiSettings.value.lastSelectedVaultByStorage[initialStorageId] ?? null,
@@ -113,7 +110,6 @@ const {
   handleConfirm,
 } = confirmState;
 
-
 const { copyToClipboard, clearClipboardNow, clearClipboardTimer } = useClipboard({
   settings,
   t,
@@ -162,7 +158,7 @@ const storageState = useStorages({
   initialized,
   unlocked,
   t,
-  localStorageId: LOCAL_STORAGE_ID,
+
   onFatalError: (message) => {
     fatalError.value = message;
   },
@@ -171,11 +167,11 @@ const storageState = useStorages({
   onSessionExpired: (_serverUrl) => {
     // Ничего не делаем - баннер покажется автоматически через storageSyncErrors
   },
-  localStorageVisible: computed(() => uiSettings.value.showLocalStorage),
+
 });
 const {
-  storages, remoteStorages, localStorage: localStorageRef, hasLocalVaults, showLocalSection,
-  storageSyncErrors, storagePersonalLocked, isOffline, syncBusy, syncError, loadStorages, checkLocalVaults,
+  storages, remoteStorages,
+  storageSyncErrors, storagePersonalLocked, isOffline, syncBusy, syncError, loadStorages,
   runRemoteSync: runRemoteSyncRaw, scheduleRemoteSync, startAutoSync, stopAutoSync, clearSyncErrors, getSyncStatus,
   getStorageInfo, deleteStorage, disconnectStorage, revealStorage,
 } = storageState;
@@ -184,7 +180,7 @@ const lastSyncTime = ref<string | null>(null);
 let lastSyncRequestId = 0;
 const refreshLastSyncTime = async (storageId: string | null = selectedStorageId.value) => {
   const requestId = ++lastSyncRequestId;
-  if (!storageId || storageId === LOCAL_STORAGE_ID) {
+  if (!storageId) {
     if (requestId === lastSyncRequestId) {
       lastSyncTime.value = null;
     }
@@ -206,9 +202,7 @@ const runRemoteSync = async (storageId?: string | null) => {
     await refreshLastSyncTime(targetId);
     return result;
   }
-  if (storage.kind === StorageKind.LocalOnly) {
-    return false;
-  }
+
   const result = await runRemoteSyncRaw(targetId);
   await refreshLastSyncTime(targetId);
   return result;
@@ -221,7 +215,6 @@ const runBootstrap = async () => {
   if (status.value?.unlocked && appStatus.value?.initialized) {
     await loadStorages();
     await refreshLastSyncTime();
-    await checkLocalVaults();
     await loadVaults();
     await loadItems();
   }
@@ -304,7 +297,7 @@ const createState = useCreateModal({
   loadItems,
   loadVaults,
   runRemoteSync: scheduleRemoteSyncAsync,
-  localStorageId: LOCAL_STORAGE_ID,
+
   lastCreateItemType: computed(() => uiSettings.value.lastCreateItemType),
   t,
   onOptimisticHistory: (payload) => itemDetailsState.addOptimisticHistory(payload),
@@ -346,7 +339,7 @@ const statusBanners = useAppStatusBanners({
   storagePersonalLocked,
   isOffline,
   pendingChangesByStorage: pendingChangesState.pendingChangesByStorage,
-  localStorageId: LOCAL_STORAGE_ID,
+
 });
 const {
   showOfflineBanner, showSessionExpiredBanner, showPersonalLockedBanner,
@@ -425,7 +418,6 @@ watch(items, () => {
     selectedItemId.value = null;
   }
 });
-
 
 const layoutState = useAppLayout({
   uiSettings,
@@ -520,7 +512,7 @@ const itemActions = useAppItemActions({
     error.value = message;
   },
   isDeletedItem,
-  localStorageId: LOCAL_STORAGE_ID,
+
 });
 const {
   copyField, copyEnv, copyJson, copyRaw, copyHistoryPassword, restoreHistoryVersion,
@@ -611,7 +603,7 @@ const authFlow = useAppAuthFlow({
   appStatus,
   unlocked,
   selectedStorageId,
-  localStorageId: LOCAL_STORAGE_ID,
+
   showSessionExpiredBanner,
   sessionExpiredStorage,
   syncError,
@@ -627,11 +619,11 @@ const authFlow = useAppAuthFlow({
   formatError,
 });
 const {
-  setupStep, setupFlow, setupOpen, setupPassword, setupConfirm, setupError, setupBusy,
+  setupStep, setupOpen, setupPassword, setupConfirm, setupError, setupBusy,
   connectServerUrl, connectLoginId, connectVerification, connectStatus, connectError,
   connectOldFp, connectNewFp, connectBusy, authMethodOpen, availableMethods,
   passwordLoginOpen, passwordLoginMode, passwordLoginBusy, passwordLoginError, normalizeServerUrl,
-  startLocalSetup, startConnect, backToWelcome, createMasterPassword,
+  startConnect, backToWelcome, createMasterPassword,
   showAuthMethodSelection, trustFingerprint, handleBannerSignIn,
   handleSelectOidc, handleSelectPassword, handlePasswordAuth,
 } = authFlow;
@@ -666,11 +658,10 @@ const storageActions = useAppStorageActions({
   t,
   uiSettings,
   storages,
-  localStorageRef,
-  hasLocalVaults,
+
   selectedStorageId,
   selectedVaultId,
-  localStorageId: LOCAL_STORAGE_ID,
+
   loadStorages,
   loadVaults,
   loadItems,
@@ -699,7 +690,7 @@ const {
   toggleStorageDropdown, closeStorageDropdown, switchStorage, openAddStorageWizard,
   openStorageSettings, handleStorageReveal, handleStorageDisconnect, handleStorageDelete,
   handleStorageGetInfo, handleSignOut, handleRemoveServer, handleSignIn, handleClearData,
-  handleFactoryReset, handleSyncNow, openCreateVault, openCreateLocalVault, toggleVaultDropdown,
+  handleFactoryReset, handleSyncNow, openCreateVault, toggleVaultDropdown,
   closeVaultDropdown, switchVault, confirmDeleteStorage, confirmDisconnectStorage,
 } = storageActions;
 
@@ -734,7 +725,6 @@ const { updateSettings, testBiometrics, rebindBiometrics, exportPlainBackup, imp
 const timeTravelMaxIndex = computed(() =>
   Math.max(0, itemDetailsState.historyEntries.value.length - 1),
 );
-
 
 const { lastActivityAt, altRevealAll } = useAppEventHandlers({
   t,

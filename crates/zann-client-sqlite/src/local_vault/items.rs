@@ -3,8 +3,31 @@ use super::*;
 impl LocalVault {
     pub fn items_list(&self, filter: ItemsFilter, page: Page) -> LocalResult<ItemPage> {
         let master_key = self.master_key()?;
-        let vault_id = self.vault_id()?;
         let pool = self.pool();
+        let storage_id = self.storage_id()?;
+        let selected = *self.vault_id.lock().expect("lock poisoned");
+        let vault_id = match selected {
+            Some(id) => id,
+            None => {
+                let vaults = self
+                    .runtime
+                    .block_on(LocalVaultRepo::new(&pool).list_by_storage(storage_id))
+                    .map_err(|err| LocalError::Service(err.to_string()))?;
+                if !vaults.is_empty() {
+                    return Err(LocalError::InvalidArgument("select a vault".to_string()));
+                }
+                return Ok(ItemPage {
+                    items: Vec::new(),
+                    next_cursor: None,
+                    total_count: 0,
+                    counts: ItemCountsView {
+                        all: 0,
+                        trash: 0,
+                        by_type: Vec::new(),
+                    },
+                });
+            }
+        };
         let services = LocalServices::new(&pool, master_key.as_ref());
         let params = ItemListParams {
             query: filter.query,
@@ -13,7 +36,7 @@ impl LocalVault {
             include_deleted: filter.include_deleted,
         };
         let result =
-            self.runtime_block_on(services.list_items(self.storage_id(), vault_id, params))?;
+            self.runtime_block_on(services.list_items(self.storage_id()?, vault_id, params))?;
         Ok(ItemPage {
             items: result
                 .items
@@ -40,7 +63,7 @@ impl LocalVault {
         let services = LocalServices::new(&pool, master_key.as_ref());
         let item_id = Uuid::parse_str(&id)
             .map_err(|_| LocalError::InvalidArgument("invalid item id".to_string()))?;
-        let item = self.runtime_block_on(services.get_item(self.storage_id(), item_id))?;
+        let item = self.runtime_block_on(services.get_item(self.storage_id()?, item_id))?;
         let payload_json = serde_json::to_string(&item.payload)
             .map_err(|err| LocalError::Service(err.to_string()))?;
         Ok(ItemDetail {
@@ -65,7 +88,7 @@ impl LocalVault {
         // list type and decrypted type disagree.
         payload.type_id = create.type_id.clone();
         let item_id = self.runtime_block_on(services.put_item(
-            self.storage_id(),
+            self.storage_id()?,
             vault_id,
             create.path,
             create.type_id,
@@ -87,7 +110,7 @@ impl LocalVault {
         payload.type_id = update.type_id.clone();
         self.runtime
             .block_on(services.update_item_by_id(
-                self.storage_id(),
+                self.storage_id()?,
                 item_id,
                 update.path,
                 update.type_id,
@@ -109,7 +132,7 @@ impl LocalVault {
         let pool = self.pool();
         let item = self
             .runtime
-            .block_on(LocalItemRepo::new(&pool).get_by_id(self.storage_id(), item_id))
+            .block_on(LocalItemRepo::new(&pool).get_by_id(self.storage_id()?, item_id))
             .map_err(|err| LocalError::Service(err.to_string()))?
             .ok_or_else(|| LocalError::InvalidArgument("item not found".to_string()))?;
         if item.vault_id != vault_id {
@@ -121,7 +144,7 @@ impl LocalVault {
         let history = self
             .runtime
             .block_on(LocalItemHistoryRepo::new(&pool).list_by_item_limit(
-                self.storage_id(),
+                self.storage_id()?,
                 item_id,
                 limit,
             ))
@@ -149,7 +172,7 @@ impl LocalVault {
         let history = self
             .runtime
             .block_on(LocalItemHistoryRepo::new(&pool).get_by_item_version(
-                self.storage_id(),
+                self.storage_id()?,
                 item_id,
                 version,
             ))
@@ -162,7 +185,7 @@ impl LocalVault {
         }
         let services = LocalServices::new(&pool, master_key.as_ref());
         let payload = self.runtime_block_on(services.decrypt_payload_for_item(
-            self.storage_id(),
+            self.storage_id()?,
             vault_id,
             item_id,
             &history.payload_enc,
@@ -183,7 +206,7 @@ impl LocalVault {
         let pool = self.pool();
         let item = self
             .runtime
-            .block_on(LocalItemRepo::new(&pool).get_by_id(self.storage_id(), item_id))
+            .block_on(LocalItemRepo::new(&pool).get_by_id(self.storage_id()?, item_id))
             .map_err(|err| LocalError::Service(err.to_string()))?
             .ok_or_else(|| LocalError::InvalidArgument("item not found".to_string()))?;
         if item.vault_id != vault_id {
@@ -192,7 +215,7 @@ impl LocalVault {
             ));
         }
         let services = LocalServices::new(&pool, master_key.as_ref());
-        self.runtime_block_on(services.restore_item_version(self.storage_id(), item_id, version))?;
+        self.runtime_block_on(services.restore_item_version(self.storage_id()?, item_id, version))?;
         self.item_get(id)
     }
 }

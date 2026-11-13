@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         core.unlock(password)?;
         println!("{db_url} already initialized, adding items to the existing vault");
     } else {
-        core.initialize_master_password(password)?;
+        core.seed_offline_fixture(password)?;
         println!("initialized {db_url}");
     }
 

@@ -131,6 +131,10 @@ export function useAppSettingsActions({
 
   const importPlainBackup = async (path?: string | null, targetStorageId?: string | null) => {
     setError("");
+    if (!targetStorageId) {
+      setError(t("errors.import_target_required"));
+      return null;
+    }
     try {
       console.info("[backup] invoke import target", targetStorageId);
       const result = await invoke<ApiResponse<PlainBackupImportResponse>>("backup_plain_import", {
@@ -149,9 +153,7 @@ export function useAppSettingsActions({
           : t(`errors.${key}`);
         throw createErrorWithCause(detail, result.error);
       }
-      const shouldSyncRemote =
-        !!targetStorageId && targetStorageId !== "local";
-      if (shouldSyncRemote) {
+
         showToast(t("settings.backups.importSyncStart"));
         const syncOk = await runRemoteSync(targetStorageId);
         if (syncOk) {
@@ -160,9 +162,7 @@ export function useAppSettingsActions({
           const message = syncError.value || t("settings.backups.importSyncFailed");
           showToast(message, { duration: 2000 });
         }
-      } else {
-        showToast(t("settings.backups.importSuccess"));
-      }
+
       return result.data;
     } catch (err) {
       setError(String(err));
@@ -172,6 +172,10 @@ export function useAppSettingsActions({
 
   const importApplePasswords = async (path?: string | null, targetStorageId?: string | null) => {
     setError("");
+    if (!targetStorageId) {
+      setError(t("errors.import_target_required"));
+      return null;
+    }
     try {
       const result = await invoke<ApiResponse<ApplePasswordsImportResponse>>("backup_apple_import", {
         payload: {
@@ -189,9 +193,7 @@ export function useAppSettingsActions({
           : t(`errors.${key}`);
         throw createErrorWithCause(detail, result.error);
       }
-      const shouldSyncRemote =
-        !!targetStorageId && targetStorageId !== "local";
-      if (shouldSyncRemote) {
+
         showToast(t("settings.backups.importSyncStart"));
         const syncOk = await runRemoteSync(targetStorageId);
         if (syncOk) {
@@ -200,9 +202,7 @@ export function useAppSettingsActions({
           const message = syncError.value || t("settings.backups.importSyncFailed");
           showToast(message, { duration: 2000 });
         }
-      } else {
-        showToast(t("settings.backups.importAppleSuccess"));
-      }
+
       return result.data;
     } catch (err) {
       setError(String(err));

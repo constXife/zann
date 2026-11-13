@@ -25,7 +25,7 @@ fn open(
 
 fn initialized(root: &CanonicalTempDir, auth: Arc<FakeHardwareAuthenticator>) -> Arc<LocalVault> {
     let core = open(root, Arc::new(UnsupportedKeystore), auth);
-    core.initialize_master_password("test master password".into())
+    core.seed_offline_fixture("test master password".into())
         .unwrap();
     core
 }
@@ -156,7 +156,7 @@ fn injected_keystore_handles_remember_unlock_and_forget() {
     auth.disconnect();
     let store = Arc::new(MemoryKeystore(Mutex::new(None)));
     let core = open(&root, store.clone(), auth.clone());
-    core.initialize_master_password("test master password".into())
+    core.seed_offline_fixture("test master password".into())
         .unwrap();
     core.remember_with_keystore().unwrap();
     core.lock().unwrap();

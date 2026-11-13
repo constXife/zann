@@ -61,8 +61,7 @@ pub trait LocalVaultService: Send + Sync {
     /// Moves an unlocked session whose storage holds no item to the storage
     /// a fresh start would open; a client calls it after a newly connected
     /// server's first sync.
-    fn follow_preferred_storage(&self) -> LocalResult<()>;
-    fn current_storage_id(&self) -> String;
+    fn current_storage_id(&self) -> LocalResult<String>;
     fn app_status(&self) -> LocalResult<AppStatus>;
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus>;
     fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome>;

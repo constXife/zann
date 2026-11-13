@@ -178,11 +178,6 @@ final class AppModel: ObservableObject {
         screen == .vault
     }
 
-    func startCreatingVault() {
-        error = nil
-        screen = .master(.create)
-    }
-
     /// `serverURL` prefills the address, as after forgetting a server.
     func startConnecting(serverURL: String? = nil, returnTo: Screen = .welcome) {
         guard let core else { return }
@@ -274,7 +269,6 @@ final class AppModel: ObservableObject {
             // reported but must not keep the vault shut.
             let synced = Result {
                 _ = try core.remoteSync(storageId: nil)
-                try core.followPreferredStorage()
             }
             return (try VaultModel.load(core), synced)
         }

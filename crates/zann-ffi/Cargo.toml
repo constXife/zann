@@ -17,6 +17,7 @@ name = "uniffi-bindgen"
 required-features = ["bindgen"]
 
 [features]
+test-support = ["zann-client-sqlite/test-support"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
@@ -28,5 +29,6 @@ zann-client-sqlite = { path = "../zann-client-sqlite", features = ["local-vault"
 zann-ui-core = { path = "../zann-ui-core" }
 
 [dev-dependencies]
+zann-ffi = { path = ".", features = ["test-support"] }
 serde_json = "1"
 tempfile = "3"

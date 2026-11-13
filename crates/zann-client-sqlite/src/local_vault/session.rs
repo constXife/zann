@@ -12,7 +12,7 @@ impl LocalVault {
         let pool = self.pool();
         let repo = LocalVaultRepo::new(&pool);
         let item_repo = LocalItemRepo::new(&pool);
-        let storage_id = self.storage_id();
+        let storage_id = self.storage_id()?;
         let vaults = self
             .runtime
             .block_on(repo.list_by_storage(storage_id))
@@ -44,7 +44,7 @@ impl LocalVault {
         let repo = LocalVaultRepo::new(&pool);
         let vaults = self
             .runtime
-            .block_on(repo.list_by_storage(self.storage_id()))
+            .block_on(repo.list_by_storage(self.storage_id()?))
             .map_err(|err| LocalError::Service(err.to_string()))?;
         if !vaults.iter().any(|vault| vault.id == vault_id) {
             return Err(LocalError::InvalidArgument("vault not found".to_string()));
@@ -65,12 +65,7 @@ impl LocalVault {
             .map(|s| StorageSummary {
                 id: s.id.to_string(),
                 name: s.name,
-                kind: if s.kind == zann_core::StorageKind::LocalOnly {
-                    "local"
-                } else {
-                    "remote"
-                }
-                .to_string(),
+                kind: "remote".to_string(),
             })
             .collect())
     }
@@ -87,19 +82,18 @@ impl LocalVault {
         if !storages.iter().any(|s| s.id == storage_id) {
             return Err(LocalError::InvalidArgument("storage not found".to_string()));
         }
-        *self.storage_id.lock().expect("lock poisoned") = storage_id;
+        *self.storage_id.lock().expect("lock poisoned") = Some(storage_id);
         *self.vault_id.lock().expect("lock poisoned") = None; // Clear selected vault
         Ok(())
     }
 
-    pub fn current_storage_id(&self) -> String {
-        self.storage_id().to_string()
+    pub fn current_storage_id(&self) -> LocalResult<String> {
+        Ok(self.storage_id()?.to_string())
     }
 
     pub fn app_status(&self) -> LocalResult<AppStatus> {
         let pool = self.pool();
         let storage_repo = LocalStorageRepo::new(&pool);
-        let vault_repo = LocalVaultRepo::new(&pool);
 
         let storages = self
             .runtime
@@ -108,22 +102,9 @@ impl LocalVault {
 
         let storages_count = storages.len() as u64;
 
-        // Check if any vaults exist (indicates master password was set)
-        let mut has_local_vault = false;
-        let mut initialized = false;
-
-        for storage in &storages {
-            let vaults = self
-                .runtime
-                .block_on(vault_repo.list_by_storage(storage.id))
-                .map_err(|err| LocalError::Service(err.to_string()))?;
-            if !vaults.is_empty() {
-                initialized = true;
-                if storage.kind == zann_core::StorageKind::LocalOnly {
-                    has_local_vault = true;
-                }
-            }
-        }
+        // A server cache can have an empty catalog (e.g. personal vaults disabled).
+        // No local vault is invented to mark the account initialized.
+        let initialized = !storages.is_empty() && self.kdf_identity()?.is_some();
 
         let locked = self.master_key.lock().expect("lock poisoned").is_none();
         let server_connected = self.app_client()?.configured_target(None).is_ok();
@@ -132,7 +113,6 @@ impl LocalVault {
             initialized,
             locked,
             storages_count,
-            has_local_vault,
             server_connected,
         })
     }
@@ -150,11 +130,14 @@ impl LocalVault {
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
+        let selection_before = *self.storage_id.lock().expect("lock poisoned");
+        let synced_storage = storage_id;
         let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
         let outcome = self
             .runtime
             .block_on(client.sync(target, operation_key, operation))
             .map_err(LocalError::from)?;
+        self.select_synced_catalog(synced_storage, selection_before, &master_key)?;
         Ok(LocalSyncOutcome::from(outcome))
     }
 
@@ -183,9 +166,7 @@ impl LocalVault {
             .block_on(LocalStorageRepo::new(&pool).get(id))
             .map_err(|err| LocalError::Service(err.to_string()))?
             .ok_or_else(|| LocalError::InvalidArgument("storage not found".to_string()))?;
-        let link = if storage.kind == zann_core::StorageKind::LocalOnly {
-            StorageLink::Local
-        } else if self
+        let link = if self
             .app_client()?
             .syncs_storage(&storage_id)
             .map_err(LocalError::from)?

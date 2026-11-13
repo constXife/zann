@@ -15,9 +15,9 @@ type UseStoragesOptions = {
   onFatalError: (message: string) => void;
   onReloadVaults: () => Promise<void>;
   onReloadItems: (options?: { silent?: boolean }) => Promise<void>;
-  localStorageId: string;
+
   onSessionExpired?: (serverUrl: string | null) => Promise<void> | void;
-  localStorageVisible?: Ref<boolean>;
+
 };
 
 type SyncStatus = "idle" | "syncing" | "synced" | "error";
@@ -58,19 +58,6 @@ export const useStorages = (options: UseStoragesOptions) => {
   // Remote-first: серверы показываются первыми
   const remoteStorages = computed(() =>
     storages.value.filter((s) => s.kind === StorageKind.Remote),
-  );
-
-  // Local storage (всегда существует в БД, но может быть скрыт в UI)
-  const localStorage = computed(() =>
-    storages.value.find((s) => s.kind === StorageKind.LocalOnly),
-  );
-
-  // Флаг для проверки наличия local vaults (устанавливается извне через checkLocalVaults)
-  const hasLocalVaults = ref(false);
-
-  // Показывать секцию "On this device" только если есть local vaults
-  const showLocalSection = computed(
-    () => hasLocalVaults.value && (options.localStorageVisible?.value ?? true),
   );
 
   const isNetworkErrorMessage = (message: string) => {
@@ -178,21 +165,8 @@ export const useStorages = (options: UseStoragesOptions) => {
       }
       storages.value = response.data;
       const existing = storages.value.find((entry) => entry.id === options.selectedStorageId.value);
-      const remoteList = storages.value.filter(
-        (entry) => entry.kind === StorageKind.Remote,
-      );
-
-      // Remote-first: если выбран local, но есть remote — переключиться на remote
-      if (existing?.kind === StorageKind.LocalOnly && remoteList.length > 0) {
-        options.selectedStorageId.value = remoteList[0].id;
-      } else if (!existing) {
-        // Fallback: первый remote, или первый storage, или local
-        const fallback = remoteList[0] ?? storages.value[0];
-        if (fallback) {
-          options.selectedStorageId.value = fallback.id;
-        } else {
-          options.selectedStorageId.value = options.localStorageId;
-        }
+      if (!existing) {
+        options.selectedStorageId.value = storages.value[0]?.id ?? "";
       }
     } catch (err) {
       options.onFatalError(String(err));
@@ -452,23 +426,6 @@ export const useStorages = (options: UseStoragesOptions) => {
     }
   };
 
-  // Проверить наличие vaults в local storage
-  const checkLocalVaults = async (): Promise<void> => {
-    const localStore = localStorage.value;
-    if (!localStore) {
-      hasLocalVaults.value = false;
-      return;
-    }
-    try {
-      const response = await invoke<ApiResponse<{ id: string }[]>>("vault_list", {
-        req: { storage_id: localStore.id },
-      });
-      hasLocalVaults.value = response.ok && (response.data?.length ?? 0) > 0;
-    } catch {
-      hasLocalVaults.value = false;
-    }
-  };
-
   const handleOnline = () => {
     isNetworkOnline.value = true;
     isServerReachable.value = true;
@@ -548,9 +505,7 @@ export const useStorages = (options: UseStoragesOptions) => {
   return {
     storages,
     remoteStorages,
-    localStorage,
-    hasLocalVaults,
-    showLocalSection,
+
     storageSyncStatus,
     storageSyncErrors,
     storagePersonalLocked,
@@ -558,7 +513,6 @@ export const useStorages = (options: UseStoragesOptions) => {
     syncBusy,
     syncError,
     loadStorages,
-    checkLocalVaults,
     runRemoteSync,
     scheduleRemoteSync,
     startAutoSync,

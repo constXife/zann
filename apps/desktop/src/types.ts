@@ -10,7 +10,6 @@ export type AppStatus = {
   initialized: boolean;
   locked: boolean;
   storages_count: number;
-  has_local_vault: boolean;
 };
 export type UnlockSource = "keystore" | "hardware_key";
 

@@ -13,7 +13,7 @@ fn foreign_keystore_remembers_unlocks_and_forgets() {
     let root = tempfile::tempdir().expect("tempdir");
     let keystore = Arc::new(MemoryKeystore::default());
     let core = open_with(&root.path().join("vault/local.sqlite"), keystore.clone());
-    core.initialize_master_password("test master password".into())
+    core.seed_offline_fixture("test master password".into())
         .expect("initialize");
 
     core.remember_with_keystore().expect("remember");
@@ -32,7 +32,7 @@ fn a_dismissed_platform_prompt_is_reported_as_cancelled() {
     let root = tempfile::tempdir().expect("tempdir");
     let keystore = Arc::new(MemoryKeystore::default());
     let core = open_with(&root.path().join("local.sqlite"), keystore.clone());
-    core.initialize_master_password("test master password".into())
+    core.seed_offline_fixture("test master password".into())
         .expect("initialize");
     core.remember_with_keystore().expect("remember");
     core.lock().expect("lock");

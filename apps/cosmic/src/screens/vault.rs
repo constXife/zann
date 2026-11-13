@@ -779,7 +779,11 @@ impl State {
     fn rebuild_nav(&mut self) {
         let selected = self.selected_category();
         self.nav.clear();
-        for view in category_views(&self.counts, self.vault_scope()) {
+        for view in self
+            .vault_scope()
+            .map(|scope| category_views(&self.counts, scope))
+            .unwrap_or_default()
+        {
             let label = format!("{} ({})", t(&view.label_key), view.count);
             let entity = self
                 .nav
@@ -803,7 +807,9 @@ impl State {
 
     fn selected_category_label(&self) -> String {
         let selected = self.selected_category();
-        category_views(&self.counts, self.vault_scope())
+        self.vault_scope()
+            .map(|scope| category_views(&self.counts, scope))
+            .unwrap_or_default()
             .into_iter()
             .find(|view| selected.as_deref() == Some(view.id.as_str()))
             .map(|view| t(&view.label_key))
@@ -872,11 +878,11 @@ impl State {
         }))
     }
 
-    fn vault_scope(&self) -> VaultScope {
+    fn vault_scope(&self) -> Option<VaultScope> {
         self.selected_vault_id
             .as_deref()
             .and_then(|id| self.vaults.iter().find(|vault| vault.id == id))
-            .map_or(VaultScope::Personal, |vault| {
+            .map(|vault| {
                 if vault.kind == zann_core::VaultKind::Shared {
                     VaultScope::Shared
                 } else {

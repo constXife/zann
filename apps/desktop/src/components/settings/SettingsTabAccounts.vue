@@ -5,10 +5,8 @@ import type { StorageSummary, StorageInfo } from "../../types";
 type Translator = (key: string, params?: Record<string, unknown>) => string;
 
 const props = defineProps<{
-  localStorage: StorageSummary | null;
   remoteStorages: StorageSummary[];
-  showLocalSection: boolean;
-  hasLocalVaults: boolean;
+
   error: string;
   t: Translator;
   getStorageInfo: (storageId: string) => Promise<StorageInfo | null>;
@@ -19,12 +17,11 @@ const props = defineProps<{
   onFactoryReset: () => Promise<void>;
   onRevealStorage: (storageId: string) => void;
   onAddServer: () => void;
-  onCreateLocalVault: () => void;
+
   onSyncNow: (storageId: string) => Promise<void>;
   onResetSyncCursor: (storageId: string) => Promise<void>;
 }>();
 
-const localInfo = ref<StorageInfo | null>(null);
 const remoteInfoMap = ref<Map<string, StorageInfo>>(new Map());
 const expandedFingerprints = ref<Set<string>>(new Set());
 
@@ -40,18 +37,6 @@ const clearDataConfirm = ref("");
 const factoryResetConfirm = ref("");
 const signOutEraseCache = ref(true);
 const busy = ref(false);
-const hideCreateLocalVault = computed(() => props.remoteStorages.length === 0);
-
-watch(
-  () => props.localStorage,
-  async (storage) => {
-    if (storage) {
-      localInfo.value = await props.getStorageInfo(storage.id);
-    }
-  },
-  { immediate: true }
-);
-
 watch(
   () => props.remoteStorages,
   async (storages) => {
@@ -266,75 +251,13 @@ const handleResetCursor = async (storageId: string) => {
       </button>
     </div>
 
-    <!-- Local Vault (shown only if user created local vaults) -->
-    <div v-if="showLocalSection && localStorage">
-      <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-4">
-        {{ t("storage.onThisDevice") }}
-      </h4>
-      <div class="rounded-lg bg-[var(--bg-tertiary)] p-4">
-        <div class="flex items-start gap-3">
-          <div class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-hover)]">
-            <svg class="h-5 w-5 text-[var(--text-secondary)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-          </div>
-          <div class="flex-1 min-w-0">
-            <div class="font-medium">{{ localStorage.name }}</div>
-            <div class="text-xs text-[var(--text-tertiary)]">
-              {{ t("storage.notSynced") }}
-            </div>
-            <div v-if="localInfo?.file_path" class="text-xs text-[var(--text-tertiary)] truncate mt-0.5" :title="localInfo.file_path">
-              {{ localInfo.file_path.split('/').pop() }}
-              <template v-if="localInfo?.file_size"> &bull; {{ formatFileSize(localInfo.file_size) }}</template>
-            </div>
-          </div>
-        </div>
-        <div class="mt-4 flex gap-2 flex-wrap">
-          <button
-            type="button"
-            class="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors"
-            @click="onRevealStorage(localStorage.id)"
-          >
-            {{ t("settings.accounts.revealInFinder") }}
-          </button>
-          <button
-            type="button"
-            class="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-hover)] hover:bg-[var(--bg-active)] transition-colors"
-            @click="showClearDataModal = true"
-          >
-            {{ t("settings.accounts.clearData") }}
-          </button>
-          <button
-            type="button"
-            class="rounded-lg px-3 py-1.5 text-xs font-medium text-category-security bg-category-security/10 hover:bg-category-security/20 transition-colors"
-            @click="showFactoryResetModal = true"
-          >
-            {{ t("settings.accounts.factoryReset") }}
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Create Local Vault (shown when no local vaults exist) -->
-    <div v-else-if="!showLocalSection && !hideCreateLocalVault">
-      <h4 class="text-xs font-semibold uppercase tracking-wider text-[var(--text-tertiary)] mb-4">
-        {{ t("storage.onThisDevice") }}
-      </h4>
-      <div class="rounded-lg border border-dashed border-[var(--border-color)] p-4 text-center">
-        <p class="text-sm text-[var(--text-secondary)] mb-3">
-          {{ t("storage.notSynced") }}
-        </p>
-        <button
-          type="button"
-          class="inline-flex items-center gap-2 text-sm font-medium text-[var(--accent)] hover:underline"
-          @click="onCreateLocalVault"
-        >
-          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-          </svg>
-          {{ t("storage.createLocalVault") }}
-        </button>
-      </div>
+    <div class="flex gap-2 flex-wrap">
+      <button type="button" class="rounded-lg px-3 py-1.5 text-xs font-medium bg-[var(--bg-hover)]" @click="showClearDataModal = true">
+        {{ t("settings.accounts.clearData") }}
+      </button>
+      <button type="button" class="rounded-lg px-3 py-1.5 text-xs font-medium text-category-security bg-category-security/10" @click="showFactoryResetModal = true">
+        {{ t("settings.accounts.factoryReset") }}
+      </button>
     </div>
 
     <!-- Clear Data Modal -->

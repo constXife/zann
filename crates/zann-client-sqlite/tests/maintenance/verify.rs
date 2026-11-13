@@ -1,7 +1,7 @@
 use super::*;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
-use zann_core::{EncryptedPayload, ItemsService, VaultsService};
+use zann_core::{EncryptedPayload, ItemsService};
 
 fn temp_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("zann-verify-{}", Uuid::now_v7()));
@@ -22,10 +22,39 @@ async fn seeded(root: &Path) -> (SqlitePool, Arc<SecretKey>) {
 /// Create a local vault with one item, the same way the app would.
 async fn seed_item(pool: &SqlitePool, master_key: &SecretKey, value: &str) -> (Uuid, Uuid) {
     let services = LocalServices::new(pool, master_key);
-    let vault = services
-        .ensure_default_local_personal()
+    let storage = zann_db::local::LocalStorage {
+        id: Uuid::now_v7(),
+        kind: zann_core::StorageKind::Remote,
+        name: "Fixture".into(),
+        server_url: Some("https://fixture.example.test".into()),
+        server_name: None,
+        server_fingerprint: None,
+        account_subject: None,
+        personal_vaults_enabled: true,
+        auth_method: None,
+    };
+    zann_db::local::LocalStorageRepo::new(pool)
+        .upsert(&storage)
         .await
-        .expect("default vault");
+        .expect("storage");
+    let id = Uuid::now_v7();
+    let key = SecretKey::generate();
+    let vault = zann_db::local::LocalVault {
+        id,
+        storage_id: storage.id,
+        slug: "personal".into(),
+        name: "Personal".into(),
+        kind: zann_core::VaultKind::Personal,
+        is_default: true,
+        vault_key_enc: core_crypto::encrypt_vault_key(master_key, id, &key).expect("wrapped key"),
+        key_wrap_type: zann_db::local::KeyWrapType::Master,
+        cache_key_fp: None,
+        last_synced_at: None,
+    };
+    zann_db::local::LocalVaultRepo::new(pool)
+        .create(&vault)
+        .await
+        .expect("vault");
     let mut payload = EncryptedPayload::new("kv");
     payload.fields.insert(
         "value".to_string(),
@@ -37,7 +66,7 @@ async fn seed_item(pool: &SqlitePool, master_key: &SecretKey, value: &str) -> (U
     );
     let item_id = services
         .put_item(
-            Uuid::nil(),
+            storage.id,
             vault.id,
             "secrets/one".to_string(),
             "kv".to_string(),
@@ -93,7 +122,14 @@ async fn a_corrupted_payload_is_caught_as_a_checksum_mismatch() {
     // silently match nothing and the test would pass without testing.
     let repo = LocalItemRepo::new(&pool);
     let mut item = repo
-        .get_by_id(Uuid::nil(), item_id)
+        .get_by_id(
+            zann_db::local::LocalStorageRepo::new(&pool)
+                .list()
+                .await
+                .expect("storages")[0]
+                .id,
+            item_id,
+        )
         .await
         .expect("read item")
         .expect("item");
@@ -128,7 +164,14 @@ async fn undecryptable_bytes_with_a_matching_checksum_are_caught_too() {
     let checksum = core_crypto::payload_checksum(&bogus);
     let repo = LocalItemRepo::new(&pool);
     let mut item = repo
-        .get_by_id(Uuid::nil(), item_id)
+        .get_by_id(
+            zann_db::local::LocalStorageRepo::new(&pool)
+                .list()
+                .await
+                .expect("storages")[0]
+                .id,
+            item_id,
+        )
         .await
         .expect("read item")
         .expect("item");

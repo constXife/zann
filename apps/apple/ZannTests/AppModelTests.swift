@@ -20,14 +20,19 @@ final class AppModelTests: XCTestCase {
     /// `name` picks the database and preferences file, so one test can
     /// compare several apps.
     private func makeModel(
-        _ name: String = "local", keystore: MemoryKeystore = MemoryKeystore()
+        _ name: String = "local", keystore: MemoryKeystore = MemoryKeystore(), seed: Bool = true
     ) -> AppModel {
-        let database = directory.appendingPathComponent("\(name).sqlite").path
+        let database = directory.appendingPathComponent(name, isDirectory: true)
+            .appendingPathComponent("local.sqlite").path
         let preferences = directory.appendingPathComponent("\(name).preferences.json")
         return AppModel(opening: {
             let core = try createCore(
                 dbPath: database, keystore: keystore, secretStore: MemorySecretStore()
             )
+            if seed, try core.listStorages().isEmpty {
+                _ = try core.seedOfflineFixture(password: "correct horse battery")
+                _ = try core.lock()
+            }
             return (core, keystore)
         }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en",
         openBrowser: { _ in })
@@ -39,20 +44,20 @@ final class AppModelTests: XCTestCase {
         let model = makeModel(UUID().uuidString)
         model.updatePreferences(change)
         XCTAssertNil(model.settingsError)
-        model.startCreatingVault()
-        await model.submit(password: "correct horse battery", mode: .create)
+        await model.submit(password: "correct horse battery", mode: .unlock)
         XCTAssertEqual(model.screen, .vault)
         return model
     }
 
-    func testFirstLaunchCreatesVaultThenLocksAndUnlocks() async {
+    func testFirstLaunchConnectsAndACachedReplicaLocksAndUnlocks() async {
+        let fresh = makeModel("fresh", seed: false)
+        XCTAssertEqual(fresh.screen, .welcome)
+        fresh.startConnecting()
+        XCTAssertEqual(fresh.screen, .connect)
         let model = makeModel()
-        XCTAssertEqual(model.screen, .welcome)
+        XCTAssertEqual(model.screen, .master(.unlock))
 
-        model.startCreatingVault()
-        XCTAssertEqual(model.screen, .master(.create))
-
-        await model.submit(password: "correct horse battery", mode: .create)
+        await model.submit(password: "correct horse battery", mode: .unlock)
         XCTAssertNil(model.error)
         XCTAssertEqual(model.screen, .vault)
         XCTAssertEqual(model.vault?.visibleItems.isEmpty, true)
@@ -72,8 +77,7 @@ final class AppModelTests: XCTestCase {
 
     func testInitializedVaultOpensOnUnlock() async {
         let first = makeModel()
-        first.startCreatingVault()
-        await first.submit(password: "correct horse battery", mode: .create)
+        await first.submit(password: "correct horse battery", mode: .unlock)
         XCTAssertEqual(first.screen, .vault)
 
         XCTAssertEqual(makeModel().screen, .master(.unlock))
@@ -157,8 +161,7 @@ final class AppModelTests: XCTestCase {
     func testTouchIDArmsUnlocksAndDisarms() async {
         let keystore = MemoryKeystore()
         let model = makeModel(keystore: keystore)
-        model.startCreatingVault()
-        await model.submit(password: "correct horse battery", mode: .create)
+        await model.submit(password: "correct horse battery", mode: .unlock)
         XCTAssertFalse(model.touchIDArmed)
         XCTAssertEqual(keystore.promptReason, "unlock your vault")
 
@@ -179,8 +182,7 @@ final class AppModelTests: XCTestCase {
     func testTouchIDChangesRunOneAtATimeAndDisarmWithoutBiometrics() async {
         let keystore = MemoryKeystore()
         let model = makeModel(keystore: keystore)
-        model.startCreatingVault()
-        await model.submit(password: "correct horse battery", mode: .create)
+        await model.submit(password: "correct horse battery", mode: .unlock)
 
         // A second change while one runs is refused, never interleaved.
         async let first: Void = model.setTouchID(true)
@@ -200,9 +202,8 @@ final class AppModelTests: XCTestCase {
     func testUnreadableRememberedUnlockKeepsThePasswordWorking() async throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let first = makeModel()
-        first.startCreatingVault()
-        await first.submit(password: "correct horse battery", mode: .create)
-        try Data("not json".utf8).write(to: directory.appendingPathComponent("unlock.json"))
+        await first.submit(password: "correct horse battery", mode: .unlock)
+        try Data("not json".utf8).write(to: directory.appendingPathComponent("local/unlock.json"))
 
         let model = makeModel()
         XCTAssertEqual(model.screen, .master(.unlock))
@@ -215,8 +216,7 @@ final class AppModelTests: XCTestCase {
     func testDismissedTouchIDPromptLeavesNoError() async {
         let keystore = MemoryKeystore()
         let model = makeModel(keystore: keystore)
-        model.startCreatingVault()
-        await model.submit(password: "correct horse battery", mode: .create)
+        await model.submit(password: "correct horse battery", mode: .unlock)
         await model.setTouchID(true)
         await model.lock()
 

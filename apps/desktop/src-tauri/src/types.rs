@@ -15,7 +15,6 @@ pub struct AppStatusResponse {
     pub initialized: bool,
     pub locked: bool,
     pub storages_count: usize,
-    pub has_local_vault: bool,
 }
 
 #[derive(Serialize)]
@@ -567,8 +566,6 @@ pub struct VaultCreateRequest {
     pub kind: Option<i32>,
     #[serde(default)]
     pub cache_policy: Option<i32>,
-    #[serde(default)]
-    pub is_default: Option<bool>,
 }
 
 #[derive(Deserialize)]

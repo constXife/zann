@@ -9,11 +9,10 @@ type AppStorageActionsOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
   uiSettings: Ref<UiSettings>;
   storages: Ref<StorageSummary[]>;
-  localStorageRef: Ref<StorageSummary | null>;
-  hasLocalVaults: ComputedRef<boolean>;
+
   selectedStorageId: Ref<string>;
   selectedVaultId: Ref<string | null>;
-  localStorageId: string;
+
   loadStorages: () => Promise<void>;
   loadVaults: () => Promise<void>;
   loadItems: (options?: { silent?: boolean }) => Promise<void>;
@@ -40,11 +39,10 @@ export function useAppStorageActions({
   t,
   uiSettings,
   storages,
-  localStorageRef,
-  hasLocalVaults,
+
   selectedStorageId,
   selectedVaultId,
-  localStorageId,
+
   loadStorages,
   loadVaults,
   loadItems,
@@ -150,10 +148,10 @@ export function useAppStorageActions({
   const handleRemoveServer = async (storageId: string) => {
     await disconnectStorage(storageId);
     if (uiSettings.value.lastSelectedStorageId === storageId) {
-      uiSettings.value.lastSelectedStorageId = localStorageId;
+      uiSettings.value.lastSelectedStorageId = "";
     }
     if (selectedStorageId.value === storageId) {
-      selectedStorageId.value = localStorageId;
+      selectedStorageId.value = "";
     }
     if (uiSettings.value.lastSelectedVaultByStorage[storageId]) {
       delete uiSettings.value.lastSelectedVaultByStorage[storageId];
@@ -230,17 +228,6 @@ export function useAppStorageActions({
     void openCreateModal("vault");
   };
 
-  const openCreateLocalVault = () => {
-    storageDropdownOpen.value = false;
-    uiSettings.value.showLocalStorage = true;
-    if (localStorageRef.value) {
-      selectedStorageId.value = localStorageRef.value.id;
-    }
-    if (!hasLocalVaults.value) {
-      void openCreateModal("vault");
-    }
-  };
-
   const toggleVaultDropdown = () => {
     vaultDropdownOpen.value = !vaultDropdownOpen.value;
   };
@@ -299,7 +286,7 @@ export function useAppStorageActions({
     handleSyncNow,
     handleResetSyncCursor,
     openCreateVault,
-    openCreateLocalVault,
+
     toggleVaultDropdown,
     closeVaultDropdown,
     switchVault,

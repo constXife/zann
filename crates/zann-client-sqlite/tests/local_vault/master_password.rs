@@ -13,7 +13,7 @@ fn master_password_persists_across_reopen() {
 
     let core = create_core(db_url.clone()).expect("create core");
     let status = core
-        .initialize_master_password(password.clone())
+        .seed_offline_fixture(password.clone())
         .expect("initialize master password");
     assert!(status.unlocked);
     drop(core);
@@ -36,7 +36,7 @@ fn a_server_storage_without_vaults_never_opens_without_the_password() {
     let password = format!("test-master-password-{}", Uuid::now_v7());
 
     let core = create_core(db_url.clone()).expect("create core");
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     drop(core);
 
@@ -65,7 +65,10 @@ fn a_server_storage_without_vaults_never_opens_without_the_password() {
     core.unlock(format!("wrong-{password}"))
         .expect_err("a wrong password must not open the vault");
     core.unlock(password).expect("the right password opens it");
-    assert_eq!(core.current_storage_id(), Uuid::nil().to_string());
+    assert_ne!(
+        core.current_storage_id().expect("selected server storage"),
+        Uuid::nil().to_string()
+    );
 
     // Even a session pointed at that storage verifies against the local vault.
     core.lock().expect("lock");

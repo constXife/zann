@@ -90,17 +90,12 @@ pub(super) async fn apple_passwords_target(
     ctx: &BackupCtx,
     target_storage_id: Option<&str>,
 ) -> Result<(Uuid, Uuid), BackupError> {
-    let services = LocalServices::new(&ctx.pool, ctx.master_key.as_ref());
-    let Some(target_storage_id) = target_storage_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && *value != "local")
-    else {
-        let vault = services
-            .ensure_default_local_personal()
-            .await
-            .map_err(|err| BackupError::new(err.kind, err.message))?;
-        return Ok((Uuid::nil(), vault.id));
-    };
+    let target_storage_id = target_storage_id.ok_or_else(|| {
+        BackupError::new(
+            "import_target_required",
+            "select a server storage to import into",
+        )
+    })?;
 
     let storage_id = Uuid::parse_str(target_storage_id)
         .map_err(|_| BackupError::new("apple_import_target_invalid", "invalid storage id"))?;
@@ -110,13 +105,6 @@ pub(super) async fn apple_passwords_target(
         .await
         .map_err(|err| BackupError::new("storage_lookup_failed", err.to_string()))?
         .ok_or_else(|| BackupError::new("storage_not_found", "storage not found"))?;
-    if storage.kind == StorageKind::LocalOnly {
-        let vault = services
-            .ensure_default_local_personal()
-            .await
-            .map_err(|err| BackupError::new(err.kind, err.message))?;
-        return Ok((Uuid::nil(), vault.id));
-    }
     if !storage.personal_vaults_enabled {
         return Err(BackupError::new(
             "personal_vaults_disabled",
