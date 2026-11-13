@@ -308,9 +308,10 @@ impl CoreFacade {
     pub fn sync_reset(&self, storage_id: Option<String>) -> CoreResult<()> {
         self.inner.sync_reset(storage_id).map_err(Into::into)
     }
-    /// Whether a server connection syncs this storage; none does after
-    /// `forget_server` until the user connects again.
-    pub fn storage_link(&self, storage_id: String) -> CoreResult<StorageLinkFfi> {
+    /// Whether a server connection syncs this storage (none does after
+    /// `forget_server` until the user connects again), with what a client
+    /// shows about its sync.
+    pub fn storage_sync_state(&self, storage_id: String) -> CoreResult<StorageSyncStateFfi> {
         self.inner
             .storage_sync_state(storage_id)
             .map(Into::into)

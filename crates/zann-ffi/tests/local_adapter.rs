@@ -1,6 +1,6 @@
 mod support;
 
-use zann_ffi::{CoreError, ItemCreate, ItemsFilter, Page, StorageLinkFfi};
+use zann_ffi::{CoreError, ItemCreate, ItemsFilter, Page, StorageSyncStateFfi, SyncLinkFfi};
 
 #[test]
 fn ffi_projects_local_commands_results_and_errors() {
@@ -55,8 +55,10 @@ fn a_storage_no_server_syncs_has_no_server_to_forget() {
     let storage = core.current_storage_id();
 
     assert_eq!(
-        core.storage_link(storage.clone()).expect("storage link"),
-        StorageLinkFfi::Local
+        core.storage_sync_state(storage.clone())
+            .expect("storage sync state")
+            .link,
+        SyncLinkFfi::Local
     );
     assert_eq!(
         core.pending_change_count(storage.clone())
@@ -79,21 +81,43 @@ fn a_storage_no_server_syncs_has_no_server_to_forget() {
 fn a_storage_without_its_connection_projects_what_waits_for_its_server() {
     use zann_client::app::local::{StorageLink, StorageSyncState};
 
-    let state = |link| StorageSyncState {
-        link,
-        server_url: Some("https://zann.example.test".into()),
-        pending_changes: 3,
-        last_synced_at: None,
-    };
     assert_eq!(
-        StorageLinkFfi::from(state(StorageLink::Disconnected)),
-        StorageLinkFfi::Disconnected {
+        StorageSyncStateFfi::from(StorageSyncState {
+            link: StorageLink::Disconnected,
             server_url: Some("https://zann.example.test".into()),
             pending_changes: 3,
+            last_synced_at: Some("2026-11-13T07:15:34+00:00".into()),
+        }),
+        StorageSyncStateFfi {
+            link: SyncLinkFfi::Disconnected,
+            server_url: Some("https://zann.example.test".into()),
+            pending_changes: 3,
+            last_synced_at: Some("2026-11-13T07:15:34+00:00".into()),
         }
     );
+}
+
+#[test]
+fn the_sync_indicator_projects_the_shared_presentation_rule() {
+    use zann_ffi::{sync_indicator, SyncActionFfi, SyncIndicatorStateFfi, SyncStatusInputFfi};
+
+    let indicator = sync_indicator(SyncStatusInputFfi {
+        link: SyncLinkFfi::Connected,
+        server_url: Some("https://zann.example.test/".into()),
+        pending_changes: 2,
+        syncing: false,
+        failed: false,
+    });
+    assert_eq!(indicator.state, SyncIndicatorStateFfi::Pending);
+    assert_eq!(indicator.label_key, "sync.pending");
     assert_eq!(
-        StorageLinkFfi::from(state(StorageLink::Connected)),
-        StorageLinkFfi::Connected
+        indicator.label_args.get("server").map(String::as_str),
+        Some("zann.example.test")
     );
+    assert_eq!(
+        indicator.label_args.get("count").map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(indicator.action, SyncActionFfi::SyncNow);
+    assert!(!indicator.needs_attention);
 }
