@@ -102,11 +102,30 @@ struct SyncStatus: View {
                     .textSelection(.enabled)
                 if let stale = vault.staleServer {
                     ForgetServer(stale: stale, strings: strings)
+                } else if vault.disconnected != nil {
+                    ReconnectServer(strings: strings)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)
             .background(.bar)
+        }
+    }
+}
+
+/// The way back to the server of a vault whose connection is gone.
+private struct ReconnectServer: View {
+    let strings: Strings
+    @EnvironmentObject private var app: AppModel
+
+    var body: some View {
+        Button(strings("settings.accounts.reconnect")) {
+            Task { await app.reconnectServer() }
+        }
+        .disabled(app.busy)
+        // A failed lock keeps the vault open, so its error shows here.
+        if let error = app.error {
+            Text(error).foregroundStyle(.red).textSelection(.enabled)
         }
     }
 }
