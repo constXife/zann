@@ -48,19 +48,8 @@ struct VaultView: View {
                 }
                 .help("\(app.strings("common.edit")) (⌘E)")
                 .disabled(vault.detail == nil)
-                if vault.canSync {
-                    Button {
-                        Task { await vault.sync() }
-                    } label: {
-                        Label(
-                            app.strings("settings.accounts.syncNow"),
-                            systemImage: vault.syncError == nil
-                                ? "arrow.triangle.2.circlepath"
-                                : "exclamationmark.arrow.triangle.2.circlepath"
-                        )
-                    }
-                    .help(vault.syncError ?? "\(app.strings("settings.accounts.syncNow")) (⌘R)")
-                    .disabled(vault.syncing)
+                if let indicator = vault.indicator {
+                    SyncIndicatorButton(indicator: indicator, vault: vault, strings: app.strings)
                 }
                 Button {
                     Task { await app.lock() }
@@ -78,6 +67,57 @@ struct VaultView: View {
     /// Dismissing the sheet from outside the form (lock) discards the draft.
     private var editor: Binding<ItemEditorModel?> {
         Binding(get: { vault.editor }, set: { if $0 == nil { vault.cancelEditing() } })
+    }
+}
+
+/// The open storage's sync at a glance: which server, whether it is synced,
+/// what waits, and the one thing pressing it does. zann-ui-core decides the
+/// state; this view draws it.
+private struct SyncIndicatorButton: View {
+    let indicator: SyncIndicatorFfi
+    @ObservedObject var vault: VaultModel
+    let strings: Strings
+    @EnvironmentObject private var app: AppModel
+
+    var body: some View {
+        Button {
+            switch indicator.action {
+            case .syncNow: Task { await vault.sync() }
+            case .reconnect: Task { await app.reconnectServer() }
+            case .noAction: break
+            }
+        } label: {
+            Label(strings(indicator.labelKey, indicator.labelArgs), systemImage: Symbols.sync(indicator.state))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(indicator.needsAttention ? Color.red : Color.primary)
+        }
+        .help(details)
+        .disabled(indicator.action == .noAction || app.busy)
+    }
+
+    /// When the storage last synced, and what pressing the indicator does.
+    private var details: String {
+        var lines: [String] = []
+        if indicator.state != .localOnly {
+            if let at = vault.syncState?.lastSyncedAt.flatMap(Self.parse) {
+                let time = Calendar.current.isDateInToday(at)
+                    ? at.formatted(date: .omitted, time: .shortened)
+                    : at.formatted(date: .abbreviated, time: .shortened)
+                lines.append(strings("sync.lastSynced", ["time": time]))
+            } else {
+                lines.append(strings("sync.neverSynced"))
+            }
+        }
+        switch indicator.action {
+        case .syncNow: lines.append("\(strings("sync.syncNowHint")) (⌘R)")
+        case .reconnect: lines.append(strings("sync.reconnectHint"))
+        case .noAction: break
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func parse(_ value: String) -> Date? {
+        ISO8601DateFormatter().date(from: value)
     }
 }
 

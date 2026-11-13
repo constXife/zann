@@ -25,6 +25,17 @@ enum Symbols {
         }
     }
 
+    static func sync(_ state: SyncIndicatorStateFfi) -> String {
+        switch state {
+        case .localOnly: return "internaldrive"
+        case .disconnected: return "icloud.slash"
+        case .syncing: return "arrow.triangle.2.circlepath"
+        case .failed: return "exclamationmark.triangle"
+        case .pending: return "arrow.up.circle"
+        case .synced: return "checkmark.circle"
+        }
+    }
+
     static func item(_ typeID: String) -> String {
         switch typeID {
         case "login": return "key.fill"

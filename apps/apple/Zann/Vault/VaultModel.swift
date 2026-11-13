@@ -89,6 +89,22 @@ final class VaultModel: ObservableObject {
     @Published private(set) var staleServer: StaleServer?
     /// Set while the last sync found the vault's server connection gone.
     @Published private(set) var disconnected: Disconnected?
+    /// What the sync indicator knows about the open storage.
+    @Published private(set) var syncState: StorageSyncStateFfi?
+
+    /// The toolbar's sync indicator, as zann-ui-core decides it.
+    var indicator: SyncIndicatorFfi? {
+        guard let syncState else { return nil }
+        return syncIndicator(
+            input: SyncStatusInputFfi(
+                link: syncState.link,
+                serverUrl: syncState.serverUrl,
+                pendingChanges: syncState.pendingChanges,
+                syncing: syncing,
+                failed: syncError != nil
+            )
+        )
+    }
 
     private let core: CoreFacade
     private let strings: Strings
@@ -127,6 +143,19 @@ final class VaultModel: ObservableObject {
         }
         schedule.unlocked(synced: synced != nil)
         apply(contents)
+        Task { await refreshSyncState() }
+    }
+
+    /// Reads the open storage's sync state again; a failed read keeps the
+    /// last one rather than hiding the indicator.
+    func refreshSyncState() async {
+        let core = core
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { try core.storageSyncState(storageId: core.currentStorageId()) }
+        }.value
+        if case .success(let state) = result {
+            syncState = state
+        }
     }
 
     /// Syncs whenever the core's schedule says so until `stopAutoSync`. A tick
@@ -237,6 +266,7 @@ final class VaultModel: ObservableObject {
             staleServer = nil
             disconnected = nil
         }
+        await refreshSyncState()
     }
 
     private func succeeded() {
@@ -251,9 +281,9 @@ final class VaultModel: ObservableObject {
     /// checked before anything picks a server: otherwise its unsent changes
     /// would wait unseen.
     private nonisolated static func disconnected(_ core: CoreFacade) throws -> Disconnected? {
-        let link = try core.storageLink(storageId: core.currentStorageId())
-        guard case .disconnected(let serverURL, let pendingChanges) = link else { return nil }
-        return Disconnected(serverURL: serverURL, pendingChanges: pendingChanges)
+        let state = try core.storageSyncState(storageId: core.currentStorageId())
+        guard state.link == .disconnected else { return nil }
+        return Disconnected(serverURL: state.serverUrl, pendingChanges: state.pendingChanges)
     }
 
     /// The vault on screen and what forgetting its server leaves behind, or
@@ -263,7 +293,7 @@ final class VaultModel: ObservableObject {
     /// one the active connection syncs.
     private nonisolated static func staleServer(_ core: CoreFacade) throws -> StaleServer? {
         let storageID = core.currentStorageId()
-        guard try core.storageLink(storageId: storageID) == .connected else { return nil }
+        guard try core.storageSyncState(storageId: storageID).link == .connected else { return nil }
         guard let storage = try core.listStorages().first(where: { $0.id == storageID }) else {
             throw CoreError.InvalidArgument("the vault on screen is not a known storage")
         }
@@ -352,6 +382,7 @@ final class VaultModel: ObservableObject {
         guard let editor, let item = await editor.save(with: core) else { return }
         self.editor = nil
         schedule.localChange()
+        Task { await refreshSyncState() }
         let core = core
         let result = await Task.detached(priority: .userInitiated) {
             Result { try Self.load(core) }

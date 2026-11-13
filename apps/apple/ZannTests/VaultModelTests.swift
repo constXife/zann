@@ -42,6 +42,14 @@ final class VaultModelTests: XCTestCase {
         XCTAssertFalse(model.canSync)
         XCTAssertNil(model.syncError)
         XCTAssertEqual(model.visibleItems.count, 3)
+
+        await model.refreshSyncState()
+        let indicator = try XCTUnwrap(model.indicator)
+        XCTAssertEqual(indicator.state, .localOnly)
+        XCTAssertEqual(indicator.action, .noAction)
+        XCTAssertFalse(indicator.needsAttention)
+        XCTAssertEqual(model.syncState?.link, .local)
+        XCTAssertEqual(model.syncState?.pendingChanges, 0)
     }
 
     func testALocalStorageOpensItsOnlyVaultAndRefusesAnUnknownOne() async throws {
