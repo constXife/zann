@@ -203,6 +203,19 @@ pub struct StorageSummaryFfi {
     pub kind: String, // "local" or "remote"
 }
 
+/// Whether a server syncs a storage. A server storage whose connection is gone
+/// keeps its items and unsent changes until the user connects to its address
+/// again with the same account.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum StorageLinkFfi {
+    Local,
+    Connected,
+    Disconnected {
+        server_url: Option<String>,
+        pending_changes: u64,
+    },
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct AppStatusFfi {
     pub initialized: bool, // master password has been set (vaults exist)
