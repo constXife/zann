@@ -967,6 +967,37 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
 }
 
 #[test]
+fn the_sync_error_on_screen_can_be_copied() {
+    use std::time::Instant;
+
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    let now = Instant::now();
+    session.auto_sync().unlocked(now, false);
+    let mut vault = vault::State::new(page, None);
+    assert!(matches!(
+        vault.update(vault::Message::CopyError, &session),
+        vault::Outcome::None
+    ));
+
+    let ticket = session.auto_sync().take_due(now).expect("due on unlock");
+    vault.update(
+        vault::Message::AutoSynced {
+            ticket,
+            storage_id: "remote-storage".to_string(),
+            list_generation: 0,
+            result: Err(local::SyncFailure::Other("sync db_error".to_string())),
+        },
+        &session,
+    );
+    let vault::Outcome::Copy { value, .. } = vault.update(vault::Message::CopyError, &session)
+    else {
+        panic!("the error goes to the clipboard");
+    };
+    assert!(value.contains("sync db_error"));
+}
+
+#[test]
 fn a_storage_without_its_connection_leads_to_connecting_its_server_again() {
     use std::time::Instant;
 
