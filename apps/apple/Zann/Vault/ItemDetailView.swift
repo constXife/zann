@@ -73,6 +73,7 @@ private struct ItemDetailContent: View {
                                 revealed: revealed.contains(index) || revealAll,
                                 copied: copied == index,
                                 revealHelp: strings(revealed.contains(index) ? "common.hide" : "common.reveal"),
+                                copyHelp: strings(copied == index ? "common.copied" : "common.copy"),
                                 onCopy: { copy($0, index: index) },
                                 onToggleReveal: { toggleReveal(index) }
                             )
@@ -140,6 +141,7 @@ private struct FieldRow: View {
     let revealed: Bool
     let copied: Bool
     let revealHelp: String
+    let copyHelp: String
     let onCopy: (String) -> Void
     let onToggleReveal: () -> Void
 
@@ -179,7 +181,7 @@ private struct FieldRow: View {
             if let totp = field.totp {
                 // A one-time code shows as a code, never as its secret, so its
                 // slot holds the countdown instead of an eye.
-                TotpValue(params: totp, copied: copied, onCopy: onCopy)
+                TotpValue(params: totp, copied: copied, copyHelp: copyHelp, onCopy: onCopy)
             } else {
                 Button { onCopy(field.value) } label: {
                     Text(shown)
@@ -192,6 +194,7 @@ private struct FieldRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(CopySurfaceStyle(copied: copied))
+                .help(copyHelp)
                 Button(action: onToggleReveal) {
                     Image(systemName: revealed ? "eye.slash" : "eye")
                 }
@@ -216,6 +219,7 @@ private struct FieldRow: View {
 private struct TotpValue: View {
     let params: TotpParamsFfi
     let copied: Bool
+    let copyHelp: String
     let onCopy: (String) -> Void
 
     var body: some View {
@@ -228,6 +232,7 @@ private struct TotpValue: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(CopySurfaceStyle(copied: copied))
+                    .help(copyHelp)
                     TotpCountdown(remaining: code.remainingSeconds, period: code.period)
                         .frame(width: FieldRow.accessoryWidth)
                 }
@@ -269,24 +274,50 @@ private struct TotpCountdown: View {
     }
 }
 
-/// The whole value surface is the copy target; pressing and a successful copy
-/// tint that surface without changing its text or geometry.
+/// The whole value surface is the copy target. Hovering it tints it and shows
+/// a copy glyph at its trailing edge, so clicking to copy is discoverable; a
+/// successful copy keeps the tint and shows a checkmark. The text and the
+/// geometry never change, so neither shifts the row.
 private struct CopySurfaceStyle: ButtonStyle {
     let copied: Bool
 
     func makeBody(configuration: Configuration) -> some View {
+        CopySurface(configuration: configuration, copied: copied)
+    }
+}
+
+private struct CopySurface: View {
+    let configuration: ButtonStyleConfiguration
+    let copied: Bool
+    @State private var hovering = false
+
+    /// Room kept at the trailing edge for the glyph, so it never covers text.
+    private static let glyphWidth: CGFloat = 16
+
+    var body: some View {
         configuration.label
+            .padding(.trailing, Self.glyphWidth + 4)
+            .overlay(alignment: .trailing) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.caption)
+                    .foregroundStyle(copied ? Color.accentColor : Color.secondary)
+                    .frame(width: Self.glyphWidth)
+                    .opacity(copied || hovering ? 1 : 0)
+                    .accessibilityHidden(true)
+            }
             .padding(.horizontal, 8)
             .padding(.vertical, 5)
             .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(fill(pressed: configuration.isPressed))
+                    .fill(fill)
             )
+            .onHover { hovering = $0 }
     }
 
-    private func fill(pressed: Bool) -> Color {
+    private var fill: Color {
         if copied { return Color.accentColor.opacity(0.18) }
-        return pressed ? Color.primary.opacity(0.1) : Color.clear
+        if configuration.isPressed { return Color.primary.opacity(0.1) }
+        return hovering ? Color.primary.opacity(0.05) : Color.clear
     }
 }
