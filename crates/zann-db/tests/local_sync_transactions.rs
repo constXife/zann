@@ -525,12 +525,12 @@ async fn checkpoint_pending_reader_materializes_at_most_the_requested_limit() {
         Some("cursor-1")
     );
     assert_eq!(pending.len(), 65);
-    assert!(matches!(
-        PendingChangeRepo::new(&fixture.pool)
-            .load_checkpoint_with_pending_max(fixture.scope.storage_id, fixture.scope.vault_id, 64,)
-            .await,
-        Err(LocalProjectionReadError::TooManyRows)
-    ));
+    let page = PendingChangeRepo::new(&fixture.pool)
+        .load_checkpoint_with_pending_max(fixture.scope.storage_id, fixture.scope.vault_id, 64)
+        .await
+        .expect("the oldest pending rows load in a bounded batch");
+    assert_eq!(page.pending.len(), 64);
+    assert!(page.more_pending, "the newer rows wait for the next batch");
     sqlx_core::query::query::<Sqlite>(
         r#"
         UPDATE pending_changes
@@ -547,12 +547,11 @@ async fn checkpoint_pending_reader_materializes_at_most_the_requested_limit() {
     .execute(&fixture.pool)
     .await
     .expect("install oversized pending overflow sentinel");
-    assert!(matches!(
+    expect_corrupt_projection(
         PendingChangeRepo::new(&fixture.pool)
-            .load_checkpoint_with_pending_max(fixture.scope.storage_id, fixture.scope.vault_id, 64,)
+            .load_checkpoint_with_pending_max(fixture.scope.storage_id, fixture.scope.vault_id, 64)
             .await,
-        Err(LocalProjectionReadError::TooManyRows)
-    ));
+    );
     assert!(PendingChangeRepo::new(&fixture.pool)
         .load_checkpoint_with_pending_limit(fixture.scope.storage_id, fixture.scope.vault_id, 0,)
         .await

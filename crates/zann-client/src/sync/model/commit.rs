@@ -4,6 +4,7 @@ pub struct SyncCheckpoint {
     pub(super) cursor: Option<SyncCursor>,
     pub(super) last_seq: Option<SyncSeq>,
     pub(super) pending: Vec<PendingProof>,
+    pub(super) more_pending: bool,
 }
 
 impl fmt::Debug for SyncCheckpoint {
@@ -13,6 +14,7 @@ impl fmt::Debug for SyncCheckpoint {
             .field("cursor", &self.cursor)
             .field("last_seq", &self.last_seq)
             .field("pending_count", &self.pending.len())
+            .field("more_pending", &self.more_pending)
             .finish()
     }
 }
@@ -37,7 +39,21 @@ impl SyncCheckpoint {
             cursor,
             last_seq,
             pending,
+            more_pending: false,
         })
+    }
+
+    /// Newer pending changes wait beyond the ones this checkpoint carries;
+    /// a sync pushes them in later batches.
+    #[must_use]
+    pub fn with_more_pending(mut self, more_pending: bool) -> Self {
+        self.more_pending = more_pending;
+        self
+    }
+
+    #[must_use]
+    pub fn more_pending(&self) -> bool {
+        self.more_pending
     }
 
     #[must_use]

@@ -37,7 +37,7 @@ pub use models::{
     HistorySource, HistorySyncStatus, LocalItem, LocalItemHistory, LocalPendingChange,
     LocalStorage, LocalSyncCheckpoint, LocalSyncCursor, LocalVault,
 };
-pub use pending_change_repo::PendingChangeRepo;
+pub use pending_change_repo::{CheckpointPage, PendingChangeRepo};
 pub use storage_repo::LocalStorageRepo;
 pub use sync_cursor_repo::SyncCursorRepo;
 pub use sync_repo::{

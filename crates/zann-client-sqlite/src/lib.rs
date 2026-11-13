@@ -595,7 +595,7 @@ impl SqliteSyncStore {
 
     async fn checkpoint(&self, scope: SyncScope) -> Result<SyncCheckpoint, SyncStoreError> {
         self.ensure_scope(scope).await?;
-        let (checkpoint, pending) = PendingChangeRepo::new(self.database.pool())
+        let page = PendingChangeRepo::new(self.database.pool())
             .load_checkpoint_with_pending_max(
                 scope.storage_id(),
                 scope.vault_id(),
@@ -603,22 +603,27 @@ impl SqliteSyncStore {
             )
             .await
             .map_err(map_projection_read)?;
-        let cursor = checkpoint
+        let cursor = page
+            .checkpoint
             .as_ref()
             .and_then(|value| value.cursor.as_ref())
             .map(|value| SyncCursor::new(value.clone()))
             .transpose()
             .map_err(map_model_error)?;
-        let last_seq = checkpoint
+        let last_seq = page
+            .checkpoint
             .and_then(|value| value.last_seq)
             .map(SyncSeq::new)
             .transpose()
             .map_err(map_model_error)?;
-        let pending = pending
+        let pending = page
+            .pending
             .iter()
             .map(|change| pending_proof(scope, change))
             .collect::<Result<Vec<_>, _>>()?;
-        SyncCheckpoint::new(cursor, last_seq, pending).map_err(map_model_error)
+        SyncCheckpoint::new(cursor, last_seq, pending)
+            .map(|checkpoint| checkpoint.with_more_pending(page.more_pending))
+            .map_err(map_model_error)
     }
 
     async fn item_states(
@@ -3537,7 +3542,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sixty_five_pending_rows_are_rejected_from_a_bounded_read() {
+    async fn sixty_five_pending_rows_load_the_oldest_sixty_four_first() {
         let fixture = configured_fixture();
         let database_path = fixture.temp.path().join("pending-limit.sqlite");
         let pool = zann_db::connect_sqlite_path_with_max(&database_path, 1)
@@ -3597,11 +3602,20 @@ mod tests {
             fixture.target,
         )
         .expect("construct adapter");
-        let error = store
+        let checkpoint = store
             .checkpoint(scope)
             .await
-            .expect_err("65 pending rows exceed the clean port limit");
-        assert_eq!(error.kind(), SyncStoreErrorKind::InvalidData);
+            .expect("a bounded batch of the oldest pending rows");
+        assert_eq!(checkpoint.pending().len(), MAX_PENDING_CHANGES as usize);
+        assert!(
+            checkpoint.more_pending(),
+            "the newest row waits for the next batch"
+        );
+        assert_eq!(
+            checkpoint.pending()[0].path(),
+            Some("accounts/pending-0"),
+            "the oldest pending change goes first"
+        );
         pool.close().await;
     }
 }
