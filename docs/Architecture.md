@@ -267,7 +267,14 @@ first sync. The sync owner creates or downloads the personal catalog and key.
 `zann-client-sqlite::local_vault` owns selection across server replicas. Opening
 selects a storage with a cached vault, in deterministic storage order; an empty
 session selects the synced storage when its first catalog arrives. There is no
-phantom Local storage or post-sync preference API. Unlock checks a cached vault
+phantom Local storage or post-sync preference API. The selection getter returns
+an explicit optional storage ID: before a first catalog it can be absent, while
+operations requiring a replica still refuse a missing selection. Selection and
+lock hold a write lease; cancellable item reads snapshot storage, vault, pool,
+key and generation under a short read lease, release it before awaiting SQLite,
+and reject completions from a superseded context. FFI consumes the typed payload
+through `zann-ui-core` into one card projection without a JSON round trip.
+Unlock checks a cached vault
 key locally. A disconnected replica keeps its keys, items, pending changes,
 exports, snapshots and verification without a server connection.
 

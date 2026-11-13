@@ -2,6 +2,7 @@ use super::*;
 
 impl LocalVault {
     pub fn current_vault_id(&self) -> Option<String> {
+        let _context = self.context_gate.read().expect("lock poisoned");
         self.vault_id
             .lock()
             .expect("lock poisoned")
@@ -9,10 +10,13 @@ impl LocalVault {
     }
 
     pub fn list_vaults(&self) -> LocalResult<Vec<VaultSummary>> {
+        let _context = self.context_gate.read().expect("lock poisoned");
         let pool = self.pool();
         let repo = LocalVaultRepo::new(&pool);
         let item_repo = LocalItemRepo::new(&pool);
-        let storage_id = self.storage_id()?;
+        let Some(storage_id) = *self.storage_id.lock().expect("lock poisoned") else {
+            return Ok(Vec::new());
+        };
         let vaults = self
             .runtime
             .block_on(repo.list_by_storage(storage_id))
@@ -35,6 +39,7 @@ impl LocalVault {
     }
 
     pub fn set_current_vault(&self, id: String) -> LocalResult<VaultStatus> {
+        let _context = self.context_gate.write().expect("lock poisoned");
         let pool = self.pool();
         if self.master_key.lock().expect("lock poisoned").is_none() {
             return Err(LocalError::Locked);
@@ -50,6 +55,8 @@ impl LocalVault {
             return Err(LocalError::InvalidArgument("vault not found".to_string()));
         }
         *self.vault_id.lock().expect("lock poisoned") = Some(vault_id);
+        self.item_reads.cancel_all();
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
         Ok(VaultStatus { unlocked: true })
     }
 
@@ -65,30 +72,18 @@ impl LocalVault {
             .map(|s| StorageSummary {
                 id: s.id.to_string(),
                 name: s.name,
+                server_url: s.server_url,
                 kind: "remote".to_string(),
             })
             .collect())
     }
 
-    pub fn set_current_storage(&self, id: String) -> LocalResult<()> {
-        let pool = self.pool();
-        let storage_id = Uuid::parse_str(&id)
-            .map_err(|_| LocalError::InvalidArgument("invalid storage id".to_string()))?;
-        let repo = LocalStorageRepo::new(&pool);
-        let storages = self
-            .runtime
-            .block_on(repo.list())
-            .map_err(|err| LocalError::Service(err.to_string()))?;
-        if !storages.iter().any(|s| s.id == storage_id) {
-            return Err(LocalError::InvalidArgument("storage not found".to_string()));
-        }
-        *self.storage_id.lock().expect("lock poisoned") = Some(storage_id);
-        *self.vault_id.lock().expect("lock poisoned") = None; // Clear selected vault
-        Ok(())
-    }
-
-    pub fn current_storage_id(&self) -> LocalResult<String> {
-        Ok(self.storage_id()?.to_string())
+    pub fn current_storage_id(&self) -> Option<String> {
+        let _context = self.context_gate.read().expect("lock poisoned");
+        self.storage_id
+            .lock()
+            .expect("lock poisoned")
+            .map(|id| id.to_string())
     }
 
     pub fn app_status(&self) -> LocalResult<AppStatus> {
@@ -130,14 +125,20 @@ impl LocalVault {
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
-        let selection_before = *self.storage_id.lock().expect("lock poisoned");
+        let (selection_before, generation) = {
+            let _context = self.context_gate.read().expect("lock poisoned");
+            (
+                *self.storage_id.lock().expect("lock poisoned"),
+                self.context_generation.load(Ordering::SeqCst),
+            )
+        };
         let synced_storage = storage_id;
         let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
         let outcome = self
             .runtime
             .block_on(client.sync(target, operation_key, operation))
             .map_err(LocalError::from)?;
-        self.select_synced_catalog(synced_storage, selection_before, &master_key)?;
+        self.select_synced_catalog(synced_storage, selection_before, &master_key, generation)?;
         Ok(LocalSyncOutcome::from(outcome))
     }
 

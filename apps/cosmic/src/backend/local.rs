@@ -209,7 +209,9 @@ pub fn storages(facade: &Facade) -> Result<Vec<StorageSummary>, String> {
 }
 
 pub fn current_storage_id(facade: &Facade) -> Result<String, String> {
-    facade.current_storage_id().map_err(|err| err.to_string())
+    facade
+        .current_storage_id()
+        .ok_or_else(|| "no server storage selected".to_string())
 }
 
 pub fn items(
@@ -385,7 +387,7 @@ pub fn import_apple_passwords(
     // just imported instead of the previously active shared vault.
     if facade
         .current_storage_id()
-        .is_ok_and(|id| id == target_storage_id)
+        .is_some_and(|id| id == target_storage_id)
     {
         let personal = facade
             .list_vaults()

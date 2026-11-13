@@ -55,7 +55,7 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(model.vaults.map(\.id), [try XCTUnwrap(model.vaultID)])
         XCTAssertEqual(model.vaults.first?.scope, .personal)
         XCTAssertEqual(model.vaults.first?.itemCount, 3)
-        let opened = model.vaultID
+        let opened = try XCTUnwrap(model.vaultID)
 
         await model.selectVault(opened)
         XCTAssertNil(model.error)
@@ -200,7 +200,8 @@ final class VaultModelTests: XCTestCase {
         let editor = try XCTUnwrap(model.editor)
         XCTAssertEqual(editor.mode, .create)
         XCTAssertEqual(editor.typeID, "note")
-        editor.setPath("Personal/Shopping")
+        editor.name = "Shopping"
+        editor.folder = "Personal"
         editor.setValue(try index(of: "text", in: editor), "eggs")
 
         await model.saveEditor()
@@ -220,6 +221,17 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(model.editor?.typeID, "ssh_key")
     }
 
+    func testEmptyCategoryActionOpensItsAdvertisedType() throws {
+        let model = try makeModel()
+        model.categoryID = "card"
+        XCTAssertTrue(model.visibleItems.isEmpty)
+        let category = try XCTUnwrap(model.categories.first { $0.id == model.categoryID })
+        let action = try XCTUnwrap(category.createAction)
+        XCTAssertEqual(Strings(language: "en")(action.labelKey), "Create card")
+        model.startCreating(typeID: action.typeId)
+        XCTAssertEqual(model.editor?.typeID, "card")
+    }
+
     func testSavedItemOutsideTheFilterResetsTheList() async throws {
         let model = try makeModel()
         model.categoryID = "note"
@@ -227,7 +239,7 @@ final class VaultModelTests: XCTestCase {
         model.query = "gro"
         model.startCreating(typeID: "login")
         let editor = try XCTUnwrap(model.editor)
-        editor.setPath("Mail")
+        editor.name = "Mail"
         editor.setValue(try index(of: "username", in: editor), "carol")
 
         await model.saveEditor()
@@ -248,8 +260,12 @@ final class VaultModelTests: XCTestCase {
         await model.startEditing()
         let editor = try XCTUnwrap(model.editor)
         XCTAssertEqual(editor.mode, .edit(id: github.id))
-        XCTAssertEqual(editor.path, "Work/GitHub")
-        editor.setPath("Work/GitHub Enterprise")
+        XCTAssertEqual(editor.name, "GitHub")
+        XCTAssertEqual(editor.folder, "Work")
+        XCTAssertEqual(editor.mainFieldIndices.map { editor.fields[$0].key }, ["username", "password", "url"])
+        XCTAssertEqual(editor.additionalFieldIndices.map { editor.fields[$0].key }, ["totp"])
+        editor.name = "GitHub Enterprise"
+        editor.folder = "Work/Accounts"
         editor.setValue(try index(of: "username", in: editor), "alice2")
 
         await model.saveEditor()
@@ -258,9 +274,11 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(model.selectedItemID, github.id)
         let detail = try await loadedDetail(model)
         XCTAssertEqual(detail.title, "GitHub Enterprise")
+        XCTAssertEqual(detail.path, "Work/Accounts/GitHub Enterprise")
         let values = Dictionary(uniqueKeysWithValues: detail.fields.map { ($0.key, $0.value) })
         XCTAssertEqual(values["username"], "alice2")
         XCTAssertEqual(values["password"], "hunter2")
+        XCTAssertEqual(values["totp"], "JBSWY3DPEHPK3PXP")
         XCTAssertEqual(model.visibleItems.count, 3)
     }
 
@@ -268,7 +286,7 @@ final class VaultModelTests: XCTestCase {
         let model = try makeModel()
         model.startCreating(typeID: "note")
         let editor = try XCTUnwrap(model.editor)
-        editor.setPath("Empty")
+        editor.name = "Empty"
         while !editor.fields.isEmpty {
             editor.removeField(0)
         }
@@ -280,13 +298,36 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(model.visibleItems.count, 3)
     }
 
+    func testAnEmptyNameCannotSaveUnderTheFolderName() async throws {
+        let model = try makeModel()
+        model.startCreating(typeID: "login")
+        let editor = try XCTUnwrap(model.editor)
+        editor.folder = "Work"
+        await model.saveEditor()
+        XCTAssertTrue(model.editor === editor)
+        XCTAssertEqual(editor.error, .translated(key: "errors.item_name_invalid"))
+        XCTAssertEqual(model.visibleItems.count, 3)
+    }
+
+    func testAddingAMissingStandardFieldUsesTheSchemaAndPreservesOtherFields() throws {
+        let editor = try ItemEditorModel.create(typeID: "login")
+        editor.setValue(try index(of: "password", in: editor), "fixture-password")
+        editor.removeField(try index(of: "url", in: editor))
+        let definition = try XCTUnwrap(editor.missingMainFields.first)
+        XCTAssertEqual(definition.key, "url")
+        editor.addField(definition)
+        XCTAssertTrue(editor.missingMainFields.isEmpty)
+        XCTAssertEqual(editor.fields[try index(of: "url", in: editor)].kind, .url)
+        XCTAssertEqual(editor.fields[try index(of: "password", in: editor)].value, "fixture-password")
+    }
+
     private func index(of key: String, in editor: ItemEditorModel) throws -> Int {
         try XCTUnwrap(editor.fields.firstIndex { $0.key == key }, "no \(key) field")
     }
 
     private func loadedDetail(_ model: VaultModel) async throws -> VaultModel.Detail {
         for _ in 0..<100 {
-            if let detail = model.detail { return detail }
+            if !model.detailLoading, let detail = model.detail { return detail }
             XCTAssertNil(model.error)
             try await Task.sleep(nanoseconds: 50_000_000)
         }

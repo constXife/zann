@@ -12,13 +12,15 @@ final class ItemEditorModel: ObservableObject, Identifiable {
     }
 
     /// The item types a new draft can take, in schema order.
-    static let typeIDs = itemTypeSchemas().map(\.typeId)
+    private static let schemas = itemTypeSchemas()
+    static let typeIDs = schemas.map(\.typeId)
 
     /// Every kind the draft accepts, in the order COSMIC lists them.
     static let kinds: [FieldKindFfi] = [.text, .password, .url, .otp, .note]
 
     let mode: Mode
-    @Published private(set) var path: String
+    @Published var name: String
+    @Published var folder: String
     @Published private(set) var typeID: String
     @Published private(set) var fields: [DraftFieldFfi]
     @Published private(set) var busy = false
@@ -32,10 +34,32 @@ final class ItemEditorModel: ObservableObject, Identifiable {
 
     private let draft: ItemDraftFfi
 
+    private var mainDefinitions: [FieldDefinitionFfi] {
+        Self.schemas.first { $0.typeId == typeID }?.main ?? []
+    }
+
+    var mainFieldIndices: [Int] {
+        mainDefinitions.compactMap { definition in fields.firstIndex { $0.key == definition.key } }
+    }
+
+    var additionalFieldIndices: [Int] {
+        let main = Set(mainFieldIndices)
+        return fields.indices.filter { !main.contains($0) }
+    }
+
+    var missingMainFields: [FieldDefinitionFfi] {
+        mainDefinitions.filter { definition in !fields.contains { $0.key == definition.key } }
+    }
+
+    func label(for key: String) -> String? {
+        mainDefinitions.first { $0.key == key }?.label
+    }
+
     private init(mode: Mode, draft: ItemDraftFfi) {
         self.mode = mode
         self.draft = draft
-        path = draft.path()
+        name = draft.name()
+        folder = draft.folder() ?? ""
         typeID = draft.typeId()
         fields = draft.fields()
     }
@@ -46,11 +70,6 @@ final class ItemEditorModel: ObservableObject, Identifiable {
 
     static func edit(_ item: ItemDetail) throws -> ItemEditorModel {
         ItemEditorModel(mode: .edit(id: item.id), draft: try ItemDraftFfi.edit(detail: item))
-    }
-
-    func setPath(_ value: String) {
-        draft.setPath(path: value)
-        path = draft.path()
     }
 
     func setType(_ value: String) {
@@ -74,6 +93,13 @@ final class ItemEditorModel: ObservableObject, Identifiable {
         fields = draft.fields()
     }
 
+    func addField(_ definition: FieldDefinitionFfi) {
+        let index = fields.count
+        addField()
+        setKey(index, definition.key)
+        setKind(index, definition.kind)
+    }
+
     func removeField(_ index: Int) {
         apply { try draft.removeField(index: UInt64(index)) }
     }
@@ -85,6 +111,7 @@ final class ItemEditorModel: ObservableObject, Identifiable {
         error = nil
         let store: @Sendable () throws -> ItemDetail
         do {
+            try draft.setLocation(name: name, folder: folder)
             switch mode {
             case .create:
                 let request = try draft.createRequest()

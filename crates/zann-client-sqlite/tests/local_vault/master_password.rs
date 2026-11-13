@@ -70,10 +70,12 @@ fn a_server_storage_without_vaults_never_opens_without_the_password() {
         Uuid::nil().to_string()
     );
 
-    // Even a session pointed at that storage verifies against the local vault.
+    let selected = core.current_storage_id();
+    // A locked session cannot change the context that will verify its password.
     core.lock().expect("lock");
     core.set_current_storage(remote.id.to_string())
-        .expect("select the empty server storage");
+        .expect_err("selection requires an unlocked session");
+    assert_eq!(core.current_storage_id(), selected);
     core.unlock("another wrong password".to_string())
         .expect_err("a wrong password must not open the vault");
 }

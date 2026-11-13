@@ -6381,6 +6381,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "totp-rs",
+ "url",
  "zann-core",
 ]
 

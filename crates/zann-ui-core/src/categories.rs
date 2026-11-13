@@ -97,6 +97,14 @@ pub struct CategoryView {
     pub order: i32,
     pub count: u64,
     pub filter: Option<CategoryFilter>,
+    pub create_action: Option<CategoryCreateAction>,
+}
+
+/// The creation offered by a category's empty state. Trash offers none.
+#[derive(Debug, Clone, Serialize)]
+pub struct CategoryCreateAction {
+    pub type_id: String,
+    pub label_key: String,
 }
 
 impl Category {
@@ -168,7 +176,24 @@ impl Category {
             order: self.order,
             count: self.count(counts),
             filter: self.filter.clone(),
+            create_action: self.create_action(),
         }
+    }
+
+    fn create_action(&self) -> Option<CategoryCreateAction> {
+        if self.is_trash() {
+            return None;
+        }
+        let type_id = create_type_for(Some(&self.id)).to_string();
+        let label_key = match self
+            .filter
+            .as_ref()
+            .and_then(|filter| filter.type_ids.as_ref())
+        {
+            Some(types) if !types.is_empty() => format!("create.actions.{type_id}"),
+            _ => "onboarding.createItem".to_string(),
+        };
+        Some(CategoryCreateAction { type_id, label_key })
     }
 }
 
@@ -298,5 +323,31 @@ mod tests {
         assert!(all.matches(&item("login", false)));
         assert!(all.matches(&item("ssh_key", false)));
         assert!(!all.matches(&item("login", true)));
+    }
+
+    #[test]
+    fn empty_category_actions_create_matching_items_and_have_translated_labels() {
+        for category in &schema().categories {
+            let view = category.to_view(&ItemCounts::default(), VaultScope::Personal);
+            if category.is_trash() {
+                assert!(view.create_action.is_none());
+                continue;
+            }
+            let action = view.create_action.expect("live category offers creation");
+            assert_eq!(action.type_id, create_type_for(Some(&category.id)));
+            assert!(category.matches(&item(&action.type_id, false)));
+            assert!(crate::item_editor::field_schemas().contains_key(&action.type_id));
+            for language in ["en", "ru"] {
+                assert!(crate::Catalogue::new(language).has(&action.label_key));
+            }
+        }
+        let note = category("note").unwrap().create_action().unwrap();
+        assert_eq!(note.label_key, "create.actions.note");
+        assert_eq!(
+            crate::Catalogue::new("ru").get(&note.label_key),
+            "Создать заметку"
+        );
+        let all = category("all").unwrap().create_action().unwrap();
+        assert_eq!(all.label_key, "onboarding.createItem");
     }
 }

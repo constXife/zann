@@ -1,31 +1,36 @@
-//! The syncs in flight, so a lock can cancel them.
+//! Operation registries so lock or context changes can cancel key-bearing work.
 //!
-//! A sync works with its own copy of the master key until it returns. Without
+//! An operation works with its own copy of the master key until it returns. Without
 //! cancellation, locking while one runs would leave that copy alive for as
-//! long as the server takes to answer.
+//! long as a database or server takes to answer.
 
 use std::sync::Mutex;
 
 use zann_client::app::{SessionCancellationHandle, SessionOperationId};
 
 #[derive(Default)]
-pub(super) struct InFlightSyncs(Mutex<Vec<(SessionOperationId, SessionCancellationHandle)>>);
+pub(super) struct InFlightOperations(Mutex<Vec<(SessionOperationId, SessionCancellationHandle)>>);
 
-impl InFlightSyncs {
-    /// Tracks one sync until the returned guard drops.
+impl InFlightOperations {
+    /// Tracks one operation until the returned guard drops.
     pub(super) fn register(
         &self,
         operation_id: SessionOperationId,
         cancel: SessionCancellationHandle,
-    ) -> InFlightSync<'_> {
+    ) -> InFlightOperation<'_> {
         self.0
             .lock()
             .expect("lock poisoned")
             .push((operation_id, cancel));
-        InFlightSync {
-            syncs: self,
+        InFlightOperation {
+            operations: self,
             operation_id,
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn len(&self) -> usize {
+        self.0.lock().expect("lock poisoned").len()
     }
 
     pub(super) fn cancel_all(&self) {
@@ -35,14 +40,14 @@ impl InFlightSyncs {
     }
 }
 
-pub(super) struct InFlightSync<'a> {
-    syncs: &'a InFlightSyncs,
+pub(super) struct InFlightOperation<'a> {
+    operations: &'a InFlightOperations,
     operation_id: SessionOperationId,
 }
 
-impl Drop for InFlightSync<'_> {
+impl Drop for InFlightOperation<'_> {
     fn drop(&mut self) {
-        self.syncs
+        self.operations
             .0
             .lock()
             .expect("lock poisoned")
@@ -64,7 +69,7 @@ mod tests {
 
     #[test]
     fn cancel_all_cancels_every_registered_sync() {
-        let syncs = InFlightSyncs::default();
+        let syncs = InFlightOperations::default();
         let (first, first_cancel) = operation();
         let (second, second_cancel) = operation();
         let _first = syncs.register(first.operation_id(), first_cancel.clone());
@@ -78,7 +83,7 @@ mod tests {
 
     #[test]
     fn a_finished_sync_is_no_longer_cancelled() {
-        let syncs = InFlightSyncs::default();
+        let syncs = InFlightOperations::default();
         let (finished, finished_cancel) = operation();
         drop(syncs.register(finished.operation_id(), finished_cancel.clone()));
 

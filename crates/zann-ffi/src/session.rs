@@ -173,7 +173,7 @@ impl SessionOperationFfi {
 }
 
 impl SessionOperationFfi {
-    fn take(&self) -> CoreResult<SessionOperation> {
+    pub(crate) fn take(&self) -> CoreResult<SessionOperation> {
         self.operation
             .lock()
             .expect("lock poisoned")

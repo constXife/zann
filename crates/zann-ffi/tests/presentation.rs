@@ -1,9 +1,9 @@
 use zann_ffi::{
     build_folder_tree, category_views, create_type_for_category, device_preference_options,
     device_preferences_default, device_preferences_from_json, device_preferences_to_json,
-    filter_items, generate_totp, item_type_schemas, normalize_server_url, project_item_fields,
-    CoreError, DraftErrorKindFfi, FieldKindFfi, FolderFilterFfi, ItemCountsFfi, ItemDetail,
-    ItemDraftFfi, ItemFilterFfi, ItemSummary, ItemTypeCount, TranslationCatalogue, VaultScopeFfi,
+    filter_items, item_type_schemas, normalize_server_url, CoreError, DraftErrorKindFfi,
+    FieldKindFfi, FolderFilterFfi, ItemCountsFfi, ItemDetail, ItemDraftFfi, ItemFilterFfi,
+    ItemSummary, ItemTypeCount, TranslationCatalogue, VaultScopeFfi,
 };
 
 fn item(title: &str, type_id: &str, path: &str, deleted: bool) -> ItemSummary {
@@ -15,33 +15,6 @@ fn item(title: &str, type_id: &str, path: &str, deleted: bool) -> ItemSummary {
         caption: None,
         deleted,
     }
-}
-
-#[test]
-fn item_fields_keep_canonical_order_masking_and_totp() {
-    let payload = r#"{"v":1,"typeId":"login","fields":{
-        "notes":{"kind":"note","value":"line"},
-        "totp":{"kind":"otp","value":"JBSWY3DPEHPK3PXP"},
-        "password":{"kind":"password","value":"hunter2"},
-        "username":{"kind":"text","value":"alice"}}}"#;
-    let fields = project_item_fields(payload.into()).expect("fields");
-    let keys: Vec<_> = fields.iter().map(|field| field.key.as_str()).collect();
-    assert_eq!(keys, ["username", "password", "totp", "notes"]);
-    assert!(!fields[0].masked);
-    assert!(fields[1].masked);
-    assert!(fields[3].multiline);
-    assert!(!format!("{fields:?}").contains("hunter2"));
-    let totp = fields[2].totp.clone().expect("totp params");
-    assert!(!format!("{totp:?}").contains("JBSWY3DPEHPK3PXP"));
-    let code = generate_totp(totp).expect("code");
-    assert_eq!(code.code.len(), 6);
-    assert!(!format!("{code:?}").contains(&code.code));
-    assert_eq!(code.period, 30);
-
-    assert!(matches!(
-        project_item_fields("not json".into()),
-        Err(CoreError::InvalidArgument(_))
-    ));
 }
 
 #[test]
@@ -57,6 +30,16 @@ fn categories_filter_and_folders_follow_ui_core() {
     let views = category_views(counts, VaultScopeFfi::Personal);
     let login = views.iter().find(|view| view.id == "login").expect("login");
     assert_eq!(login.count, 2);
+    let note = views.iter().find(|view| view.id == "note").unwrap();
+    let action = note.create_action.as_ref().expect("note creation action");
+    assert_eq!(action.type_id, "note");
+    assert_eq!(action.label_key, "create.actions.note");
+    assert!(views
+        .iter()
+        .find(|view| view.id == "trash")
+        .unwrap()
+        .create_action
+        .is_none());
     assert_eq!(
         views
             .iter()
@@ -123,7 +106,9 @@ fn item_draft_validates_and_builds_the_payload() {
         }) if translation_key == "errors.path_invalid"
     ));
 
-    draft.set_path(" web/example ".into());
+    draft
+        .set_location("example".into(), " web ".into())
+        .expect("location");
     draft.set_field_value(0, "alice".into()).expect("username");
     draft
         .set_field_value(1, "hunter2".into())
@@ -155,6 +140,16 @@ fn item_draft_validates_and_builds_the_payload() {
     })
     .expect("edit");
     assert_eq!(edited.type_id(), "note");
+    assert_eq!(edited.name(), "example");
+    assert_eq!(edited.folder().as_deref(), Some("web"));
+    assert!(matches!(
+        edited.set_location(String::new(), "folder".into()),
+        Err(CoreError::Draft {
+            kind: DraftErrorKindFfi::Name,
+            ..
+        })
+    ));
+    assert_eq!(edited.path(), "web/example");
     let values: Vec<_> = edited
         .fields()
         .into_iter()

@@ -61,9 +61,64 @@ fn kinds_supply_policy_and_explicit_metadata_overrides_it() {
     assert_eq!(field("notes").value, "line one\nline two");
     assert!(!field("url").masked);
     assert!(!field("url").multiline);
+    assert_eq!(
+        field("url").website_url.as_deref(),
+        Some("https://example.com/")
+    );
     assert!(field("custom").masked && field("custom").multiline);
     assert!(!field("unmasked").masked && field("unmasked").multiline);
     assert!(field("single_line").masked && !field("single_line").multiline);
+}
+
+#[test]
+fn website_actions_require_a_public_url_field_and_an_explicit_http_scheme() {
+    let fields = project(
+        json!({
+            "url": {"kind": "text", "value": "https://example.com/"},
+            "website": {"kind": "url", "value": " HTTPS://EXAMPLE.COM/account?q=1 "},
+            "masked_website": {"kind": "url", "value": "https://example.com/private", "meta": {"masked": true}},
+            "password": {"kind": "password", "value": "https://example.com/", "meta": {"masked": false}}
+        }),
+        Value::Null,
+    );
+    let field = |key: &str| fields.iter().find(|field| field.key == key).unwrap();
+    assert_eq!(
+        field("website").website_url.as_deref(),
+        Some("https://example.com/account?q=1")
+    );
+    assert_eq!(field("website").value, " HTTPS://EXAMPLE.COM/account?q=1 ");
+    for key in ["url", "masked_website", "password"] {
+        assert!(field(key).website_url.is_none());
+    }
+    for value in [
+        "",
+        "example.com",
+        "//example.com",
+        "https:example.com",
+        "https://",
+        "https://invalid host/",
+        "https://user:password@example.com/",
+        "https://user@example.com/",
+        "file:///tmp/file",
+        "javascript:alert(1)",
+        "data:text/html,test",
+        "mailto:user@example.com",
+        "zann://open",
+    ] {
+        let fields = project(
+            json!({"website": {"kind": "url", "value": value}}),
+            Value::Null,
+        );
+        assert!(fields[0].website_url.is_none());
+    }
+    let fields = project(
+        json!({"website": {"kind": "url", "value": "http://localhost:8080/"}}),
+        Value::Null,
+    );
+    assert_eq!(
+        fields[0].website_url.as_deref(),
+        Some("http://localhost:8080/")
+    );
 }
 
 #[test]
@@ -168,4 +223,23 @@ fn a_field_shown_as_its_code_is_labelled_as_a_code() {
         catalogue.field_label(&field("totp_secret").label_key),
         "One-time code"
     );
+}
+
+#[test]
+fn typed_projection_transfers_value_allocation_instead_of_cloning_it() {
+    let mut payload = zann_core::secrets::EncryptedPayload::new("login");
+    let value = "an owned fixture value".to_string();
+    let address = value.as_ptr();
+    payload.fields.insert(
+        "password".into(),
+        zann_core::secrets::FieldValue {
+            kind: zann_core::secrets::FieldKind::Password,
+            value,
+            meta: None,
+        },
+    );
+    let fields = zann_ui_core::item_detail::project_payload_fields(payload);
+    assert_eq!(fields[0].value.as_ptr(), address);
+    assert_eq!(fields[0].value, "an owned fixture value");
+    assert!(fields[0].masked);
 }
