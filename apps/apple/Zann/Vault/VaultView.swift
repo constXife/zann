@@ -326,9 +326,14 @@ struct ItemList: View {
                 }
             }
             .padding(.vertical, 3)
+            // Rows near the end load the next page, so scrolling reaches
+            // every item.
+            .onAppear { vault.itemAppeared(item.id) }
         }
         .overlay {
-            if vault.visibleItems.isEmpty {
+            if vault.visibleItems.isEmpty && vault.searching {
+                ProgressView()
+            } else if vault.visibleItems.isEmpty {
                 Text(strings("items.noItems"))
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
