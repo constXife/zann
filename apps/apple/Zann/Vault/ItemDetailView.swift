@@ -170,9 +170,15 @@ private struct FieldRow: View {
         Text(label).foregroundStyle(.secondary)
     }
 
+    /// Width of the trailing slot every row keeps, so values line up: the
+    /// eye of a masked value, or the countdown of a one-time code.
+    static let accessoryWidth: CGFloat = 22
+
     private var valueAndEye: some View {
         HStack(alignment: .center, spacing: 12) {
             if let totp = field.totp {
+                // A one-time code shows as a code, never as its secret, so its
+                // slot holds the countdown instead of an eye.
                 TotpValue(params: totp, copied: copied, onCopy: onCopy)
             } else {
                 Button { onCopy(field.value) } label: {
@@ -186,16 +192,15 @@ private struct FieldRow: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(CopySurfaceStyle(copied: copied))
+                Button(action: onToggleReveal) {
+                    Image(systemName: revealed ? "eye.slash" : "eye")
+                }
+                .buttonStyle(.borderless)
+                .help(revealHelp)
+                .frame(width: Self.accessoryWidth)
+                .opacity(canReveal ? 1 : 0)
+                .disabled(!canReveal)
             }
-            // The eye keeps its slot on every row so values line up. A one-time
-            // code is shown as a code, never as its secret, so it has no eye.
-            Button(action: onToggleReveal) {
-                Image(systemName: revealed ? "eye.slash" : "eye")
-            }
-            .buttonStyle(.borderless)
-            .help(revealHelp)
-            .opacity(canReveal ? 1 : 0)
-            .disabled(!canReveal)
         }
     }
 
@@ -216,16 +221,16 @@ private struct TotpValue: View {
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
             if let code = try? generateTotp(params: params) {
-                Button { onCopy(code.code) } label: {
-                    HStack {
-                        Text(grouped(code.code)).font(.title3.monospaced())
-                        Spacer()
-                        Text("\(code.remainingSeconds)s")
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
+                HStack(alignment: .center, spacing: 12) {
+                    Button { onCopy(code.code) } label: {
+                        Text(grouped(code.code))
+                            .font(.title3.monospaced())
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
+                    .buttonStyle(CopySurfaceStyle(copied: copied))
+                    TotpCountdown(remaining: code.remainingSeconds, period: code.period)
+                        .frame(width: FieldRow.accessoryWidth)
                 }
-                .buttonStyle(CopySurfaceStyle(copied: copied))
             } else {
                 Text("invalid one-time code")
                     .foregroundStyle(.red)
@@ -237,6 +242,30 @@ private struct TotpValue: View {
     private func grouped(_ code: String) -> String {
         let split = code.index(code.startIndex, offsetBy: code.count / 2)
         return "\(code[..<split]) \(code[split...])"
+    }
+}
+
+/// How long the code shown stays valid: a ring that empties over the period,
+/// with the seconds left in its help. It turns orange in the last five
+/// seconds, when copying the next code is the safer bet.
+private struct TotpCountdown: View {
+    let remaining: UInt32
+    let period: UInt32
+
+    var body: some View {
+        let fraction = period > 0 ? Double(remaining) / Double(period) : 0
+        let ending = remaining <= 5
+        ZStack {
+            Circle().stroke(Color.secondary.opacity(0.25), lineWidth: 2)
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(ending ? Color.orange : Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .animation(.linear(duration: 1), value: remaining)
+        }
+        .frame(width: 14, height: 14)
+        .help("\(remaining)s")
+        .accessibilityLabel("\(remaining)s")
     }
 }
 
