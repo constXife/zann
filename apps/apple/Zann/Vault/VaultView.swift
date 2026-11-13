@@ -247,6 +247,8 @@ struct VaultSidebar: View {
             ForEach(vault.categories, id: \.id) { category in
                 Label(strings(category.labelKey), systemImage: Symbols.category(category.icon))
                     .badge(Int(category.count))
+                    // A search counts its matches; a category with none fades.
+                    .foregroundStyle(vault.searchMatchCount != nil && category.count == 0 ? .secondary : .primary)
                     .tag(Selection.category(category.id))
             }
             if !vault.folders.tree.isEmpty {
@@ -364,7 +366,14 @@ struct ItemList: View {
             }
         }
         .navigationTitle(categoryTitle)
+        .navigationSubtitle(searchSubtitle)
         .searchable(text: $vault.query, prompt: strings("items.searchPlaceholder"))
+    }
+
+    /// Says the list shows search matches, not the whole category.
+    private var searchSubtitle: String {
+        guard let count = vault.searchMatchCount else { return "" }
+        return strings("items.searchMatches", ["count": String(count), "query": vault.searchedQuery])
     }
 
     private var categoryTitle: String {

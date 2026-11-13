@@ -124,6 +124,7 @@
     "kvActions": "Действия",
     "kvMatches": "Совпадений: {count}/{total}",
     "kvNoMatches": "Совпадений не найдено.",
+    "searchMatches": "Найдено по «{query}»: {count}",
     "noItems": "Пока нет записей. Создайте первую запись.",
     "noFields": "У этой записи нет полей.",
     "loadMore": "Загрузить ещё",
