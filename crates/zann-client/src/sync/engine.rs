@@ -13,7 +13,7 @@ use super::model::{
     PushCommitPlan, ReconciledCatalog, ResolvedSyncTarget, SyncCursor, SyncError, SyncErrorKind,
     SyncFuture, SyncLocalStore, SyncOutcome, SyncOutcomeStatus, SyncProgress, SyncProgressPhase,
     SyncProgressSink, SyncSeq, SyncStage, SyncStoreError, SyncStoreErrorKind, VaultPlane,
-    MAX_CATALOG_VAULTS, MAX_PULL_CHANGES, MAX_PULL_PAGES,
+    MAX_CATALOG_VAULTS, MAX_PULL_CHANGES, MAX_PULL_PAGES, MAX_PUSH_ROUNDS,
 };
 use super::transport::{HttpSyncRemote, RemoteError, RemoteErrorKind, RemoteFuture, SyncRemote};
 use super::wire::{
@@ -297,33 +297,44 @@ impl SyncEngine {
                 return Ok(outcome);
             }
 
-            let checkpoint = self
-                .local
-                .load_checkpoint(vault.scope())
-                .await
-                .map_err(|error| map_store_error(operation_id, SyncStage::LoadCheckpoint, error))?;
-            if checkpoint
-                .pending()
-                .iter()
-                .any(|proof| proof.scope() != vault.scope())
-            {
-                return Err(SyncError::new(
-                    operation_id,
-                    SyncErrorKind::Local,
-                    SyncStage::LoadCheckpoint,
-                ));
-            }
-            let checkpoint_sequence = checkpoint.cursor().map(SyncCursor::sequence).unwrap_or(0);
-            let durable_sequence = checkpoint.last_seq().map(SyncSeq::get).unwrap_or(0);
-            if checkpoint_sequence != durable_sequence {
-                return Err(SyncError::new(
-                    operation_id,
-                    SyncErrorKind::Local,
-                    SyncStage::LoadCheckpoint,
-                ));
-            }
-            let (cursor, last_seq, pending) = checkpoint.into_parts();
-            if !pending.is_empty() {
+            // A vault with more unsent changes than one push carries sends
+            // them in bounded batches, oldest first; what is left after the
+            // last round waits for the next sync.
+            let mut push_rounds = 0_usize;
+            let (cursor, last_seq) = loop {
+                let checkpoint =
+                    self.local
+                        .load_checkpoint(vault.scope())
+                        .await
+                        .map_err(|error| {
+                            map_store_error(operation_id, SyncStage::LoadCheckpoint, error)
+                        })?;
+                if checkpoint
+                    .pending()
+                    .iter()
+                    .any(|proof| proof.scope() != vault.scope())
+                {
+                    return Err(SyncError::new(
+                        operation_id,
+                        SyncErrorKind::Local,
+                        SyncStage::LoadCheckpoint,
+                    ));
+                }
+                let checkpoint_sequence =
+                    checkpoint.cursor().map(SyncCursor::sequence).unwrap_or(0);
+                let durable_sequence = checkpoint.last_seq().map(SyncSeq::get).unwrap_or(0);
+                if checkpoint_sequence != durable_sequence {
+                    return Err(SyncError::new(
+                        operation_id,
+                        SyncErrorKind::Local,
+                        SyncStage::LoadCheckpoint,
+                    ));
+                }
+                let more_pending = checkpoint.more_pending();
+                let (cursor, last_seq, pending) = checkpoint.into_parts();
+                if pending.is_empty() {
+                    break (cursor, last_seq);
+                }
                 self.ensure_dispatchable(&operation, SyncStage::Push)?;
                 self.report(
                     operation_id,
@@ -393,7 +404,19 @@ impl SyncEngine {
                     changes_committed.checked_add(pushed_count).ok_or_else(|| {
                         SyncError::new(operation_id, SyncErrorKind::LimitExceeded, SyncStage::Push)
                     })?;
-            }
+                push_rounds += 1;
+                if !more_pending || push_rounds >= MAX_PUSH_ROUNDS {
+                    break (cursor, last_seq);
+                }
+                if let Some(outcome) = self.partial_if_stopped(
+                    &operation,
+                    vault_count,
+                    pages_committed,
+                    changes_committed,
+                )? {
+                    return Ok(outcome);
+                }
+            };
 
             let mut cursor = cursor;
             let mut last_seq = last_seq;
@@ -978,7 +1001,7 @@ mod tests {
     use crate::sync::model::{
         GeneratedVaultKeyCommit, PendingProof, ProjectionReset, PullCommitReceipt, PushCommitPlan,
         PushCommitReceipt, ResolvedSyncVault, StorageBindingProof, SyncCheckpoint, SyncCursor,
-        SyncScope, SyncSeq, SyncStoreFuture, VaultPayloadKey,
+        SyncScope, SyncSeq, SyncStoreFuture, VaultPayloadKey, MAX_PENDING_CHANGES,
     };
     use crate::sync::wire::{
         validate_catalog, AppliedPushChangeWire, PersonalHistoryWire, PersonalPullChangeWire,
@@ -1050,6 +1073,8 @@ mod tests {
         vaults: Vec<(Uuid, VaultPlane)>,
         pages: Mutex<HashMap<Uuid, VecDeque<PullPageWire>>>,
         push_response: Mutex<Option<PushResponseWire>>,
+        /// Answers for later pushes, in order, once `push_response` is used.
+        push_responses: Mutex<VecDeque<PushResponseWire>>,
         catalog_calls: AtomicUsize,
         pull_calls: AtomicUsize,
         push_calls: AtomicUsize,
@@ -1069,6 +1094,7 @@ mod tests {
                 vaults: catalog_vaults,
                 pages: Mutex::new(pages),
                 push_response: Mutex::new(None),
+                push_responses: Mutex::new(VecDeque::new()),
                 catalog_calls: AtomicUsize::new(0),
                 pull_calls: AtomicUsize::new(0),
                 push_calls: AtomicUsize::new(0),
@@ -1161,11 +1187,20 @@ mod tests {
         ) -> RemoteFuture<'a, PushResponseWire> {
             self.push_calls.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
-                self.push_response
+                let first = self
+                    .push_response
                     .lock()
                     .map_err(|_| RemoteError::new(RemoteErrorKind::Unavailable))?
-                    .take()
-                    .ok_or_else(|| RemoteError::new(RemoteErrorKind::Unavailable))
+                    .take();
+                match first {
+                    Some(response) => Ok(response),
+                    None => self
+                        .push_responses
+                        .lock()
+                        .map_err(|_| RemoteError::new(RemoteErrorKind::Unavailable))?
+                        .pop_front()
+                        .ok_or_else(|| RemoteError::new(RemoteErrorKind::Unavailable)),
+                }
             })
         }
     }
@@ -1363,14 +1398,19 @@ mod tests {
                     .map(SyncSeq::new)
                     .transpose()
                     .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::InvalidData))?;
-                let pending = self
+                let mut pending = self
                     .checkpoint_pending
                     .lock()
                     .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::Internal))?
                     .get(&scope)
                     .cloned()
                     .unwrap_or_default();
+                // Like the SQLite store: the oldest bounded batch, and whether
+                // newer pending changes wait beyond it.
+                let more_pending = pending.len() > MAX_PENDING_CHANGES;
+                pending.truncate(MAX_PENDING_CHANGES);
                 SyncCheckpoint::new(cursor, seq, pending)
+                    .map(|checkpoint| checkpoint.with_more_pending(more_pending))
                     .map_err(|_| SyncStoreError::new(SyncStoreErrorKind::InvalidData))
             })
         }
@@ -2618,6 +2658,87 @@ mod tests {
                 .expect_err("a create without its local projection raced a local change"),
             SyncErrorKind::ConcurrentLocalChange
         );
+    }
+
+    #[tokio::test]
+    async fn more_pending_changes_than_one_push_carries_go_in_batches() {
+        let fixture = fixture_with_vault(VaultPlane::PersonalClient, |_vault_id| {
+            vec![personal_page(Vec::new(), 5, false)]
+        });
+        let vault_id = fixture.remote.vaults.first().expect("one vault").0;
+        let scope = SyncScope::new(fixture.store.storage_id, vault_id).expect("valid scope");
+        fixture
+            .store
+            .default_checkpoint
+            .lock()
+            .expect("default checkpoint")
+            .clone_from(&(Some(cursor_string(5)), Some(5)));
+        let created = (0..=MAX_PENDING_CHANGES)
+            .map(|_| Uuid::now_v7())
+            .collect::<Vec<_>>();
+        fixture
+            .store
+            .checkpoint_pending
+            .lock()
+            .expect("checkpoint pending")
+            .insert(
+                scope,
+                created
+                    .iter()
+                    .map(|id| pending_create_proof(scope, *id, vec![42]))
+                    .collect(),
+            );
+        for id in &created {
+            fixture
+                .store
+                .stored_items
+                .lock()
+                .expect("stored items")
+                .insert((scope, *id), created_projection(*id, vec![42]));
+        }
+        let response = |ids: &[Uuid], first_seq: i64| PushResponseWire {
+            applied: ids.iter().map(Uuid::to_string).collect(),
+            applied_changes: ids
+                .iter()
+                .zip(first_seq..)
+                .map(|(id, seq)| AppliedPushChangeWire {
+                    item_id: id.to_string(),
+                    seq,
+                    updated_at: TIMESTAMP.to_string(),
+                    deleted_at: None,
+                })
+                .collect(),
+            conflicts: Vec::new(),
+            new_cursor: cursor_string(first_seq + ids.len() as i64 - 1),
+        };
+        let (first, rest) = created.split_at(MAX_PENDING_CHANGES);
+        fixture
+            .remote
+            .push_responses
+            .lock()
+            .expect("push responses")
+            .extend([response(first, 6), response(rest, 6 + first.len() as i64)]);
+
+        let outcome = fixture
+            .engine
+            .pull(&fixture.target, fixture.operation)
+            .await
+            .expect("every batch is pushed");
+
+        assert_eq!(outcome.status(), SyncOutcomeStatus::Complete);
+        assert_eq!(fixture.remote.push_calls.load(Ordering::SeqCst), 2);
+        assert_eq!(fixture.store.push_commits.load(Ordering::SeqCst), 2);
+        let checkpoint = fixture
+            .store
+            .load_checkpoint(scope)
+            .await
+            .expect("checkpoint");
+        assert!(checkpoint.pending().is_empty());
+        assert!(!checkpoint.more_pending());
+        let stored = fixture.store.stored_items.lock().expect("stored items");
+        assert!(created.iter().all(|id| stored
+            .get(&(scope, *id))
+            .is_some_and(|item| item.sync_status == SyncStatus::Synced)));
     }
 
     #[tokio::test]

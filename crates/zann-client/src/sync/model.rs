@@ -31,6 +31,9 @@ pub(crate) const MAX_PULL_CHANGES: usize = 16_384;
 pub(crate) const MAX_HISTORY_PER_ITEM: usize = 5;
 pub(crate) const MAX_CURSOR_BYTES: usize = 4_096;
 pub(crate) const MAX_PENDING_CHANGES: usize = 64;
+/// Push batches one sync sends per vault; up to 1,024 changes, the rest
+/// waits for the next sync.
+pub(crate) const MAX_PUSH_ROUNDS: usize = 16;
 pub(crate) const MAX_PAYLOAD_BYTES: usize = 262_144;
 pub(crate) const MAX_CIPHERTEXT_BYTES: usize = MAX_PAYLOAD_BYTES + 256;
 pub(crate) const MAX_ITEM_NAME_BYTES: usize = 200;

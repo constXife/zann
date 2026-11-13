@@ -51,7 +51,7 @@ use zann_db::local::{
     LocalProjectionReadError, LocalStorage, LocalStorageProof, LocalStorageRepo, LocalSyncError,
     LocalSyncGenerationProof, LocalSyncRepo, LocalSyncScope, LocalVault, LocalVaultKeyBindError,
     LocalVaultRepo, PendingChangeRepo, PullChange, PullPage, PushCommit, PushOutcome,
-    ResetProjection,
+    ResetProjection, SyncCursorRepo,
 };
 use zann_db::{ExistingSqliteDatabase, SqlitePool};
 
@@ -595,7 +595,7 @@ impl SqliteSyncStore {
 
     async fn checkpoint(&self, scope: SyncScope) -> Result<SyncCheckpoint, SyncStoreError> {
         self.ensure_scope(scope).await?;
-        let (checkpoint, pending) = PendingChangeRepo::new(self.database.pool())
+        let page = PendingChangeRepo::new(self.database.pool())
             .load_checkpoint_with_pending_max(
                 scope.storage_id(),
                 scope.vault_id(),
@@ -603,22 +603,56 @@ impl SqliteSyncStore {
             )
             .await
             .map_err(map_projection_read)?;
-        let cursor = checkpoint
+        let cursor = page
+            .checkpoint
             .as_ref()
             .and_then(|value| value.cursor.as_ref())
             .map(|value| SyncCursor::new(value.clone()))
             .transpose()
             .map_err(map_model_error)?;
-        let last_seq = checkpoint
+        let mut last_seq = page
+            .checkpoint
             .and_then(|value| value.last_seq)
             .map(SyncSeq::new)
             .transpose()
             .map_err(map_model_error)?;
-        let pending = pending
+        if let (None, Some(cursor)) = (last_seq, cursor.as_ref()) {
+            if cursor.sequence() > 0 {
+                last_seq = Some(self.adopt_legacy_last_seq(scope, cursor).await?);
+            }
+        }
+        let pending = page
+            .pending
             .iter()
             .map(|change| pending_proof(scope, change))
             .collect::<Result<Vec<_>, _>>()?;
-        SyncCheckpoint::new(cursor, last_seq, pending).map_err(map_model_error)
+        SyncCheckpoint::new(cursor, last_seq, pending)
+            .map(|checkpoint| checkpoint.with_more_pending(page.more_pending))
+            .map_err(map_model_error)
+    }
+
+    /// MIG-009: a cursor written before migration 0002 added `last_seq` keeps
+    /// its sequence only inside the cursor. The current engine never writes a
+    /// cursor past zero without one, so this records it once, idempotently;
+    /// a cursor that changed meanwhile is a stale checkpoint.
+    async fn adopt_legacy_last_seq(
+        &self,
+        scope: SyncScope,
+        cursor: &SyncCursor,
+    ) -> Result<SyncSeq, SyncStoreError> {
+        let adopted = SyncCursorRepo::new(self.database.pool())
+            .adopt_legacy_last_seq(
+                scope.storage_id(),
+                scope.vault_id(),
+                cursor.as_str(),
+                cursor.sequence(),
+            )
+            .await
+            .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
+        if !adopted {
+            return Err(store_error(SyncStoreErrorKind::StaleCheckpoint));
+        }
+        SyncSeq::new(cursor.sequence()).map_err(map_model_error)
     }
 
     async fn item_states(
@@ -978,8 +1012,13 @@ async fn reconcile_catalog_rows(
             remote.plane,
             remote.vault_key_envelope,
         )?;
+        // MIG-009: a vault that predates migration 0002 still carries the
+        // internal slug it derived from its id; the key bind adopts the
+        // catalog's slug once every cached item proves the key.
+        let legacy_slug =
+            local.cache_key_fp.is_none() && local.slug == LocalVault::local_slug(remote.id);
         if local.storage_id != storage.id
-            || local.slug != remote.slug
+            || (local.slug != remote.slug && !legacy_slug)
             || local.name != remote.name
             || local.kind != kind
             || local.is_default
@@ -1095,8 +1134,13 @@ async fn reconcile_catalog_rows_for_test(
             remote.plane,
             remote.vault_key_envelope,
         )?;
+        // MIG-009: a vault that predates migration 0002 still carries the
+        // internal slug it derived from its id; the key bind adopts the
+        // catalog's slug once every cached item proves the key.
+        let legacy_slug =
+            local.cache_key_fp.is_none() && local.slug == LocalVault::local_slug(remote.id);
         if local.storage_id != storage.id
-            || local.slug != remote.slug
+            || (local.slug != remote.slug && !legacy_slug)
             || local.name != remote.name
             || local.kind != kind
             || local.is_default
@@ -1830,7 +1874,7 @@ mod tests {
         ClientId, ConnectionMetadata, CredentialActivation, CredentialBundle, CredentialPortError,
         CredentialSecret, CredentialStore, LegacyCredentialLocator, LegacyCredentialSource,
     };
-    use zann_db::local::{LocalSyncCheckpoint, SyncCursorRepo};
+    use zann_db::local::LocalSyncCheckpoint;
 
     mod candidate_key;
     mod multi_storage;
@@ -3527,7 +3571,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sixty_five_pending_rows_are_rejected_from_a_bounded_read() {
+    async fn sixty_five_pending_rows_load_the_oldest_sixty_four_first() {
         let fixture = configured_fixture();
         let database_path = fixture.temp.path().join("pending-limit.sqlite");
         let pool = zann_db::connect_sqlite_path_with_max(&database_path, 1)
@@ -3587,11 +3631,20 @@ mod tests {
             fixture.target,
         )
         .expect("construct adapter");
-        let error = store
+        let checkpoint = store
             .checkpoint(scope)
             .await
-            .expect_err("65 pending rows exceed the clean port limit");
-        assert_eq!(error.kind(), SyncStoreErrorKind::InvalidData);
+            .expect("a bounded batch of the oldest pending rows");
+        assert_eq!(checkpoint.pending().len(), MAX_PENDING_CHANGES as usize);
+        assert!(
+            checkpoint.more_pending(),
+            "the newest row waits for the next batch"
+        );
+        assert_eq!(
+            checkpoint.pending()[0].path(),
+            Some("accounts/pending-0"),
+            "the oldest pending change goes first"
+        );
         pool.close().await;
     }
 }
