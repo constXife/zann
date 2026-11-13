@@ -67,11 +67,8 @@ pub trait LocalVaultService: Send + Sync {
     /// Requires an unlocked session and verifies the target's cached vault keys,
     /// and chooses its preferred vault atomically; refusal preserves selection.
     fn set_current_storage(&self, id: String) -> LocalResult<()>;
-    /// Moves an unlocked session whose storage holds no item to the storage
-    /// a fresh start would open; a client calls it after a newly connected
-    /// server's first sync.
-    fn follow_preferred_storage(&self) -> LocalResult<()>;
-    fn current_storage_id(&self) -> String;
+    /// The selected server replica; an empty pre-sync session has none.
+    fn current_storage_id(&self) -> Option<String>;
     fn app_status(&self) -> LocalResult<AppStatus>;
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus>;
     fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome>;

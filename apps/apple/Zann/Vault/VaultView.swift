@@ -48,7 +48,7 @@ struct VaultView: View {
                 vault.startCreating()
             }
             .help("\(app.strings("common.create")) (⌘N)")
-            .disabled(vault.switching || !vault.contextReady)
+            .disabled(vault.switching || !vault.contextReady || vault.vaultID == nil)
         }
     }
 

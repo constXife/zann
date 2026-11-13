@@ -87,7 +87,7 @@ async fn sqlite_path_connector_does_not_interpret_filename_as_a_uri() {
             .expect("query database at literal path")
             .try_get("count")
             .expect("decode storage count");
-    assert_eq!(storage_count, 1);
+    assert_eq!(storage_count, 0);
     assert!(
         path.exists(),
         "connector must use the exact filesystem path"

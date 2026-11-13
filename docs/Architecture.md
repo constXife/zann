@@ -258,25 +258,29 @@ and recomputed-fingerprint coherence before candidate publication.
 Logout and refresh rejection use a symmetric credential-aware revoke rather
 than editing metadata directly.
 
-Which local storage a session shows is a `zann-client-sqlite::local_vault`
-rule, not a shell choice. Opening picks the storage holding the most items
-among those holding a vault, and a server storage wins over the local one when
-none holds an item. Unlocking always verifies the key against a vault of that
-storage. After a newly connected server's first sync, clients call
-`follow_preferred_storage`, which moves a session whose storage is still empty
-to the storage that opening would pick. Explicit `set_current_storage` requires
-an unlocked session, resolves cached vault keys through the canonical
-`LocalServices` wrapping policy (including server-wrapped shared vaults), and
-selects its preferred vault before publishing the context. Item writes and list operations hold a context read lease;
-selection and lock acquire its write lease. Cancellable item reads snapshot
-the selected storage/vault, pool and key under a short lease, then release it
-before awaiting SQLite. The existing `SessionOperation` cancels the read on
-replacement, selection or lock; generation validation rejects stale results.
-The FFI projects the typed payload through `zann-ui-core` and returns one
-complete card, without sending payload JSON to Swift and back. A superseded unlock cannot publish
-its context. Native shells reload list, counts and detail on selection and sync
-with the selected storage ID. The current root still has one KDF identity;
-selection does not introduce independent master-key identities per account.
+Native clients are offline-first replicas of server storages. Authentication
+commits the account's KDF salt and parameters into Config v2; opening SQLite or
+setting a master password never invents an identity. A fresh database contains
+no storage or vault. First use is connect → authenticate → master password →
+first sync. The sync owner creates or downloads the personal catalog and key.
+
+`zann-client-sqlite::local_vault` owns selection across server replicas. Opening
+selects a storage with a cached vault, in deterministic storage order; an empty
+session selects the synced storage when its first catalog arrives. There is no
+phantom Local storage or post-sync preference API. The selection getter returns
+an explicit optional storage ID: before a first catalog it can be absent, while
+operations requiring a replica still refuse a missing selection. Selection and
+lock hold a write lease; cancellable item reads snapshot storage, vault, pool,
+key and generation under a short read lease, release it before awaiting SQLite,
+and reject completions from a superseded context. FFI consumes the typed payload
+through `zann-ui-core` into one card projection without a JSON round trip.
+Unlock checks a cached vault
+key locally. A disconnected replica keeps its keys, items, pending changes,
+exports, snapshots and verification without a server connection.
+
+The forward SQLite migration removes empty legacy local-only storages and
+refuses any with vaults, items, history or pending changes. Historical migration
+checksums remain unchanged. See the [cutover guide](migrations/server-first-clients.md).
 
 A device that holds no vault has nothing local to check a master key against,
 and its first sync binds the key's fingerprint to the connection. So when such

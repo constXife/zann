@@ -1,13 +1,15 @@
 use super::*;
+use zann_db::local::LocalStorage;
 
-pub(super) fn fixture() -> (tempfile::TempDir, Arc<LocalVault>, Uuid) {
+pub(super) fn fixture() -> (tempfile::TempDir, Arc<LocalVault>, Uuid, Uuid) {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().canonicalize().expect("canonical root");
     let core =
         open_vault(format!("sqlite://{}", root.join("local.sqlite").display())).expect("open");
-    core.initialize_master_password("context test password".into())
+    core.seed_offline_fixture("context test password".into())
         .expect("initialize");
     let pool = core.pool();
+    let first = core.storage_id().expect("first storage");
     let remote = LocalStorage {
         id: Uuid::now_v7(),
         kind: zann_core::StorageKind::Remote,
@@ -24,7 +26,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, Arc<LocalVault>, Uuid) {
         .expect("storage");
     let mut vault = core
         .runtime
-        .block_on(LocalVaultRepo::new(&pool).list_by_storage(Uuid::nil()))
+        .block_on(LocalVaultRepo::new(&pool).list_by_storage(first))
         .expect("vaults")
         .remove(0);
     // The same vault ID in two storage contexts must never mix their items.
@@ -32,7 +34,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, Arc<LocalVault>, Uuid) {
     core.runtime
         .block_on(LocalVaultRepo::new(&pool).insert_if_absent(&vault))
         .expect("vault");
-    (dir, core, remote.id)
+    (dir, core, first, remote.id)
 }
 
 fn page(core: &LocalVault) -> ItemPage {
@@ -51,7 +53,7 @@ fn page(core: &LocalVault) -> ItemPage {
 
 #[test]
 fn selection_opens_target_vault_and_isolates_reads_and_writes() {
-    let (_dir, core, remote) = fixture();
+    let (_dir, core, first, remote) = fixture();
     let local_vault = core.current_vault_id();
     let local_item = core
         .debug_create_kv_item("Local".into(), "key".into(), "local value".into())
@@ -64,15 +66,14 @@ fn selection_opens_target_vault_and_isolates_reads_and_writes() {
     core.debug_create_kv_item("Remote".into(), "key".into(), "remote value".into())
         .expect("item");
     assert_eq!(page(&core).items[0].path, "Remote");
-    core.set_current_storage(Uuid::nil().to_string())
-        .expect("back");
+    core.set_current_storage(first.to_string()).expect("back");
     assert_eq!(page(&core).items[0].id, local_item);
     assert_eq!(page(&core).items.len(), 1);
 }
 
 #[test]
 fn selection_round_trips_storage_with_personal_and_server_wrapped_shared_vaults() {
-    let (_dir, core, remote) = fixture();
+    let (_dir, core, first, remote) = fixture();
     let pool = core.pool();
     let personal = Uuid::parse_str(&core.current_vault_id().expect("personal")).expect("id");
     let shared = zann_db::local::LocalVault {
@@ -100,8 +101,7 @@ fn selection_round_trips_storage_with_personal_and_server_wrapped_shared_vaults(
     let item = core
         .debug_create_kv_item("Shared".into(), "key".into(), "fixture value".into())
         .expect("shared item");
-    core.set_current_storage(Uuid::nil().to_string())
-        .expect("local");
+    core.set_current_storage(first.to_string()).expect("local");
     assert!(page(&core).items.is_empty());
     core.set_current_storage(remote.to_string())
         .expect("return to remote");
@@ -112,7 +112,7 @@ fn selection_round_trips_storage_with_personal_and_server_wrapped_shared_vaults(
         "shared payload still opens with its canonical key"
     );
 
-    core.set_current_storage(Uuid::nil().to_string())
+    core.set_current_storage(first.to_string())
         .expect("local again");
     core.runtime
         .block_on(LocalVaultRepo::new(&pool).update_key(
@@ -127,12 +127,15 @@ fn selection_round_trips_storage_with_personal_and_server_wrapped_shared_vaults(
         .expect_err("wrong personal key");
     assert!(matches!(&error, LocalError::Unlock { kind, .. } if kind == "storage_key_mismatch"));
     assert!(std::error::Error::source(&error).is_some());
-    assert_eq!(core.current_storage_id(), Uuid::nil().to_string());
+    assert_eq!(
+        core.current_storage_id().expect("storage"),
+        first.to_string()
+    );
 }
 
 #[test]
 fn incompatible_keys_and_empty_storage_leave_selection_unchanged() {
-    let (_dir, core, remote) = fixture();
+    let (_dir, core, first, remote) = fixture();
     let before = core.current_vault_id();
     let pool = core.pool();
     let vault_id = Uuid::parse_str(before.as_ref().expect("vault")).expect("id");
@@ -149,20 +152,27 @@ fn incompatible_keys_and_empty_storage_leave_selection_unchanged() {
         .expect_err("wrong key");
     assert!(matches!(&error, LocalError::Unlock { kind, .. } if kind == "storage_key_mismatch"));
     assert!(std::error::Error::source(&error).is_some());
-    assert_eq!(core.current_storage_id(), Uuid::nil().to_string());
+    assert_eq!(
+        core.current_storage_id().expect("storage"),
+        first.to_string()
+    );
     assert_eq!(core.current_vault_id(), before);
     core.runtime
         .block_on(LocalVaultRepo::new(&pool).delete_by_storage(remote))
         .expect("empty");
-    assert!(
-        matches!(core.set_current_storage(remote.to_string()), Err(LocalError::Sync { kind, .. }) if kind == "storage_empty")
+    core.set_current_storage(remote.to_string())
+        .expect("empty server catalog");
+    assert_eq!(
+        core.current_storage_id().expect("storage"),
+        remote.to_string()
     );
-    assert_eq!(core.current_vault_id(), before);
+    assert!(core.current_vault_id().is_none());
+    assert!(page(&core).items.is_empty());
 }
 
 #[test]
 fn selection_waits_for_item_context_and_lock_supersedes_pending_unlock() {
-    let (_dir, core, remote) = fixture();
+    let (_dir, core, first, remote) = fixture();
     let lease = core.context_gate.read().expect("lease");
     let (started_tx, started_rx) = std::sync::mpsc::channel();
     let (done_tx, done_rx) = std::sync::mpsc::channel();
@@ -176,7 +186,7 @@ fn selection_waits_for_item_context_and_lock_supersedes_pending_unlock() {
     assert!(done_rx
         .recv_timeout(std::time::Duration::from_millis(50))
         .is_err());
-    assert_eq!(core.storage_id(), Uuid::nil());
+    assert_eq!(core.storage_id().expect("storage"), first);
     drop(lease);
     done_rx
         .recv_timeout(std::time::Duration::from_secs(5))
@@ -188,8 +198,26 @@ fn selection_waits_for_item_context_and_lock_supersedes_pending_unlock() {
     core.lock().expect("lock");
     assert!(core.finish_unlock(key, generation).is_err());
     assert!(matches!(
-        core.set_current_storage(Uuid::nil().to_string()),
+        core.set_current_storage(first.to_string()),
         Err(LocalError::Locked)
     ));
     assert!(!core.vault_status().expect("status").unlocked);
+}
+
+#[test]
+fn a_late_sync_target_cannot_replace_an_explicitly_selected_empty_replica() {
+    let (_dir, core, first, second) = fixture();
+    core.runtime
+        .block_on(LocalVaultRepo::new(&core.pool()).delete_by_storage(second))
+        .expect("empty second catalog");
+    core.set_current_storage(second.to_string())
+        .expect("second replica");
+    let key = core.master_key().expect("key");
+    for target in [Some(first.to_string()), None] {
+        let generation = core.context_generation.load(Ordering::SeqCst);
+        core.select_synced_catalog(target, Some(second), &key, generation)
+            .expect("a completed sync preserves explicit navigation");
+        assert_eq!(core.current_storage_id(), Some(second.to_string()));
+        assert!(core.current_vault_id().is_none());
+    }
 }

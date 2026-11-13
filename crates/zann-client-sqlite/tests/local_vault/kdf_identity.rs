@@ -1,7 +1,5 @@
-//! The KDF identity has one home, the Config v2 `identity`, and one rule for
-//! where it comes from: a login commits the account's, and only a vault that
-//! is local-only from the start generates its own. Opening a database never
-//! invents one, so a second device can always adopt the account's salt.
+//! Config v2 keeps the account KDF identity committed by server login.
+//! Opening a database or requesting local initialization never invents one.
 
 use crate::support::CanonicalTempDir;
 use std::fs;
@@ -69,24 +67,20 @@ fn opening_a_fresh_database_commits_no_identity() {
     assert_eq!(
         committed_identity(&root),
         None,
-        "opening must leave the salt to a login or an explicit local vault"
+        "opening must leave the salt to server login"
     );
 }
 
 #[test]
-fn a_local_only_vault_generates_and_commits_its_identity() {
+fn initializing_without_server_login_stores_nothing() {
     let root = CanonicalTempDir::new();
-    let password = format!("pw-{}", Uuid::now_v7());
     let core = create_core(db_url(&root)).expect("open core");
-    core.initialize_master_password(password.clone())
-        .expect("initialize master password");
-    drop(core);
-
-    let identity = committed_identity(&root).expect("local identity committed");
-    assert_eq!(identity.kdf_params.algorithm, "argon2id");
-
-    let core = create_core(db_url(&root)).expect("reopen core");
-    assert!(core.unlock(password).expect("unlock").unlocked);
+    core.initialize_master_password("correct horse battery".into())
+        .expect_err("server required");
+    assert!(core.list_storages().expect("storages").is_empty());
+    assert!(core.current_storage_id().is_none());
+    assert!(core.current_vault_id().is_none());
+    assert!(committed_identity(&root).is_none());
 }
 
 /// The account's identity outlives the session that committed it, for
@@ -128,17 +122,9 @@ fn a_second_device_unlocks_with_the_account_identity() {
 
     let first = CanonicalTempDir::new();
     let core = create_core(db_url(&first)).expect("open device A");
-    // Device A made the account's vault online, where the server confirmed
-    // its key; offline it stands in with the same salt and parameters, which
-    // alone determine the key.
-    let mut same_salt = account_identity();
-    same_salt.email = None;
-    same_salt.salt_fingerprint = None;
-    app_client(&first)
-        .replace_kdf_identity_if_matches(None, same_salt)
-        .expect("device A login");
-    core.initialize_master_password(password.clone())
-        .expect("device A creates the vault");
+    core.seed_offline_fixture(password.clone())
+        .expect("device A replica");
+    let identity = committed_identity(&first).expect("account identity");
     // A consistent copy of device A's database, independent of its WAL.
     let synced = core.snapshot_create(None).expect("device A snapshot");
     drop(core);
@@ -147,7 +133,7 @@ fn a_second_device_unlocks_with_the_account_identity() {
     let core = create_core(db_url(&second)).expect("open device B");
     drop(core);
     app_client(&second)
-        .replace_kdf_identity_if_matches(None, account_identity())
+        .replace_kdf_identity_if_matches(None, identity)
         .expect("device B login adopts the account's salt");
 
     // Stand in for a sync: device B receives device A's encrypted vault.

@@ -31,6 +31,19 @@ impl Drop for DbUrlOverride {
     }
 }
 
+fn seed_session(session: &Session, password: &str) -> Result<(), String> {
+    let fixture = zann_client_sqlite::local_vault::open_vault_at_path(
+        session.database_location().path(),
+        zann_client_sqlite::local_vault::LocalVaultPorts::system_default(),
+    )
+    .map_err(|err| err.to_string())?;
+    fixture
+        .seed_offline_fixture(password.to_string())
+        .map_err(|err| err.to_string())?;
+    drop(fixture);
+    local::unlock(&session.facade(), password.to_string())
+}
+
 const LOGIN_PAYLOAD: &str = r#"{
   "v": 1,
   "typeId": "login",
@@ -49,7 +62,7 @@ fn vault_with_items() -> (tempfile::TempDir, Session) {
     assert!(!status.initialized);
 
     let facade = session.facade();
-    local::initialize_master_password(&facade, "demo-password".to_string()).expect("initialize");
+    seed_session(&session, "demo-password").expect("initialize");
     facade
         .debug_create_kv_item(
             "work/aws".to_string(),
@@ -94,7 +107,7 @@ fn session_keeps_the_explicit_database_instead_of_reresolving_the_environment() 
 
     let result = (|| {
         let (session, _) = Session::open_at(explicit_path.clone())?;
-        local::initialize_master_password(&session.facade(), "explicit-password".to_string())?;
+        seed_session(&session, "explicit-password")?;
         let status = session
             .facade()
             .app_status()
@@ -209,7 +222,7 @@ fn facade_creates_and_edits_items_for_cosmic() {
         Session::open_at(dir.path().join("local.sqlite")).expect("open session");
     assert!(!status.initialized);
     let facade = session.facade();
-    local::initialize_master_password(&facade, "demo-password".to_string()).expect("initialize");
+    seed_session(&session, "demo-password").expect("initialize");
 
     let created = local::item_create(
         &facade,
@@ -293,7 +306,7 @@ fn search_finds_an_item_beyond_the_first_loaded_page() {
     assert!(!status.initialized);
 
     let facade = session.facade();
-    local::initialize_master_password(&facade, "demo-password".to_string()).expect("initialize");
+    seed_session(&session, "demo-password").expect("initialize");
     facade
         .debug_create_kv_item(
             "Hetzner".to_string(),
@@ -715,7 +728,7 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
     let ignored = vault.update(
         vault::Message::AutoSynced {
             ticket: stale,
-            storage_id: local::current_storage_id(&session.facade()),
+            storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
             list_generation: 0,
             result: Ok(Some(empty.clone())),
         },
@@ -729,7 +742,7 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
     vault.update(
         vault::Message::AutoSynced {
             ticket: current,
-            storage_id: local::current_storage_id(&session.facade()),
+            storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
             list_generation: 0,
             result: Ok(Some(empty)),
         },
@@ -760,7 +773,7 @@ fn a_sync_started_under_an_older_search_keeps_the_newer_list() {
     vault.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: local::current_storage_id(&session.facade()),
+            storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
             list_generation: 0,
             result: Ok(Some(empty)),
         },
@@ -1156,15 +1169,15 @@ fn backend_classifies_the_identity_change_and_forgets_idempotently() {
         Err(local::SyncFailure::Other(_))
     ));
 
-    let storage = local::current_storage_id(&facade);
-    // A storage no server syncs has nothing to sync on schedule.
+    let storage = local::current_storage_id(&facade).expect("selected storage");
+    // A disconnected cache reports why pending changes cannot be sent.
     assert!(matches!(
         local::sync_and_reload(&facade, storage.clone(), None),
-        Ok(None)
+        Err(local::SyncFailure::Disconnected { .. })
     ));
     assert_eq!(
         local::pending_change_count(&facade, storage.clone()).expect("count"),
-        0
+        2
     );
     assert_eq!(
         local::forget_server(&facade, storage).expect("no server to forget"),

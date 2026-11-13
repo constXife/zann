@@ -14,7 +14,7 @@ fn ffi_projects_local_commands_results_and_errors() {
         core.unlock_remembered(),
         Err(CoreError::Unlock { kind, .. }) if kind == "keystore_not_found"
     ));
-    core.initialize_master_password("adapter-test-password".into())
+    core.seed_offline_fixture("adapter-test-password".into())
         .expect("initialize");
     let payload = r#"{"v":1,"typeId":"login","fields":{"password":{"kind":"password","value":"test-secret"}}}"#;
     let item = core
@@ -50,7 +50,7 @@ fn ffi_projects_local_commands_results_and_errors() {
 fn a_listed_item_carries_its_caption_from_non_secret_fields() {
     let root = tempfile::tempdir().expect("tempdir");
     let core = support::open(&root.path().join("local.sqlite"));
-    core.initialize_master_password("adapter-test-password".into())
+    core.seed_offline_fixture("adapter-test-password".into())
         .expect("initialize");
     let create = |path: &str, payload: &str| {
         core.item_create(ItemCreate {
@@ -114,15 +114,15 @@ fn a_listed_item_carries_its_caption_from_non_secret_fields() {
 fn a_storage_no_server_syncs_has_no_server_to_forget() {
     let root = tempfile::tempdir().expect("tempdir");
     let core = support::open(&root.path().join("local.sqlite"));
-    core.initialize_master_password("adapter-test-password".into())
+    core.seed_offline_fixture("adapter-test-password".into())
         .expect("initialize");
-    let storage = core.current_storage_id();
+    let storage = core.current_storage_id().expect("selected server storage");
 
     assert_eq!(
         core.storage_sync_state(storage.clone())
             .expect("storage sync state")
             .link,
-        SyncLinkFfi::Local
+        SyncLinkFfi::Disconnected
     );
     assert_eq!(
         core.pending_change_count(storage.clone())

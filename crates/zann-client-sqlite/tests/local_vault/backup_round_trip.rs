@@ -22,7 +22,7 @@ fn db_url(root: &std::path::Path) -> String {
 fn exports_a_vault_to_an_explicit_path() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/api".into(), "token".into(), "s3cr3t".into())
         .expect("create item");
@@ -48,7 +48,7 @@ fn exports_a_vault_to_an_explicit_path() {
 fn an_empty_path_falls_back_to_the_vault_directory() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/api".into(), "token".into(), "s3cr3t".into())
         .expect("create item");
@@ -66,52 +66,28 @@ fn an_empty_path_falls_back_to_the_vault_directory() {
 }
 
 #[test]
-fn what_is_exported_can_be_imported_into_a_fresh_vault() {
-    let source_root = CanonicalTempDir::new();
-    let password = format!("pw-{}", Uuid::now_v7());
-
-    let source = create_core(db_url(&source_root)).expect("create source core");
-    source
-        .initialize_master_password(password.clone())
-        .expect("initialize master password");
-    source
-        .debug_create_kv_item("secrets/one".into(), "token".into(), "first".into())
-        .expect("create first item");
-    source
-        .debug_create_kv_item("secrets/two".into(), "token".into(), "second".into())
-        .expect("create second item");
-
-    let backup = source_root.join("export.json");
-    let exported = source
-        .backup_export_file(backup.display().to_string())
+fn importing_requires_an_explicit_server_destination() {
+    let root = CanonicalTempDir::new();
+    let core = create_core(db_url(&root)).expect("core");
+    core.seed_offline_fixture("correct horse battery".into())
+        .expect("fixture");
+    let path = root.join("backup.json");
+    core.backup_export_file(path.display().to_string())
         .expect("export");
-    assert_eq!(exported.items_count, 2);
-    drop(source);
-
-    let target_root = CanonicalTempDir::new();
-    let target = create_core(db_url(&target_root)).expect("create target core");
-    target
-        .initialize_master_password(password)
-        .expect("initialize master password");
-
-    let report = target
-        .backup_import_file(
-            backup.display().to_string(),
-            BackupImportOptions {
-                target_storage_id: None,
-            },
-        )
-        .expect("import");
-
-    assert_eq!(report.imported_items, 2);
-    assert_eq!(report.skipped_existing, 0);
+    core.backup_import_file(
+        path.display().to_string(),
+        BackupImportOptions {
+            target_storage_id: None,
+        },
+    )
+    .expect_err("no implicit local import destination");
 }
 
 #[test]
 fn an_empty_import_path_is_rejected_rather_than_guessed() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
 
     let err = core
@@ -129,7 +105,7 @@ fn an_empty_import_path_is_rejected_rather_than_guessed() {
 fn exporting_a_locked_vault_fails() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
     core.lock().expect("lock");
 
@@ -141,7 +117,7 @@ fn exporting_a_locked_vault_fails() {
 fn apple_passwords_preflight_and_import_keep_distinct_duplicate_titles() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.initialize_master_password(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
         .expect("initialize master password");
     let csv = root.join("Passwords.csv");
     fs::write(
@@ -163,7 +139,7 @@ fn apple_passwords_preflight_and_import_keep_distinct_duplicate_titles() {
     assert_eq!(preflight.duplicate_rows, 1);
     assert_eq!(preflight.invalid_rows, 1);
 
-    let target_storage_id = core.current_storage_id();
+    let target_storage_id = core.current_storage_id().expect("selected server storage");
     let report = core
         .apple_passwords_import_file(
             csv.display().to_string(),

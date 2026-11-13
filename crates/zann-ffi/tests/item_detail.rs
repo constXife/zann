@@ -6,7 +6,7 @@ use zann_ffi::{generate_totp, CoreError, ItemCreate, SessionOperationFfi};
 fn one_read_projects_canonical_fields_without_exporting_payload_json() {
     let root = tempfile::tempdir().expect("tempdir");
     let core = support::open(&root.path().join("local.sqlite"));
-    core.initialize_master_password("adapter-test-password".into())
+    core.seed_offline_fixture("adapter-test-password".into())
         .expect("initialize");
     let payload = r#"{"v":1,"typeId":"login","fields":{
         "notes":{"kind":"note","value":"line"},

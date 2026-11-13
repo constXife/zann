@@ -1,11 +1,9 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use zann_core::{ServiceError, ServiceResult, VaultKind, VaultSummary, VaultsService};
-use zann_crypto::crypto::SecretKey;
-use zann_crypto::vault_crypto as core_crypto;
+use zann_core::{ServiceError, ServiceResult, VaultSummary, VaultsService};
 
-use crate::local::{LocalVault, LocalVaultRepo};
+use crate::local::LocalVaultRepo;
 
 use super::LocalServices;
 
@@ -46,73 +44,5 @@ impl<'a> VaultsService for LocalServices<'a> {
             kind: vault.kind,
             is_default: vault.is_default,
         }))
-    }
-
-    async fn create_vault(
-        &self,
-        storage_id: Uuid,
-        name: &str,
-        kind: VaultKind,
-        is_default: bool,
-    ) -> ServiceResult<VaultSummary> {
-        let repo = LocalVaultRepo::new(self.pool);
-        let vault_key = SecretKey::generate();
-        let vault_id = Uuid::now_v7();
-        let payload = core_crypto::encrypt_vault_key(self.master_key, vault_id, &vault_key)
-            .map_err(|err| ServiceError::new("vault_key_encrypt_failed", err.to_string()))?;
-        let vault = LocalVault {
-            id: vault_id,
-            storage_id,
-            slug: LocalVault::local_slug(vault_id),
-            name: name.to_string(),
-            kind,
-            is_default,
-            vault_key_enc: payload,
-            key_wrap_type: crate::local::KeyWrapType::Master,
-            cache_key_fp: None,
-            last_synced_at: None,
-        };
-        repo.create(&vault)
-            .await
-            .map_err(|err| ServiceError::new("vault_create_failed", err.to_string()))?;
-        Ok(VaultSummary {
-            id: vault.id,
-            storage_id: vault.storage_id,
-            name: vault.name,
-            kind: vault.kind,
-            is_default: vault.is_default,
-        })
-    }
-
-    async fn ensure_default_local_personal(&self) -> ServiceResult<VaultSummary> {
-        let repo = LocalVaultRepo::new(self.pool);
-        let storage_id = Uuid::nil();
-        let vault_key = SecretKey::generate();
-        let vault_id = Uuid::now_v7();
-        let payload = core_crypto::encrypt_vault_key(self.master_key, vault_id, &vault_key)
-            .map_err(|err| ServiceError::new("vault_key_encrypt_failed", err.to_string()))?;
-        let candidate = LocalVault {
-            id: vault_id,
-            storage_id,
-            slug: LocalVault::local_slug(vault_id),
-            name: "Personal (Local)".to_string(),
-            kind: VaultKind::Personal,
-            is_default: true,
-            vault_key_enc: payload,
-            key_wrap_type: crate::local::KeyWrapType::Master,
-            cache_key_fp: None,
-            last_synced_at: None,
-        };
-        let vault = repo
-            .ensure_default_local_personal(&candidate)
-            .await
-            .map_err(|err| ServiceError::new("vault_ensure_default_failed", err.to_string()))?;
-        Ok(VaultSummary {
-            id: vault.id,
-            storage_id: vault.storage_id,
-            name: vault.name,
-            kind: vault.kind,
-            is_default: vault.is_default,
-        })
     }
 }

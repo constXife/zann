@@ -5,7 +5,6 @@ import { CachePolicy, VaultKind } from "../constants/enums";
 const createVaultName = defineModel<string>("createVaultName", { required: true });
 const createVaultKind = defineModel<VaultKind>("createVaultKind", { required: true });
 const createVaultCachePolicy = defineModel<CachePolicy>("createVaultCachePolicy", { required: true });
-const createVaultDefault = defineModel<boolean>("createVaultDefault", { required: true });
 
 const props = defineProps<{ t: Translator }>();
 </script>
@@ -45,9 +44,6 @@ const props = defineProps<{ t: Translator }>();
         <option :value="CachePolicy.None">{{ props.t("create.cacheNone") }}</option>
       </select>
     </label>
-    <label class="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
-      <input type="checkbox" class="rounded" v-model="createVaultDefault" />
-      <span>{{ props.t("create.setDefault") }}</span>
-    </label>
+
   </div>
 </template>

@@ -39,7 +39,15 @@ impl State {
     ) -> Task<Message> {
         self.syncing = true;
         let facade = session.facade();
-        let storage_id = local::current_storage_id(&facade);
+        let storage_id = match local::current_storage_id(&facade) {
+            Ok(id) => id,
+            Err(err) => {
+                self.syncing = false;
+                self.sync_error = Some(err);
+                session.auto_sync().finished(ticket, Instant::now());
+                return self.arm_auto_sync(session);
+            }
+        };
         let list_generation = self.list_generation;
         let query = (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
         cosmic::task::future(async move {

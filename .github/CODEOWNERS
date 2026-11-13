@@ -26,9 +26,11 @@
 /crates/zann-db/src/services/mod.rs @constXife
 /crates/zann-db/src/services/items.rs @constXife
 /crates/zann-db/migrations/0002_sync_cursor_last_seq.sql @constXife
+/crates/zann-db/migrations/0004_server_replicas.sql @constXife
 /crates/zann-db/tests/local_sqlite_path.rs @constXife
 /crates/zann-db/tests/local_sync_transactions.rs @constXife
 /crates/zann-db/tests/local_vault_migration.rs @constXife
+/crates/zann-db/tests/server_replicas_migration.rs @constXife
 /tests/fixtures/crypto/ @constXife
 /docs/audit-surface.md @constXife
 

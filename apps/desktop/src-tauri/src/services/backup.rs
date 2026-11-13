@@ -17,7 +17,7 @@ use zann_client_sqlite::maintenance::backup::{
     read_backup_metadata, slugify, stream_backup_items_async, BackupCtx, ImportOutcome,
     BACKUP_VERSION,
 };
-use zann_core::{CachePolicy, ItemsService, StorageKind, VaultKind, VaultsService};
+use zann_core::{CachePolicy, ItemsService, VaultKind};
 use zann_db::local::{
     KeyWrapType, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVault, LocalVaultRepo,
 };
@@ -195,13 +195,6 @@ pub async fn apple_import(
         target_storage_id.as_deref().unwrap_or("<none>")
     ));
 
-    let master_key = state
-        .master_key
-        .read()
-        .await
-        .clone()
-        .ok_or_else(|| "vault is locked".to_string())?;
-    let services = LocalServices::new(&state.pool, master_key.as_ref());
     let storage_repo = LocalStorageRepo::new(&state.pool);
     let vault_repo = LocalVaultRepo::new(&state.pool);
     let (_storage_id, _personal_vault_id) =
@@ -213,130 +206,122 @@ pub async fn apple_import(
                 .await
                 .map_err(|err| err.to_string())?
                 .ok_or_else(|| "storage not found".to_string())?;
-            if storage.kind != StorageKind::Remote {
-                let local_personal = services
-                    .ensure_default_local_personal()
-                    .await
-                    .map_err(|err| err.message)?;
-                (Uuid::nil(), local_personal.id)
+
+            if !storage.personal_vaults_enabled {
+                return Ok(ApiResponse::err(
+                    "personal_vaults_disabled",
+                    "personal vaults disabled for server",
+                ));
+            }
+            let existing_personal = vault_repo
+                .list_by_storage(storage.id)
+                .await
+                .map_err(|err| err.to_string())?
+                .into_iter()
+                .find(|vault| vault.kind == VaultKind::Personal);
+            let personal_id = if let Some(existing) = existing_personal {
+                existing.id
             } else {
-                if !storage.personal_vaults_enabled {
-                    return Ok(ApiResponse::err(
-                        "personal_vaults_disabled",
-                        "personal vaults disabled for server",
-                    ));
-                }
-                let existing_personal = vault_repo
-                    .list_by_storage(storage.id)
+                let addr = storage
+                    .server_url
+                    .clone()
+                    .ok_or_else(|| "server url missing".to_string())?;
+                let mut config = load_config(&state.root).map_err(|err| err.to_string())?;
+                let context_name = context_name_from_url(&addr);
+                let client = reqwest::Client::new();
+                let access_token = ensure_access_token_for_context(
+                    &client,
+                    &addr,
+                    &context_name,
+                    &mut config,
+                    Some(storage.id),
+                )
+                .await
+                .map_err(|err| format!("auth_failed: {err}"))?;
+                let _ = save_config(&state.root, &config);
+                let headers = auth_headers(&access_token)
+                    .map_err(|err| format!("auth_header_failed: {err}"))?;
+
+                let personal_status_url =
+                    format!("{}/v1/vaults/personal/status", addr.trim_end_matches('/'));
+                let personal_resp = client
+                    .get(personal_status_url)
+                    .headers(headers.clone())
+                    .send()
+                    .await
+                    .map_err(|err| format!("personal_status_request_failed: {err}"))?;
+                let personal_resp = ensure_success(personal_resp)
+                    .await
+                    .map_err(|err| format!("personal_status_failed: {err}"))?;
+                let personal_status =
+                    decode_json_response::<PersonalVaultStatusResponse>(personal_resp)
+                        .await
+                        .map_err(|err| format!("personal_status_decode_failed: {err}"))?;
+                let personal_vault_id = personal_status
+                    .personal_vault_id
+                    .clone()
+                    .ok_or_else(|| "personal vault missing".to_string())?;
+
+                let detail_url = format!(
+                    "{}/v1/vaults/{}",
+                    addr.trim_end_matches('/'),
+                    personal_vault_id
+                );
+                let detail_resp = client
+                    .get(detail_url)
+                    .headers(headers.clone())
+                    .send()
+                    .await
+                    .map_err(|err| format!("vault_detail_request_failed: {err}"))?;
+                let detail_resp = ensure_success(detail_resp)
+                    .await
+                    .map_err(|err| format!("vault_detail_failed: {err}"))?;
+                let detail = decode_json_response::<VaultDetailResponse>(detail_resp)
+                    .await
+                    .map_err(|err| format!("vault_detail_decode_failed: {err}"))?;
+
+                let vault_id =
+                    Uuid::parse_str(&detail.id).map_err(|_| "invalid vault id".to_string())?;
+                if vault_repo
+                    .get_by_id(storage.id, vault_id)
                     .await
                     .map_err(|err| err.to_string())?
-                    .into_iter()
-                    .find(|vault| vault.kind == VaultKind::Personal);
-                let personal_id = if let Some(existing) = existing_personal {
-                    existing.id
-                } else {
-                    let addr = storage
-                        .server_url
-                        .clone()
-                        .ok_or_else(|| "server url missing".to_string())?;
-                    let mut config = load_config(&state.root).map_err(|err| err.to_string())?;
-                    let context_name = context_name_from_url(&addr);
-                    let client = reqwest::Client::new();
-                    let access_token = ensure_access_token_for_context(
-                        &client,
-                        &addr,
-                        &context_name,
-                        &mut config,
-                        Some(storage.id),
-                    )
-                    .await
-                    .map_err(|err| format!("auth_failed: {err}"))?;
-                    let _ = save_config(&state.root, &config);
-                    let headers = auth_headers(&access_token)
-                        .map_err(|err| format!("auth_header_failed: {err}"))?;
-
-                    let personal_status_url =
-                        format!("{}/v1/vaults/personal/status", addr.trim_end_matches('/'));
-                    let personal_resp = client
-                        .get(personal_status_url)
-                        .headers(headers.clone())
-                        .send()
-                        .await
-                        .map_err(|err| format!("personal_status_request_failed: {err}"))?;
-                    let personal_resp = ensure_success(personal_resp)
-                        .await
-                        .map_err(|err| format!("personal_status_failed: {err}"))?;
-                    let personal_status =
-                        decode_json_response::<PersonalVaultStatusResponse>(personal_resp)
-                            .await
-                            .map_err(|err| format!("personal_status_decode_failed: {err}"))?;
-                    let personal_vault_id = personal_status
-                        .personal_vault_id
-                        .clone()
-                        .ok_or_else(|| "personal vault missing".to_string())?;
-
-                    let detail_url = format!(
-                        "{}/v1/vaults/{}",
-                        addr.trim_end_matches('/'),
-                        personal_vault_id
-                    );
-                    let detail_resp = client
-                        .get(detail_url)
-                        .headers(headers.clone())
-                        .send()
-                        .await
-                        .map_err(|err| format!("vault_detail_request_failed: {err}"))?;
-                    let detail_resp = ensure_success(detail_resp)
-                        .await
-                        .map_err(|err| format!("vault_detail_failed: {err}"))?;
-                    let detail = decode_json_response::<VaultDetailResponse>(detail_resp)
-                        .await
-                        .map_err(|err| format!("vault_detail_decode_failed: {err}"))?;
-
-                    let vault_id =
-                        Uuid::parse_str(&detail.id).map_err(|_| "invalid vault id".to_string())?;
-                    if vault_repo
-                        .get_by_id(storage.id, vault_id)
-                        .await
-                        .map_err(|err| err.to_string())?
-                        .is_none()
-                    {
-                        let kind = VaultKind::try_from(detail.kind)
-                            .map_err(|_| "invalid vault kind".to_string())?;
-                        let encryption_type = detail.encryption_type;
-                        let key_wrap_type =
-                            if encryption_type == zann_core::VaultEncryptionType::Server.as_i32() {
-                                KeyWrapType::RemoteServer
-                            } else {
-                                KeyWrapType::RemoteStrict
-                            };
-                        let local_vault = LocalVault {
-                            id: vault_id,
-                            storage_id: storage.id,
-                            slug: detail.slug.clone(),
-                            name: detail.name.clone(),
-                            kind,
-                            is_default: false,
-                            vault_key_enc: detail.vault_key_enc.clone(),
-                            key_wrap_type,
-                            cache_key_fp: None,
-                            last_synced_at: None,
+                    .is_none()
+                {
+                    let kind = VaultKind::try_from(detail.kind)
+                        .map_err(|_| "invalid vault kind".to_string())?;
+                    let encryption_type = detail.encryption_type;
+                    let key_wrap_type =
+                        if encryption_type == zann_core::VaultEncryptionType::Server.as_i32() {
+                            KeyWrapType::RemoteServer
+                        } else {
+                            KeyWrapType::RemoteStrict
                         };
-                        vault_repo
-                            .create(&local_vault)
-                            .await
-                            .map_err(|err| err.to_string())?;
-                    }
-                    vault_id
-                };
-                (storage.id, personal_id)
-            }
+                    let local_vault = LocalVault {
+                        id: vault_id,
+                        storage_id: storage.id,
+                        slug: detail.slug.clone(),
+                        name: detail.name.clone(),
+                        kind,
+                        is_default: false,
+                        vault_key_enc: detail.vault_key_enc.clone(),
+                        key_wrap_type,
+                        cache_key_fp: None,
+                        last_synced_at: None,
+                    };
+                    vault_repo
+                        .create(&local_vault)
+                        .await
+                        .map_err(|err| err.to_string())?;
+                }
+                vault_id
+            };
+            (storage.id, personal_id)
         } else {
-            let local_personal = services
-                .ensure_default_local_personal()
-                .await
-                .map_err(|err| err.message)?;
-            (Uuid::nil(), local_personal.id)
+            return Ok(ApiResponse::err(
+                "import_target_required",
+                "select a server storage to import into",
+            ));
         };
 
     let input_path = match path {
@@ -659,7 +644,6 @@ async fn plain_import_remote(
         .await
         .clone()
         .ok_or_else(|| log_remote_error("vault is locked"))?;
-    let services = LocalServices::new(&state.pool, master_key.as_ref());
     let item_repo = LocalItemRepo::new(&state.pool);
 
     #[derive(Default)]
@@ -673,6 +657,7 @@ async fn plain_import_remote(
     let counters = Arc::new(Mutex::new(ImportCounters::default()));
     let path_display = input_path.display().to_string();
     let vault_map_ref = &vault_map;
+    let services = LocalServices::new(&state.pool, master_key.as_ref());
     let services_ref = &services;
     let item_repo_ref = &item_repo;
 

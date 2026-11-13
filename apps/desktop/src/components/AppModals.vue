@@ -27,7 +27,6 @@ type AppModalsProps = {
   appStatus: unknown;
   showSetupModal: unknown;
   setupStep: unknown;
-  setupFlow: unknown;
   setupPassword: unknown;
   setupConfirm: unknown;
   setupPasswordMode: unknown;
@@ -43,7 +42,7 @@ type AppModalsProps = {
   connectLoginId: unknown;
   logoUrl: unknown;
   normalizeServerUrl: unknown;
-  startLocalSetup: unknown;
+
   startConnect: unknown;
   backToWelcome: unknown;
   createMasterPassword: unknown;
@@ -77,8 +76,7 @@ type AppModalsProps = {
   testBiometrics: unknown;
   rebindBiometrics: unknown;
   storages: unknown;
-  showLocalSection: unknown;
-  hasLocalVaults: unknown;
+
   getStorageInfo: unknown;
   handleSignOut: unknown;
   handleSignIn: unknown;
@@ -87,7 +85,7 @@ type AppModalsProps = {
   handleFactoryReset: unknown;
   handleStorageReveal: unknown;
   openAddStorageWizard: unknown;
-  openCreateLocalVault: unknown;
+
   handleSyncNow: unknown;
   handleResetSyncCursor: unknown;
   exportPlainBackup: unknown;
@@ -105,7 +103,6 @@ type AppModalsProps = {
   createVaultName: unknown;
   createVaultKind: unknown;
   createVaultCachePolicy: unknown;
-  createVaultDefault: unknown;
   showFolderSuggestions: unknown;
   vaults: unknown;
   flatFolderPaths: unknown;
@@ -206,7 +203,6 @@ const valueRef = <T>(key: keyof AppModalsProps) =>
   });
 
 const setupStep = modelRef<unknown>("setupStep");
-const setupFlow = modelRef<unknown>("setupFlow");
 const setupPassword = modelRef<unknown>("setupPassword");
 const setupConfirm = modelRef<unknown>("setupConfirm");
 const setupPasswordMode = modelRef<unknown>("setupPasswordMode");
@@ -228,7 +224,6 @@ const advancedOpen = modelRef<unknown>("advancedOpen");
 const createVaultName = modelRef<unknown>("createVaultName");
 const createVaultKind = modelRef<unknown>("createVaultKind");
 const createVaultCachePolicy = modelRef<unknown>("createVaultCachePolicy");
-const createVaultDefault = modelRef<unknown>("createVaultDefault");
 const showFolderSuggestions = modelRef<unknown>("showFolderSuggestions");
 const renameFolderModalOpen = modelRef<unknown>("renameFolderModalOpen");
 
@@ -279,7 +274,6 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
   <SetupWizardModal
     :open="showSetupModal"
     v-model:step="setupStep"
-    v-model:flow="setupFlow"
     v-model:setup-password="setupPassword"
     v-model:setup-confirm="setupConfirm"
     v-model:connect-server-url="connectServerUrl"
@@ -296,7 +290,6 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :logo-url="logoUrl"
     :t="t"
     :normalize-server-url="normalizeServerUrl"
-    :start-local-setup="startLocalSetup"
     :start-connect="startConnect"
     :back-to-welcome="backToWelcome"
     :create-master-password="createMasterPassword"
@@ -357,8 +350,6 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :on-test-biometrics="testBiometrics"
     :on-rebind-biometrics="rebindBiometrics"
     :storages="storages"
-    :show-local-section="showLocalSection"
-    :has-local-vaults="hasLocalVaults"
     :get-storage-info="getStorageInfo"
     :on-sign-out="handleSignOut"
     :on-sign-in="handleSignIn"
@@ -367,7 +358,6 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :on-factory-reset="handleFactoryReset"
     :on-reveal-storage="handleStorageReveal"
     :on-add-server="openAddStorageWizard"
-    :on-create-local-vault="openCreateLocalVault"
     :on-sync-now="handleSyncNow"
     :on-reset-sync-cursor="handleResetSyncCursor"
     :on-export-plain="exportPlainBackup"
@@ -389,7 +379,6 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     v-model:create-vault-name="createVaultName"
     v-model:create-vault-kind="createVaultKind"
     v-model:create-vault-cache-policy="createVaultCachePolicy"
-    v-model:create-vault-default="createVaultDefault"
     v-model:show-folder-suggestions="showFolderSuggestions"
     :create-mode="createMode"
     :vaults="vaults"

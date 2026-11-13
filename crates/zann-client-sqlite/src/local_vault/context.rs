@@ -48,16 +48,10 @@ impl LocalVault {
                 .runtime
                 .block_on(LocalVaultRepo::new(&pool).list_by_storage(id))
                 .map_err(|error| LocalError::Service(error.to_string()))?;
-            if vaults.is_empty() {
-                return Err(LocalError::Sync {
-                    kind: "storage_empty".into(),
-                    message: "this storage has no cached vaults; sync it before opening it".into(),
-                });
-            }
             self.verify_storage_keys(&master_key, &vaults)?;
             preferred_vault(&self.runtime, &pool, id, &vaults)?
         };
-        *self.storage_id.lock().expect("lock poisoned") = id;
+        *self.storage_id.lock().expect("lock poisoned") = Some(id);
         *self.vault_id.lock().expect("lock poisoned") = selected_vault;
         self.item_reads.cancel_all();
         self.context_generation.fetch_add(1, Ordering::SeqCst);

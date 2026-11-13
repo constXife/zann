@@ -83,7 +83,7 @@ pub(super) async fn ensure_storage_projection_bounded(
             CASE WHEN typeof(id) IN ('blob', 'text')
                 THEN octet_length(id) IN (16, 36) ELSE 0 END
             AND CASE WHEN typeof(kind) = 'integer'
-                THEN kind IN (1, 2) ELSE 0 END
+                THEN kind = 2 ELSE 0 END
             AND CASE WHEN typeof(name) = 'text'
                 THEN octet_length(name) BETWEEN 1 AND ?2 ELSE 0 END
             AND (server_url IS NULL OR CASE WHEN typeof(server_url) = 'text'
@@ -286,7 +286,7 @@ pub(super) async fn ensure_storage_kinds_bounded(
             WHEN typeof(id) NOT IN ('blob', 'text') THEN 1
             WHEN octet_length(id) NOT IN (16, 36) THEN 1
             WHEN typeof(kind) != 'integer' THEN 1
-            WHEN kind NOT IN (1, 2) THEN 1
+            WHEN kind != 2 THEN 1
             ELSE 0
         END
         LIMIT 1

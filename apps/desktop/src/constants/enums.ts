@@ -1,5 +1,4 @@
 export const StorageKind = {
-  LocalOnly: 1,
   Remote: 2,
 } as const;
 

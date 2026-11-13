@@ -371,7 +371,6 @@ pub fn device_preference_options() -> DevicePreferenceOptionsFfi {
 /// Whether a server syncs a storage; mirrors `zann_ui_core::SyncLink`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum SyncLinkFfi {
-    Local,
     Connected,
     Disconnected,
 }
@@ -379,7 +378,6 @@ pub enum SyncLinkFfi {
 impl From<SyncLinkFfi> for zann_ui_core::SyncLink {
     fn from(link: SyncLinkFfi) -> Self {
         match link {
-            SyncLinkFfi::Local => Self::Local,
             SyncLinkFfi::Connected => Self::Connected,
             SyncLinkFfi::Disconnected => Self::Disconnected,
         }
@@ -398,7 +396,6 @@ pub struct SyncStatusInputFfi {
 /// Which state the indicator shows, most urgent first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum SyncIndicatorStateFfi {
-    LocalOnly,
     Disconnected,
     Syncing,
     Failed,
@@ -436,7 +433,6 @@ pub fn sync_indicator(input: SyncStatusInputFfi) -> SyncIndicatorFfi {
     });
     SyncIndicatorFfi {
         state: match indicator {
-            zann_ui_core::SyncIndicator::LocalOnly => SyncIndicatorStateFfi::LocalOnly,
             zann_ui_core::SyncIndicator::Disconnected { .. } => SyncIndicatorStateFfi::Disconnected,
             zann_ui_core::SyncIndicator::Syncing { .. } => SyncIndicatorStateFfi::Syncing,
             zann_ui_core::SyncIndicator::Failed { .. } => SyncIndicatorStateFfi::Failed,

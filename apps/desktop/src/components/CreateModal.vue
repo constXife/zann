@@ -25,7 +25,6 @@ const advancedOpen = defineModel<boolean>("advancedOpen", { required: true });
 const createVaultName = defineModel<string>("createVaultName", { required: true });
 const createVaultKind = defineModel<VaultKind>("createVaultKind", { required: true });
 const createVaultCachePolicy = defineModel<CachePolicy>("createVaultCachePolicy", { required: true });
-const createVaultDefault = defineModel<boolean>("createVaultDefault", { required: true });
 const showFolderSuggestions = defineModel<boolean>("showFolderSuggestions", { required: true });
 
 const props = defineProps<{
@@ -362,7 +361,6 @@ onErrorCaptured((err, instance, info) => {
           v-model:create-vault-name="createVaultName"
           v-model:create-vault-kind="createVaultKind"
           v-model:create-vault-cache-policy="createVaultCachePolicy"
-          v-model:create-vault-default="createVaultDefault"
           :t="t"
         />
 

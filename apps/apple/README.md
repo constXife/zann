@@ -79,8 +79,9 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   and decides when registration is offered. The account's personal vault
   then opens with its master password (or a new account creates one) and
   opens cached content immediately. The first sync runs in the background;
-  the core then moves a still-empty session to the server's personal vault
-  when no editor is open, and keeps choosing it after a restart.
+  the core selects the first catalog when it arrives. Until then the workspace
+  has no selected replica or vault, and cannot create records. No standalone
+  identity or fallback Local vault is created.
 - Card reads use one `item_detail` FFI call returning ordered/masked fields.
   Rust transfers payload field strings into the shared presentation projection;
   no full payload JSON crosses into Swift and back. `ItemDetailLoader` owns one
@@ -103,7 +104,7 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   Server and vault navigation remains available during network sync. Progress
   follows its original server; a late completion reloads only the current
   context and never restores a previous selection. Explicit navigation also
-  cancels the first-sync automatic storage handoff.
+  is preserved when the first catalog arrives.
 
 - `Zann/SettingsView.swift` is the Settings window (⌘,) over the shared
   device preferences. `Zann/PreferencesFile.swift` keeps them in this app's

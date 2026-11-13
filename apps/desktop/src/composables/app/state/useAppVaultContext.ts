@@ -40,8 +40,7 @@ export function useAppVaultContext({
     if (storage?.kind === StorageKind.Remote) {
       parts.push(storage.server_name ?? storage.name ?? storage.server_url ?? t("nav.vaults"));
       parts.push(isSharedVault.value ? t("nav.shared") : t("nav.personal"));
-    } else if (storage) {
-      parts.push(t("storage.localVault"));
+
     }
     if (selectedVaultName.value) {
       parts.push(selectedVaultName.value);

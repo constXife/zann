@@ -42,7 +42,7 @@ type AppItemActionsOptions = {
   showToast: (message: string, options?: { duration?: number }) => void;
   setError: (message: string) => void;
   isDeletedItem: (item: ItemSummary) => boolean;
-  localStorageId: string;
+
 };
 
 export function useAppItemActions({
@@ -66,7 +66,7 @@ export function useAppItemActions({
   showToast,
   setError,
   isDeletedItem,
-  localStorageId,
+
 }: AppItemActionsOptions) {
   const copyField = async (field: FieldRow) => {
     await copyToClipboard(field.value);
@@ -221,9 +221,9 @@ export function useAppItemActions({
         selectedItemId.value = null;
       }
       await loadItems();
-      if (storageId !== localStorageId) {
+
         scheduleRemoteSync(storageId);
-      }
+
       showToast(t("common.deleted"));
     } catch (err) {
       setError(String(err));
@@ -269,9 +269,9 @@ export function useAppItemActions({
       selectedItemId.value = null;
     }
     await loadItems();
-    if (storageId !== localStorageId) {
+
       scheduleRemoteSync(storageId);
-    }
+
     showToast(t("items.restore"));
   };
 

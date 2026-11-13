@@ -4,18 +4,19 @@ import ZannCoreKit
 @testable import Zann
 
 /// Test-only cached server projection; copies encrypted keys inside a temporary DB.
-func seedStorageContext(database: URL) throws -> String {
+func seedStorageContext(database: URL, sourceStorageID: String) throws -> String {
     var db: OpaquePointer?
     guard sqlite3_open(database.path, &db) == SQLITE_OK else {
         throw NSError(domain: "StorageFixture", code: 1)
     }
     defer { sqlite3_close(db) }
+    let source = sourceStorageID.replacingOccurrences(of: "-", with: "")
     let sql = """
         INSERT INTO storages (id, kind, name, server_url)
         VALUES (X'123456781234123412341234567890ab', 2, 'Remote', 'https://work.example.test');
         INSERT INTO local_vaults (id, storage_id, slug, name, kind, is_default, vault_key_enc, key_wrap_type)
         SELECT id, X'123456781234123412341234567890ab', slug, name, kind, is_default, vault_key_enc, key_wrap_type
-        FROM local_vaults WHERE storage_id = X'00000000000000000000000000000000';
+        FROM local_vaults WHERE storage_id = X'\(source)';
         """
     guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
         throw NSError(domain: "StorageFixture", code: Int(sqlite3_errcode(db)))
@@ -30,9 +31,9 @@ final class StorageContextTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: dir) }
         let database = dir.appendingPathComponent("local.sqlite")
         let core = try createCore(dbPath: database.path, keystore: MemoryKeystore(), secretStore: MemorySecretStore())
-        _ = try core.initializeMasterPassword(password: "storage test password")
-        let local = core.currentStorageId()
-        let remote = try seedStorageContext(database: database)
+        _ = try core.seedOfflineFixture(password: "storage test password")
+        let local = try XCTUnwrap(core.currentStorageId())
+        let remote = try seedStorageContext(database: database, sourceStorageID: local)
         let model = VaultModel(core: core, contents: try VaultModel.load(core), strings: Strings(language: "en"))
         XCTAssertEqual(model.storages.first(where: { $0.id == remote })?.displayName, "work.example.test")
         model.startCreating(typeID: "note")

@@ -28,11 +28,12 @@ impl LocalVault {
             let in_flight = self
                 .item_reads
                 .register(operation.operation_id(), operation.cancellation_handle());
+            let master_key = self.master_key()?;
             (
-                self.storage_id(),
+                self.storage_id()?,
                 self.vault_id()?,
                 self.context_generation.load(Ordering::SeqCst),
-                self.master_key()?,
+                master_key,
                 self.pool(),
                 in_flight,
             )

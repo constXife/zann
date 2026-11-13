@@ -84,7 +84,7 @@ pub trait HardwareEnrollmentProgress: Send + Sync {
 
 #[derive(uniffi::Object)]
 pub struct CoreFacade {
-    inner: Arc<dyn LocalVaultService>,
+    inner: Arc<native::LocalVault>,
 }
 #[uniffi::export]
 impl CoreFacade {
@@ -284,16 +284,10 @@ impl CoreFacade {
             .map(|value| value.into_iter().map(|value| value.into()).collect())
             .map_err(Into::into)
     }
-    /// Moves an unlocked session whose storage holds no item to the storage
-    /// a fresh start would open; call it after a newly connected server's
-    /// first sync.
-    pub fn follow_preferred_storage(&self) -> CoreResult<()> {
-        self.inner.follow_preferred_storage().map_err(Into::into)
-    }
     pub fn set_current_storage(&self, id: String) -> CoreResult<()> {
         self.inner.set_current_storage(id).map_err(Into::into)
     }
-    pub fn current_storage_id(&self) -> String {
+    pub fn current_storage_id(&self) -> Option<String> {
         self.inner.current_storage_id()
     }
     pub fn app_status(&self) -> CoreResult<AppStatusFfi> {
@@ -399,3 +393,6 @@ pub fn create_core(
         .map_err(Into::into)
 }
 uniffi::setup_scaffolding!("zann_ffi");
+
+#[cfg(feature = "test-support")]
+mod test_support;

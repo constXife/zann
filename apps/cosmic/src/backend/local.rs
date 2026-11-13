@@ -132,7 +132,6 @@ const SERVER_IDENTITY_CHANGED: &str = "server_identity_changed";
 fn syncs(facade: &Facade, storage_id: String) -> Result<bool, SyncFailure> {
     let state = facade.storage_sync_state(storage_id)?;
     match state.link {
-        StorageLink::Local => Ok(false),
         StorageLink::Connected => Ok(true),
         StorageLink::Disconnected => Err(SyncFailure::Disconnected {
             server_url: state.server_url,
@@ -160,7 +159,7 @@ pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailu
 
 /// A scheduled sync of the open storage, the one "Sync now" in Settings runs
 /// for it, so a refusal names the storage its recovery acts on. `None` for a
-/// local storage or a sync that changed nothing; otherwise the first page
+/// sync that changed nothing; otherwise the first page
 /// again, for `query`. A server storage whose connection is gone is refused
 /// as [`SyncFailure::Disconnected`].
 pub fn sync_and_reload(
@@ -183,9 +182,9 @@ pub fn sync_and_reload(
 /// The first sync of a newly connected server; the core then moves the
 /// still-empty session to that server's personal vault.
 pub fn sync_new_server(facade: &Facade, storage_id: String) -> Result<(), String> {
-    sync(facade, Some(storage_id)).map_err(|failure| failure.to_string())?;
     facade
-        .follow_preferred_storage()
+        .remote_sync(Some(storage_id))
+        .map(|_| ())
         .map_err(|err| err.to_string())
 }
 
@@ -209,8 +208,10 @@ pub fn storages(facade: &Facade) -> Result<Vec<StorageSummary>, String> {
     facade.list_storages().map_err(|err| err.to_string())
 }
 
-pub fn current_storage_id(facade: &Facade) -> String {
-    facade.current_storage_id()
+pub fn current_storage_id(facade: &Facade) -> Result<String, String> {
+    facade
+        .current_storage_id()
+        .ok_or_else(|| "no server storage selected".to_string())
 }
 
 pub fn items(
@@ -384,7 +385,10 @@ pub fn import_apple_passwords(
     // The Apple export always belongs to the personal vault. Keep the open
     // session aligned with the destination so closing Settings shows what was
     // just imported instead of the previously active shared vault.
-    if facade.current_storage_id() == target_storage_id {
+    if facade
+        .current_storage_id()
+        .is_some_and(|id| id == target_storage_id)
+    {
         let personal = facade
             .list_vaults()
             .map_err(|err| err.to_string())?

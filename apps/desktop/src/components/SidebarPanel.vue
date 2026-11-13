@@ -17,9 +17,7 @@ const props = defineProps<{
   storageDropdownOpen: boolean;
   storages: StorageSummary[];
   remoteStorages: StorageSummary[];
-  localStorage?: StorageSummary;
-  showLocalSection: boolean;
-  hasLocalVaults: boolean;
+
   selectedStorageId: string;
   currentStorage?: StorageSummary;
   getSyncStatus: (storageId: string) => SyncStatus;
@@ -29,7 +27,7 @@ const props = defineProps<{
   closeStorageDropdown: () => void;
   openAddStorageWizard: () => void;
   openStorageSettings: () => void;
-  openCreateLocalVault: () => void;
+
   openSettings: (tab?: "general" | "accounts") => void;
   switchStorage: (storageId: string) => void;
   vaultDropdownOpen: boolean;
@@ -82,21 +80,6 @@ const staleSyncTitle = computed(() => {
     return "";
   }
   return `${t("storage.lastSynced")}: ${last.toLocaleDateString()}`;
-});
-
-const hideVaultSelector = computed(() => {
-  const allLocal = props.storages.length > 0 &&
-    props.storages.every((storage) => storage.kind === StorageKind.LocalOnly);
-  return (
-    allLocal &&
-    props.currentStorage?.kind === StorageKind.LocalOnly &&
-    props.vaults.length <= 1
-  );
-});
-
-const hideCreateLocalVault = computed(() => {
-  return props.storages.length > 0 &&
-    props.storages.every((storage) => storage.kind === StorageKind.LocalOnly);
 });
 
 </script>
@@ -152,7 +135,7 @@ const hideCreateLocalVault = computed(() => {
             {{ currentStorage?.name ?? t('nav.vaults') }}
           </div>
           <div class="text-xs text-[var(--text-secondary)] truncate">
-            {{ currentStorage?.kind === StorageKind.LocalOnly ? t('storage.localVault') : (currentStorage?.server_name ?? currentStorage?.server_url ?? t('nav.sections')) }}
+            {{ currentStorage?.server_name ?? currentStorage?.server_url ?? t('nav.sections') }}
           </div>
         </div>
 
@@ -308,63 +291,6 @@ const hideCreateLocalVault = computed(() => {
             <span class="text-sm font-medium">{{ t('storage.addServer') }}</span>
           </button>
 
-          <!-- ON THIS DEVICE section (only if has local vaults) -->
-          <template v-if="showLocalSection && localStorage">
-            <div class="border-t border-[var(--border-color)] my-1"></div>
-            <div class="px-3 py-1.5 text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">
-              {{ t('storage.onThisDevice') }}
-            </div>
-            <button
-              type="button"
-              class="w-full flex items-center gap-3 px-3 py-2.5 text-left transition-colors"
-              :class="
-                localStorage.id === selectedStorageId
-                  ? 'bg-[var(--bg-active)]'
-                  : 'hover:bg-[var(--bg-hover)]'
-              "
-              @click="switchStorage(localStorage.id)"
-              data-testid="storage-local-entry"
-            >
-              <span class="text-sm flex-shrink-0">📱</span>
-
-              <div class="flex-1 min-w-0">
-                <div class="text-sm font-medium truncate">
-                  {{ localStorage.name }}
-                </div>
-                <div class="text-xs text-[var(--text-secondary)] truncate">
-                  {{ t('storage.notSynced') }}
-                </div>
-              </div>
-
-              <svg
-                v-if="localStorage.id === selectedStorageId"
-                class="h-4 w-4 text-[var(--accent)] flex-shrink-0"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-              </svg>
-            </button>
-          </template>
-
-          <!-- Create local vault (if no local vaults yet) -->
-          <template v-if="!showLocalSection && !hasLocalVaults && !hideCreateLocalVault">
-            <div class="border-t border-[var(--border-color)] my-1"></div>
-            <button
-              type="button"
-              class="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-[var(--bg-hover)] transition-colors text-[var(--text-secondary)]"
-              @click="openCreateLocalVault"
-              data-testid="storage-create-local-vault"
-            >
-              <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-              </svg>
-              <span class="text-sm">
-                {{ t('storage.createLocalVault') }}
-              </span>
-            </button>
-          </template>
         </div>
 
         <div class="border-t border-[var(--border-color)]"></div>
@@ -389,7 +315,7 @@ const hideCreateLocalVault = computed(() => {
       @click="closeStorageDropdown"
     ></div>
 
-    <div v-if="!hideVaultSelector" class="relative px-3 pb-2">
+    <div v-if="vaults.length > 0" class="relative px-3 pb-2">
       <button
         type="button"
         class="w-full flex items-center gap-2 rounded-lg px-3 py-2 hover:bg-[var(--bg-hover)] transition-colors text-left"

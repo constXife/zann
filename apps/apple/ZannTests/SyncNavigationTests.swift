@@ -9,7 +9,6 @@ private final class NavigationCore: UXDelayedCore {
     private let stateLock = NSLock()
     private var virtualVault: String?
     private var pageDelay: (() throws -> Void)?
-    var followCalls = 0
 
     func delayNextPage(_ delay: @escaping () throws -> Void) {
         stateLock.lock()
@@ -42,10 +41,7 @@ private final class NavigationCore: UXDelayedCore {
         try delay?()
         return result
     }
-    override func followPreferredStorage() throws {
-        followCalls += 1
-        try super.followPreferredStorage()
-    }
+
 }
 
 @MainActor final class SyncNavigationTests: XCTestCase {
@@ -57,8 +53,8 @@ private final class NavigationCore: UXDelayedCore {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let database = directory.appendingPathComponent("local.sqlite")
         let real = try createCore(dbPath: database.path, keystore: MemoryKeystore(), secretStore: MemorySecretStore())
-        _ = try real.initializeMasterPassword(password: "fixture master password")
-        remote = try seedStorageContext(database: database)
+        _ = try real.seedOfflineFixture(password: "fixture master password")
+        remote = try seedStorageContext(database: database, sourceStorageID: try XCTUnwrap(real.currentStorageId()))
         core = NavigationCore(unsafeFromRawPointer: real.uniffiClonePointer())
         _ = try core.itemCreate(create: .init(title: "Local note", path: "Local note", typeId: "note",
             payloadJson: #"{"v":1,"typeId":"note","fields":{"text":{"kind":"text","value":"fixture"}}}"#))
@@ -68,8 +64,8 @@ private final class NavigationCore: UXDelayedCore {
         core = nil
         try? FileManager.default.removeItem(at: directory)
     }
-    private func makeModel(follow: Bool = false) throws -> VaultModel {
-        VaultModel(core: core, contents: try VaultModel.load(core), strings: Strings(language: "en"), followAfterSync: follow)
+    private func makeModel() throws -> VaultModel {
+        VaultModel(core: core, contents: try VaultModel.load(core), strings: Strings(language: "en"))
     }
     private func checkStorageSwitch(failing: Bool) async throws {
         let model = try makeModel()
@@ -105,8 +101,8 @@ private final class NavigationCore: UXDelayedCore {
     func testOldServerFailureDoesNotAffectNewServer() async throws {
         try await checkStorageSwitch(failing: true)
     }
-    func testVaultSwitchDuringFirstSyncWinsOverAutomaticFollowing() async throws {
-        let model = try makeModel(follow: true)
+    func testVaultSwitchDuringSyncPreservesExplicitSelection() async throws {
+        let model = try makeModel()
         let started = expectation(description: "first sync started")
         let gate = DispatchSemaphore(value: 0)
         core.syncGate = gate
@@ -122,7 +118,6 @@ private final class NavigationCore: UXDelayedCore {
         await sync.value
         XCTAssertEqual(model.vaultID, core.extra.id)
         XCTAssertTrue(model.visibleItems.isEmpty)
-        XCTAssertEqual(core.followCalls, 0, "explicit navigation cancels the automatic handoff")
     }
     func testLatePageCannotOverwriteNavigationAwayAndBack() async throws {
         let model = try makeModel()
@@ -138,7 +133,7 @@ private final class NavigationCore: UXDelayedCore {
         let sync = Task { await model.sync() }
         await fulfillment(of: [read], timeout: 2)
         await model.selectStorage(remote)
-        await model.selectStorage(local)
+        await model.selectStorage(try XCTUnwrap(local))
         model.startCreating(typeID: "note")
         try XCTUnwrap(model.editor).name = "Newer note"
         await model.saveEditor()

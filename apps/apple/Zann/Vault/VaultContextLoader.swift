@@ -27,16 +27,18 @@ enum VaultContextLoader {
         let page = try page(core, query: query, cursor: nil, limit: UInt32(max(Int(itemsPageLimit), keeping)))
         let vaults = try core.listVaults()
         let storages = try core.listStorages()
-        let syncState = try core.storageSyncState(storageId: storageID)
-        guard core.currentStorageId() == storageID,
-              let storage = storages.first(where: { $0.id == storageID }),
-              let id = core.currentVaultId(), let vault = vaults.first(where: { $0.id == id }) else {
+        let syncState = try storageID.map { try core.storageSyncState(storageId: $0) }
+        let serverConnected = try core.appStatus().serverConnected
+        guard core.currentStorageId() == storageID else {
             throw CoreError.Sync(kind: "context_changed", message: "The open storage changed while loading its contents.")
         }
-        return VaultModel.Contents(
-            page: page, query: query, vaults: vaults, vault: vault,
-            storages: storages, storage: storage, syncState: syncState
-        )
+        let storage = storages.first { $0.id == storageID }
+        let vault = vaults.first { $0.id == core.currentVaultId() }
+        guard (storageID == nil || storage != nil), (core.currentVaultId() == nil || vault != nil) else {
+            throw CoreError.Sync(kind: "context_changed", message: "The open vault changed while loading its contents.")
+        }
+        return VaultModel.Contents(page: page, query: query, vaults: vaults, vault: vault,
+            storages: storages, storage: storage, syncState: syncState, serverConnected: serverConnected)
     }
 
     static func page(_ core: CoreFacade, query: String, cursor: String?, limit: UInt32) throws -> ItemPage {

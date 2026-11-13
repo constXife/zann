@@ -50,7 +50,7 @@ does not authorize another temporary implementation.
 | Cancellable local item reads | `zann-client::app::local::LocalVaultService::item_read`, implemented by `zann-client-sqlite::local_vault` | native item presentation through FFI | existing `SessionOperation`, coherent context snapshot, typed decrypted payload, lock/selection cancellation | JSON round trips for card projection; SQL or cancellation policy in shells |
 | Authenticated application session | private `zann-client::session` owner, exposed only through `zann-client::app::AppClient` | COSMIC, FFI and the Tauri sync composition root; future CLI adapter | `CredentialStore`, `ClientPaths`, clock, operation deadline and cancellation | constructing `AppSession` directly; password/OIDC login, trust, refresh, logout, token-selection and ambiguity policy in shells and FFI |
 | Authenticated application composition | `zann-client::app` **(active native facade)** | COSMIC, FFI and the Tauri sync composition root | injected `AppSyncStoreFactory`, `CredentialStore`, explicit `ClientPaths`, operation-scoped master key, progress/cancellation | exposing `AppSession`/`SyncEngine`, bearer access, ambient paths, mutable target/key maps or local orchestration in shells |
-| Local vault application use cases | `zann-client::app` **(planned beyond remote sync)** | Tauri, COSMIC and FFI adapters | storage/credential ports, `ClientPaths`, clock and progress sink | local application orchestration in Tauri commands, COSMIC screens or `zann-ffi` |
+| Offline replica application use cases | `zann-client::app::local` (port), `zann-client-sqlite::local_vault` (native implementation) | Tauri, COSMIC and FFI adapters | storage/credential ports, `ClientPaths`, clock and progress sink | local application orchestration in Tauri commands, COSMIC screens or `zann-ffi` |
 | Connect, startup, unlock and idle flows | `zann-flows` **(planned)** | Tauri and COSMIC adapters; future clients | typed effect executor, operation IDs and cancellation | flow reducers in components/screens; toolkit, runtime, filesystem or transport in `zann-flows` |
 | Categories, folders, filters, list captions, item-detail projection and editor drafts | `zann-ui-core`; the list subtitle's payload fields are `zann-core::item_subtitle`, applied where `zann-db` decrypts a list page | Tauri/Vue, COSMIC and future clients | canonical schema/catalogue data, translation and abstract-icon resolver | category, ordering, masking/copy/reveal, TOTP parsing or list-caption policy in components or screens; payload decryption for list rows outside `zann-db` |
 | Streaming backup/import/export use cases | `zann-client::app::local` (port), `zann-client-sqlite::maintenance` (native implementation) | native clients and Tauri adapters | `Read`/`Write`, explicit paths, progress and cancellation ports | file dialogs in shared services; parsing/encryption policy in Tauri commands |
@@ -673,6 +673,18 @@ callback interfaces that Swift and Kotlin shells implement over Keychain
 (`SecAccessControl`) and Android Keystore; adapters wrap received secrets in
 zeroizing values at once.
 The superseded `zann-app` package is deleted.
+
+Standalone local-only storage creation is removed (#241). Server authentication
+is the sole production source of Config v2 KDF identity; the local port only
+unlocks and edits server replicas. First sync selects its catalog without a
+shell follow-up selection heuristic. Disconnected replicas retain offline
+editing, pending history, export, snapshots and verify. SQLite migration 0004
+rejects nonempty legacy local-only data instead of deleting or remapping it.
+The opt-in `zann-client-sqlite/test-support` fixture seeds an explicit synthetic
+remote replica and identity without network I/O; `zann-ffi/test-support` projects
+it for Apple tests. Debug Apple bindings enable it, release bindings do not.
+No new MIG exception or compatibility writer is introduced. MIG-003 and MIG-006
+no longer include standalone local creation, selection or welcome-choice policy.
 
 The CLI uses `ConfigRepository`, `CredentialStore` and `zann-client::server`.
 Its in-memory context view is projected from Config v2 and is never serialized.

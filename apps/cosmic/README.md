@@ -116,7 +116,7 @@ Two more things worth knowing:
 
 ## Demo vault
 
-To try the PoC without touching a real vault, seed a throwaway one (the
+To try the PoC without touching a real vault, seed a synthetic server replica (the
 identity config is written next to the database, so give it its own directory):
 
 ```bash
@@ -127,8 +127,9 @@ cargo run --example seed_demo_vault
 cargo run
 ```
 
-Both variables are required. The seed creates a real vault, so its master
-password is yours to choose rather than a constant published here.
+Both variables are required. This test/dev fixture has no authenticated server
+session and is excluded from production builds. Its master password is yours
+to choose rather than a constant published here.
 
 It writes a few key/value items plus one login with a masked password and a
 one-time code, so the detail drawer has something to hide and to count down.

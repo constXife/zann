@@ -39,7 +39,7 @@ final class AppModel: ObservableObject {
     /// Where leaving the connect screen goes: the welcome screen for a new
     /// device, the unlock screen after forgetting a server.
     private var connectReturn = Screen.welcome
-    /// A fresh sign-in follows its server after the first background sync.
+    /// A fresh sign-in explains that the first catalog arrives after unlock.
     /// The cached vault UI opens as soon as the master key is verified.
     @Published private(set) var syncAfterUnlock = false
 
@@ -178,11 +178,6 @@ final class AppModel: ObservableObject {
         screen == .vault
     }
 
-    func startCreatingVault() {
-        error = nil
-        screen = .master(.create)
-    }
-
     /// `serverURL` prefills the address, as after forgetting a server.
     func startConnecting(serverURL: String? = nil, returnTo: Screen = .welcome) {
         guard let core else { return }
@@ -276,8 +271,7 @@ final class AppModel: ObservableObject {
     /// Open cached content immediately; even the first server sync runs behind
     /// the usable vault UI. The core still owns preferred-storage selection.
     private func open(core: CoreFacade, contents: VaultModel.Contents) {
-        let vault = VaultModel(core: core, contents: contents, strings: strings,
-                               followAfterSync: syncAfterUnlock)
+        let vault = VaultModel(core: core, contents: contents, strings: strings)
         syncAfterUnlock = false
         self.vault = vault
         lastActivity = Date()

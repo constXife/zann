@@ -11,10 +11,11 @@ struct VaultContextHeader: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Picker(strings("nav.serverAccount"), selection: storageSelection) {
+                    if vault.storageID == nil { Text(strings("nav.serverAccount")).tag(String?.none) }
                     ForEach(vault.storages, id: \.id) { storage in
                         Label(storage.displayName, systemImage: storage.serverUrl == nil ? "desktopcomputer" : "server.rack")
                             .lineLimit(1)
-                            .tag(storage.id)
+                            .tag(Optional(storage.id))
                     }
                 }
                 .pickerStyle(.menu)
@@ -58,8 +59,8 @@ struct VaultContextHeader: View {
         .padding(.vertical, 8)
     }
 
-    private var storageSelection: Binding<String> {
-        Binding(get: { vault.storageID }, set: { id in Task { await vault.selectStorage(id) } })
+    private var storageSelection: Binding<String?> {
+        Binding(get: { vault.storageID }, set: { id in if let id { Task { await vault.selectStorage(id) } } })
     }
 
     private var vaultSelection: Binding<String?> {

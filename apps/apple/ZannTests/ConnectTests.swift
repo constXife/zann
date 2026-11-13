@@ -215,7 +215,7 @@ final class ConnectTests: XCTestCase {
         XCTAssertNil(vault.syncError)
 
         let core = try XCTUnwrap(cores["forget"])
-        let storage = core.currentStorageId()
+        let storage = try XCTUnwrap(core.currentStorageId())
         XCTAssertEqual(try core.storageSyncState(storageId: storage).link, .connected)
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 0)
         XCTAssertEqual(try core.forgetServer(storageId: storage), url)

@@ -10,7 +10,7 @@ fn operation() -> (
 
 #[test]
 fn cancelled_and_expired_reads_stop_before_opening_an_item() {
-    let (_dir, core, _) = context_tests::fixture();
+    let (_dir, core, _, _) = context_tests::fixture();
     let (op, cancel) = operation();
     cancel.cancel();
     assert!(matches!(
@@ -28,7 +28,7 @@ fn cancelled_and_expired_reads_stop_before_opening_an_item() {
 #[test]
 fn waiting_read_cancels_and_releases_key_without_waiting_for_sqlite() {
     for locking in [false, true] {
-        let (_dir, core, _) = context_tests::fixture();
+        let (_dir, core, _, _) = context_tests::fixture();
         let id = core
             .debug_create_kv_item("Example".into(), "key".into(), "fixture value".into())
             .expect("item");
@@ -70,7 +70,7 @@ fn waiting_read_cancels_and_releases_key_without_waiting_for_sqlite() {
 
 #[test]
 fn typed_read_is_bound_to_selected_storage_and_reports_source_errors() {
-    let (_dir, core, remote) = context_tests::fixture();
+    let (_dir, core, _, remote) = context_tests::fixture();
     let id = core
         .debug_create_kv_item("Local".into(), "key".into(), "fixture value".into())
         .expect("item");

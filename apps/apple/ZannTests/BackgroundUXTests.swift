@@ -43,6 +43,44 @@ class UXDelayedCore: CoreFacade {
     }
 }
 
+/// Exposes the legitimate no-selection state until the first sync completes.
+private final class BootstrapCore: UXDelayedCore {
+    private let stateLock = NSLock()
+    private var catalogReady = false
+    override func currentStorageId() -> String? {
+        stateLock.lock()
+        let ready = catalogReady
+        stateLock.unlock()
+        return ready ? super.currentStorageId() : nil
+    }
+    override func listStorages() throws -> [StorageSummaryFfi] {
+        currentStorageId() == nil ? [] : try super.listStorages()
+    }
+    override func currentVaultId() -> String? {
+        currentStorageId() == nil ? nil : super.currentVaultId()
+    }
+    override func listVaults() throws -> [VaultSummaryFfi] {
+        currentStorageId() == nil ? [] : try super.listVaults()
+    }
+    override func itemsList(filter: ItemsFilter, page: Page) throws -> ItemPage {
+        currentStorageId() == nil
+            ? ItemPage(items: [], nextCursor: nil, totalCount: 0, counts: .init(all: 0, trash: 0, byType: []))
+            : try super.itemsList(filter: filter, page: page)
+    }
+    override func appStatus() throws -> AppStatusFfi {
+        var status = try super.appStatus()
+        status.serverConnected = true
+        return status
+    }
+    override func remoteSync(storageId: String?) throws -> SyncOutcomeFfi {
+        let result = try super.remoteSync(storageId: storageId)
+        stateLock.lock()
+        catalogReady = true
+        stateLock.unlock()
+        return result
+    }
+}
+
 @MainActor final class BackgroundUXTests: XCTestCase {
     private var directory: URL!
     private var core: UXDelayedCore!
@@ -51,7 +89,7 @@ class UXDelayedCore: CoreFacade {
         directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let real = try createCore(dbPath: directory.appendingPathComponent("local.sqlite").path,
                                   keystore: MemoryKeystore(), secretStore: MemorySecretStore())
-        _ = try real.initializeMasterPassword(password: "fixture master password")
+        _ = try real.seedOfflineFixture(password: "fixture master password")
         core = UXDelayedCore(wrapping: real)
         for title in ["First", "Second"] {
             _ = try core.itemCreate(create: ItemCreate(title: title, path: title, typeId: "login",
@@ -97,6 +135,39 @@ class UXDelayedCore: CoreFacade {
         await finishing.value
         XCTAssertNil(vault.syncError)
         vault.cancelEditing()
+        await app.lock()
+    }
+
+    func testEmptyFirstSyncOpensWorkspaceBeforeCatalogArrives() async throws {
+        let bootstrap = BootstrapCore(unsafeFromRawPointer: core.uniffiClonePointer())
+        let started = expectation(description: "first catalog waiting")
+        let gate = DispatchSemaphore(value: 0)
+        bootstrap.syncGate = gate
+        bootstrap.onSync = { started.fulfill() }
+        defer { gate.signal() }
+        _ = try bootstrap.lock()
+        let app = AppModel(opening: { (bootstrap, MemoryKeystore()) },
+            preferences: { PreferencesFile(url: self.directory.appendingPathComponent("bootstrap.json")) },
+            systemLanguage: "en", openBrowser: { _ in })
+        await app.submit(password: "fixture master password", mode: .unlock)
+        await fulfillment(of: [started], timeout: 2)
+        XCTAssertEqual(app.screen, .vault)
+        XCTAssertFalse(app.busy)
+        let vault = try XCTUnwrap(app.vault)
+        XCTAssertNil(vault.storageID)
+        XCTAssertNil(vault.vaultID)
+        XCTAssertTrue(vault.syncing)
+        XCTAssertEqual(vault.indicator?.state, .syncing)
+        vault.startCreating(typeID: "note")
+        XCTAssertNil(vault.editor, "a first catalog is required before creation")
+        let finishing = Task { await vault.sync() }
+        await Task.yield()
+        gate.signal()
+        await finishing.value
+        XCTAssertNotNil(vault.storageID)
+        XCTAssertNotNil(vault.vaultID)
+        XCTAssertEqual(vault.visibleItems.count, 2)
+        XCTAssertFalse(vault.syncing)
         await app.lock()
     }
 

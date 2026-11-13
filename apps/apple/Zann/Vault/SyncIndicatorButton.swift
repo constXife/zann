@@ -51,11 +51,9 @@ struct SyncIndicatorButton<Recovery: View>: View {
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)
             }
-            if indicator.state != .localOnly {
-                Text(lastSynced)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+            Text(lastSynced)
+                .font(.callout)
+                .foregroundStyle(.secondary)
             if let error {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
             }

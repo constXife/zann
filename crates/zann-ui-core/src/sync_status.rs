@@ -8,8 +8,6 @@
 /// Whether a server syncs the storage.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SyncLink {
-    /// A storage on this device only.
-    Local,
     /// A server connection syncs it.
     Connected,
     /// A server's storage no connection syncs any more.
@@ -31,7 +29,6 @@ pub struct SyncStatusInput<'a> {
 /// in progress, a failed one, changes waiting, everything sent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SyncIndicator {
-    LocalOnly,
     Disconnected {
         server: String,
         pending_changes: u64,
@@ -66,7 +63,6 @@ pub fn sync_indicator(input: SyncStatusInput<'_>) -> SyncIndicator {
     let server = || input.server_url.map(server_label).unwrap_or_default();
     let pending_changes = input.pending_changes;
     match input.link {
-        SyncLink::Local => SyncIndicator::LocalOnly,
         SyncLink::Disconnected => SyncIndicator::Disconnected {
             server: server(),
             pending_changes,
@@ -89,7 +85,6 @@ impl SyncIndicator {
     #[must_use]
     pub fn label_key(&self) -> &'static str {
         match self {
-            Self::LocalOnly => "sync.localOnly",
             Self::Disconnected { .. } => "sync.disconnected",
             Self::Syncing { .. } => "sync.syncing",
             Self::Failed { .. } => "sync.failed",
@@ -101,7 +96,6 @@ impl SyncIndicator {
     #[must_use]
     pub fn label_args(&self) -> Vec<(&'static str, String)> {
         match self {
-            Self::LocalOnly => Vec::new(),
             Self::Syncing { server } | Self::Synced { server } => {
                 vec![("server", server.clone())]
             }
@@ -126,7 +120,7 @@ impl SyncIndicator {
     #[must_use]
     pub fn action(&self) -> SyncAction {
         match self {
-            Self::LocalOnly | Self::Syncing { .. } => SyncAction::None,
+            Self::Syncing { .. } => SyncAction::None,
             Self::Disconnected { .. } => SyncAction::Reconnect,
             Self::Failed { .. } | Self::Pending { .. } | Self::Synced { .. } => SyncAction::SyncNow,
         }
@@ -220,13 +214,6 @@ mod tests {
                 server: "zann.example.test".to_string()
             }
         );
-        assert_eq!(
-            sync_indicator(SyncStatusInput {
-                syncing: true,
-                ..input(SyncLink::Local)
-            }),
-            SyncIndicator::LocalOnly
-        );
     }
 
     #[test]
@@ -249,10 +236,6 @@ mod tests {
         let synced = sync_indicator(input(SyncLink::Connected));
         assert_eq!(synced.action(), SyncAction::SyncNow);
         assert!(!synced.needs_attention());
-        assert_eq!(
-            sync_indicator(input(SyncLink::Local)).action(),
-            SyncAction::None
-        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ final class VaultModelTests: XCTestCase {
             keystore: MemoryKeystore(),
             secretStore: MemorySecretStore()
         )
-        _ = try core.initializeMasterPassword(password: "correct horse battery")
+        _ = try core.seedOfflineFixture(password: "correct horse battery")
         try createItem("login", path: "Work/GitHub", values: [
             "username": "alice", "password": "hunter2", "totp": "JBSWY3DPEHPK3PXP",
         ])
@@ -35,24 +35,22 @@ final class VaultModelTests: XCTestCase {
         VaultModel(core: core, contents: try VaultModel.load(core), strings: Strings(language: "en"))
     }
 
-    func testALocalOnlyVaultHasNothingToSync() async throws {
+    func testADisconnectedReplicaKeepsOfflineEditsAndReportsPendingChanges() async throws {
         let model = try makeModel()
-        XCTAssertFalse(model.canSync)
         await model.sync()
-        XCTAssertFalse(model.canSync)
-        XCTAssertNil(model.syncError)
+        XCTAssertTrue(model.canSync)
+        XCTAssertNotNil(model.syncError)
         XCTAssertEqual(model.visibleItems.count, 3)
-
         await model.refreshSyncState()
         let indicator = try XCTUnwrap(model.indicator)
-        XCTAssertEqual(indicator.state, .localOnly)
-        XCTAssertEqual(indicator.action, .noAction)
-        XCTAssertFalse(indicator.needsAttention)
-        XCTAssertEqual(model.syncState?.link, .local)
-        XCTAssertEqual(model.syncState?.pendingChanges, 0)
+        XCTAssertEqual(indicator.state, .disconnected)
+        XCTAssertEqual(indicator.action, .reconnect)
+        XCTAssertTrue(indicator.needsAttention)
+        XCTAssertEqual(model.syncState?.link, .disconnected)
+        XCTAssertEqual(model.syncState?.pendingChanges, 3)
     }
 
-    func testALocalStorageOpensItsOnlyVaultAndRefusesAnUnknownOne() async throws {
+    func testAReplicaOpensItsOnlyVaultAndRefusesAnUnknownOne() async throws {
         let model = try makeModel()
         XCTAssertEqual(model.vaults.map(\.id), [try XCTUnwrap(model.vaultID)])
         XCTAssertEqual(model.vaults.first?.scope, .personal)

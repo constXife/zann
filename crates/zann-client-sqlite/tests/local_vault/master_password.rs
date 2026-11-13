@@ -13,7 +13,7 @@ fn master_password_persists_across_reopen() {
 
     let core = create_core(db_url.clone()).expect("create core");
     let status = core
-        .initialize_master_password(password.clone())
+        .seed_offline_fixture(password.clone())
         .expect("initialize master password");
     assert!(status.unlocked);
     drop(core);
@@ -36,7 +36,7 @@ fn a_server_storage_without_vaults_never_opens_without_the_password() {
     let password = format!("test-master-password-{}", Uuid::now_v7());
 
     let core = create_core(db_url.clone()).expect("create core");
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     drop(core);
 
@@ -65,13 +65,17 @@ fn a_server_storage_without_vaults_never_opens_without_the_password() {
     core.unlock(format!("wrong-{password}"))
         .expect_err("a wrong password must not open the vault");
     core.unlock(password).expect("the right password opens it");
-    assert_eq!(core.current_storage_id(), Uuid::nil().to_string());
+    assert_ne!(
+        core.current_storage_id().expect("selected server storage"),
+        Uuid::nil().to_string()
+    );
 
+    let selected = core.current_storage_id();
     // A locked session cannot change the context that will verify its password.
     core.lock().expect("lock");
     core.set_current_storage(remote.id.to_string())
         .expect_err("selection requires an unlocked session");
-    assert_eq!(core.current_storage_id(), Uuid::nil().to_string());
+    assert_eq!(core.current_storage_id(), selected);
     core.unlock("another wrong password".to_string())
         .expect_err("a wrong password must not open the vault");
 }

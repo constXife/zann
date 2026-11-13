@@ -105,9 +105,11 @@ jobs:
               - 'crates/zann-db/src/services/mod.rs'
               - 'crates/zann-db/src/services/items.rs'
               - 'crates/zann-db/migrations/0002_sync_cursor_last_seq.sql'
+              - 'crates/zann-db/migrations/0004_server_replicas.sql'
               - 'crates/zann-db/tests/local_sqlite_path.rs'
               - 'crates/zann-db/tests/local_sync_transactions.rs'
               - 'crates/zann-db/tests/local_vault_migration.rs'
+              - 'crates/zann-db/tests/server_replicas_migration.rs'
               - 'crates/zann-server/src/domains/auth/core/**'
               - 'crates/zann-server/src/domains/access_control/**'
               - 'crates/zann-server/src/infra/audit.rs'
@@ -349,7 +351,7 @@ jobs:
       - name: Tests (pull-only SQLite sync adapter)
         run: cargo test -p zann-client-sqlite --locked
       - name: Tests (SQLite sync and path seams)
-        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration
+        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration
 
   client-architecture:
     needs: changes
@@ -457,6 +459,13 @@ jobs:
           xcodegen --spec project.yml
           xcodebuild test -quiet -project Zann.xcodeproj -scheme Zann \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath build
+      - name: Upload Apple test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-test-results
+          path: apps/apple/build/Logs/Test/*.xcresult
+          retention-days: 7
 
   # Tauri is outside the root workspace, so root tests cannot catch shared API
   # or compatibility changes in its Rust adapter.
@@ -680,12 +689,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      checks: write
-      issues: write
-      pull-requests: write
-      security-events: write
     env:
-      # The action builds cargo-audit from source, and its dependencies now
+      # cargo-audit is built from source, and its dependencies now
       # need a newer rustc than the 1.92 pinned in rust-toolchain.toml. This
       # job only reads Cargo.lock, so the toolchain it uses says nothing about
       # how the project itself is built.
@@ -693,10 +698,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.23.0 --locked
+      # This job is the required check; avoid a second Check API publication.
       - name: Security audit
-        uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit --file Cargo.lock
 
   # Package evaluation and build are required: source tests do not prove packaging.
   cosmic-package:

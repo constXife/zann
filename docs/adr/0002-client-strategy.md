@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-09
-- **Updated:** 2026-10-25
+- **Updated:** 2026-11-13
 - **Context:** [ADR 0001](0001-shared-client-core.md) settled *how* clients
   share code (`[CORE]` in `zann-client::app` + `[PRESENTATION]` in
   `zann-ui-core` and `zann-flows`, with `zann-ffi` as the UniFFI edge adapter
@@ -126,6 +126,45 @@ Because `zann-autofill`, `zann-passkey`, `zann-ui-core`, and `zann-client::app`
 are written and tested in Rust first (via COSMIC and the browser host), the
 SwiftUI and Jetpack Compose clients arrive onto a stable, battle-tested UniFFI
 contract rather than debugging sync and domain matching across three languages.
+
+### Server-anchored offline replicas (#241)
+
+Native clients require server login or registration before setting a master
+password. Config v2's account identity is the single KDF source; SQLite starts
+without a storage or vault. The first sync supplies the server catalog and
+personal key. There is no standalone serverless vault mode.
+
+Once synced, cached vaults remain usable offline, including unlock, reading,
+search, editing with pending changes, backup export, snapshots and verify.
+Forgetting a connection retains that disconnected replica. Personal vault keys
+and plaintext remain inside the client boundary; server-first setup does not
+change the personal/shared trust split.
+
+The implementation reuses Config v2 authentication and the existing sync CAS,
+local-vault port and native persistence owner. A feature-gated synthetic server
+replica supplies network-free development and UI tests. Migration 0004 removes
+only empty legacy local storages; nonempty local-only data aborts transactionally
+and requires export with the older client before upgrading. See the
+[cutover guide](../migrations/server-first-clients.md).
+
+The repository has no separate values manifest. Against the invariants in
+`AGENTS.md` and the capability map, each mechanism has the following tradeoff:
+
+- **Account-owned identity and catalog:** one source replaces local salts and
+  fallback vault creation. The existing trust and credential transactions stay
+  authoritative; personal E2EE is unchanged. First use requires network access,
+  while subsequent offline access adds no network dependency.
+- **Fail-closed migration:** preserves secret custody and crash safety rather
+  than reinterpreting data under a different account key. Upgrade requires one
+  schema transaction; owners of nonempty legacy local data must export before
+  upgrading. No automatic conversion or recovery protocol is added.
+- **Explicit fixtures:** reuse the native adapter and crypto owner. Synthetic
+  data is confined to an opt-in test/dev feature, with no authenticated session
+  or production fallback. The same fixture serves Rust and Swift tests.
+
+Keeping both standalone and server-backed modes was rejected: it preserves two
+KDF origins and cross-shell selection branches without a coherent account
+transition. This pre-GA cutover removes those paths in place.
 
 ## Consequences
 

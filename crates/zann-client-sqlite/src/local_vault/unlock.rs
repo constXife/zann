@@ -103,8 +103,6 @@ impl LocalVault {
     }
 
     pub fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus> {
-        let generation = self.context_generation.load(Ordering::SeqCst);
-        let pool = self.pool();
         if password.len() < 8 {
             return Err(LocalError::InvalidArgument(
                 "password must be at least 8 characters".to_string(),
@@ -119,67 +117,12 @@ impl LocalVault {
             ));
         }
 
-        // A login has already committed the account's identity; only a vault
-        // that is local-only from the start gets a fresh salt.
-        let client = self.app_client()?;
-        let identity = match client
-            .kdf_identity()
-            .map_err(|err| LocalError::Service(err.to_string()))?
-        {
-            Some(identity) => identity,
-            None => {
-                self.refuse_local_identity_on_server()?;
-                let identity = new_local_identity();
-                client
-                    .replace_kdf_identity_if_matches(None, identity.clone())
-                    .map_err(|err| LocalError::Service(err.to_string()))?;
-                identity
-            }
-        };
-        let master_key = Arc::new(derive_master_key(&password, &identity)?);
-        // An account that already has a personal vault key opens only with
-        // the master password that made it, even through this path.
-        self.check_key_for_new_device(&master_key, Some(&identity))?;
-
-        // Create local storage if none exists
-        let storage_repo = LocalStorageRepo::new(&pool);
-        let storages = self
-            .runtime
-            .block_on(storage_repo.list())
-            .map_err(|err| LocalError::Service(err.to_string()))?;
-
-        let storage_id = if storages.is_empty() {
-            let new_storage = LocalStorage {
-                id: Uuid::now_v7(),
-                kind: zann_core::StorageKind::LocalOnly,
-                name: "Local".to_string(),
-                server_url: None,
-                server_name: None,
-                server_fingerprint: None,
-                account_subject: None,
-                personal_vaults_enabled: true,
-                auth_method: None,
-            };
-            self.runtime
-                .block_on(storage_repo.upsert(&new_storage))
-                .map_err(|err| LocalError::Service(err.to_string()))?;
-            new_storage.id
-        } else {
-            self.storage_id()
-        };
-
-        // Create the default vault
-        let services = LocalServices::new(&pool, master_key.as_ref());
-        let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
-
-        // Publish one coherent selection only if no lock or switch superseded it.
-        let _context = self.context_gate.write().expect("lock poisoned");
-        self.check_context_generation(generation)?;
-        *self.master_key.lock().expect("lock poisoned") = Some(master_key);
-        *self.vault_id.lock().expect("lock poisoned") = Some(vault.id);
-        *self.storage_id.lock().expect("lock poisoned") = storage_id;
-        self.context_generation.fetch_add(1, Ordering::SeqCst);
-
-        Ok(VaultStatus { unlocked: true })
+        // Only authentication commits the account KDF identity.
+        self.kdf_identity()?.ok_or_else(|| {
+            LocalError::InvalidArgument(
+                "sign in to a server before setting the master password".to_string(),
+            )
+        })?;
+        self.unlock(password)
     }
 }

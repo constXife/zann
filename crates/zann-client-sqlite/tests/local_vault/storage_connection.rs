@@ -16,7 +16,7 @@ fn a_server_storage_without_a_connection_is_not_synced() {
     let password = format!("test-master-password-{}", Uuid::now_v7());
 
     let core = create_core(db_url.clone()).expect("create core");
-    core.initialize_master_password(password.clone())
+    core.seed_offline_fixture(password.clone())
         .expect("initialize master password");
     drop(core);
 
@@ -55,12 +55,8 @@ fn a_server_storage_without_a_connection_is_not_synced() {
             last_synced_at: None,
         }
     );
-    assert_eq!(
-        core.storage_sync_state(Uuid::nil().to_string())
-            .expect("the local storage")
-            .link,
-        StorageLink::Local
-    );
+    core.storage_sync_state(Uuid::nil().to_string())
+        .expect_err("no phantom Local storage");
     core.storage_sync_state(Uuid::now_v7().to_string())
         .expect_err("an unknown storage is not a local one");
     // An explicit sync still says why it cannot run.
@@ -79,7 +75,7 @@ fn the_storage_kept_for_an_address_is_found_and_released() {
     let root = CanonicalTempDir::new();
     let db_path = root.join("local.sqlite");
     let core = create_core(format!("sqlite://{}", db_path.display())).expect("create core");
-    core.initialize_master_password(format!("test-master-password-{}", Uuid::now_v7()))
+    core.seed_offline_fixture(format!("test-master-password-{}", Uuid::now_v7()))
         .expect("initialize master password");
     drop(core);
 
