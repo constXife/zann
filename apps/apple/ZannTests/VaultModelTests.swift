@@ -99,6 +99,53 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(model.visibleItems.map(\.title), ["Bank"])
     }
 
+    func testScrollingLoadsEveryItemPastTheFirstPage() async throws {
+        try createVaultPastTheFirstPage()
+        let model = try makeModel()
+        XCTAssertEqual(model.totalCount, 254)
+        XCTAssertEqual(model.visibleItems.count, 200)
+        XCTAssertFalse(model.visibleItems.contains { $0.title == "Hetzner" })
+
+        // Rows far from the end load nothing.
+        model.itemAppeared(try XCTUnwrap(model.visibleItems.first).id)
+        XCTAssertFalse(model.loadingMore)
+        model.itemAppeared(try XCTUnwrap(model.visibleItems.last).id)
+        try await settled(model)
+
+        XCTAssertEqual(model.visibleItems.count, 254)
+        XCTAssertEqual(Set(model.visibleItems.map(\.id)).count, 254)
+        XCTAssertTrue(model.visibleItems.contains { $0.title == "Hetzner" })
+        XCTAssertEqual(model.folders.tree.map(\.path), ["Cloud", "Filler", "Personal", "Work"])
+    }
+
+    func testSearchFindsAnItemPastTheLoadedPage() async throws {
+        try createVaultPastTheFirstPage()
+        let model = try makeModel()
+        XCTAssertFalse(model.visibleItems.contains { $0.title == "Hetzner" })
+
+        model.query = "hetz"
+        // Until the core answers, only the loaded page narrows.
+        XCTAssertTrue(model.searching)
+        XCTAssertEqual(model.visibleItems.count, 0)
+        try await settled(model)
+        XCTAssertEqual(model.visibleItems.map(\.title), ["Hetzner"])
+        let counts = Dictionary(uniqueKeysWithValues: model.categories.map { ($0.id, $0.count) })
+        XCTAssertEqual(counts["all"], 1)
+
+        model.query = ""
+        try await settled(model)
+        XCTAssertEqual(model.visibleItems.count, 200)
+        XCTAssertEqual(model.totalCount, 254)
+    }
+
+    func testASparseCategoryLoadsPagesUntilItsItemsShow() async throws {
+        try createVaultPastTheFirstPage()
+        let model = try makeModel()
+        model.categoryID = "login"
+        try await settled(model)
+        XCTAssertEqual(Set(model.visibleItems.map(\.title)), ["Hetzner", "Bank", "GitHub"])
+    }
+
     func testSelectionProjectsFieldsWithMaskingAndTotp() async throws {
         let model = try makeModel()
         let github = try XCTUnwrap(model.visibleItems.first { $0.title == "GitHub" })
@@ -235,6 +282,26 @@ final class VaultModelTests: XCTestCase {
         }
         struct Timeout: Error {}
         XCTFail("detail did not load within 5 seconds")
+        throw Timeout()
+    }
+
+    /// 254 items, newest first: 250 notes fill the first page, so the login
+    /// created before them sits past it.
+    private func createVaultPastTheFirstPage() throws {
+        try createItem("login", path: "Cloud/Hetzner", values: ["username": "root"])
+        for index in 0..<250 {
+            try createItem("note", path: "Filler/Note \(index)", values: ["text": "filler"])
+        }
+    }
+
+    /// Waits until no search or page is loading.
+    private func settled(_ model: VaultModel) async throws {
+        for _ in 0..<200 {
+            if !model.searching && !model.loadingMore { return }
+            try await Task.sleep(nanoseconds: 50_000_000)
+        }
+        struct Timeout: Error {}
+        XCTFail("the list did not settle within 10 seconds")
         throw Timeout()
     }
 

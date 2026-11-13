@@ -1,17 +1,27 @@
 import Foundation
 import ZannCoreKit
 
-/// First page only; paging and server-side search come in a later slice.
+/// How many items one `itemsList` call pages in, as COSMIC's `PAGE_LIMIT`.
 private let itemsPageLimit: UInt32 = 200
+/// Scrolling keeps at most this many items loaded, as COSMIC's
+/// `ITEM_CACHE_LIMIT`; a search still reaches the whole vault past it.
+private let itemCacheLimit = Int(itemsPageLimit) * 5
+/// A row this close to the end of the list loads the next page.
+private let prefetchRows = 40
+/// A category or folder showing fewer rows loads the next page by itself.
+private let minVisibleRows = 24
+/// The pause after a keystroke before the core searches, as COSMIC's.
+private let searchDebounceNanoseconds: UInt64 = 180_000_000
 
 /// The `CoreError.Sync` kind for a server that no longer proves the identity
 /// this device pinned.
 private let serverIdentityChanged = "server_identity_changed"
 
-/// One unlocked vault: the loaded page, the sidebar categories, the visible
-/// list and the selected item's projected fields. Categories, filtering and
-/// field projection come from zann-ui-core; this type only holds selection and
-/// sequences the blocking calls. Dropping it on lock drops every secret it held.
+/// One unlocked vault: the loaded pages, the sidebar categories, the visible
+/// list and the selected item's projected fields. The core searches and
+/// pages; categories, filtering and field projection come from zann-ui-core;
+/// this type only holds selection and sequences the blocking calls. Dropping
+/// it on lock drops every secret it held.
 @MainActor
 final class VaultModel: ObservableObject {
     struct Detail {
@@ -41,10 +51,11 @@ final class VaultModel: ObservableObject {
         let pendingChanges: UInt64
     }
 
-    /// The open vault's first page with the storage's vaults, loaded
-    /// together so the picker and the list never disagree.
+    /// The open vault's first page for `query` with the storage's vaults,
+    /// loaded together so the picker and the list never disagree.
     struct Contents {
         let page: ItemPage
+        let query: String
         let vaults: [VaultSummaryFfi]
         let vault: VaultSummaryFfi
     }
@@ -74,8 +85,13 @@ final class VaultModel: ObservableObject {
     }
 
     @Published var query = "" {
-        didSet { if query != oldValue { refreshVisible() } }
+        didSet { if query != oldValue { queryChanged() } }
     }
+
+    /// The core is searching for a query typed after the list loaded.
+    @Published private(set) var searching = false
+    /// The next page is loading.
+    @Published private(set) var loadingMore = false
 
     @Published private(set) var selectedItemID: String?
     /// The open create or edit form; at most one at a time.
@@ -114,7 +130,16 @@ final class VaultModel: ObservableObject {
     private var autoSync: Task<Void, Never>?
     /// The sync the schedule admitted, until it ends.
     private var running: Task<Void, Never>?
+    /// The loaded pages of the list for `appliedQuery`.
     private var items: [ItemSummary] = []
+    private var nextCursor: String?
+    /// The trimmed query whose results `items` holds. While a newer one waits
+    /// for the core, the loaded items narrow locally.
+    private var appliedQuery = ""
+    /// Bumped whenever `items` is replaced, so a page loaded for an older list
+    /// is dropped.
+    private var listGeneration = 0
+    private var search: Task<Void, Never>?
     private var counts: ItemCountsFfi
     /// Shared vaults show the infrastructure categories.
     private var scope: VaultScopeFfi
@@ -204,9 +229,9 @@ final class VaultModel: ObservableObject {
         case disconnected(Disconnected)
     }
 
-    /// Pushes local changes and pulls the server's, then reloads the page if
-    /// anything changed; the core picks the server and the vault to show. A
-    /// Mac that never signed in to a server has nothing to sync.
+    /// Pushes local changes and pulls the server's, then reloads the list on
+    /// screen if anything changed; the core picks the server and the vault to
+    /// show. A Mac that never signed in to a server has nothing to sync.
     private func run(_ ticket: AutoSyncTicketFfi) async {
         syncing = true
         defer {
@@ -216,6 +241,8 @@ final class VaultModel: ObservableObject {
         }
         let core = core
         let follow = followPending
+        let shown = appliedQuery
+        let loaded = items.count
         let result = await Task.detached(priority: .userInitiated) {
             Result { () -> Synced in
                 if let gone = try Self.disconnected(core) { return .disconnected(gone) }
@@ -231,7 +258,7 @@ final class VaultModel: ObservableObject {
                 }
                 if follow { try core.followPreferredStorage() }
                 guard follow || outcome.changesCommitted > 0 else { return .unchanged }
-                return .changed(try Self.load(core))
+                return .changed(try Self.load(core, query: shown, keeping: loaded))
             }
         }.value
         switch result {
@@ -304,18 +331,37 @@ final class VaultModel: ObservableObject {
         )
     }
 
-    /// The first page of the current vault and the storage's vaults. The
-    /// trash category filters client-side, so deleted items load too.
+    /// The first page of the current vault and the storage's vaults.
     nonisolated static func load(_ core: CoreFacade) throws -> Contents {
-        let page = try core.itemsList(
-            filter: ItemsFilter(query: nil, includeDeleted: true),
-            page: Page(limit: itemsPageLimit, cursor: nil)
-        )
+        try load(core, query: "", keeping: 0)
+    }
+
+    /// The start of the current vault's list for the trimmed `query`, empty
+    /// for every item, and the storage's vaults. It spans at least a page and
+    /// the `keeping` items loaded before, so a reload keeps the scrolled-to
+    /// rows; `itemCacheLimit` stays within what one core call returns.
+    private nonisolated static func load(
+        _ core: CoreFacade, query: String, keeping: Int
+    ) throws -> Contents {
+        let limit = UInt32(max(Int(itemsPageLimit), keeping))
+        let page = try Self.page(core, query: query, cursor: nil, limit: limit)
         let vaults = try core.listVaults()
         guard let id = core.currentVaultId(), let vault = vaults.first(where: { $0.id == id }) else {
             throw CoreError.InvalidArgument("the open vault is not one of its storage's vaults")
         }
-        return Contents(page: page, vaults: vaults, vault: vault)
+        return Contents(page: page, query: query, vaults: vaults, vault: vault)
+    }
+
+    /// One page of the current vault; the core matches a non-empty `query`
+    /// over the whole vault. The trash category filters client-side, so
+    /// deleted items load too.
+    private nonisolated static func page(
+        _ core: CoreFacade, query: String, cursor: String?, limit: UInt32
+    ) throws -> ItemPage {
+        try core.itemsList(
+            filter: ItemsFilter(query: query.isEmpty ? nil : query, includeDeleted: true),
+            page: Page(limit: limit, cursor: cursor)
+        )
     }
 
     /// Opens another vault of this storage with nothing filtered or
@@ -341,11 +387,11 @@ final class VaultModel: ObservableObject {
         switch result {
         case .success(let contents):
             error = nil
+            select(nil)
+            apply(contents)
             query = ""
             folder = .any
             categoryID = "all"
-            select(nil)
-            apply(contents)
         case .failure(let failure):
             error = describe(failure)
         }
@@ -377,29 +423,42 @@ final class VaultModel: ObservableObject {
         editor = nil
     }
 
-    /// Saves the open form, then reloads the page and shows the saved item.
+    /// Saves the open form, then reloads the list and shows the saved item.
     func saveEditor() async {
         guard let editor, let item = await editor.save(with: core) else { return }
         self.editor = nil
         schedule.localChange()
         Task { await refreshSyncState() }
-        let core = core
-        let result = await Task.detached(priority: .userInitiated) {
-            Result { try Self.load(core) }
-        }.value
-        switch result {
-        case .success(let contents): apply(contents)
-        case .failure(let failure):
-            error = describe(failure)
-            return
-        }
-        // A saved item can fall outside the current category, folder or search.
+        guard await reload(query: trimmedQuery) else { return }
+        // A saved item can fall outside the current category, folder or
+        // search; the newest change heads the unfiltered first page.
         if !visibleItems.contains(where: { $0.id == item.id }) {
+            if !appliedQuery.isEmpty {
+                guard await reload(query: "") else { return }
+            }
             query = ""
             folder = .any
             categoryID = "all"
         }
         show(item.id)
+    }
+
+    /// Replaces the list with its start for `query`, as many items as are
+    /// loaded now; a failure shows its error and keeps the list.
+    private func reload(query: String) async -> Bool {
+        let core = core
+        let loaded = items.count
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { try Self.load(core, query: query, keeping: loaded) }
+        }.value
+        switch result {
+        case .success(let contents):
+            apply(contents)
+            return true
+        case .failure(let failure):
+            error = describe(failure)
+            return false
+        }
     }
 
     private func open(_ make: () throws -> ItemEditorModel) {
@@ -450,25 +509,127 @@ final class VaultModel: ObservableObject {
         }
     }
 
+    /// Shows `contents` in place of everything loaded. A search started for
+    /// the list it replaces is dropped, since the core may have switched
+    /// vaults since; one for the query typed now starts again.
     private func apply(_ contents: Contents) {
-        let page = contents.page
         vaults = contents.vaults
         vaultID = contents.vault.id
         scope = contents.vault.scope
+        search?.cancel()
+        search = nil
+        searching = false
+        replace(with: contents.page, query: contents.query)
+        if trimmedQuery != appliedQuery { searchFor(trimmedQuery) }
+    }
+
+    /// Starts the list over at `page`, the first one for `query`.
+    private func replace(with page: ItemPage, query: String) {
+        listGeneration += 1
+        loadingMore = false
+        appliedQuery = query
         items = page.items
+        take(page)
+    }
+
+    /// Takes the cursor and the counts of the page just added to `items`.
+    /// Categories count the whole vault, or the matches of a search, as the
+    /// core reports them; folders come from the loaded pages, and a search
+    /// leaves them as browsing found them.
+    private func take(_ page: ItemPage) {
+        nextCursor = page.nextCursor
         counts = page.counts
         totalCount = page.totalCount
         categories = categoryViews(counts: counts, scope: scope)
-        folders = buildFolderTree(items: items)
+        if appliedQuery.isEmpty { folders = buildFolderTree(items: items) }
         refreshVisible()
     }
 
+    private var trimmedQuery: String {
+        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A query the loaded items do not answer goes to the core after a pause;
+    /// one they do drops any search still waiting.
+    private func queryChanged() {
+        if trimmedQuery == appliedQuery {
+            search?.cancel()
+            search = nil
+            searching = false
+        } else {
+            searchFor(trimmedQuery)
+        }
+        refreshVisible()
+    }
+
+    /// Replaces the list with the core's first page for `wanted`, unless the
+    /// query changes again first. Clearing the query reloads at once.
+    private func searchFor(_ wanted: String) {
+        search?.cancel()
+        searching = true
+        let delay: UInt64 = wanted.isEmpty ? 0 : searchDebounceNanoseconds
+        let core = core
+        search = Task { [weak self] in
+            if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
+            guard !Task.isCancelled else { return }
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try Self.page(core, query: wanted, cursor: nil, limit: itemsPageLimit) }
+            }.value
+            guard let self, !Task.isCancelled else { return }
+            self.search = nil
+            self.searching = false
+            switch result {
+            case .success(let page): self.replace(with: page, query: wanted)
+            case .failure(let failure): self.error = describe(failure)
+            }
+        }
+    }
+
+    /// The list shows `id`; near the end of what is loaded, the next page
+    /// starts loading.
+    func itemAppeared(_ id: String) {
+        guard visibleItems.suffix(prefetchRows).contains(where: { $0.id == id }) else { return }
+        loadMore()
+    }
+
+    /// Appends the next page of the list on screen, up to `itemCacheLimit`
+    /// items. A page that lands after the list was replaced is dropped.
+    private func loadMore() {
+        guard let cursor = nextCursor, !loadingMore, !searching, items.count < itemCacheLimit else {
+            return
+        }
+        loadingMore = true
+        let generation = listGeneration
+        let query = appliedQuery
+        let core = core
+        Task { [weak self] in
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try Self.page(core, query: query, cursor: cursor, limit: itemsPageLimit) }
+            }.value
+            guard let self, generation == self.listGeneration else { return }
+            self.loadingMore = false
+            switch result {
+            case .success(let page):
+                self.items.append(contentsOf: page.items.prefix(itemCacheLimit - self.items.count))
+                self.take(page)
+            case .failure(let failure):
+                self.error = describe(failure)
+            }
+        }
+    }
+
     private func refreshVisible() {
-        let filter = ItemFilterFfi(categoryId: categoryID, folder: folder, query: query)
+        // The core's matches already answer the applied query; a newer one
+        // narrows them until the core answers it.
+        let narrowing = trimmedQuery == appliedQuery ? "" : query
+        let filter = ItemFilterFfi(categoryId: categoryID, folder: folder, query: narrowing)
         visibleItems = filterItems(items: items, filter: filter).map { items[Int($0)] }
         if let selectedItemID, !visibleItems.contains(where: { $0.id == selectedItemID }) {
             select(nil)
         }
+        // A category or folder whose items sit further down the vault fills
+        // the list without waiting for a scroll.
+        if visibleItems.count < minVisibleRows { loadMore() }
     }
 
     private nonisolated static func loadDetail(_ core: CoreFacade, id: String) throws -> Detail {
