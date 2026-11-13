@@ -2888,7 +2888,7 @@ dependencies = [
  "js-sys",
  "log",
  "wasm-bindgen",
- "windows-core 0.62.2",
+ "windows-core 0.61.2",
 ]
 
 [[package]]
@@ -8385,6 +8385,7 @@ dependencies = [
  "serde_json",
  "thiserror 1.0.69",
  "totp-rs",
+ "url",
  "zann-core",
 ]
 
