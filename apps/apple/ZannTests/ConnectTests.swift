@@ -207,7 +207,7 @@ final class ConnectTests: XCTestCase {
         XCTAssertNil(vault.syncError)
 
         let core = try XCTUnwrap(cores["forget"])
-        let storage = core.currentStorageId()
+        let storage = try core.currentStorageId()
         XCTAssertEqual(try core.storageSyncState(storageId: storage).link, .connected)
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 0)
         XCTAssertEqual(try core.forgetServer(storageId: storage), url)
@@ -243,7 +243,7 @@ final class ConnectTests: XCTestCase {
         await device.submit(password: master, mode: .unlock)
         let reconnected = try XCTUnwrap(device.vault)
         XCTAssertNil(reconnected.syncError)
-        XCTAssertEqual(core.currentStorageId(), storage, "the new connection syncs the same vault")
+        XCTAssertEqual(try core.currentStorageId(), storage, "the new connection syncs the same vault")
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 0)
         await device.lock()
 
