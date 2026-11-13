@@ -17,6 +17,8 @@ struct VaultView: View {
             ItemList(vault: vault, strings: app.strings)
                 .navigationSplitViewColumnWidth(min: 320, ideal: 400, max: 560)
                 .safeAreaInset(edge: .bottom) { SyncStatus(vault: vault, strings: app.strings) }
+                // Creating adds to the list, so it sits over the list.
+                .toolbar { createMenu }
         } detail: {
             ItemDetailView(
                 vault: vault,
@@ -24,43 +26,64 @@ struct VaultView: View {
                 preferences: app.preferences,
                 revealAll: reveal.isHeld
             )
-        }
-        .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
-                Menu {
-                    ForEach(ItemEditorModel.typeIDs, id: \.self) { typeID in
-                        Button {
-                            vault.startCreating(typeID: typeID)
-                        } label: {
-                            Label(app.strings("types.\(typeID)"), systemImage: Symbols.item(typeID))
-                        }
-                    }
-                } label: {
-                    Label(app.strings("common.create"), systemImage: "plus")
-                } primaryAction: {
-                    vault.startCreating()
-                }
-                .help("\(app.strings("common.create")) (⌘N)")
-                Button {
-                    Task { await vault.startEditing() }
-                } label: {
-                    Label(app.strings("common.edit"), systemImage: "square.and.pencil")
-                }
-                .help("\(app.strings("common.edit")) (⌘E)")
-                .disabled(vault.detail == nil)
-                if let indicator = vault.indicator {
-                    SyncIndicatorButton(indicator: indicator, vault: vault, strings: app.strings)
-                }
-                Button {
-                    Task { await app.lock() }
-                } label: {
-                    Label(app.strings("common.lock"), systemImage: "lock")
-                }
-                .help("\(app.strings("common.lock")) (⌘L)")
-            }
+            .toolbar { detailToolbar }
         }
         .sheet(item: editor) { editor in
             ItemEditorView(editor: editor, vault: vault, strings: app.strings)
+        }
+    }
+
+    private var createMenu: some ToolbarContent {
+        ToolbarItem {
+            Menu {
+                ForEach(ItemEditorModel.typeIDs, id: \.self) { typeID in
+                    Button {
+                        vault.startCreating(typeID: typeID)
+                    } label: {
+                        Label(app.strings("types.\(typeID)"), systemImage: Symbols.item(typeID))
+                    }
+                }
+            } label: {
+                Label(app.strings("common.create"), systemImage: "plus")
+            } primaryAction: {
+                vault.startCreating()
+            }
+            .help("\(app.strings("common.create")) (⌘N)")
+        }
+    }
+
+    /// Edit acts on the item shown, so it leads the detail pane; the sync
+    /// (account) and lock (app) follow apart from it and from each other.
+    /// Spacers keep each in its own group, and macOS 26 is the first to
+    /// draw toolbar items in shared groups at all.
+    @ToolbarContentBuilder private var detailToolbar: some ToolbarContent {
+        ToolbarItem {
+            Button {
+                Task { await vault.startEditing() }
+            } label: {
+                Label(app.strings("common.edit"), systemImage: "pencil")
+            }
+            .help("\(app.strings("common.edit")) (⌘E)")
+            .disabled(vault.detail == nil)
+        }
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.flexible)
+        }
+        if let indicator = vault.indicator {
+            ToolbarItem {
+                SyncIndicatorButton(indicator: indicator, vault: vault, strings: app.strings)
+            }
+        }
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed)
+        }
+        ToolbarItem {
+            Button {
+                Task { await app.lock() }
+            } label: {
+                Label(app.strings("common.lock"), systemImage: "lock")
+            }
+            .help("\(app.strings("common.lock")) (⌘L)")
         }
     }
 
