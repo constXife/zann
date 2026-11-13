@@ -203,17 +203,16 @@ pub struct StorageSummaryFfi {
     pub kind: String, // "local" or "remote"
 }
 
-/// Whether a server syncs a storage. A server storage whose connection is gone
-/// keeps its items and unsent changes until the user connects to its address
-/// again with the same account.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
-pub enum StorageLinkFfi {
-    Local,
-    Connected,
-    Disconnected {
-        server_url: Option<String>,
-        pending_changes: u64,
-    },
+/// Whether a server syncs a storage, with what a client shows about its sync.
+/// A server storage whose connection is gone keeps its items and unsent
+/// changes until the user connects to its address again with the same account.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct StorageSyncStateFfi {
+    pub link: crate::SyncLinkFfi,
+    pub server_url: Option<String>,
+    pub pending_changes: u64,
+    /// RFC 3339 time any of its vaults last finished a sync.
+    pub last_synced_at: Option<String>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

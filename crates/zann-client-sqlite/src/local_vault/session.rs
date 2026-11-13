@@ -198,7 +198,7 @@ impl LocalVault {
             .runtime
             .block_on(SyncCursorRepo::new(&pool).last_synced_at(id))
             .map_err(|err| LocalError::Service(err.to_string()))?
-            .map(|at| at.to_rfc3339());
+            .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
         Ok(StorageSyncState {
             link,
             server_url: storage.server_url,

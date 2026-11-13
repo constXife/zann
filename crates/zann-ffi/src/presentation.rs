@@ -359,3 +359,93 @@ pub fn device_preference_options() -> DevicePreferenceOptionsFfi {
         trash_auto_purge_days: TRASH_RETENTION_DAYS.to_vec(),
     }
 }
+
+/// Whether a server syncs a storage; mirrors `zann_ui_core::SyncLink`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SyncLinkFfi {
+    Local,
+    Connected,
+    Disconnected,
+}
+
+impl From<SyncLinkFfi> for zann_ui_core::SyncLink {
+    fn from(link: SyncLinkFfi) -> Self {
+        match link {
+            SyncLinkFfi::Local => Self::Local,
+            SyncLinkFfi::Connected => Self::Connected,
+            SyncLinkFfi::Disconnected => Self::Disconnected,
+        }
+    }
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct SyncStatusInputFfi {
+    pub link: SyncLinkFfi,
+    pub server_url: Option<String>,
+    pub pending_changes: u64,
+    pub syncing: bool,
+    pub failed: bool,
+}
+
+/// Which state the indicator shows, most urgent first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SyncIndicatorStateFfi {
+    LocalOnly,
+    Disconnected,
+    Syncing,
+    Failed,
+    Pending,
+    Synced,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
+pub enum SyncActionFfi {
+    /// Pressing does nothing (`none` would read as `Optional.none` in Swift).
+    NoAction,
+    SyncNow,
+    Reconnect,
+}
+
+/// The indicator as `zann_ui_core::sync_status` decides it: its state, its
+/// catalogue label with arguments, and what pressing it does.
+#[derive(Clone, Debug, PartialEq, Eq, uniffi::Record)]
+pub struct SyncIndicatorFfi {
+    pub state: SyncIndicatorStateFfi,
+    pub label_key: String,
+    pub label_args: std::collections::HashMap<String, String>,
+    pub action: SyncActionFfi,
+    pub needs_attention: bool,
+}
+
+#[uniffi::export]
+pub fn sync_indicator(input: SyncStatusInputFfi) -> SyncIndicatorFfi {
+    let indicator = zann_ui_core::sync_indicator(zann_ui_core::SyncStatusInput {
+        link: input.link.into(),
+        server_url: input.server_url.as_deref(),
+        pending_changes: input.pending_changes,
+        syncing: input.syncing,
+        failed: input.failed,
+    });
+    SyncIndicatorFfi {
+        state: match indicator {
+            zann_ui_core::SyncIndicator::LocalOnly => SyncIndicatorStateFfi::LocalOnly,
+            zann_ui_core::SyncIndicator::Disconnected { .. } => SyncIndicatorStateFfi::Disconnected,
+            zann_ui_core::SyncIndicator::Syncing { .. } => SyncIndicatorStateFfi::Syncing,
+            zann_ui_core::SyncIndicator::Failed { .. } => SyncIndicatorStateFfi::Failed,
+            zann_ui_core::SyncIndicator::Pending { .. } => SyncIndicatorStateFfi::Pending,
+            zann_ui_core::SyncIndicator::Synced { .. } => SyncIndicatorStateFfi::Synced,
+        },
+        label_key: indicator.label_key().to_string(),
+        label_args: indicator
+            .label_args()
+            .into_iter()
+            .map(|(name, value)| (name.to_string(), value))
+            .collect(),
+        action: match indicator.action() {
+            zann_ui_core::SyncAction::None => SyncActionFfi::NoAction,
+            zann_ui_core::SyncAction::SyncNow => SyncActionFfi::SyncNow,
+            zann_ui_core::SyncAction::Reconnect => SyncActionFfi::Reconnect,
+        },
+        needs_attention: indicator.needs_attention(),
+    }
+}

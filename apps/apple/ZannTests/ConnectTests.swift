@@ -208,12 +208,14 @@ final class ConnectTests: XCTestCase {
 
         let core = try XCTUnwrap(cores["forget"])
         let storage = core.currentStorageId()
-        XCTAssertEqual(try core.storageLink(storageId: storage), .connected)
+        XCTAssertEqual(try core.storageSyncState(storageId: storage).link, .connected)
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 0)
         XCTAssertEqual(try core.forgetServer(storageId: storage), url)
-        guard case .disconnected(let kept, 0) = try core.storageLink(storageId: storage) else {
+        let gone = try core.storageSyncState(storageId: storage)
+        guard gone.link == .disconnected, gone.pendingChanges == 0 else {
             return XCTFail("a forgotten server's vault stays a server's")
         }
+        let kept = gone.serverUrl
         XCTAssertNotNil(kept)
         XCTAssertNil(try core.forgetServer(storageId: storage))
 
@@ -228,6 +230,8 @@ final class ConnectTests: XCTestCase {
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 1)
         await vault.sync()
         XCTAssertEqual(vault.disconnected, .init(serverURL: kept, pendingChanges: 1))
+        XCTAssertEqual(vault.indicator?.state, .disconnected)
+        XCTAssertEqual(vault.indicator?.action, .reconnect)
 
         await device.reconnectServer()
         XCTAssertNil(device.vault, "connecting again ends at the master password")

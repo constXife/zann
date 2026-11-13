@@ -504,15 +504,17 @@ impl From<native::StorageSummary> for StorageSummaryFfi {
     }
 }
 
-impl From<native::StorageSyncState> for StorageLinkFfi {
+impl From<native::StorageSyncState> for StorageSyncStateFfi {
     fn from(value: native::StorageSyncState) -> Self {
-        match value.link {
-            native::StorageLink::Local => Self::Local,
-            native::StorageLink::Connected => Self::Connected,
-            native::StorageLink::Disconnected => Self::Disconnected {
-                server_url: value.server_url,
-                pending_changes: value.pending_changes,
+        Self {
+            link: match value.link {
+                native::StorageLink::Local => crate::SyncLinkFfi::Local,
+                native::StorageLink::Connected => crate::SyncLinkFfi::Connected,
+                native::StorageLink::Disconnected => crate::SyncLinkFfi::Disconnected,
             },
+            server_url: value.server_url,
+            pending_changes: value.pending_changes,
+            last_synced_at: value.last_synced_at,
         }
     }
 }
