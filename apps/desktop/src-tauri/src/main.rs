@@ -36,8 +36,7 @@ use commands::session::{
 use commands::shell::open_external_url;
 use commands::storage::{
     app_version, local_clear_data, local_factory_reset, open_data_folder, open_logs,
-    storage_delete, storage_disconnect, storage_info, storage_reveal, storage_sign_out,
-    storages_list,
+    storage_disconnect, storage_info, storage_reveal, storage_sign_out, storages_list,
 };
 use commands::sync::{remote_reset, remote_sync, sync_reset_cursor};
 use commands::totp::totp_generate;
@@ -129,7 +128,6 @@ fn main() {
             sync_reset_cursor,
             storages_list,
             storage_info,
-            storage_delete,
             storage_disconnect,
             storage_reveal,
             storage_sign_out,

@@ -134,9 +134,6 @@ export type StorageInfo = {
   id: string;
   name: string;
   kind: StorageKind;
-  file_path?: string | null;
-  file_size?: number | null;
-  last_modified?: string | null;
   server_url?: string | null;
   server_name?: string | null;
   account_subject?: string | null;

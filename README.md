@@ -137,7 +137,7 @@ Server threat model: [crates/zann-server/SECURITY.md](crates/zann-server/SECURIT
 
 ### Desktop
 
-- Offline-first for personal vaults; optional server connection for shared vaults.
+- Connect to a server for setup and sync; use encrypted vault replicas offline.
 - Recommended for interactive use and day-to-day management.
 
 ### CLI (token-based)

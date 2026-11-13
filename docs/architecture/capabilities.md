@@ -322,10 +322,10 @@ reinterpret its credential references at a new path. A future schema version
 is not treated as corruption and MUST NOT be replaced from an older backup.
 
 The KDF identity (`identity`: salt and parameters) lives only in Config v2. A
-login commits the account's identity from prelogin; `LocalVault` generates one
-only when it initializes a vault and no identity is committed yet, and a
-snapshot restore replaces it by compare-and-swap. Opening a database never
-creates an identity, so a second device can adopt the account's salt.
+login commits the account's identity from prelogin, and a snapshot restore
+replaces it by compare-and-swap. Opening a database or setting its master
+password never creates an identity; authentication must commit the account's
+salt and parameters before the device can unlock its server replica.
 
 If the primary is absent while the predecessor backup exists, initialization
 MUST stop for explicit recovery; it MUST NOT create defaults or remigrate

@@ -30,7 +30,6 @@ vi.mock("../composables/useUiSettings", () => ({
     settings: ref({
       lastSelectedStorageId: "remote-1",
       lastSelectedVaultByStorage: {},
-      showLocalStorage: true,
       lastCreateItemType: "login",
     }),
   }),
@@ -238,18 +237,12 @@ vi.mock("../composables/app/actions/useAppStorageActions", () => ({
   useAppStorageActions: () => ({
     storageDropdownOpen: ref(false),
     vaultDropdownOpen: ref(false),
-    deleteStorageOpen: ref(false),
-    deleteStorageInfo: ref(null),
-    deleteStorageBusy: ref(false),
     toggleStorageDropdown: vi.fn(),
     closeStorageDropdown: vi.fn(),
     switchStorage: vi.fn(),
     openAddStorageWizard: vi.fn(),
     openStorageSettings: vi.fn(),
     handleStorageReveal: vi.fn(),
-    handleStorageDisconnect: vi.fn(),
-    handleStorageDelete: vi.fn(),
-    handleStorageGetInfo: vi.fn(),
     handleSignOut: vi.fn(),
     handleRemoveServer: vi.fn(),
     handleSignIn: vi.fn(),
@@ -260,8 +253,6 @@ vi.mock("../composables/app/actions/useAppStorageActions", () => ({
     toggleVaultDropdown: vi.fn(),
     closeVaultDropdown: vi.fn(),
     switchVault: vi.fn(),
-    confirmDeleteStorage: vi.fn(),
-    confirmDisconnectStorage: vi.fn(),
   }),
 }));
 

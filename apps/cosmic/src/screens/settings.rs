@@ -175,7 +175,7 @@ impl State {
             exported: None,
             apple_selection: None,
             apple_imported: None,
-            import_target_storage_id: "local".to_string(),
+            import_target_storage_id: String::new(),
             refresh_vault_on_close: false,
             snapshots: Vec::new(),
             restore_target: String::new(),
