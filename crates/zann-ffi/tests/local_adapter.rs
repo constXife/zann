@@ -77,20 +77,23 @@ fn a_storage_no_server_syncs_has_no_server_to_forget() {
 
 #[test]
 fn a_storage_without_its_connection_projects_what_waits_for_its_server() {
-    use zann_client::app::local::StorageLink;
+    use zann_client::app::local::{StorageLink, StorageSyncState};
 
+    let state = |link| StorageSyncState {
+        link,
+        server_url: Some("https://zann.example.test".into()),
+        pending_changes: 3,
+        last_synced_at: None,
+    };
     assert_eq!(
-        StorageLinkFfi::from(StorageLink::Disconnected {
-            server_url: Some("https://zann.example.test".into()),
-            pending_changes: 3,
-        }),
+        StorageLinkFfi::from(state(StorageLink::Disconnected)),
         StorageLinkFfi::Disconnected {
             server_url: Some("https://zann.example.test".into()),
             pending_changes: 3,
         }
     );
     assert_eq!(
-        StorageLinkFfi::from(StorageLink::Connected),
+        StorageLinkFfi::from(state(StorageLink::Connected)),
         StorageLinkFfi::Connected
     );
 }

@@ -18,7 +18,7 @@ use zann_crypto::vault_crypto;
 use zann_crypto::EncryptedPayload;
 use zann_db::local::{
     HistorySyncStatus, LocalItemHistoryRepo, LocalItemRepo, LocalStorage, LocalStorageRepo,
-    LocalVaultRepo, PendingChangeRepo,
+    LocalVaultRepo, PendingChangeRepo, SyncCursorRepo,
 };
 use zann_db::services::LocalServices;
 use zann_db::SqliteFileLocation;
@@ -546,8 +546,8 @@ impl LocalVaultService for LocalVault {
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()> {
         LocalVault::sync_reset(self, storage_id)
     }
-    fn storage_link(&self, storage_id: String) -> LocalResult<StorageLink> {
-        LocalVault::storage_link(self, storage_id)
+    fn storage_sync_state(&self, storage_id: String) -> LocalResult<StorageSyncState> {
+        LocalVault::storage_sync_state(self, storage_id)
     }
     fn pending_change_count(&self, storage_id: String) -> LocalResult<u64> {
         LocalVault::pending_change_count(self, storage_id)

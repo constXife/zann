@@ -233,7 +233,7 @@ pub struct StorageSummary {
 /// Whether a server syncs a storage, from the client config rather than the
 /// storage row: a server storage keeps its row, and its unsent changes, after
 /// its connection is gone.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StorageLink {
     /// A storage on this device only; no server ever syncs it.
     Local,
@@ -241,12 +241,21 @@ pub enum StorageLink {
     Connected,
     /// A server storage no connection syncs: its server was forgotten, or its
     /// sign-in never reached this client's config. Nothing syncs it until the
-    /// user connects to `server_url` again with the same account, which takes
-    /// the storage and its `pending_changes` over.
-    Disconnected {
-        server_url: Option<String>,
-        pending_changes: u64,
-    },
+    /// user connects to its server again with the same account, which takes
+    /// the storage and its pending changes over.
+    Disconnected,
+}
+
+/// Everything a client shows about one storage's sync, read in one call.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageSyncState {
+    pub link: StorageLink,
+    /// The server address the storage belongs to; `None` for a local one.
+    pub server_url: Option<String>,
+    /// Local changes no server has confirmed yet.
+    pub pending_changes: u64,
+    /// RFC 3339 time any of its vaults last finished a sync.
+    pub last_synced_at: Option<String>,
 }
 
 #[derive(Debug, Clone)]

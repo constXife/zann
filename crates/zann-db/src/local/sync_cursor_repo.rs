@@ -57,6 +57,22 @@ impl<'a> SyncCursorRepo<'a> {
         .map(|_| ())
     }
 
+    /// When any vault of the storage last finished a sync, `None` before the
+    /// first one.
+    pub async fn last_synced_at(
+        &self,
+        storage_id: uuid::Uuid,
+    ) -> Result<Option<chrono::DateTime<chrono::Utc>>, sqlx_core::Error> {
+        use sqlx_core::row::Row;
+        query!(
+            r#"SELECT MAX(last_sync_at) AS last_sync_at FROM sync_cursors WHERE storage_id = ?1"#,
+            storage_id
+        )
+        .fetch_one(self.pool)
+        .await?
+        .try_get("last_sync_at")
+    }
+
     /// Loads the cursor and server sequence from one durable SQLite snapshot.
     pub async fn get_checkpoint(
         &self,
