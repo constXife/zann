@@ -6,7 +6,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, Arc<LocalVault>, Uuid, Uuid) {
     let root = dir.path().canonicalize().expect("canonical root");
     let core =
         open_vault(format!("sqlite://{}", root.join("local.sqlite").display())).expect("open");
-    core.seed_offline_fixture("context test password".into())
+    core.seed_offline_fixture(format!("context-{}", Uuid::now_v7()))
         .expect("initialize");
     let pool = core.pool();
     let first = core.storage_id().expect("first storage");
