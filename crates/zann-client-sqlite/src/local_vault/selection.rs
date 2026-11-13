@@ -94,6 +94,7 @@ impl LocalVault {
     /// of a newly connected server, which lands the device in that server's
     /// personal vault. A storage with items is never left behind.
     pub fn follow_preferred_storage(&self) -> LocalResult<()> {
+        let _context = self.context_gate.write().expect("lock poisoned");
         self.master_key()?;
         let pool = self.pool();
         // Held across the check and the switch, so a concurrent selection
@@ -113,8 +114,11 @@ impl LocalVault {
         let Some(vault_id) = preferred_vault(&self.runtime, &pool, resolved, &vaults)? else {
             return Ok(());
         };
+        self.verify_storage_keys(self.master_key()?.as_ref(), &vaults)?;
         *self.vault_id.lock().expect("lock poisoned") = Some(vault_id);
         *storage_id = resolved;
+        self.item_reads.cancel_all();
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }

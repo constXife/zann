@@ -2,6 +2,7 @@ use super::*;
 
 impl LocalVault {
     pub fn current_vault_id(&self) -> Option<String> {
+        let _context = self.context_gate.read().expect("lock poisoned");
         self.vault_id
             .lock()
             .expect("lock poisoned")
@@ -9,6 +10,7 @@ impl LocalVault {
     }
 
     pub fn list_vaults(&self) -> LocalResult<Vec<VaultSummary>> {
+        let _context = self.context_gate.read().expect("lock poisoned");
         let pool = self.pool();
         let repo = LocalVaultRepo::new(&pool);
         let item_repo = LocalItemRepo::new(&pool);
@@ -35,6 +37,7 @@ impl LocalVault {
     }
 
     pub fn set_current_vault(&self, id: String) -> LocalResult<VaultStatus> {
+        let _context = self.context_gate.write().expect("lock poisoned");
         let pool = self.pool();
         if self.master_key.lock().expect("lock poisoned").is_none() {
             return Err(LocalError::Locked);
@@ -50,6 +53,8 @@ impl LocalVault {
             return Err(LocalError::InvalidArgument("vault not found".to_string()));
         }
         *self.vault_id.lock().expect("lock poisoned") = Some(vault_id);
+        self.item_reads.cancel_all();
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
         Ok(VaultStatus { unlocked: true })
     }
 
@@ -65,6 +70,7 @@ impl LocalVault {
             .map(|s| StorageSummary {
                 id: s.id.to_string(),
                 name: s.name,
+                server_url: s.server_url,
                 kind: if s.kind == zann_core::StorageKind::LocalOnly {
                     "local"
                 } else {
@@ -75,24 +81,8 @@ impl LocalVault {
             .collect())
     }
 
-    pub fn set_current_storage(&self, id: String) -> LocalResult<()> {
-        let pool = self.pool();
-        let storage_id = Uuid::parse_str(&id)
-            .map_err(|_| LocalError::InvalidArgument("invalid storage id".to_string()))?;
-        let repo = LocalStorageRepo::new(&pool);
-        let storages = self
-            .runtime
-            .block_on(repo.list())
-            .map_err(|err| LocalError::Service(err.to_string()))?;
-        if !storages.iter().any(|s| s.id == storage_id) {
-            return Err(LocalError::InvalidArgument("storage not found".to_string()));
-        }
-        *self.storage_id.lock().expect("lock poisoned") = storage_id;
-        *self.vault_id.lock().expect("lock poisoned") = None; // Clear selected vault
-        Ok(())
-    }
-
     pub fn current_storage_id(&self) -> String {
+        let _context = self.context_gate.read().expect("lock poisoned");
         self.storage_id().to_string()
     }
 

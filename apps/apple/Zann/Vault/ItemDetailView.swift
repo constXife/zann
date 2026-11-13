@@ -9,20 +9,37 @@ struct ItemDetailView: View {
     let preferences: DevicePreferencesFfi
     /// Held reveal modifier; never mutates the per-field reveal state.
     let revealAll: Bool
+    @State private var showLoadingIndicator = false
 
     var body: some View {
-        if let detail = vault.detail {
-            ItemDetailContent(
-                detail: detail, strings: strings, preferences: preferences, revealAll: revealAll
-            )
-            // Fresh reveal and copy state for every item.
-            .id(detail.id)
-        } else if let error = vault.error {
-            placeholder(error)
-        } else if vault.selectedItemID != nil {
-            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            placeholder(strings("items.detailsHint"))
+        Group {
+            if let detail = vault.detail {
+                ItemDetailContent(
+                    detail: detail, strings: strings, preferences: preferences,
+                    revealAll: revealAll && detail.id == vault.selectedItemID,
+                    selectionGeneration: vault.detailSelectionGeneration
+                )
+                // The previous card stays visually stable during replacement,
+                // but none of its actions may target the newly selected row.
+                .disabled(detail.id != vault.selectedItemID)
+                .accessibilityHidden(detail.id != vault.selectedItemID)
+            } else if let error = vault.error {
+                placeholder(error)
+            } else if vault.selectedItemID != nil {
+                Group {
+                    if showLoadingIndicator { ProgressView() }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                placeholder(strings("items.detailsHint"))
+            }
+        }
+        .task(id: vault.selectedItemID) {
+            showLoadingIndicator = false
+            guard vault.detail == nil, vault.selectedItemID != nil else { return }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled, vault.detail == nil else { return }
+            showLoadingIndicator = true
         }
     }
 
@@ -40,9 +57,13 @@ private struct ItemDetailContent: View {
     let strings: Strings
     let preferences: DevicePreferencesFfi
     let revealAll: Bool
+    let selectionGeneration: Int
 
+    @State private var stateGeneration: Int?
+    @State private var revealTasks: [Int: Task<Void, Never>] = [:]
     @State private var revealed: Set<Int> = []
     @State private var copied: Int?
+    @State private var copyFeedbackTask: Task<Void, Never>?
     /// Below this width a label beside its value leaves the value too little
     /// room, so every row puts its label above instead.
     @State private var compact = false
@@ -52,7 +73,7 @@ private struct ItemDetailContent: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 14) {
-                    ItemIcon(typeID: detail.typeID, size: 52)
+                    ItemIcon(typeID: detail.typeId, size: 52)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(detail.title).font(.title2.bold()).textSelection(.enabled)
                         Text(subtitle).foregroundStyle(.secondary)
@@ -66,18 +87,21 @@ private struct ItemDetailContent: View {
                             if index > 0 {
                                 Divider().padding(.leading, 12)
                             }
-                            FieldRow(
+                            ItemDetailFieldRow(
                                 field: field,
                                 label: strings.fieldLabel(field.labelKey),
                                 compact: compact,
-                                revealed: revealed.contains(index) || revealAll,
-                                copied: copied == index,
-                                revealHelp: strings(revealed.contains(index) ? "common.hide" : "common.reveal"),
+                                revealed: (stateGeneration == selectionGeneration && revealed.contains(index)) || revealAll,
+                                copied: stateGeneration == selectionGeneration && copied == index,
+                                strings: strings,
+                                copyFeedback: copyFeedback,
+                                revealHelp: strings(stateGeneration == selectionGeneration && revealed.contains(index) ? "common.hide" : "common.reveal"),
                                 onCopy: { copy($0, index: index) },
                                 onToggleReveal: { toggleReveal(index) }
                             )
                         }
                     }
+                    .id(detail.id)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
                             .fill(Color(nsColor: .controlBackgroundColor))
@@ -95,198 +119,65 @@ private struct ItemDetailContent: View {
             .frame(maxWidth: 680, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onChange(of: selectionGeneration) { _ in resetInteractions() }
+        .onDisappear { resetInteractions() }
+    }
+
+    private func resetInteractions() {
+        stateGeneration = selectionGeneration
+        revealed.removeAll()
+        copied = nil
+        copyFeedbackTask?.cancel()
+        for task in revealTasks.values { task.cancel() }
+        revealTasks.removeAll()
+    }
+
+    private var copyFeedback: String {
+        preferences.clipboardClearSeconds > 0
+            ? strings("items.copiedClears", ["seconds": String(preferences.clipboardClearSeconds)])
+            : strings("common.copied")
     }
 
     /// The type, after the folder the item lives in. `path` ends with the
     /// item's own name, which the title already shows.
     private var subtitle: String {
-        let type = strings.typeLabel(detail.typeID)
+        let type = strings.typeLabel(detail.typeId)
         return folderOf(path: detail.path).map { "\($0) · \(type)" } ?? type
     }
 
     private func copy(_ value: String, index: Int) {
+        if stateGeneration != selectionGeneration { resetInteractions() }
         Clipboard.copy(
             value,
             clearAfter: preferences.clipboardClearSeconds,
             onlyIfUnchanged: preferences.clipboardClearIfUnchanged
         )
         copied = index
-        Task {
+        copyFeedbackTask?.cancel()
+        copyFeedbackTask = Task {
             try? await Task.sleep(nanoseconds: 1_500_000_000)
-            if copied == index { copied = nil }
+            guard !Task.isCancelled else { return }
+            copied = nil
         }
     }
 
     /// The eye button holds for `auto_hide_reveal_seconds`, then masks again.
     private func toggleReveal(_ index: Int) {
+        if stateGeneration != selectionGeneration { resetInteractions() }
+        revealTasks[index]?.cancel()
         guard revealed.insert(index).inserted else {
             revealed.remove(index)
             return
         }
         let seconds = preferences.autoHideRevealSeconds
         guard seconds > 0 else { return }
-        Task {
+        let generation = selectionGeneration
+        let expectedGeneration = $stateGeneration
+        let revealedFields = $revealed
+        revealTasks[index] = Task {
             try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
-            revealed.remove(index)
+            guard !Task.isCancelled, expectedGeneration.wrappedValue == generation else { return }
+            revealedFields.wrappedValue.remove(index)
         }
-    }
-}
-
-private struct FieldRow: View {
-    let field: ItemDetailFieldFfi
-    let label: String
-    /// The label sits above the value instead of beside it.
-    let compact: Bool
-    let revealed: Bool
-    let copied: Bool
-    let revealHelp: String
-    let onCopy: (String) -> Void
-    let onToggleReveal: () -> Void
-
-    /// zann-ui-core's fixed-width mask, the same one COSMIC shows.
-    private static let mask = maskedValue()
-
-    var body: some View {
-        Group {
-            if compact {
-                VStack(alignment: .leading, spacing: 2) {
-                    labelText.padding(.horizontal, 8)
-                    valueAndEye
-                }
-            } else {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    labelText
-                        .lineLimit(2)
-                        .frame(width: 140, alignment: .leading)
-                    valueAndEye
-                }
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    private var labelText: some View {
-        Text(label).foregroundStyle(.secondary)
-    }
-
-    /// Width of the trailing slot every row keeps, so values line up: the
-    /// eye of a masked value, or the countdown of a one-time code.
-    static let accessoryWidth: CGFloat = 22
-
-    private var valueAndEye: some View {
-        HStack(alignment: .center, spacing: 12) {
-            if let totp = field.totp {
-                // A one-time code shows as a code, never as its secret, so its
-                // slot holds the countdown instead of an eye.
-                TotpValue(params: totp, copied: copied, onCopy: onCopy)
-            } else {
-                Button { onCopy(field.value) } label: {
-                    Text(shown)
-                        // Only secrets are set in a fixed-width face; plain
-                        // values read as ordinary text and wrap. A secret
-                        // keeps one line, so revealing it never resizes the row.
-                        .font(field.masked ? .body.monospaced() : .body)
-                        .lineLimit(field.masked ? 1 : nil)
-                        .multilineTextAlignment(.leading)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(CopySurfaceStyle(copied: copied))
-                Button(action: onToggleReveal) {
-                    Image(systemName: revealed ? "eye.slash" : "eye")
-                }
-                .buttonStyle(.borderless)
-                .help(revealHelp)
-                .frame(width: Self.accessoryWidth)
-                .opacity(canReveal ? 1 : 0)
-                .disabled(!canReveal)
-            }
-        }
-    }
-
-    private var canReveal: Bool {
-        field.masked && field.totp == nil
-    }
-
-    private var shown: String {
-        field.masked && !revealed ? Self.mask : field.value
-    }
-}
-
-private struct TotpValue: View {
-    let params: TotpParamsFfi
-    let copied: Bool
-    let onCopy: (String) -> Void
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            if let code = try? generateTotp(params: params) {
-                HStack(alignment: .center, spacing: 12) {
-                    Button { onCopy(code.code) } label: {
-                        Text(grouped(code.code))
-                            .font(.title3.monospaced())
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .buttonStyle(CopySurfaceStyle(copied: copied))
-                    TotpCountdown(remaining: code.remainingSeconds, period: code.period)
-                        .frame(width: FieldRow.accessoryWidth)
-                }
-            } else {
-                Text("invalid one-time code")
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-    }
-
-    private func grouped(_ code: String) -> String {
-        let split = code.index(code.startIndex, offsetBy: code.count / 2)
-        return "\(code[..<split]) \(code[split...])"
-    }
-}
-
-/// How long the code shown stays valid: a ring that empties over the period,
-/// with the seconds left in its help. It turns orange in the last five
-/// seconds, when copying the next code is the safer bet.
-private struct TotpCountdown: View {
-    let remaining: UInt32
-    let period: UInt32
-
-    var body: some View {
-        let fraction = period > 0 ? Double(remaining) / Double(period) : 0
-        let ending = remaining <= 5
-        ZStack {
-            Circle().stroke(Color.secondary.opacity(0.25), lineWidth: 2)
-            Circle()
-                .trim(from: 0, to: fraction)
-                .stroke(ending ? Color.orange : Color.secondary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                .animation(.linear(duration: 1), value: remaining)
-        }
-        .frame(width: 14, height: 14)
-        .help("\(remaining)s")
-        .accessibilityLabel("\(remaining)s")
-    }
-}
-
-/// The whole value surface is the copy target; pressing and a successful copy
-/// tint that surface without changing its text or geometry.
-private struct CopySurfaceStyle: ButtonStyle {
-    let copied: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 8)
-            .padding(.vertical, 5)
-            .contentShape(Rectangle())
-            .background(
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(fill(pressed: configuration.isPressed))
-            )
-    }
-
-    private func fill(pressed: Bool) -> Color {
-        if copied { return Color.accentColor.opacity(0.18) }
-        return pressed ? Color.primary.opacity(0.1) : Color.clear
     }
 }

@@ -28,11 +28,17 @@ struct ZannApp: App {
         systemLanguage: Locale.preferredLanguages.first ?? Locale.current.identifier,
         openBrowser: { NSWorkspace.shared.open($0) }
     )
+    // Security observers must outlive a closed vault window while the app
+    // remains in the menu bar (idle lock and clear-on-exit included).
+    @State private var lockTriggers: LockTriggers?
 
     var body: some Scene {
-        WindowGroup {
+        Window("Zann", id: mainWindowID) {
             RootView()
                 .environmentObject(model)
+                .onAppear {
+                    if lockTriggers == nil { lockTriggers = LockTriggers(model: model) }
+                }
         }
         // Room for all three vault columns from the first launch; the window
         // also grows to the vault's own minimum when it opens.
@@ -60,11 +66,15 @@ struct ZannApp: App {
                 // Commands observe only AppModel; a vault with no server
                 // makes this a no-op.
                 .disabled(model.vault == nil)
-                Button("Lock") { Task { await model.lock() } }
+                Button(model.strings("common.lock")) { Task { await model.lock() } }
                     .keyboardShortcut("l", modifiers: .command)
                     .disabled(!model.isUnlocked)
             }
         }
+        MenuBarExtra("Zann", systemImage: "key.fill") {
+            MenuBarControls().environmentObject(model)
+        }
+        .menuBarExtraStyle(.menu)
         Settings {
             SettingsView().environmentObject(model)
         }
@@ -73,14 +83,12 @@ struct ZannApp: App {
 
 struct RootView: View {
     @EnvironmentObject private var model: AppModel
-    @State private var lockTriggers: LockTriggers?
 
     var body: some View {
         screen
             // The one place the window minimum is set: an outer minimum would
             // hide the vault's larger one from the window.
             .frame(minWidth: minimum.width, minHeight: minimum.height)
-            .onAppear { lockTriggers = lockTriggers ?? LockTriggers(model: model) }
             // Closing the window keeps the app running, so it counts as hidden.
             .onDisappear { Task { await model.appHidden() } }
     }

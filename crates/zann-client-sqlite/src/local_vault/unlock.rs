@@ -6,11 +6,12 @@ impl LocalVault {
     }
 
     pub fn unlock(&self, password: String) -> LocalResult<VaultStatus> {
+        let generation = self.context_generation.load(Ordering::SeqCst);
         let identity = self
             .kdf_identity()?
             .ok_or_else(|| LocalError::InvalidArgument("vault is not initialized".to_string()))?;
         let master_key = Arc::new(derive_master_key(&password, &identity)?);
-        self.finish_unlock(master_key)
+        self.finish_unlock(master_key, generation)
     }
 
     pub fn remembered_unlock(&self) -> LocalResult<RememberedUnlock> {
@@ -37,6 +38,7 @@ impl LocalVault {
     /// Unlock using whichever source this device has armed. Blocks on a touch
     /// when that source is a hardware key.
     pub fn unlock_remembered(&self) -> LocalResult<VaultStatus> {
+        let generation = self.context_generation.load(Ordering::SeqCst);
         let remembered = self.load_remembered()?;
         let master_key = match remembered.unlock_source {
             UnlockSource::Keystore => remembered.unlock_with_keystore(self.keystore.as_ref()),
@@ -45,7 +47,7 @@ impl LocalVault {
             }
         }
         .map_err(unlock_error)?;
-        self.finish_unlock(Arc::new(SecretKey::from_bytes(master_key)))
+        self.finish_unlock(Arc::new(SecretKey::from_bytes(master_key)), generation)
     }
 
     /// Whether an enrolled authenticator is connected. Silent: no touch, so
@@ -83,12 +85,15 @@ impl LocalVault {
         self.save_remembered(&remembered)
     }
 
-    /// Drops the master key and cancels every sync in flight, so none keeps
-    /// its copy of the key until the server answers.
+    /// Drops the master key and cancels pending item reads and syncs, so their
+    /// copies do not remain alive while waiting for SQLite or the server.
     pub fn lock(&self) -> LocalResult<VaultStatus> {
+        let _context = self.context_gate.write().expect("lock poisoned");
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
         *self.master_key.lock().expect("lock poisoned") = None;
         *self.vault_id.lock().expect("lock poisoned") = None;
         self.syncs.cancel_all();
+        self.item_reads.cancel_all();
         Ok(VaultStatus { unlocked: false })
     }
 
@@ -98,6 +103,7 @@ impl LocalVault {
     }
 
     pub fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus> {
+        let generation = self.context_generation.load(Ordering::SeqCst);
         let pool = self.pool();
         if password.len() < 8 {
             return Err(LocalError::InvalidArgument(
@@ -157,7 +163,6 @@ impl LocalVault {
             self.runtime
                 .block_on(storage_repo.upsert(&new_storage))
                 .map_err(|err| LocalError::Service(err.to_string()))?;
-            *self.storage_id.lock().expect("lock poisoned") = new_storage.id;
             new_storage.id
         } else {
             self.storage_id()
@@ -167,10 +172,13 @@ impl LocalVault {
         let services = LocalServices::new(&pool, master_key.as_ref());
         let vault = self.runtime_block_on(services.ensure_default_local_personal())?;
 
-        // Store master key and vault id
+        // Publish one coherent selection only if no lock or switch superseded it.
+        let _context = self.context_gate.write().expect("lock poisoned");
+        self.check_context_generation(generation)?;
         *self.master_key.lock().expect("lock poisoned") = Some(master_key);
         *self.vault_id.lock().expect("lock poisoned") = Some(vault.id);
         *self.storage_id.lock().expect("lock poisoned") = storage_id;
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
 
         Ok(VaultStatus { unlocked: true })
     }

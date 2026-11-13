@@ -54,25 +54,56 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   come from zann-ui-core; labels read the shared `i18n/` catalogue.
   Create (⌘N) and edit (⌘E) open a sheet over a zann-ui-core `ItemDraftFfi`,
   which owns the type templates, validation and the stored payload.
+  The form separates name and optional folder, labels standard inputs from
+  the shared schema, and keeps editable keys/types under Additional fields.
+  In search, Down or Return moves to the first result; the list then uses
+  native arrow-key navigation. An empty result offers Clear search.
+  Empty categories offer creation of their schema-selected type directly in
+  the list; Trash has no creation action.
+  Detail values are copy buttons with an icon, hover help and checkmark feedback;
+  website fields have a separate browser action from the shared field projection.
   The sidebar's folder section is zann-ui-core's `build_folder_tree`.
 - `Zann/Platform/` holds the macOS adapters: a pasteboard writer that marks
   values concealed and clears them on the configured timer, the held Option
   key that reveals masked values while pressed, and the lock triggers (input
   as activity, the idle tick, focus loss, hiding and minimizing) whose effect
   `AppModel` decides from `DevicePreferences`.
+  The menu-bar key icon offers Open, Lock and Quit. Closing the window keeps
+  Zann running; Open raises or restores its single window. Lock-on-hidden and
+  idle lock continue to apply with the window closed, and Quit still honours
+  clear-on-exit. Security event observers live for the app's lifetime.
 
 - `Zann/Connect/` signs this Mac in to a server through the core's
   `RemoteSession`: probe and pin the server, confirm a changed fingerprint,
   then a password or browser sign-in. The core pins trust, keeps the session
   and decides when registration is offered. The account's personal vault
   then opens with its master password (or a new account creates one) and
-  syncs once; the core then moves the still-empty session to the server's
-  personal vault and keeps choosing it after a restart.
-- Every later unlock opens the vault at once and syncs in the background.
+  opens cached content immediately. The first sync runs in the background;
+  the core then moves a still-empty session to the server's personal vault
+  when no editor is open, and keeps choosing it after a restart.
+- Card reads use one `item_detail` FFI call returning ordered/masked fields.
+  Rust transfers payload field strings into the shared presentation projection;
+  no full payload JSON crosses into Swift and back. `ItemDetailLoader` owns one
+  read operation and cancels it on replacement, lock or release. Cancellation
+  interrupts a pending SQLite future; an in-progress bounded crypto call can
+  finish, after which its cancelled result is discarded.
+  Replacing a card keeps the previous layout until the new projection is ready,
+  masks its revealed values and disables its actions. Reveal/copy state resets
+  with each selection; only an initial read longer than 150 ms shows a spinner.
+- Every unlock opens cached content and syncs in the background.
   While unlocked the vault syncs on the core's `AutoSyncSchedule`: a couple
   of seconds after each save and every minute otherwise, one sync at a time;
-  ⌘R syncs on demand and lock stops it. A vault that only lives on this Mac
-  has no sync.
+  ⌘R syncs on demand and lock stops it. Lock is available through ⌘L and
+  the Vault menu; it has no toolbar button. A vault that only lives on this Mac
+  has no sync. The sidebar header selects the server/account storage with its
+  compact sync icon; the vault selector stays in the row below.
+  Sync progress stays in that icon. Clicking it shows the server address, last
+  completed sync, errors and sync/reconnect/forget actions; no workspace banner
+  appears during synchronization.
+  Server and vault navigation remains available during network sync. Progress
+  follows its original server; a late completion reloads only the current
+  context and never restores a previous selection. Explicit navigation also
+  cancels the first-sync automatic storage handoff.
 
 - `Zann/SettingsView.swift` is the Settings window (⌘,) over the shared
   device preferences. `Zann/PreferencesFile.swift` keeps them in this app's

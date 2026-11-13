@@ -46,6 +46,8 @@ does not authorize another temporary implementation.
 | Sync semantics | `zann-client::sync` **(active bidirectional surface)** | local application sessions | transactional repository port, private remote transport, progress/cancellation sink | cursor, merge, conflict, version and deletion policy in shells, FFI or presentation |
 | Sync scheduling | `zann-client::sync::AutoSyncSchedule`, consumed through `zann-client::app::local` | COSMIC and FFI shells | caller-supplied monotonic `now`; the shell's timer and sync call | debounce, interval, unlock/lock or single-flight admission policy in shells or FFI; a scheduled sync starting or completing into a later unlock |
 | SQLite sync persistence | `zann-client-sqlite` **(production adapter)** | native application composition roots | explicit `ClientPaths` plus one pre-resolved native SQLite file location, injected sync port, bounded projection proofs and atomic DB CAS | implicit active target selection, `HOME`/URI path derivation, binding replacement, multiple endpoint/profile caches or direct use from shells |
+| Unlocked storage/vault context | `zann-client-sqlite::local_vault` | native application facade | key-verified selection and preferred vault, context read/write leases | key checks or preferred-vault policy in shells; implicit sync target after explicit selection |
+| Cancellable local item reads | `zann-client::app::local::LocalVaultService::item_read`, implemented by `zann-client-sqlite::local_vault` | native item presentation through FFI | existing `SessionOperation`, coherent context snapshot, typed decrypted payload, lock/selection cancellation | JSON round trips for card projection; SQL or cancellation policy in shells |
 | Authenticated application session | private `zann-client::session` owner, exposed only through `zann-client::app::AppClient` | COSMIC, FFI and the Tauri sync composition root; future CLI adapter | `CredentialStore`, `ClientPaths`, clock, operation deadline and cancellation | constructing `AppSession` directly; password/OIDC login, trust, refresh, logout, token-selection and ambiguity policy in shells and FFI |
 | Authenticated application composition | `zann-client::app` **(active native facade)** | COSMIC, FFI and the Tauri sync composition root | injected `AppSyncStoreFactory`, `CredentialStore`, explicit `ClientPaths`, operation-scoped master key, progress/cancellation | exposing `AppSession`/`SyncEngine`, bearer access, ambient paths, mutable target/key maps or local orchestration in shells |
 | Local vault application use cases | `zann-client::app` **(planned beyond remote sync)** | Tauri, COSMIC and FFI adapters | storage/credential ports, `ClientPaths`, clock and progress sink | local application orchestration in Tauri commands, COSMIC screens or `zann-ffi` |
@@ -82,6 +84,14 @@ parsing, field order, masking/multiline metadata and TOTP parameter extraction.
 Its detail screen retains translation and temporary reveal/copy state. COSMIC
 no longer has a direct `zann-crypto` dependency (MIG-004). Tauri's
 `useItemDetails.ts` projection remains migration debt under MIG-006.
+
+Category projections also supply empty-state creation actions (target type and
+translation key); Trash supplies none. Shells render these actions and open the
+shared editor draft rather than maintaining their own category-to-type tables.
+
+The same field projection supplies an optional website action for explicitly
+typed, unmasked HTTP(S) URLs without embedded credentials. Browser launch is a
+separate user-invoked shell action; it never replaces copying the field value.
 
 `zann-ui-core::item_editor` owns typed draft decoding, validation and payload
 construction. COSMIC and Tauri consume `schemas/item_fields.json` as the one

@@ -104,7 +104,8 @@
     "personal": "Personal",
     "shared": "Shared",
     "folders": "Folders",
-    "noFolder": "No folder"
+    "noFolder": "No folder",
+    "serverAccount": "Server / account"
   },
   "folder": {
     "rename": "Rename folder",
@@ -116,6 +117,10 @@
     "affects": "Affects {count} items"
   },
   "items": {
+    "copyField": "Copy {field}",
+    "openWebsite": "Open website",
+    "websiteOpenFailed": "Could not open the website.",
+    "copiedClears": "Copied. Clipboard clears in {seconds} seconds.",
     "searchPlaceholder": "Search items",
     "kvSearchPlaceholder": "Search keys (/)",
     "kvSectionTitle": "Key-Value",
@@ -124,6 +129,8 @@
     "kvActions": "Actions",
     "kvMatches": "{count}/{total} matches",
     "kvNoMatches": "No matching keys or values.",
+    "noSearchResults": "No matching items.",
+    "clearSearch": "Clear search",
     "searchMatches": "{count} found for “{query}”",
     "noItems": "No items yet. Create your first item to get started.",
     "noFields": "This item has no fields.",
@@ -458,8 +465,8 @@
     "importAppleDuplicates": "{count} repeated titles will receive a numeric suffix; no credentials will be overwritten.",
     "importAppleInvalidPreview": "{count} rows without a title will be skipped.",
     "importApplePlainWarning": "This CSV contains plaintext passwords. Keep it secure and delete it when you no longer need it.",
-    "importApplePickerLocalOnly": "The selected CSV is not a local file.",
-    "importApplePickerFailed": "Could not open the file picker: {error}",
+      "importApplePickerLocalOnly": "The selected CSV is not a local file.",
+      "importApplePickerFailed": "Could not open the file picker: {error}",
     "importAppleTargetMissing": "No import target is available.",
     "importAppleSuccess": "Apple Passwords imported",
     "importAppleFailed": "Apple Passwords import failed",
@@ -497,6 +504,20 @@
     "openSettings": "Open Settings"
   },
   "create": {
+    "actions": {
+      "login": "Create login",
+      "note": "Create note",
+      "card": "Create card",
+      "identity": "Create identity",
+      "api": "Create API item",
+      "kv": "Create key-value item",
+      "ssh_key": "Create SSH key",
+      "database": "Create database item",
+      "cloud_iam": "Create cloud credentials",
+      "file_secret": "Add file",
+      "server_credentials": "Create server credentials",
+      "secret": "Create secret"
+    },
     "vaultTitle": "Create vault",
     "itemHeader": "Create New Secret",
     "itemEditHeader": "Update Secret",
@@ -552,6 +573,8 @@
     "keyLabel": "Key",
     "actionsLabel": "Actions",
     "advanced": "Advanced",
+    "additionalFields": "Additional fields",
+    "fieldType": "Field type",
     "customFields": "Custom fields",
     "kindText": "Text",
     "kindPassword": "Password",
@@ -633,6 +656,7 @@
     "name_too_long": "Name is too long.",
     "path_too_long": "Path is too long.",
     "path_segments_limit": "Path is too deep.",
+    "item_name_invalid": "Enter a name without /. Choose its folder separately.",
     "path_invalid": "Path contains invalid segments.",
     "path_segment_invalid": "Path contains reserved segments.",
     "path_segment_invalid_chars": "Path segments may contain only letters, numbers, underscores, or hyphens.",
@@ -660,7 +684,10 @@
     "hardware_key_unsupported": "This key does not support hmac-secret",
     "hardware_key_not_accessible": "The key is visible to the system but not accessible",
     "hardware_key_unsupported_platform": "Hardware keys are not supported on this platform yet",
-    "hardware_key_error": "Hardware key error"
+    "hardware_key_error": "Hardware key error",
+    "context_changed": "The open storage changed. Try again.",
+    "storage_empty": "This storage has no cached vaults. Sync it before opening it.",
+    "storage_key_mismatch": "This storage uses a different master key. The current storage remains open."
   },
   "time": {
     "never": "Never",
@@ -727,6 +754,7 @@
     "pending": "Pending"
   },
   "sync": {
+    "details": "Sync details",
     "localOnly": "On this device",
     "disconnected": "Not connected · {count} unsent",
     "syncing": "Syncing with {server}…",

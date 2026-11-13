@@ -264,7 +264,19 @@ among those holding a vault, and a server storage wins over the local one when
 none holds an item. Unlocking always verifies the key against a vault of that
 storage. After a newly connected server's first sync, clients call
 `follow_preferred_storage`, which moves a session whose storage is still empty
-to the storage that opening would pick.
+to the storage that opening would pick. Explicit `set_current_storage` requires
+an unlocked session, resolves cached vault keys through the canonical
+`LocalServices` wrapping policy (including server-wrapped shared vaults), and
+selects its preferred vault before publishing the context. Item writes and list operations hold a context read lease;
+selection and lock acquire its write lease. Cancellable item reads snapshot
+the selected storage/vault, pool and key under a short lease, then release it
+before awaiting SQLite. The existing `SessionOperation` cancels the read on
+replacement, selection or lock; generation validation rejects stale results.
+The FFI projects the typed payload through `zann-ui-core` and returns one
+complete card, without sending payload JSON to Swift and back. A superseded unlock cannot publish
+its context. Native shells reload list, counts and detail on selection and sync
+with the selected storage ID. The current root still has one KDF identity;
+selection does not introduce independent master-key identities per account.
 
 A device that holds no vault has nothing local to check a master key against,
 and its first sync binds the key's fingerprint to the connection. So when such

@@ -29,7 +29,7 @@ default = []
 local-vault = [
   "dep:anyhow", "dep:base64", "dep:chrono", "dep:csv", "dep:percent-encoding",
   "dep:serde", "dep:serde_json", "dep:thiserror", "dep:url", "dep:zann-keystore",
-  "zann-client/os-credentials", "tokio/rt-multi-thread", "tokio/sync",
+  "zann-client/os-credentials", "tokio/rt-multi-thread", "tokio/sync", "tokio/macros", "tokio/time",
 ]
 
 [dev-dependencies]

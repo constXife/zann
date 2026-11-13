@@ -218,6 +218,8 @@ pub struct StorageSummaryFfi {
     pub id: String,
     pub name: String,
     pub kind: String, // "local" or "remote"
+    pub server_url: Option<String>,
+    pub display_name: String,
 }
 
 /// Whether a server syncs a storage, with what a client shows about its sync.

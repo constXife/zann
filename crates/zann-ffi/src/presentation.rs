@@ -64,6 +64,7 @@ pub struct ItemDetailFieldFfi {
     pub masked: bool,
     pub multiline: bool,
     pub totp: Option<TotpParamsFfi>,
+    pub website_url: Option<String>,
 }
 
 impl std::fmt::Debug for ItemDetailFieldFfi {
@@ -81,6 +82,7 @@ impl From<ItemDetailField> for ItemDetailFieldFfi {
             masked: field.masked,
             multiline: field.multiline,
             totp: field.totp.map(Into::into),
+            website_url: field.website_url,
         }
     }
 }
@@ -89,14 +91,6 @@ impl From<ItemDetailField> for ItemDetailFieldFfi {
 #[uniffi::export]
 pub fn masked_value() -> String {
     zann_ui_core::MASKED_VALUE.to_string()
-}
-
-/// Item fields in canonical reading order with masking and TOTP metadata.
-#[uniffi::export]
-pub fn project_item_fields(payload_json: String) -> CoreResult<Vec<ItemDetailFieldFfi>> {
-    zann_ui_core::project_item_fields(&payload_json)
-        .map(|fields| fields.into_iter().map(Into::into).collect())
-        .map_err(|error| CoreError::InvalidArgument(error.to_string()))
 }
 
 #[derive(Clone, uniffi::Record)]
@@ -153,6 +147,13 @@ pub struct CategoryViewFfi {
     pub icon: String,
     pub order: i32,
     pub count: u64,
+    pub create_action: Option<CategoryCreateActionFfi>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct CategoryCreateActionFfi {
+    pub type_id: String,
+    pub label_key: String,
 }
 
 impl From<CategoryView> for CategoryViewFfi {
@@ -163,6 +164,10 @@ impl From<CategoryView> for CategoryViewFfi {
             icon: view.icon,
             order: view.order,
             count: view.count,
+            create_action: view.create_action.map(|action| CategoryCreateActionFfi {
+                type_id: action.type_id,
+                label_key: action.label_key,
+            }),
         }
     }
 }

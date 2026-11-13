@@ -230,6 +230,7 @@ pub struct StorageSummary {
     pub id: String,
     pub name: String,
     pub kind: String, // "local" or "remote"
+    pub server_url: Option<String>,
 }
 
 /// Whether a server syncs a storage, from the client config rather than the

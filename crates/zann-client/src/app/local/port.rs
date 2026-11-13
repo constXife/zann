@@ -21,7 +21,7 @@ pub trait LocalVaultService: Send + Sync {
     fn remove_hardware_key(&self, credential_id: String) -> LocalResult<()>;
     fn remember_with_keystore(&self) -> LocalResult<()>;
     fn forget_remembered(&self) -> LocalResult<()>;
-    /// Forgets the master key and cancels every `remote_sync` in flight.
+    /// Forgets the master key and cancels item reads and remote syncs in flight.
     fn lock(&self) -> LocalResult<VaultStatus>;
     fn vault_status(&self) -> LocalResult<VaultStatus>;
     fn current_vault_id(&self) -> Option<String>;
@@ -29,6 +29,13 @@ pub trait LocalVaultService: Send + Sync {
     fn set_current_vault(&self, id: String) -> LocalResult<VaultStatus>;
     fn items_list(&self, filter: ItemsFilter, page: Page) -> LocalResult<ItemPage>;
     fn item_get(&self, id: String) -> LocalResult<ItemDetail>;
+    /// Reads a typed payload for local presentation without a JSON round trip.
+    /// Cancellation drops pending reads; context changes refuse stale results.
+    fn item_read(
+        &self,
+        id: String,
+        operation: crate::app::SessionOperation,
+    ) -> LocalResult<zann_core::ItemDetail>;
     fn item_create(&self, create: ItemCreate) -> LocalResult<ItemDetail>;
     fn item_update(&self, id: String, update: ItemUpdate) -> LocalResult<ItemDetail>;
     fn item_history_list(&self, id: String, limit: u32) -> LocalResult<Vec<ItemHistorySummary>>;
@@ -57,6 +64,8 @@ pub trait LocalVaultService: Send + Sync {
     fn snapshot_restore_target(&self) -> String;
     fn snapshot_restore(&self, path: String) -> LocalResult<SnapshotRestore>;
     fn list_storages(&self) -> LocalResult<Vec<StorageSummary>>;
+    /// Requires an unlocked session and verifies the target's cached vault keys,
+    /// and chooses its preferred vault atomically; refusal preserves selection.
     fn set_current_storage(&self, id: String) -> LocalResult<()>;
     /// Moves an unlocked session whose storage holds no item to the storage
     /// a fresh start would open; a client calls it after a newly connected

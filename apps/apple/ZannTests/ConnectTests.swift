@@ -110,12 +110,14 @@ final class ConnectTests: XCTestCase {
         await deviceA.submit(password: master, mode: .create)
         XCTAssertNil(deviceA.error)
         let vaultA = try XCTUnwrap(deviceA.vault)
+        await vaultA.sync()
         XCTAssertTrue(vaultA.canSync)
         XCTAssertNil(vaultA.syncError)
 
         vaultA.startCreating(typeID: "note")
         let editor = try XCTUnwrap(vaultA.editor)
-        editor.setPath("Shared/From A")
+        editor.name = "From A"
+        editor.folder = "Shared"
         await vaultA.saveEditor()
         XCTAssertNil(vaultA.editor)
         await vaultA.sync()
@@ -131,6 +133,7 @@ final class ConnectTests: XCTestCase {
         await deviceB.submit(password: master, mode: .unlock)
         XCTAssertNil(deviceB.error)
         let vaultB = try XCTUnwrap(deviceB.vault)
+        await vaultB.sync()
         XCTAssertNil(vaultB.syncError)
         XCTAssertEqual(vaultB.visibleItems.map(\.path), ["Shared/From A"])
 
@@ -159,14 +162,17 @@ final class ConnectTests: XCTestCase {
         try await signIn(deviceA, url: url, email: email, password: account)
         await deviceA.submit(password: master, mode: .create)
         let vaultA = try XCTUnwrap(deviceA.vault)
+        await vaultA.sync()
         let deviceB = makeDevice("b")
         try await signIn(deviceB, url: url, email: email, password: account)
         await deviceB.submit(password: master, mode: .unlock)
         let vaultB = try XCTUnwrap(deviceB.vault)
+        await vaultB.sync()
         XCTAssertTrue(vaultB.visibleItems.isEmpty)
 
         vaultA.startCreating(typeID: "note")
-        try XCTUnwrap(vaultA.editor).setPath("Shared/Automatic")
+        try XCTUnwrap(vaultA.editor).name = "Automatic"
+        try XCTUnwrap(vaultA.editor).folder = "Shared"
         await vaultA.saveEditor()
 
         // Two automatic syncs in one process may meet the core's one-sync
@@ -199,9 +205,11 @@ final class ConnectTests: XCTestCase {
         let master = "master-password-\(suffix)"
         await device.submit(password: master, mode: .create)
         let vault = try XCTUnwrap(device.vault)
+        await vault.sync()
         XCTAssertTrue(vault.canSync)
         vault.startCreating(typeID: "note")
-        try XCTUnwrap(vault.editor).setPath("Kept/Local")
+        try XCTUnwrap(vault.editor).name = "Local"
+        try XCTUnwrap(vault.editor).folder = "Kept"
         await vault.saveEditor()
         await vault.sync()
         XCTAssertNil(vault.syncError)
@@ -225,7 +233,8 @@ final class ConnectTests: XCTestCase {
         XCTAssertNil(vault.staleServer)
         XCTAssertEqual(vault.visibleItems.map(\.path), ["Kept/Local"])
         vault.startCreating(typeID: "note")
-        try XCTUnwrap(vault.editor).setPath("Kept/Unsent")
+        try XCTUnwrap(vault.editor).name = "Unsent"
+        try XCTUnwrap(vault.editor).folder = "Kept"
         await vault.saveEditor()
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 1)
         await vault.sync()
@@ -242,6 +251,7 @@ final class ConnectTests: XCTestCase {
         try await signIn(device, url: url, email: email, password: account)
         await device.submit(password: master, mode: .unlock)
         let reconnected = try XCTUnwrap(device.vault)
+        await reconnected.sync()
         XCTAssertNil(reconnected.syncError)
         XCTAssertEqual(core.currentStorageId(), storage, "the new connection syncs the same vault")
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 0)
@@ -250,8 +260,10 @@ final class ConnectTests: XCTestCase {
         let witness = makeDevice("witness")
         try await signIn(witness, url: url, email: email, password: account)
         await witness.submit(password: master, mode: .unlock)
+        let witnessed = try XCTUnwrap(witness.vault)
+        await witnessed.sync()
         XCTAssertEqual(
-            Set(try XCTUnwrap(witness.vault).visibleItems.map(\.path)), ["Kept/Local", "Kept/Unsent"]
+            Set(witnessed.visibleItems.map(\.path)), ["Kept/Local", "Kept/Unsent"]
         )
     }
 
@@ -273,12 +285,14 @@ final class ConnectTests: XCTestCase {
         try await signIn(device, url: url, email: email, password: account)
         await device.submit(password: "master-password-\(suffix)", mode: .create)
         let vault = try XCTUnwrap(device.vault)
+        await vault.sync()
         vault.startCreating(typeID: "note")
-        try XCTUnwrap(vault.editor).setPath("Mine/Note")
+        try XCTUnwrap(vault.editor).name = "Note"
+        try XCTUnwrap(vault.editor).folder = "Mine"
         await vault.saveEditor()
         await vault.sync()
         XCTAssertNil(vault.syncError)
-        let personal = vault.vaultID
+        let personal = try XCTUnwrap(vault.vaultID)
         let team = try XCTUnwrap(vault.vaults.first { $0.name == teamName })
         XCTAssertEqual(team.scope, .shared)
         XCTAssertEqual(vault.vaults.count, 2)

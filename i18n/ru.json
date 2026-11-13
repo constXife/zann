@@ -104,7 +104,8 @@
     "personal": "Личные",
     "shared": "Общие",
     "folders": "Папки",
-    "noFolder": "Без папки"
+    "noFolder": "Без папки",
+    "serverAccount": "Сервер / аккаунт"
   },
   "folder": {
     "rename": "Переименовать папку",
@@ -116,6 +117,10 @@
     "affects": "Затронет {count} записей"
   },
   "items": {
+    "copyField": "Скопировать: {field}",
+    "openWebsite": "Открыть сайт",
+    "websiteOpenFailed": "Не удалось открыть сайт.",
+    "copiedClears": "Скопировано. Буфер обмена очистится через {seconds} сек.",
     "searchPlaceholder": "Поиск",
     "kvSearchPlaceholder": "Поиск по ключам (/)",
     "kvSectionTitle": "Ключ-значение",
@@ -124,6 +129,8 @@
     "kvActions": "Действия",
     "kvMatches": "Совпадений: {count}/{total}",
     "kvNoMatches": "Совпадений не найдено.",
+    "noSearchResults": "Совпадений не найдено.",
+    "clearSearch": "Очистить поиск",
     "searchMatches": "Найдено по «{query}»: {count}",
     "noItems": "Пока нет записей. Создайте первую запись.",
     "noFields": "У этой записи нет полей.",
@@ -458,8 +465,8 @@
     "importAppleDuplicates": "Повторяющиеся заголовки: {count}. К ним будет добавлен числовой суффикс; учётные данные не будут перезаписаны.",
     "importAppleInvalidPreview": "Строки без названия будут пропущены: {count}.",
     "importApplePlainWarning": "CSV содержит пароли в открытом виде. Храните его безопасно и удалите, когда он больше не нужен.",
-    "importApplePickerLocalOnly": "Выбранный CSV не является локальным файлом.",
-    "importApplePickerFailed": "Не удалось открыть выбор файла: {error}",
+      "importApplePickerLocalOnly": "Выбранный CSV не является локальным файлом.",
+      "importApplePickerFailed": "Не удалось открыть выбор файла: {error}",
     "importAppleTargetMissing": "Нет доступного хранилища для импорта.",
     "importAppleSuccess": "Apple Passwords импортированы",
     "importAppleFailed": "Ошибка импорта Apple Passwords",
@@ -497,6 +504,20 @@
     "openSettings": "Открыть настройки"
   },
   "create": {
+    "actions": {
+      "login": "Создать логин",
+      "note": "Создать заметку",
+      "card": "Создать карту",
+      "identity": "Добавить личные данные",
+      "api": "Создать API-запись",
+      "kv": "Создать запись ключ-значение",
+      "ssh_key": "Создать SSH-ключ",
+      "database": "Создать запись базы данных",
+      "cloud_iam": "Создать облачные ключи",
+      "file_secret": "Добавить файл",
+      "server_credentials": "Создать учётные данные сервера",
+      "secret": "Создать секрет"
+    },
     "vaultTitle": "Создать хранилище",
     "itemHeader": "Создать секрет",
     "itemTitle": "Имя",
@@ -552,6 +573,8 @@
     "keyLabel": "Ключ",
     "actionsLabel": "Действия",
     "advanced": "Дополнительно",
+    "additionalFields": "Дополнительные поля",
+    "fieldType": "Тип поля",
     "customFields": "Свои поля",
     "kindText": "Текст",
     "kindPassword": "Пароль",
@@ -633,6 +656,7 @@
     "name_too_long": "Слишком длинное имя.",
     "path_too_long": "Слишком длинный путь.",
     "path_segments_limit": "Слишком глубокий путь.",
+    "item_name_invalid": "Введите имя без /. Папку укажите отдельно.",
     "path_invalid": "Путь содержит недопустимые сегменты.",
     "path_segment_invalid": "Путь содержит служебные сегменты.",
     "path_segment_invalid_chars": "Сегменты пути могут содержать только латинские буквы, цифры, подчёркивания или дефисы.",
@@ -660,7 +684,10 @@
     "hardware_key_unsupported": "Ключ не поддерживает hmac-secret",
     "hardware_key_not_accessible": "Ключ виден системе, но недоступен",
     "hardware_key_unsupported_platform": "Аппаратные ключи пока не поддерживаются на этой платформе",
-    "hardware_key_error": "Ошибка аппаратного ключа"
+    "hardware_key_error": "Ошибка аппаратного ключа",
+    "context_changed": "Открытое хранилище изменилось. Повторите действие.",
+    "storage_empty": "В этом хранилище ещё нет загруженных vaults. Сначала выполните синхронизацию.",
+    "storage_key_mismatch": "В этом хранилище другой мастер-ключ. Текущее хранилище осталось открытым."
   },
   "time": {
     "never": "Никогда",
@@ -727,6 +754,7 @@
     "pending": "Ожидает синхронизации"
   },
   "sync": {
+    "details": "Синхронизация",
     "localOnly": "На этом устройстве",
     "disconnected": "Нет подключения · не отправлено: {count}",
     "syncing": "Синхронизация с {server}…",

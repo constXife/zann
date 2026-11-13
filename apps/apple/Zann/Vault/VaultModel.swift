@@ -2,7 +2,7 @@ import Foundation
 import ZannCoreKit
 
 /// How many items one `itemsList` call pages in, as COSMIC's `PAGE_LIMIT`.
-private let itemsPageLimit: UInt32 = 200
+let itemsPageLimit: UInt32 = 200
 /// Scrolling keeps at most this many items loaded, as COSMIC's
 /// `ITEM_CACHE_LIMIT`; a search still reaches the whole vault past it.
 private let itemCacheLimit = Int(itemsPageLimit) * 5
@@ -24,13 +24,7 @@ private let serverIdentityChanged = "server_identity_changed"
 /// it on lock drops every secret it held.
 @MainActor
 final class VaultModel: ObservableObject {
-    struct Detail {
-        let id: String
-        let title: String
-        let path: String
-        let typeID: String
-        let fields: [ItemDetailFieldFfi]
-    }
+    typealias Detail = ItemDetailViewFfi
 
     /// The server that syncs this vault proves a different identity than the
     /// one this device pinned. Retrying cannot help; the way out is to forget
@@ -58,13 +52,19 @@ final class VaultModel: ObservableObject {
         let query: String
         let vaults: [VaultSummaryFfi]
         let vault: VaultSummaryFfi
+        let storages: [StorageSummaryFfi]
+        let storage: StorageSummaryFfi
+        let syncState: StorageSyncStateFfi
     }
 
     /// The vaults of the storage on screen; the picker shows when there are
     /// several.
     @Published private(set) var vaults: [VaultSummaryFfi] = []
     /// The vault whose items are listed.
-    @Published private(set) var vaultID: String
+    @Published private(set) var vaultID: String?
+    @Published private(set) var storageID: String
+    @Published private(set) var storages: [StorageSummaryFfi] = []
+    @Published private(set) var contextReady = true
     /// A vault switch is loading.
     @Published private(set) var switching = false
     @Published private(set) var categories: [CategoryViewFfi] = []
@@ -72,6 +72,9 @@ final class VaultModel: ObservableObject {
     @Published private(set) var visibleItems: [ItemSummary] = []
     @Published private(set) var totalCount: UInt64 = 0
     @Published private(set) var detail: Detail?
+    @Published private(set) var detailLoading = false
+
+    var canEdit: Bool { detail != nil && detail?.id == selectedItemID && !switching && contextReady }
     @Published private(set) var error: String?
 
     @Published var categoryID: String {
@@ -98,7 +101,9 @@ final class VaultModel: ObservableObject {
     @Published private(set) var editor: ItemEditorModel?
     /// Whether a server holds this vault's storage, so syncing means something.
     @Published private(set) var canSync: Bool
-    @Published private(set) var syncing = false
+    @Published private(set) var syncingStorageID: String?
+    /// Progress belongs to its server, even after navigation moves elsewhere.
+    var syncing: Bool { syncingStorageID == storageID }
     /// Why the last sync failed; the vault stays usable offline.
     @Published private(set) var syncError: String?
     /// Set while the last sync was refused for a changed server identity.
@@ -108,7 +113,7 @@ final class VaultModel: ObservableObject {
     /// What the sync indicator knows about the open storage.
     @Published private(set) var syncState: StorageSyncStateFfi?
 
-    /// The toolbar's sync indicator, as zann-ui-core decides it.
+    /// The sidebar's sync indicator, as zann-ui-core decides it.
     var indicator: SyncIndicatorFfi? {
         guard let syncState else { return nil }
         return syncIndicator(
@@ -122,6 +127,7 @@ final class VaultModel: ObservableObject {
         )
     }
 
+    private let detailLoader: ItemDetailLoader
     private let core: CoreFacade
     private let strings: Strings
     /// The core decides when to sync and admits one sync at a time, manual
@@ -130,6 +136,10 @@ final class VaultModel: ObservableObject {
     private var autoSync: Task<Void, Never>?
     /// The sync the schedule admitted, until it ends.
     private var running: Task<Void, Never>?
+    /// Invalidates UI reads across vault/storage switches, including A → B → A.
+    private var contextGeneration = 0
+    /// A completed pull may need a fresh page after a local switch finishes.
+    private var syncRefreshStorageID: String?
     /// The loaded pages of the list for `appliedQuery`.
     private var items: [ItemSummary] = []
     private var nextCursor: String?
@@ -145,28 +155,26 @@ final class VaultModel: ObservableObject {
     private var scope: VaultScopeFfi
     /// Bumped on every selection so a slow load cannot show a previous item.
     private var selection = 0
-    /// The first sync after signing in failed, so the move to the server's
-    /// vault still waits for one that succeeds.
+    var detailSelectionGeneration: Int { selection }
+    /// The first sync after signing in has not finished its preferred-storage
+    /// handoff yet; a draft keeps its existing context until it closes.
     private var followPending: Bool
 
-    /// `synced` is the outcome of a sync that ran before the vault opened,
-    /// `nil` when none did.
+    /// The first sync may follow the newly connected server's preferred storage.
     init(
-        core: CoreFacade, contents: Contents, strings: Strings, synced: Result<Void, Error>? = nil
+        core: CoreFacade, contents: Contents, strings: Strings, followAfterSync: Bool = false
     ) {
+        detailLoader = ItemDetailLoader(core: core)
         self.core = core
         self.strings = strings
         counts = contents.page.counts
         vaultID = contents.vault.id
+        storageID = contents.storage.id
         scope = contents.vault.scope
         categoryID = "all"
-        canSync = synced != nil
-        followPending = false
-        if case .failure(let failure)? = synced {
-            syncError = strings.message(for: failure)
-            followPending = true
-        }
-        schedule.unlocked(synced: synced != nil)
+        canSync = followAfterSync
+        followPending = followAfterSync
+        schedule.unlocked(synced: false)
         apply(contents)
         Task { await refreshSyncState() }
     }
@@ -175,12 +183,13 @@ final class VaultModel: ObservableObject {
     /// last one rather than hiding the indicator.
     func refreshSyncState() async {
         let core = core
+        let wanted = storageID
+        let generation = contextGeneration
         let result = await Task.detached(priority: .userInitiated) {
-            Result { try core.storageSyncState(storageId: core.currentStorageId()) }
+            Result { try core.storageSyncState(storageId: wanted) }
         }.value
-        if case .success(let state) = result {
-            syncState = state
-        }
+        guard wanted == storageID, generation == contextGeneration, !switching else { return }
+        if case .success(let state) = result { applySyncState(state) }
     }
 
     /// Syncs whenever the core's schedule says so until `stopAutoSync`. A tick
@@ -190,7 +199,7 @@ final class VaultModel: ObservableObject {
         autoSync = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
-                if let ticket = self.schedule.takeDue() {
+                if !self.switching, self.contextReady, let ticket = self.schedule.takeDue() {
                     await self.start(ticket).value
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -201,6 +210,8 @@ final class VaultModel: ObservableObject {
     /// The vault is locking: nothing more is due, and a sync still running
     /// (which the core's lock cancels) schedules nothing.
     func stopAutoSync() {
+        detailLoader.cancel()
+        detailLoading = false
         autoSync?.cancel()
         autoSync = nil
         schedule.locked()
@@ -208,6 +219,12 @@ final class VaultModel: ObservableObject {
 
     /// Syncs now, or waits for the sync already running.
     func sync() async {
+        guard !switching, contextReady else { return }
+        let wanted = storageID
+        if let running, syncingStorageID != wanted {
+            await running.value
+            guard wanted == storageID, !switching, contextReady else { return }
+        }
         if let ticket = schedule.takeNow() {
             start(ticket)
         }
@@ -216,15 +233,18 @@ final class VaultModel: ObservableObject {
 
     @discardableResult
     private func start(_ ticket: AutoSyncTicketFfi) -> Task<Void, Never> {
-        let task = Task { await self.run(ticket) }
+        let storage = storageID
+        let generation = contextGeneration
+        let follow = followPending
+        syncingStorageID = storage
+        let task = Task { await self.run(ticket, storage: storage, generation: generation, follow: follow) }
         running = task
         return task
     }
 
     private enum Synced {
         case noServer
-        case unchanged
-        case changed(Contents)
+        case completed(changed: Bool)
         case identityChanged(StaleServer)
         case disconnected(Disconnected)
     }
@@ -232,43 +252,66 @@ final class VaultModel: ObservableObject {
     /// Pushes local changes and pulls the server's, then reloads the list on
     /// screen if anything changed; the core picks the server and the vault to
     /// show. A Mac that never signed in to a server has nothing to sync.
-    private func run(_ ticket: AutoSyncTicketFfi) async {
-        syncing = true
+    private func run(_ ticket: AutoSyncTicketFfi, storage wantedStorage: String, generation: Int, follow: Bool) async {
         defer {
-            syncing = false
+            syncingStorageID = nil
             running = nil
             schedule.finished(ticket: ticket)
         }
         let core = core
-        let follow = followPending
-        let shown = appliedQuery
-        let loaded = items.count
         let result = await Task.detached(priority: .userInitiated) {
             Result { () -> Synced in
-                if let gone = try Self.disconnected(core) { return .disconnected(gone) }
-                guard try core.appStatus().serverConnected else { return .noServer }
+                let state = try core.storageSyncState(storageId: wantedStorage)
+                if state.link == .disconnected {
+                    return .disconnected(Disconnected(serverURL: state.serverUrl, pendingChanges: state.pendingChanges))
+                }
+                if state.link == .local && !follow { return .noServer }
+                if follow && state.link == .local {
+                    guard try core.appStatus().serverConnected else { return .noServer }
+                }
                 let outcome: SyncOutcomeFfi
                 do {
-                    outcome = try core.remoteSync(storageId: nil)
+                    outcome = try core.remoteSync(storageId: follow ? nil : wantedStorage)
                 } catch let failure as CoreError {
                     guard case .Sync(serverIdentityChanged, _) = failure,
-                          let stale = try Self.staleServer(core)
+                          let stale = try Self.staleServer(core, storageID: wantedStorage)
                     else { throw failure }
                     return .identityChanged(stale)
                 }
-                if follow { try core.followPreferredStorage() }
-                guard follow || outcome.changesCommitted > 0 else { return .unchanged }
-                return .changed(try Self.load(core, query: shown, keeping: loaded))
+                return .completed(changed: outcome.changesCommitted > 0)
             }
         }.value
+        guard wantedStorage == storageID else { return }
         switch result {
-        case .success(.changed(let contents)):
-            succeeded()
-            apply(contents)
-            // The open item may have changed on the server.
-            if let selectedItemID { refreshDetail(selectedItemID) }
-        case .success(.unchanged):
-            succeeded()
+        case .success(.completed(let changed)):
+            // A draft pins its storage. Finish first-sync following only when
+            // no form is open; next sync retries that handoff if it still waits.
+            let shouldFollow = follow && generation == contextGeneration && editor == nil && !switching
+            if shouldFollow {
+                let shown = trimmedQuery
+                let loaded = items.count
+                switching = true
+                let loadedResult = await Task.detached(priority: .userInitiated) {
+                    Result { () -> Contents in
+                        try core.followPreferredStorage()
+                        return try VaultContextLoader.load(core, query: shown, keeping: loaded)
+                    }
+                }.value
+                switching = false
+                switch loadedResult {
+                case .success(let contents):
+                    succeeded(followed: !follow || shouldFollow)
+                    apply(contents)
+                    if let selectedItemID { loadDetail(selectedItemID) }
+                case .failure(let failure): syncError = strings.message(for: failure)
+                }
+            } else {
+                succeeded(followed: !follow)
+                if changed {
+                    syncRefreshStorageID = wantedStorage
+                    await refreshSyncedContents()
+                }
+            }
         case .success(.noServer):
             canSync = false
             staleServer = nil
@@ -296,30 +339,44 @@ final class VaultModel: ObservableObject {
         await refreshSyncState()
     }
 
-    private func succeeded() {
+    /// Reload the context on screen, never the vault a sync started from.
+    /// If navigation supersedes this read, its completion drains the refresh.
+    private func refreshSyncedContents() async {
+        guard let wanted = syncRefreshStorageID, !switching else { return }
+        guard wanted == storageID, contextReady else {
+            syncRefreshStorageID = nil
+            return
+        }
+        let generation = contextGeneration
+        let core = core
+        let shown = trimmedQuery
+        let loaded = items.count
+        let result = await Task.detached(priority: .userInitiated) {
+            Result { try VaultContextLoader.load(core, query: shown, keeping: loaded) }
+        }.value
+        guard generation == contextGeneration, !switching else { return }
+        syncRefreshStorageID = nil
+        switch result {
+        case .success(let contents):
+            apply(contents)
+            if let selectedItemID { loadDetail(selectedItemID) }
+        case .failure(let failure): syncError = strings.message(for: failure)
+        }
+    }
+
+    private func succeeded(followed: Bool) {
         canSync = true
-        followPending = false
+        if followed { followPending = false }
         syncError = nil
         staleServer = nil
         disconnected = nil
     }
 
-    /// The vault on screen when it is a server's and no connection syncs it,
-    /// checked before anything picks a server: otherwise its unsent changes
-    /// would wait unseen.
-    private nonisolated static func disconnected(_ core: CoreFacade) throws -> Disconnected? {
-        let state = try core.storageSyncState(storageId: core.currentStorageId())
-        guard state.link == .disconnected else { return nil }
-        return Disconnected(serverURL: state.serverUrl, pendingChanges: state.pendingChanges)
-    }
-
     /// The vault on screen and what forgetting its server leaves behind, or
     /// `nil` when no connection syncs it: then nothing here can be forgotten
-    /// and the refusal stays a plain error. The app never switches vaults,
-    /// so outside the first sync after connecting the vault on screen is the
-    /// one the active connection syncs.
-    private nonisolated static func staleServer(_ core: CoreFacade) throws -> StaleServer? {
-        let storageID = core.currentStorageId()
+    /// and the refusal stays a plain error. Selection is explicit, so this
+    /// always describes the storage currently on screen.
+    private nonisolated static func staleServer(_ core: CoreFacade, storageID: String) throws -> StaleServer? {
         guard try core.storageSyncState(storageId: storageID).link == .connected else { return nil }
         guard let storage = try core.listStorages().first(where: { $0.id == storageID }) else {
             throw CoreError.InvalidArgument("the vault on screen is not a known storage")
@@ -333,44 +390,28 @@ final class VaultModel: ObservableObject {
 
     /// The first page of the current vault and the storage's vaults.
     nonisolated static func load(_ core: CoreFacade) throws -> Contents {
-        try load(core, query: "", keeping: 0)
-    }
-
-    /// The start of the current vault's list for the trimmed `query`, empty
-    /// for every item, and the storage's vaults. It spans at least a page and
-    /// the `keeping` items loaded before, so a reload keeps the scrolled-to
-    /// rows; `itemCacheLimit` stays within what one core call returns.
-    private nonisolated static func load(
-        _ core: CoreFacade, query: String, keeping: Int
-    ) throws -> Contents {
-        let limit = UInt32(max(Int(itemsPageLimit), keeping))
-        let page = try Self.page(core, query: query, cursor: nil, limit: limit)
-        let vaults = try core.listVaults()
-        guard let id = core.currentVaultId(), let vault = vaults.first(where: { $0.id == id }) else {
-            throw CoreError.InvalidArgument("the open vault is not one of its storage's vaults")
-        }
-        return Contents(page: page, query: query, vaults: vaults, vault: vault)
-    }
-
-    /// One page of the current vault; the core matches a non-empty `query`
-    /// over the whole vault. The trash category filters client-side, so
-    /// deleted items load too.
-    private nonisolated static func page(
-        _ core: CoreFacade, query: String, cursor: String?, limit: UInt32
-    ) throws -> ItemPage {
-        try core.itemsList(
-            filter: ItemsFilter(query: query.isEmpty ? nil : query, includeDeleted: true),
-            page: Page(limit: limit, cursor: cursor)
-        )
+        try VaultContextLoader.load(core, query: "", keeping: 0)
     }
 
     /// Opens another vault of this storage with nothing filtered or
     /// selected. If its items cannot load, the core goes back to the vault
     /// on screen, so the picker and the list keep agreeing.
     func selectVault(_ id: String) async {
-        guard id != vaultID, editor == nil, !switching else { return }
+        guard id != vaultID, editor == nil, !switching, contextReady else { return }
+        contextGeneration += 1
+        followPending = false
         switching = true
-        defer { switching = false }
+        listGeneration += 1
+        loadingMore = false
+        search?.cancel()
+        search = nil
+        searching = false
+        select(nil)
+        defer {
+            switching = false
+            if contextReady { queryChanged() }
+            Task { await refreshSyncedContents() }
+        }
         let core = core
         let result = await Task.detached(priority: .userInitiated) {
             Result { () -> Contents in
@@ -388,34 +429,99 @@ final class VaultModel: ObservableObject {
         case .success(let contents):
             error = nil
             select(nil)
-            apply(contents)
             query = ""
             folder = .any
             categoryID = "all"
+            apply(contents)
         case .failure(let failure):
             error = describe(failure)
         }
     }
 
+    /// Switches only registered storage contexts. A refused switch keeps the
+    /// current list; a committed context whose reads fail never shows old data.
+    func selectStorage(_ id: String) async {
+        guard id != storageID, editor == nil, !switching else { return }
+        guard let target = storages.first(where: { $0.id == id }) else { return }
+        contextGeneration += 1
+        followPending = false
+        switching = true
+        listGeneration += 1
+        loadingMore = false
+        search?.cancel()
+        search = nil
+        searching = false
+        select(nil)
+        defer {
+            switching = false
+            if contextReady { queryChanged() }
+            Task { await refreshSyncedContents() }
+        }
+        let core = core
+        let outcome = await Task.detached(priority: .userInitiated) {
+            VaultContextLoader.select(core, storage: target)
+        }.value
+        switch outcome {
+        case .refused(let failure):
+            error = strings.message(for: failure)
+        case .loaded(let contents):
+            query = ""
+            folder = .any
+            categoryID = "all"
+            syncError = nil
+            staleServer = nil
+            disconnected = nil
+            followPending = false
+            apply(contents)
+            error = nil
+        case .unreadable(let failure):
+            query = ""
+            folder = .any
+            categoryID = "all"
+            followPending = false
+            canSync = false
+            staleServer = nil
+            disconnected = nil
+            nextCursor = nil
+            loadingMore = false
+            totalCount = 0
+            appliedQuery = ""
+            storageID = target.id
+            vaultID = nil
+            vaults = []
+            items = []
+            visibleItems = []
+            categories = []
+            folders = FolderTreeFfi(itemsWithoutFolder: 0, tree: [])
+            syncState = nil
+            syncError = nil
+            contextReady = false
+            error = strings.message(for: failure)
+        }
+    }
+
     func select(_ id: String?) {
-        guard id != selectedItemID else { return }
+        guard !switching || id == nil, contextReady || id == nil, id != selectedItemID else { return }
         show(id)
     }
 
     /// A new item of `typeID`, or of the type zann-ui-core picks for the
     /// selected category.
     func startCreating(typeID: String? = nil) {
-        guard editor == nil else { return }
+        guard editor == nil, !switching, contextReady else { return }
         let type = typeID ?? createTypeForCategory(categoryId: categoryID)
         open { try ItemEditorModel.create(typeID: type) }
     }
 
     func startEditing() async {
-        guard editor == nil, let id = detail?.id else { return }
+        guard editor == nil, canEdit, let id = detail?.id else { return }
         let core = core
+        let wanted = storageID
+        let token = selection
         let result = await Task.detached(priority: .userInitiated) {
             Result { try core.itemGet(id: id) }
         }.value
+        guard wanted == storageID, token == selection, !switching else { return }
         open { try ItemEditorModel.edit(try result.get()) }
     }
 
@@ -448,9 +554,12 @@ final class VaultModel: ObservableObject {
     private func reload(query: String) async -> Bool {
         let core = core
         let loaded = items.count
+        let wanted = storageID
+        let generation = contextGeneration
         let result = await Task.detached(priority: .userInitiated) {
-            Result { try Self.load(core, query: query, keeping: loaded) }
+            Result { try VaultContextLoader.load(core, query: query, keeping: loaded) }
         }.value
+        guard wanted == storageID, generation == contextGeneration, !switching else { return false }
         switch result {
         case .success(let contents):
             apply(contents)
@@ -473,40 +582,36 @@ final class VaultModel: ObservableObject {
     /// save shows the stored version.
     private func show(_ id: String?) {
         selectedItemID = id
-        detail = nil
         error = nil
         selection += 1
-        guard let id else { return }
-        let token = selection
-        let core = core
-        Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try Self.loadDetail(core, id: id) }
-            }.value
-            guard token == selection else { return }
+        if let id {
+            loadDetail(id)
+        } else {
+            detailLoader.cancel()
+            detail = nil
+            detailLoading = false
+        }
+    }
+
+    private func loadDetail(_ id: String) {
+        detailLoading = true
+        detailLoader.load(id) { [weak self] result in
+            guard let self else { return }
+            self.detailLoading = false
             switch result {
             case .success(let detail): self.detail = detail
-            case .failure(let failure): error = describe(failure)
+            case .failure(let failure):
+                self.detail = nil
+                self.error = describe(failure)
             }
         }
     }
 
-    /// Reloads the shown item in place after a background sync: the pane
-    /// keeps the old version until the new one arrives, and a selection made
-    /// meanwhile wins.
-    private func refreshDetail(_ id: String) {
-        let token = selection
-        let core = core
-        Task {
-            let result = await Task.detached(priority: .userInitiated) {
-                Result { try Self.loadDetail(core, id: id) }
-            }.value
-            guard token == selection else { return }
-            switch result {
-            case .success(let detail): self.detail = detail
-            case .failure(let failure): error = describe(failure)
-            }
-        }
+    private func applySyncState(_ state: StorageSyncStateFfi) {
+        syncState = state
+        canSync = followPending || state.link != .local
+        disconnected = state.link == .disconnected
+            ? Disconnected(serverURL: state.serverUrl, pendingChanges: state.pendingChanges) : nil
     }
 
     /// Shows `contents` in place of everything loaded. A search started for
@@ -515,6 +620,10 @@ final class VaultModel: ObservableObject {
     private func apply(_ contents: Contents) {
         vaults = contents.vaults
         vaultID = contents.vault.id
+        storages = contents.storages
+        storageID = contents.storage.id
+        applySyncState(contents.syncState)
+        contextReady = true
         scope = contents.vault.scope
         search?.cancel()
         search = nil
@@ -567,6 +676,7 @@ final class VaultModel: ObservableObject {
     /// A query the loaded items do not answer goes to the core after a pause;
     /// one they do drops any search still waiting.
     private func queryChanged() {
+        guard !switching, contextReady else { return }
         if trimmedQuery == appliedQuery {
             search?.cancel()
             search = nil
@@ -588,7 +698,7 @@ final class VaultModel: ObservableObject {
             if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
             guard !Task.isCancelled else { return }
             let result = await Task.detached(priority: .userInitiated) {
-                Result { try Self.page(core, query: wanted, cursor: nil, limit: itemsPageLimit) }
+                Result { try VaultContextLoader.page(core, query: wanted, cursor: nil, limit: itemsPageLimit) }
             }.value
             guard let self, !Task.isCancelled else { return }
             self.search = nil
@@ -610,7 +720,7 @@ final class VaultModel: ObservableObject {
     /// Appends the next page of the list on screen, up to `itemCacheLimit`
     /// items. A page that lands after the list was replaced is dropped.
     private func loadMore() {
-        guard let cursor = nextCursor, !loadingMore, !searching, items.count < itemCacheLimit else {
+        guard !switching, contextReady, let cursor = nextCursor, !loadingMore, !searching, items.count < itemCacheLimit else {
             return
         }
         loadingMore = true
@@ -619,7 +729,7 @@ final class VaultModel: ObservableObject {
         let core = core
         Task { [weak self] in
             let result = await Task.detached(priority: .userInitiated) {
-                Result { try Self.page(core, query: query, cursor: cursor, limit: itemsPageLimit) }
+                Result { try VaultContextLoader.page(core, query: query, cursor: cursor, limit: itemsPageLimit) }
             }.value
             guard let self, generation == self.listGeneration else { return }
             self.loadingMore = false
@@ -647,14 +757,4 @@ final class VaultModel: ObservableObject {
         if visibleItems.count < minVisibleRows { loadMore() }
     }
 
-    private nonisolated static func loadDetail(_ core: CoreFacade, id: String) throws -> Detail {
-        let item = try core.itemGet(id: id)
-        return Detail(
-            id: item.id,
-            title: item.title,
-            path: item.path,
-            typeID: item.typeId,
-            fields: try projectItemFields(payloadJson: item.payloadJson)
-        )
-    }
 }

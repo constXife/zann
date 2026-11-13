@@ -10,7 +10,9 @@ pub use auto_sync::*;
 mod conversions;
 mod session;
 pub use session::*;
+mod item_detail;
 mod item_editor;
+pub use item_detail::*;
 pub use item_editor::*;
 mod presentation;
 pub use presentation::*;
@@ -23,6 +25,10 @@ pub use platform::*;
 pub enum CoreError {
     #[error("vault is locked")]
     Locked,
+    #[error("operation cancelled")]
+    Cancelled,
+    #[error("operation deadline exceeded")]
+    DeadlineExceeded,
     #[error("invalid argument: {0}")]
     InvalidArgument(String),
     #[error("service error: {0}")]
@@ -58,6 +64,9 @@ impl From<zann_client::app::local::LocalError> for CoreError {
         use zann_client::app::local::LocalError;
         match error {
             LocalError::Locked => Self::Locked,
+            LocalError::Cancelled => Self::Cancelled,
+            LocalError::DeadlineExceeded => Self::DeadlineExceeded,
+            LocalError::ItemRead(source) => Self::Service(source.to_string()),
             LocalError::InvalidPayload(source) => Self::InvalidArgument(source.to_string()),
             LocalError::InvalidArgument(message) => Self::InvalidArgument(message),
             LocalError::Service(message) => Self::Service(message),

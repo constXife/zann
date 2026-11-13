@@ -2,6 +2,30 @@ use zann_ui_core::item_editor::{field_schemas, DraftError, ItemDraft};
 use zann_ui_core::project_item_fields;
 
 #[test]
+fn separate_name_and_folder_inputs_rename_move_and_reject_missing_names_atomically() {
+    let mut draft = ItemDraft::create("login").unwrap();
+    draft.set_location(" GitHub ", " Work/Accounts/ ").unwrap();
+    assert_eq!(draft.name(), "GitHub");
+    assert_eq!(draft.folder(), Some("Work/Accounts"));
+    assert_eq!(draft.save().unwrap().path, "Work/Accounts/GitHub");
+    for name in ["", "   ", "Other/Name"] {
+        assert!(matches!(
+            draft.set_location(name, "Elsewhere"),
+            Err(DraftError::Name)
+        ));
+        assert_eq!(draft.path, "Work/Accounts/GitHub");
+    }
+    draft.set_location("GitHub Enterprise", "").unwrap();
+    assert_eq!(draft.folder(), None);
+    let saved = draft.save().unwrap();
+    assert_eq!(saved.title, "GitHub Enterprise");
+    assert_eq!(saved.path, saved.title);
+    let edited = ItemDraft::edit(" Work/GitHub/ ".into(), &saved.payload_json).unwrap();
+    assert_eq!(edited.name(), "GitHub");
+    assert_eq!(edited.folder(), Some("Work"));
+}
+
+#[test]
 fn edit_preserves_typed_metadata_extras_and_payload_version() {
     let json = r#"{"v":7,"typeId":"custom","fields":{"z":{"kind":"text","value":"sentinel","meta":{"masked":true,"multiline":true,"readonly":true}},"username":{"kind":"text","value":"user"}},"extra":{"issuer":"source"}}"#;
     let mut draft = ItemDraft::edit("group/item".into(), json).unwrap();
