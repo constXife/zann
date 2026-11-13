@@ -978,8 +978,13 @@ async fn reconcile_catalog_rows(
             remote.plane,
             remote.vault_key_envelope,
         )?;
+        // MIG-009: a vault that predates migration 0002 still carries the
+        // internal slug it derived from its id; the key bind adopts the
+        // catalog's slug once every cached item proves the key.
+        let legacy_slug =
+            local.cache_key_fp.is_none() && local.slug == LocalVault::local_slug(remote.id);
         if local.storage_id != storage.id
-            || local.slug != remote.slug
+            || (local.slug != remote.slug && !legacy_slug)
             || local.name != remote.name
             || local.kind != kind
             || local.is_default
@@ -1095,8 +1100,13 @@ async fn reconcile_catalog_rows_for_test(
             remote.plane,
             remote.vault_key_envelope,
         )?;
+        // MIG-009: a vault that predates migration 0002 still carries the
+        // internal slug it derived from its id; the key bind adopts the
+        // catalog's slug once every cached item proves the key.
+        let legacy_slug =
+            local.cache_key_fp.is_none() && local.slug == LocalVault::local_slug(remote.id);
         if local.storage_id != storage.id
-            || local.slug != remote.slug
+            || (local.slug != remote.slug && !legacy_slug)
             || local.name != remote.name
             || local.kind != kind
             || local.is_default
