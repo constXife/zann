@@ -20,6 +20,7 @@ tracing = "0.1"
 url = "2"
 zann-core = { path = "../zann-core", default-features = false }
 zann-crypto = { path = "../zann-crypto" }
+zeroize = "1"
 
 [features]
 default = []

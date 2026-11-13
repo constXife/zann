@@ -6,6 +6,7 @@ use zann_core::{
 };
 use zann_crypto::crypto::SecretKey;
 use zann_crypto::vault_crypto as core_crypto;
+use zeroize::Zeroizing;
 
 use crate::local::{
     HistorySource, HistorySyncStatus, KeyWrapType, LocalItemHistory, LocalItemHistoryRepo,
@@ -17,6 +18,12 @@ use crate::SqlitePool;
 pub struct LocalServices<'a> {
     pool: &'a SqlitePool,
     master_key: &'a SecretKey,
+}
+
+/// A vault with the key its payloads open with; see `vault_payload_keys`.
+struct VaultPayloadKeys {
+    vault: LocalVault,
+    primary: SecretKey,
 }
 
 pub const MAX_ITEM_NAME_LEN: usize = 200;
@@ -233,127 +240,52 @@ impl<'a> LocalServices<'a> {
         item_id: Uuid,
         payload_enc: &[u8],
     ) -> ServiceResult<EncryptedPayload> {
-        let repo = LocalVaultRepo::new(self.pool);
-        let vault = repo
+        let keys = self.vault_payload_keys(storage_id, vault_id).await?;
+        self.open_payload(&keys, item_id, payload_enc)
+    }
+
+    /// The vault and the key its payloads open with, resolved once so a page
+    /// of items does not look the vault up and unwrap its key per item.
+    async fn vault_payload_keys(
+        &self,
+        storage_id: Uuid,
+        vault_id: Uuid,
+    ) -> ServiceResult<VaultPayloadKeys> {
+        let vault = LocalVaultRepo::new(self.pool)
             .get_by_id(storage_id, vault_id)
             .await
             .map_err(|err| ServiceError::new("vault_lookup_failed", err.to_string()))?
             .ok_or_else(|| ServiceError::new("vault_not_found", "vault not found"))?;
-        let checksum = core_crypto::payload_checksum(payload_enc);
-        Self::item_debug(format_args!(
-            "[item_debug] decrypt_start item_id={} vault_id={} kind={} key_wrap_type={} vault_key_len={} checksum={}",
-            item_id,
-            vault_id,
-            vault.kind.as_i32(),
-            vault.key_wrap_type.as_i32(),
-            vault.vault_key_enc.len(),
-            checksum
-        ));
-        let (primary_key, primary_source) = if vault.kind == VaultKind::Shared {
-            (SecretKey::from_bytes(*self.master_key.as_bytes()), "master")
+        let primary = if vault.kind == VaultKind::Shared {
+            SecretKey::from_bytes(*self.master_key.as_bytes())
         } else {
-            (self.decrypt_vault_key(&vault)?, "vault")
+            self.decrypt_vault_key(&vault)?
         };
-        let primary_fp = Self::key_fingerprint(&primary_key);
-        Self::item_debug(format_args!(
-            "[item_debug] decrypt_key item_id={} vault_id={} source={} key_fp={}",
-            item_id, vault_id, primary_source, primary_fp
-        ));
-        let mut used_source = primary_source.to_string();
-        let mut used_fp = primary_fp.clone();
-        let bytes = match core_crypto::decrypt_payload_bytes(
-            &primary_key,
-            vault_id,
-            item_id,
-            payload_enc,
-        ) {
-            Ok(value) => value,
-            Err(err) => {
-                if vault.kind == VaultKind::Shared && !vault.vault_key_enc.is_empty() {
-                    Self::item_debug(format_args!(
-                        "[item_debug] shared_decrypt_fallback item_id={} vault_id={} checksum={}",
-                        item_id, vault_id, checksum
-                    ));
-                    let fallback_key = self.decrypt_vault_key(&vault)?;
-                    let fallback_fp = Self::key_fingerprint(&fallback_key);
-                    match core_crypto::decrypt_payload_bytes(
-                        &fallback_key,
-                        vault_id,
-                        item_id,
-                        payload_enc,
-                    ) {
-                        Ok(value) => {
-                            used_source = "vault_fallback".to_string();
-                            used_fp = fallback_fp.clone();
-                            Self::item_debug(format_args!(
-                                "[item_debug] shared_decrypt_fallback_ok item_id={} vault_id={} key_fp={}",
-                                item_id, vault_id, fallback_fp
-                            ));
-                            value
-                        }
-                        Err(err) => {
-                            let cache_key_fp = LocalItemRepo::new(self.pool)
-                                .get_by_id(storage_id, item_id)
-                                .await
-                                .ok()
-                                .flatten()
-                                .and_then(|item| item.cache_key_fp);
-                            if let Some(cache_key_fp) = cache_key_fp {
-                                Self::item_debug(format_args!(
-                                    "[item_debug] cache_key_fp item_id={} vault_id={} cache_key_fp={}",
-                                    item_id, vault_id, cache_key_fp
-                                ));
-                            }
-                            Self::item_debug(format_args!(
-                                "[item_debug] shared_decrypt_fallback_failed item_id={} vault_id={} key_fp={} error={}",
-                                item_id, vault_id, fallback_fp, err
-                            ));
-                            return Err(ServiceError::new(
-                                "payload_decrypt_failed",
-                                err.to_string(),
-                            ));
-                        }
-                    }
-                } else {
-                    let cache_key_fp = LocalItemRepo::new(self.pool)
-                        .get_by_id(storage_id, item_id)
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|item| item.cache_key_fp);
-                    if let Some(cache_key_fp) = cache_key_fp {
-                        Self::item_debug(format_args!(
-                            "[item_debug] cache_key_fp item_id={} vault_id={} cache_key_fp={}",
-                            item_id, vault_id, cache_key_fp
-                        ));
-                    }
-                    Self::item_debug(format_args!(
-                        "[item_debug] decrypt_failed item_id={} vault_id={} source={} key_fp={} checksum={} error={}",
-                        item_id, vault_id, primary_source, primary_fp, checksum, err
-                    ));
-                    return Err(ServiceError::new("payload_decrypt_failed", err.to_string()));
-                }
+        Ok(VaultPayloadKeys { vault, primary })
+    }
+
+    /// Decrypts one item's payload with its vault's keys. A shared vault that
+    /// also wraps a vault key retries with it when the master key fails.
+    fn open_payload(
+        &self,
+        keys: &VaultPayloadKeys,
+        item_id: Uuid,
+        payload_enc: &[u8],
+    ) -> ServiceResult<EncryptedPayload> {
+        let vault = &keys.vault;
+        let opened =
+            core_crypto::decrypt_payload_bytes(&keys.primary, vault.id, item_id, payload_enc);
+        let bytes = match opened {
+            Ok(bytes) => bytes,
+            Err(_) if vault.kind == VaultKind::Shared && !vault.vault_key_enc.is_empty() => {
+                let fallback = self.decrypt_vault_key(vault)?;
+                core_crypto::decrypt_payload_bytes(&fallback, vault.id, item_id, payload_enc)
+                    .map_err(|err| ServiceError::new("payload_decrypt_failed", err.to_string()))?
             }
+            Err(err) => return Err(ServiceError::new("payload_decrypt_failed", err.to_string())),
         };
-        let cache_key_fp = LocalItemRepo::new(self.pool)
-            .get_by_id(storage_id, item_id)
-            .await
-            .ok()
-            .flatten()
-            .and_then(|item| item.cache_key_fp);
-        if let Some(cache_key_fp) = cache_key_fp {
-            if cache_key_fp == used_fp {
-                Self::item_debug(format_args!(
-                    "[item_debug] cache_key_fp_match item_id={} vault_id={} source={} key_fp={}",
-                    item_id, vault_id, used_source, cache_key_fp
-                ));
-            } else {
-                Self::item_debug(format_args!(
-                    "[item_debug] cache_key_fp_mismatch item_id={} vault_id={} source={} cache_key_fp={} used_key_fp={}",
-                    item_id, vault_id, used_source, cache_key_fp, used_fp
-                ));
-            }
-        }
+        // The plaintext bytes are wiped once parsed; the payload zeroizes itself.
+        let bytes = Zeroizing::new(bytes);
         EncryptedPayload::from_bytes(&bytes)
             .map_err(|err| ServiceError::new("payload_decode_failed", err.to_string()))
     }
@@ -374,28 +306,7 @@ impl<'a> LocalServices<'a> {
         storage_id: Uuid,
         vault_id: Uuid,
     ) -> ServiceResult<SecretKey> {
-        let repo = LocalVaultRepo::new(self.pool);
-        let vault = repo
-            .get_by_id(storage_id, vault_id)
-            .await
-            .map_err(|err| ServiceError::new("vault_lookup_failed", err.to_string()))?
-            .ok_or_else(|| ServiceError::new("vault_not_found", "vault not found"))?;
-        let (key, source) = if vault.kind == VaultKind::Shared {
-            (SecretKey::from_bytes(*self.master_key.as_bytes()), "master")
-        } else {
-            (self.decrypt_vault_key(&vault)?, "vault")
-        };
-        let key_fp = Self::key_fingerprint(&key);
-        Self::item_debug(format_args!(
-            "[item_debug] payload_key vault_id={} kind={} key_wrap_type={} vault_key_len={} source={} key_fp={}",
-            vault.id,
-            vault.kind.as_i32(),
-            vault.key_wrap_type.as_i32(),
-            vault.vault_key_enc.len(),
-            source,
-            key_fp
-        ));
-        Ok(key)
+        Ok(self.vault_payload_keys(storage_id, vault_id).await?.primary)
     }
 
     fn payload_checksum(payload_enc: &[u8]) -> String {
