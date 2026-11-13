@@ -215,10 +215,6 @@ impl cosmic::Application for App {
         self.header_menu()
     }
 
-    fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
-        self.header_sync_status()
-    }
-
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
         let (shell, preference_store, preferences, close_to_tray) =
             match Session::open().and_then(|(session, status)| {
@@ -312,12 +308,13 @@ impl cosmic::Application for App {
         .into_container()
         .width(Length::Fill)
         .height(Length::Fill);
-        let mut column = widget::column::with_capacity(2);
-        if let Some(selector) = vault.vault_selector() {
-            column =
-                column.push(selector.map(|message| cosmic::Action::App(Message::Vault(message))));
-        }
-        column = column.push(nav);
+        let column = widget::column::with_capacity(2)
+            .push(
+                vault
+                    .nav_header()
+                    .map(|message| cosmic::Action::App(Message::Vault(message))),
+            )
+            .push(nav);
 
         Some(
             widget::container(column)

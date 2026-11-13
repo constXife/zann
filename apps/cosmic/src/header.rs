@@ -1,4 +1,4 @@
-//! The header bar: the app menu at its start, the sync indicator at its end.
+//! The header bar's app menu.
 use super::*;
 
 impl App {
@@ -50,21 +50,5 @@ impl App {
             .item_width(menu::ItemWidth::Uniform(240))
             .item_height(menu::ItemHeight::Uniform(36))
             .into()]
-    }
-
-    /// The open vault's sync indicator, on every screen that keeps it.
-    pub(super) fn header_sync_status(&self) -> Vec<Element<'_, Message>> {
-        let Shell::Ready {
-            screen: Screen::Vault(vault) | Screen::Settings { vault, .. },
-            ..
-        } = &self.shell
-        else {
-            return Vec::new();
-        };
-        vault
-            .sync_indicator()
-            .map(|indicator| indicator.map(Message::Vault))
-            .into_iter()
-            .collect()
     }
 }
