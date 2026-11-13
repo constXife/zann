@@ -49,6 +49,25 @@ pub struct LocalVault {
     root: PathBuf,
 }
 
+impl Drop for LocalVault {
+    /// Closes every pooled connection before the vault is gone. SQLite
+    /// checkpoints the WAL into the database file as each connection closes,
+    /// so a close that outlived the vault would write into a file that may
+    /// already have been replaced or copied over. The close runs on a fresh
+    /// thread, which holds no async runtime of its own, so dropping the vault
+    /// is safe inside one too.
+    fn drop(&mut self) {
+        let pool = match self.pool.get_mut() {
+            Ok(pool) => pool.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
+        let runtime = &self.runtime;
+        std::thread::scope(|scope| {
+            scope.spawn(|| runtime.block_on(pool.close()));
+        });
+    }
+}
+
 impl LocalVault {
     fn pool(&self) -> SqlitePool {
         self.pool.lock().expect("lock poisoned").clone()

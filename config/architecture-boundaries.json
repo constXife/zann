@@ -91,6 +91,14 @@
       "grandfathered": true,
       "review_on": "2026-11-16",
       "removal_condition": "All clients consume zann-flows and canonical zann-ui-core presentation policy"
+    },
+    "MIG-009": {
+      "owner": "@constXife",
+      "tracking": "legacy remote projection adoption",
+      "grandfathered": false,
+      "issue": "#230",
+      "expires_on": "2027-02-13",
+      "removal_condition": "No local database predates migration 0002: every legacy device has synced its remote projection once"
     }
   },
   "dependency_exceptions": [

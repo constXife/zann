@@ -98,6 +98,33 @@ impl<'a> SyncCursorRepo<'a> {
         .await
     }
 
+    /// MIG-009: a cursor a legacy client wrote before migration 0002 added
+    /// `last_seq` keeps its sequence only inside its opaque value. The caller,
+    /// which owns the cursor format, records that sequence once; a cursor that
+    /// changed or already has one is left as it is. Returns whether it wrote.
+    pub async fn adopt_legacy_last_seq(
+        &self,
+        storage_id: uuid::Uuid,
+        vault_id: uuid::Uuid,
+        cursor: &str,
+        last_seq: i64,
+    ) -> Result<bool, sqlx_core::Error> {
+        query!(
+            r#"
+            UPDATE sync_cursors
+            SET last_seq = ?4
+            WHERE storage_id = ?1 AND vault_id = ?2 AND cursor = ?3 AND last_seq IS NULL
+            "#,
+            storage_id,
+            vault_id,
+            cursor,
+            last_seq
+        )
+        .execute(self.pool)
+        .await
+        .map(|result| result.rows_affected() == 1)
+    }
+
     /// Seeds or deliberately replaces a complete checkpoint. Sync page commits
     /// should use `LocalSyncRepo`, whose compare-and-swap is transactional.
     pub async fn upsert_checkpoint(

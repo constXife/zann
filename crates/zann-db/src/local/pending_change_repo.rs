@@ -16,6 +16,14 @@ const MAX_PENDING_CHECKSUM_BYTES: i64 = 256;
 const MAX_CURSOR_BYTES: i64 = 4_096;
 const MAX_TIMESTAMP_BYTES: i64 = 64;
 
+/// A vault's checkpoint with its oldest pending changes, at most the bound the
+/// caller asked for; `more_pending` says that newer ones wait beyond it.
+pub struct CheckpointPage {
+    pub checkpoint: Option<LocalSyncCheckpoint>,
+    pub pending: Vec<LocalPendingChange>,
+    pub more_pending: bool,
+}
+
 pub struct PendingChangeRepo<'a> {
     pool: &'a SqlitePool,
 }
@@ -158,8 +166,7 @@ impl<'a> PendingChangeRepo<'a> {
         storage_id: Uuid,
         vault_id: Uuid,
         max_pending: u32,
-    ) -> Result<(Option<LocalSyncCheckpoint>, Vec<LocalPendingChange>), LocalProjectionReadError>
-    {
+    ) -> Result<CheckpointPage, LocalProjectionReadError> {
         if storage_id.is_nil()
             || vault_id.is_nil()
             || max_pending == 0
@@ -230,10 +237,7 @@ impl<'a> PendingChangeRepo<'a> {
         .fetch_one(&mut *tx)
         .await?;
         let pending_count: i64 = count_row.try_get("count")?;
-        if pending_count > i64::from(max_pending) {
-            tx.rollback().await?;
-            return Err(LocalProjectionReadError::TooManyRows);
-        }
+        let more_pending = pending_count > i64::from(max_pending);
 
         let corrupt_pending = query!(
             r#"
@@ -332,7 +336,11 @@ impl<'a> PendingChangeRepo<'a> {
         .fetch_all(&mut *tx)
         .await?;
         tx.commit().await?;
-        Ok((checkpoint, pending))
+        Ok(CheckpointPage {
+            checkpoint,
+            pending,
+            more_pending,
+        })
     }
 
     /// Reads the unique storage/item pending row without an unbounded vector.

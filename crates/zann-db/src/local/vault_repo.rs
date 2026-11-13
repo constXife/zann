@@ -976,13 +976,24 @@ async fn bind_cache_key_fingerprints_leased_in(
             // the fingerprints bound before prove this master key opens the
             // same vault keys, so it is claimed as it stands. A storage that
             // never bound a key is claimed only while empty.
-            if fingerprint_states.iter().all(|state| *state == 0) {
-                ensure_storage_projection_empty_for_claim(
-                    tx,
-                    expected_storage.storage_id(),
-                    bindings,
-                )
-                .await?;
+            // A legacy storage (MIG-009) is claimed with its projection
+            // only within the catalog's vaults; each one then proves its key
+            // or stays empty in the bind below.
+            if fingerprint_states
+                .iter()
+                .all(|state| state.fingerprint == 0)
+            {
+                if fingerprint_states.iter().any(|state| state.legacy) {
+                    ensure_storage_projection_within_catalog(tx, expected_storage.storage_id())
+                        .await?;
+                } else {
+                    ensure_storage_projection_empty_for_claim(
+                        tx,
+                        expected_storage.storage_id(),
+                        bindings,
+                    )
+                    .await?;
+                }
             }
             claim_generation(tx, expected_storage.storage_id(), generation)
                 .await
@@ -990,7 +1001,10 @@ async fn bind_cache_key_fingerprints_leased_in(
             bind_cache_key_fingerprints_in(tx, bindings).await
         }
         LocalGenerationBindingState::Exact | LocalGenerationBindingState::Older => {
-            if fingerprint_states.iter().any(|state| *state != 1) {
+            if fingerprint_states
+                .iter()
+                .any(|state| state.fingerprint != 1)
+            {
                 return Err(LocalVaultKeyBindError::GenerationChanged);
             }
             ensure_bound_generation_and_advance(tx, expected_storage.storage_id(), generation)
@@ -1032,62 +1046,78 @@ async fn ensure_exact_catalog(
     Ok(())
 }
 
-/// Returns 0 for NULL, 1 for the exact target fingerprint, and rejects every
-/// mismatched identity or fingerprint.  The catalog preflight has already
-/// bounded every selected dynamic value before this comparison runs.
+/// One catalog binding as the row stands: its fingerprint state (0 for NULL,
+/// 1 for the exact target) and whether it still carries the internal slug
+/// migration 0002 gave a legacy vault (MIG-009). Every mismatched identity
+/// or fingerprint is rejected; the catalog preflight has already bounded every
+/// selected dynamic value before this comparison runs.
+#[derive(Clone, Copy)]
+struct BindingState {
+    fingerprint: i64,
+    legacy: bool,
+}
+
+async fn inspect_binding(
+    tx: &mut Transaction<'static, Sqlite>,
+    binding: &CacheKeyFingerprintBinding<'_>,
+) -> Result<BindingState, LocalVaultKeyBindError> {
+    let current = query!(
+        r#"
+        SELECT
+                CASE WHEN
+                (slug = ?3 OR (slug = ?10 AND cache_key_fp IS NULL))
+                AND name = ?4
+                AND kind = ?5
+                AND is_default = ?6
+                AND vault_key_enc = ?7
+                AND key_wrap_type = ?8
+            THEN 1 ELSE 0 END AS identity_matches,
+            CASE
+                WHEN cache_key_fp IS NULL THEN 0
+                WHEN cache_key_fp = ?9 THEN 1
+                ELSE 2
+            END AS fingerprint_state,
+            CASE WHEN slug = ?10 AND slug != ?3 THEN 1 ELSE 0 END AS legacy
+        FROM local_vaults
+        WHERE storage_id = ?1 AND id = ?2
+        "#,
+        binding.storage_id,
+        binding.vault_id,
+        binding.expected_slug,
+        binding.expected_name,
+        binding.expected_kind.as_i32(),
+        binding.expected_is_default,
+        binding.expected_vault_key_enc,
+        binding.expected_key_wrap_type.as_i32(),
+        binding.target_cache_key_fp,
+        LocalVault::local_slug(binding.vault_id)
+    )
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(LocalVaultKeyBindError::Database)?
+    .ok_or(LocalVaultKeyBindError::NotFound)?;
+    let read = |column: &str| -> Result<i64, LocalVaultKeyBindError> {
+        current
+            .try_get::<i64, _>(column)
+            .map_err(LocalVaultKeyBindError::Database)
+    };
+    let fingerprint = read("fingerprint_state")?;
+    if read("identity_matches")? != 1 || !matches!(fingerprint, 0 | 1) {
+        return Err(LocalVaultKeyBindError::KeyBindingChanged);
+    }
+    Ok(BindingState {
+        fingerprint,
+        legacy: read("legacy")? == 1,
+    })
+}
+
 async fn inspect_fingerprint_bindings(
     tx: &mut Transaction<'static, Sqlite>,
     bindings: &[CacheKeyFingerprintBinding<'_>],
-) -> Result<Vec<i64>, LocalVaultKeyBindError> {
+) -> Result<Vec<BindingState>, LocalVaultKeyBindError> {
     let mut states = Vec::with_capacity(bindings.len());
     for binding in bindings {
-        let current = query!(
-            r#"
-            SELECT
-                CASE WHEN
-                    slug = ?3
-                    AND name = ?4
-                    AND kind = ?5
-                    AND is_default = ?6
-                    AND vault_key_enc = ?7
-                    AND key_wrap_type = ?8
-                THEN 1 ELSE 0 END AS identity_matches,
-                CASE
-                    WHEN cache_key_fp IS NULL THEN 0
-                    WHEN cache_key_fp = ?9 THEN 1
-                    ELSE 2
-                END AS fingerprint_state
-            FROM local_vaults
-            WHERE storage_id = ?1 AND id = ?2
-            "#,
-            binding.storage_id,
-            binding.vault_id,
-            binding.expected_slug,
-            binding.expected_name,
-            binding.expected_kind.as_i32(),
-            binding.expected_is_default,
-            binding.expected_vault_key_enc,
-            binding.expected_key_wrap_type.as_i32(),
-            binding.target_cache_key_fp
-        )
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(LocalVaultKeyBindError::Database)?
-        .ok_or(LocalVaultKeyBindError::NotFound)?;
-        if current
-            .try_get::<i64, _>("identity_matches")
-            .map_err(LocalVaultKeyBindError::Database)?
-            != 1
-        {
-            return Err(LocalVaultKeyBindError::KeyBindingChanged);
-        }
-        let state = current
-            .try_get::<i64, _>("fingerprint_state")
-            .map_err(LocalVaultKeyBindError::Database)?;
-        if !matches!(state, 0 | 1) {
-            return Err(LocalVaultKeyBindError::KeyBindingChanged);
-        }
-        states.push(state);
+        states.push(inspect_binding(tx, binding).await?);
     }
     Ok(states)
 }
@@ -1121,65 +1151,61 @@ async fn ensure_storage_projection_empty_for_claim(
     Ok(())
 }
 
+/// No projection row of the storage belongs to a vault outside its catalog;
+/// the exact-catalog check has already made `local_vaults` that catalog.
+async fn ensure_storage_projection_within_catalog(
+    tx: &mut Transaction<'static, Sqlite>,
+    storage_id: Uuid,
+) -> Result<(), LocalVaultKeyBindError> {
+    ensure_projection_identifiers_bounded(tx).await?;
+    for table in [
+        "items_cache",
+        "sync_cursors",
+        "pending_changes",
+        "item_history",
+    ] {
+        // `table` comes only from the fixed list above.
+        let sql = format!(
+            "SELECT 1 FROM {table} WHERE storage_id = ?1 AND vault_id NOT IN \
+             (SELECT id FROM local_vaults WHERE storage_id = ?1) LIMIT 1"
+        );
+        if sqlx_core::query::query::<Sqlite>(&sql)
+            .bind(storage_id)
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(LocalVaultKeyBindError::Database)?
+            .is_some()
+        {
+            return Err(LocalVaultKeyBindError::ProjectionNotEmpty);
+        }
+    }
+    Ok(())
+}
+
 async fn bind_cache_key_fingerprints_in(
     tx: &mut Transaction<'static, Sqlite>,
     bindings: &[CacheKeyFingerprintBinding<'_>],
 ) -> Result<CacheKeyFingerprintBatchBind, LocalVaultKeyBindError> {
     let mut requires_update = Vec::with_capacity(bindings.len());
+    let mut adopts = Vec::new();
 
     // Preflight the complete catalog before the first UPDATE. BEGIN IMMEDIATE
     // prevents another writer from invalidating these proofs in between.
     for binding in bindings {
-        let current = query!(
-            r#"
-            SELECT
-                CASE WHEN
-                    slug = ?3
-                    AND name = ?4
-                    AND kind = ?5
-                    AND is_default = ?6
-                    AND vault_key_enc = ?7
-                    AND key_wrap_type = ?8
-                THEN 1 ELSE 0 END AS identity_matches,
-                CASE
-                    WHEN cache_key_fp IS NULL THEN 0
-                    WHEN cache_key_fp = ?9 THEN 1
-                    ELSE 2
-                END AS fingerprint_state
-            FROM local_vaults
-            WHERE storage_id = ?1 AND id = ?2
-            "#,
-            binding.storage_id,
-            binding.vault_id,
-            binding.expected_slug,
-            binding.expected_name,
-            binding.expected_kind.as_i32(),
-            binding.expected_is_default,
-            binding.expected_vault_key_enc,
-            binding.expected_key_wrap_type.as_i32(),
-            binding.target_cache_key_fp
-        )
-        .fetch_optional(&mut **tx)
-        .await
-        .map_err(LocalVaultKeyBindError::Database)?;
-        let Some(current) = current else {
-            return Err(LocalVaultKeyBindError::NotFound);
-        };
-        let identity_matches: i64 = current
-            .try_get("identity_matches")
-            .map_err(LocalVaultKeyBindError::Database)?;
-        let fingerprint_state: i64 = current
-            .try_get("fingerprint_state")
-            .map_err(LocalVaultKeyBindError::Database)?;
-        if identity_matches != 1 || fingerprint_state == 2 {
-            return Err(LocalVaultKeyBindError::KeyBindingChanged);
+        let state = inspect_binding(tx, binding).await?;
+        if state.fingerprint == 1 {
+            continue;
         }
-
-        if fingerprint_state == 0 {
+        if state.legacy {
+            // MIG-009: a vault that predates migration 0002 keeps the
+            // projection its legacy client synced, under the internal slug
+            // the migration gave it. It takes the catalog's slug and key only
+            // when every cached item proves that key.
+            ensure_legacy_projection_proven(tx, binding).await?;
+            adopts.push(*binding);
+        } else {
             ensure_vault_projection_empty(tx, binding.storage_id, binding.vault_id).await?;
             requires_update.push(*binding);
-        } else if fingerprint_state != 1 {
-            return Err(LocalVaultKeyBindError::KeyBindingChanged);
         }
     }
 
@@ -1229,10 +1255,102 @@ async fn bind_cache_key_fingerprints_in(
         }
     }
 
+    for binding in &adopts {
+        let updated = query!(
+            r#"
+            UPDATE local_vaults
+            SET cache_key_fp = ?9,
+                slug = ?3
+            WHERE storage_id = ?1
+              AND id = ?2
+              AND slug = ?10
+              AND name = ?4
+              AND kind = ?5
+              AND is_default = ?6
+              AND vault_key_enc = ?7
+              AND key_wrap_type = ?8
+              AND cache_key_fp IS NULL
+              AND EXISTS (
+                  SELECT 1 FROM items_cache WHERE storage_id = ?1 AND vault_id = ?2
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM items_cache
+                  WHERE storage_id = ?1 AND vault_id = ?2 AND cache_key_fp IS NOT ?9
+              )
+            "#,
+            binding.storage_id,
+            binding.vault_id,
+            binding.expected_slug,
+            binding.expected_name,
+            binding.expected_kind.as_i32(),
+            binding.expected_is_default,
+            binding.expected_vault_key_enc,
+            binding.expected_key_wrap_type.as_i32(),
+            binding.target_cache_key_fp,
+            LocalVault::local_slug(binding.vault_id)
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(LocalVaultKeyBindError::Database)?
+        .rows_affected();
+        if updated != 1 {
+            return Err(LocalVaultKeyBindError::KeyBindingChanged);
+        }
+    }
+
+    let bound = requires_update.len() + adopts.len();
     Ok(CacheKeyFingerprintBatchBind {
-        bound: requires_update.len(),
-        already_bound: bindings.len() - requires_update.len(),
+        bound,
+        already_bound: bindings.len() - bound,
     })
+}
+
+/// A legacy vault's projection proves the catalog's key when it caches at
+/// least one item, every cached item is encrypted under that key, and every
+/// pending change belongs to one of those items. History rows follow their
+/// items. Anything else is a projection the key cannot claim.
+async fn ensure_legacy_projection_proven(
+    tx: &mut Transaction<'static, Sqlite>,
+    binding: &CacheKeyFingerprintBinding<'_>,
+) -> Result<(), LocalVaultKeyBindError> {
+    ensure_projection_identifiers_bounded(tx).await?;
+    let proof = query!(
+        r#"
+        SELECT
+            EXISTS(
+                SELECT 1 FROM items_cache WHERE storage_id = ?1 AND vault_id = ?2
+            ) AS cached,
+            EXISTS(
+                SELECT 1 FROM items_cache
+                WHERE storage_id = ?1 AND vault_id = ?2 AND cache_key_fp IS NOT ?3
+            ) AS foreign_key,
+            EXISTS(
+                SELECT 1 FROM pending_changes AS pending
+                WHERE pending.storage_id = ?1 AND pending.vault_id = ?2
+                  AND NOT EXISTS (
+                      SELECT 1 FROM items_cache AS item
+                      WHERE item.storage_id = ?1 AND item.vault_id = ?2
+                        AND item.id = pending.item_id
+                  )
+            ) AS orphan_pending
+        "#,
+        binding.storage_id,
+        binding.vault_id,
+        binding.target_cache_key_fp
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(LocalVaultKeyBindError::Database)?;
+    let flag = |column: &str| -> Result<bool, LocalVaultKeyBindError> {
+        proof
+            .try_get::<i64, _>(column)
+            .map(|value| value != 0)
+            .map_err(LocalVaultKeyBindError::Database)
+    };
+    if !flag("cached")? || flag("foreign_key")? || flag("orphan_pending")? {
+        return Err(LocalVaultKeyBindError::ProjectionNotEmpty);
+    }
+    Ok(())
 }
 
 async fn ensure_vault_projection_empty(
