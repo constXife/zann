@@ -48,6 +48,19 @@ pub fn folder_of(path: &str) -> Option<&str> {
         .filter(|folder| !folder.is_empty())
 }
 
+/// The line under an item's title in a list: who or where the item is for
+/// (its subtitle), then the folder it lives in. The title already names the
+/// item, so the path's last segment never shows. `None` when there is
+/// neither.
+pub fn item_caption(subtitle: Option<&str>, path: &str) -> Option<String> {
+    let parts: Vec<&str> = subtitle
+        .filter(|subtitle| !subtitle.is_empty())
+        .into_iter()
+        .chain(folder_of(path))
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
+}
+
 /// Build the folder tree from the loaded items.
 ///
 /// Deleted items are ignored: they are shown under trash, not under their
@@ -165,6 +178,24 @@ mod tests {
         assert_eq!(folder_of("root"), None);
         assert_eq!(folder_of(""), None);
         assert_eq!(folder_of("/root"), None);
+    }
+
+    #[test]
+    fn caption_puts_the_subtitle_before_the_folder() {
+        assert_eq!(
+            item_caption(Some("alice"), "work/GitHub").as_deref(),
+            Some("alice · work")
+        );
+        assert_eq!(
+            item_caption(Some("alice"), "GitHub").as_deref(),
+            Some("alice")
+        );
+        assert_eq!(item_caption(None, "work/GitHub").as_deref(), Some("work"));
+        assert_eq!(
+            item_caption(Some(""), "work/GitHub").as_deref(),
+            Some("work")
+        );
+        assert_eq!(item_caption(None, "GitHub"), None);
     }
 
     #[test]

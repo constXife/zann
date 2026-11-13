@@ -339,11 +339,12 @@ struct ItemList: View {
         List(vault.visibleItems, id: \.id, selection: selection) { item in
             HStack(spacing: 10) {
                 ItemIcon(typeID: item.typeId)
-                // The title already names the item; the caption says where it lives.
+                // The title names the item; the caption says who or where it
+                // is for and where it lives.
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.title).lineLimit(1)
-                    if let folder = folderOf(path: item.path) {
-                        Text(folder)
+                    if let caption = item.caption {
+                        Text(caption)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)

@@ -70,23 +70,16 @@ impl From<Page> for native::Page {
 
 impl From<native::ItemSummary> for ItemSummary {
     fn from(value: native::ItemSummary) -> Self {
+        let caption = zann_ui_core::item_caption(
+            value.subtitle.as_ref().map(native::ItemSubtitle::as_str),
+            &value.path,
+        );
         Self {
             id: value.id,
             title: value.title,
             path: value.path,
             type_id: value.type_id,
-            deleted: value.deleted,
-        }
-    }
-}
-
-impl From<ItemSummary> for native::ItemSummary {
-    fn from(value: ItemSummary) -> Self {
-        Self {
-            id: value.id,
-            title: value.title,
-            path: value.path,
-            type_id: value.type_id,
+            caption,
             deleted: value.deleted,
         }
     }
@@ -140,17 +133,6 @@ impl From<ItemTypeCount> for native::ItemTypeCount {
 
 impl From<native::ItemPage> for ItemPage {
     fn from(value: native::ItemPage) -> Self {
-        Self {
-            items: value.items.into_iter().map(|value| value.into()).collect(),
-            next_cursor: value.next_cursor,
-            total_count: value.total_count,
-            counts: value.counts.into(),
-        }
-    }
-}
-
-impl From<ItemPage> for native::ItemPage {
-    fn from(value: ItemPage) -> Self {
         Self {
             items: value.items.into_iter().map(|value| value.into()).collect(),
             next_cursor: value.next_cursor,

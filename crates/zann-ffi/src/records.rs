@@ -25,13 +25,30 @@ pub struct Page {
     pub cursor: Option<String>,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
 pub struct ItemSummary {
     pub id: String,
     pub title: String,
     pub path: String,
     pub type_id: String,
+    /// The line under the title in a list, from `zann_ui_core::item_caption`:
+    /// who or where the item is for, then its folder.
+    pub caption: Option<String>,
     pub deleted: bool,
+}
+
+impl std::fmt::Debug for ItemSummary {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ItemSummary")
+            .field("id", &self.id)
+            .field("title", &self.title)
+            .field("path", &self.path)
+            .field("type_id", &self.type_id)
+            .field("caption", &self.caption.as_ref().map(|_| "<redacted>"))
+            .field("deleted", &self.deleted)
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

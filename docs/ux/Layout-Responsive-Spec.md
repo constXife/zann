@@ -80,8 +80,11 @@ their platform-native controls inside the same semantic regions.
 - SHOULD: Prefer truncation with tooltips in dense views; allow wrapping in detail view.
 - MUST: Define minimum column widths for list/table layouts; avoid zero-width columns.
 - SHOULD: Use compact/comfortable density presets on desktop if supported.
-- SHOULD: An item list row shows the item's folder under its title, not the
-  full path that repeats the title.
+- SHOULD: An item list row shows a caption under its title: the item's
+  subtitle (who or where it is for, e.g. a login's username or host), then
+  its folder, as `zann-ui-core::item_caption` joins them; never the full path
+  that repeats the title, and never a secret field. The core takes the
+  subtitle from non-secret payload fields (`zann-core::item_subtitle`).
 - SHOULD: When the detail column is too narrow for a label beside its value,
   every field row puts its label above the value; rows never mix the two.
 
