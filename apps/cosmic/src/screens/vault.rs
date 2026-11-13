@@ -34,6 +34,7 @@ fn category_icon(schema_icon: &str) -> &'static str {
         "card" => "credit-card-symbolic",
         "person" => "contact-new-symbolic",
         "network" => "network-server-symbolic",
+        "server" => "computer-symbolic",
         "list" => "view-list-symbolic",
         "trash" => "user-trash-symbolic",
         _ => "folder-symbolic",
