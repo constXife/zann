@@ -465,11 +465,11 @@ fn vault_filters_the_list_and_forwards_copies() {
 }
 
 #[test]
-fn vault_selector_only_reserves_sidebar_space_for_multiple_vaults() {
+fn the_nav_header_offers_a_vault_picker_only_for_multiple_vaults() {
     let (_dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = vault::State::new(page, None);
-    assert!(state.vault_selector().is_none());
+    assert!(!state.offers_vault_picker());
 
     state.update(
         vault::Message::VaultsLoaded(Ok(local::VaultContext {
@@ -494,7 +494,7 @@ fn vault_selector_only_reserves_sidebar_space_for_multiple_vaults() {
         &session,
     );
 
-    assert!(state.vault_selector().is_some());
+    assert!(state.offers_vault_picker());
 }
 
 #[test]

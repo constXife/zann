@@ -72,7 +72,8 @@ impl State {
         Outcome::None
     }
 
-    /// The indicator for the header bar, with its details in a tooltip.
+    /// The indicator beside the vault picker: an icon (with the count of
+    /// unsent changes when there are any), its label and details in a tooltip.
     pub fn sync_indicator(&self) -> Option<Element<'_, Message>> {
         let indicator = self.sync_indicator_state()?;
         let args = indicator.label_args();
@@ -86,29 +87,49 @@ impl State {
             SyncIndicator::Disconnected { .. } => "network-offline-symbolic",
             SyncIndicator::Syncing { .. } => "emblem-synchronizing-symbolic",
             SyncIndicator::Failed { .. } => "dialog-warning-symbolic",
-            SyncIndicator::Pending { .. } => "view-refresh-symbolic",
+            SyncIndicator::Pending { .. } => "go-up-symbolic",
             SyncIndicator::Synced { .. } => "emblem-ok-symbolic",
         };
+        let unsent = match &indicator {
+            SyncIndicator::Pending {
+                pending_changes, ..
+            }
+            | SyncIndicator::Failed {
+                pending_changes, ..
+            }
+            | SyncIndicator::Disconnected {
+                pending_changes, ..
+            } if *pending_changes > 0 => Some(pending_changes.to_string()),
+            _ => None,
+        };
         let spacing = theme::spacing();
-        let content = widget::row::with_capacity(2)
+        let mut content = widget::row::with_capacity(2)
             .push(widget::icon::from_name(icon).size(16).icon())
-            .push(widget::text::body(label))
-            .spacing(spacing.space_xxs)
+            .spacing(spacing.space_xxxs)
             .align_y(Alignment::Center);
+        if let Some(unsent) = unsent {
+            content = content.push(widget::text::caption(unsent));
+        }
         let mut button = widget::button::custom(content)
             .class(if indicator.needs_attention() {
                 theme::Button::Destructive
             } else {
-                theme::Button::Text
+                theme::Button::Icon
             })
-            .padding([4, 8]);
+            .padding([4, 6]);
         if indicator.action() != SyncAction::None {
             button = button.on_press(Message::SyncIndicatorPressed);
         }
+        let details = self.sync_details(&indicator);
+        let tooltip = if details.is_empty() {
+            label
+        } else {
+            format!("{label}\n{details}")
+        };
         Some(
             widget::tooltip(
                 button,
-                widget::text::body(self.sync_details(&indicator)),
+                widget::text::body(tooltip),
                 widget::tooltip::Position::Bottom,
             )
             .into(),

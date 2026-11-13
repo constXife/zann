@@ -268,27 +268,44 @@ impl State {
         &self.nav
     }
 
+    /// A picker only when there is more than one vault to choose from.
+    pub fn offers_vault_picker(&self) -> bool {
+        self.vaults.len() > 1
+    }
+
     /// Storage/vault context belongs to the navigation column, above the
-    /// category tree. The shell embeds this in its custom libcosmic nav bar.
-    pub fn vault_selector(&self) -> Option<Element<'_, Message>> {
-        if self.vaults.len() <= 1 {
-            return None;
-        }
+    /// category tree: the vault on screen, a picker when there are several,
+    /// and the sync status of the storage it belongs to. The shell embeds
+    /// this in its custom libcosmic nav bar.
+    pub fn nav_header(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
-        let labels: Vec<String> = self.vaults.iter().map(vault_label).collect();
+        let mut title = widget::row::with_capacity(2)
+            .push(widget::text::caption(t("nav.vaults")).width(Length::Fill))
+            .align_y(Alignment::Center);
+        if let Some(indicator) = self.sync_indicator() {
+            title = title.push(indicator);
+        }
         let selected = self
             .selected_vault_id
             .as_deref()
             .and_then(|id| self.vaults.iter().position(|vault| vault.id == id));
-        Some(
-            widget::column::with_capacity(2)
-                .push(widget::text::caption(t("nav.vaults")))
-                .push(widget::dropdown(labels, selected, Message::SelectVault))
-                .spacing(spacing.space_xxs)
-                .padding(spacing.space_s)
-                .width(Length::Fill)
-                .into(),
-        )
+        let vault: Element<'_, Message> = if self.offers_vault_picker() {
+            let labels: Vec<String> = self.vaults.iter().map(vault_label).collect();
+            widget::dropdown(labels, selected, Message::SelectVault).into()
+        } else {
+            let label = selected
+                .and_then(|index| self.vaults.get(index))
+                .map(vault_label)
+                .unwrap_or_default();
+            widget::text::body(label).into()
+        };
+        widget::column::with_capacity(2)
+            .push(title)
+            .push(vault)
+            .spacing(spacing.space_xxs)
+            .padding(spacing.space_s)
+            .width(Length::Fill)
+            .into()
     }
 
     /// The shell owns the window and knows how much room its navigation column
