@@ -155,7 +155,17 @@ impl State {
         );
 
         if let Some(error) = self.error.as_ref() {
-            content = content.push(widget::text::caption(error.clone()));
+            content = content.push(
+                widget::row::with_capacity(2)
+                    .push(widget::text::caption(error.clone()).width(Length::Fill))
+                    .push(
+                        widget::button::icon(widget::icon::from_name("edit-copy-symbolic"))
+                            .tooltip(t("common.copy"))
+                            .on_press(Message::CopyError),
+                    )
+                    .spacing(spacing.space_xs)
+                    .align_y(Alignment::Center),
+            );
             if self.stale_server_banner().is_some() {
                 content = content.push(
                     widget::button::standard(t("items.reviewStaleServer"))

@@ -186,6 +186,8 @@ pub enum Message {
     },
     /// Open the recovery for the server that changed its identity.
     ReviewStaleServer,
+    /// Copy the error on screen, which the label itself cannot select.
+    CopyError,
     /// The shown item, read again after a sync changed the vault.
     DetailRefreshed(Result<Detail, String>),
 }
@@ -708,6 +710,15 @@ impl State {
             }
 
             Message::ResizeEnd => self.drag = None,
+
+            Message::CopyError => {
+                if let Some(error) = self.error.clone() {
+                    return Outcome::Copy {
+                        value: error,
+                        feedback: Task::none(),
+                    };
+                }
+            }
 
             message @ (Message::SyncDue(_)
             | Message::AutoSynced { .. }
