@@ -4,13 +4,13 @@ use super::AppClient;
 use crate::config::{ConfigError, ConfigIdentity};
 
 impl AppClient {
-    /// The committed KDF identity: the server's after a login, or the one a
-    /// local-only vault was created with. `None` until either happened.
+    /// The account KDF identity committed by authentication or snapshot restore.
+    /// `None` until an identity has been committed.
     pub fn kdf_identity(&self) -> Result<Option<ConfigIdentity>, ConfigError> {
         Ok(self.repository.snapshot()?.config().identity.clone())
     }
 
-    /// Commit a locally generated or restored identity, provided the stored
+    /// Commit a restored identity or an explicit test fixture, provided the stored
     /// one is still `expected`.
     pub fn replace_kdf_identity_if_matches(
         &self,

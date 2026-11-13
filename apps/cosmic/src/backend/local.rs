@@ -350,7 +350,7 @@ pub fn remove_hardware_key(facade: &Facade, credential_id: String) -> Result<(),
         .map_err(|err| err.to_string())
 }
 
-/// Writes a plain backup of every local vault. The facade picks the path,
+/// Writes a plain backup of every cached vault. The facade picks the path,
 /// because this client has no file picker of its own — see
 /// docs/adr/0002-client-strategy.md on why being able to leave comes first.
 pub fn export_backup(facade: &Facade) -> Result<BackupExportReport, String> {

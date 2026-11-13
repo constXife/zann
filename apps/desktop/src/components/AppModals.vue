@@ -12,7 +12,6 @@ import CreateModal from "./CreateModal.vue";
 import SyncStatusToast from "./SyncStatusToast.vue";
 import FolderContextMenu from "./FolderContextMenu.vue";
 import RenameFolderModal from "./RenameFolderModal.vue";
-import DeleteStorageModal from "./DeleteStorageModal.vue";
 import ConfirmModal from "./ConfirmModal.vue";
 import AuthMethodModal from "./AuthMethodModal.vue";
 import PasswordLoginModal from "./PasswordLoginModal.vue";
@@ -144,11 +143,6 @@ type AppModalsProps = {
   renameFolderBusy: unknown;
   renameFolderError: unknown;
   submitRenameFolder: unknown;
-  deleteStorageOpen: unknown;
-  deleteStorageInfo: unknown;
-  deleteStorageBusy: unknown;
-  confirmDeleteStorage: unknown;
-  confirmDisconnectStorage: unknown;
   confirmOpen: unknown;
   confirmTitle: unknown;
   confirmMessage: unknown;
@@ -240,7 +234,6 @@ const onPasswordSubmit = (payload: {
   }
 };
 const renameFolderNewName = modelRef<unknown>("renameFolderNewName");
-const deleteStorageOpen = modelRef<unknown>("deleteStorageOpen");
 const confirmOpen = modelRef<unknown>("confirmOpen");
 const identityAlertOpen = modelRef<unknown>("identityAlertOpen");
 const authMethodOpen = modelRef<unknown>("authMethodOpen");
@@ -434,15 +427,6 @@ const identityAlertMessage = valueRef<unknown>("identityAlertMessage");
     :error="renameFolderError"
     :t="t"
     @submit="submitRenameFolder"
-  />
-
-  <DeleteStorageModal
-    v-model:open="deleteStorageOpen"
-    :storage="deleteStorageInfo"
-    :busy="deleteStorageBusy"
-    :t="t"
-    @delete="confirmDeleteStorage"
-    @disconnect="confirmDisconnectStorage"
   />
 
   <ConfirmModal

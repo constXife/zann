@@ -4,12 +4,12 @@ Minimal COSMIC-native PoC built on [libcosmic](https://github.com/pop-os/libcosm
 (iced).
 
 Scope: connect to a server (password or SSO, including confirming a changed
-server key) or set up a local vault, unlock it with the master password, browse
+server key), unlock its offline replica with the master password, browse
 the items (nav categories, search, paging) and read a secret — masked fields
 with a reveal toggle, one-time codes and copy-to-clipboard.
 
-Creating/editing items and browsing/restoring history use the native local
-vault port. Closing to tray is configurable; a missing tray host leaves the
+Creating/editing items and browsing/restoring history use the native offline
+replica port. Closing to tray is configurable; a missing tray host leaves the
 window reachable. Folder mutation and attachments are not covered.
 
 The crate is excluded from the root workspace: libcosmic is a git dependency and

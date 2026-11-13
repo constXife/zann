@@ -173,7 +173,7 @@ const {
   storages, remoteStorages,
   storageSyncErrors, storagePersonalLocked, isOffline, syncBusy, syncError, loadStorages,
   runRemoteSync: runRemoteSyncRaw, scheduleRemoteSync, startAutoSync, stopAutoSync, clearSyncErrors, getSyncStatus,
-  getStorageInfo, deleteStorage, disconnectStorage, revealStorage,
+  getStorageInfo, disconnectStorage, revealStorage,
 } = storageState;
 
 const lastSyncTime = ref<string | null>(null);
@@ -599,7 +599,6 @@ const {
 
 const authFlow = useAppAuthFlow({
   t,
-  uiSettings,
   appStatus,
   unlocked,
   selectedStorageId,
@@ -668,8 +667,6 @@ const storageActions = useAppStorageActions({
   runRemoteSync,
   refreshStatus,
   refreshAppStatus,
-  getStorageInfo,
-  deleteStorage,
   disconnectStorage,
   revealStorage,
   openCreateModal: createState.openCreateModal,
@@ -686,12 +683,11 @@ const storageActions = useAppStorageActions({
   showToast,
 });
 const {
-  storageDropdownOpen, vaultDropdownOpen, deleteStorageOpen, deleteStorageInfo, deleteStorageBusy,
+  storageDropdownOpen, vaultDropdownOpen,
   toggleStorageDropdown, closeStorageDropdown, switchStorage, openAddStorageWizard,
-  openStorageSettings, handleStorageReveal, handleStorageDisconnect, handleStorageDelete,
-  handleStorageGetInfo, handleSignOut, handleRemoveServer, handleSignIn, handleClearData,
+  openStorageSettings, handleStorageReveal, handleSignOut, handleRemoveServer, handleSignIn, handleClearData,
   handleFactoryReset, handleSyncNow, openCreateVault, toggleVaultDropdown,
-  closeVaultDropdown, switchVault, confirmDeleteStorage, confirmDisconnectStorage,
+  closeVaultDropdown, switchVault,
 } = storageActions;
 
 const { resolveConflict } = useConflictActions({

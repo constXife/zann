@@ -52,9 +52,6 @@ pub async fn storage_info(
         Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
     };
 
-    let file_path = None;
-    let file_size = None;
-    let last_modified = None;
     let mut last_synced = None;
 
     let cursor_repo = SyncCursorRepo::new(&state.pool);
@@ -79,88 +76,12 @@ pub async fn storage_info(
         id: storage.id.to_string(),
         name: storage.name,
         kind: storage.kind.as_i32(),
-        file_path,
-        file_size,
-        last_modified,
         server_url: storage.server_url,
         server_name: storage.server_name,
         account_subject: storage.account_subject,
         last_synced,
         fingerprint,
     }))
-}
-
-pub async fn storage_delete(
-    state: State<'_, AppState>,
-    storage_id: String,
-    move_to_trash: bool,
-) -> Result<ApiResponse<()>, String> {
-    ensure_unlocked(&state).await?;
-    let storage_uuid = Uuid::parse_str(&storage_id).map_err(|_| "invalid storage id")?;
-
-    let storage_repo = LocalStorageRepo::new(&state.pool);
-    let _storage = match storage_repo.get(storage_uuid).await {
-        Ok(Some(s)) => s,
-        Ok(None) => return Ok(ApiResponse::err("storage_not_found", "storage not found")),
-        Err(err) => return Ok(ApiResponse::err("db_error", &err.to_string())),
-    };
-
-    let item_repo = LocalItemRepo::new(&state.pool);
-    let vault_repo = LocalVaultRepo::new(&state.pool);
-    let cursor_repo = SyncCursorRepo::new(&state.pool);
-    let pending_repo = PendingChangeRepo::new(&state.pool);
-
-    if let Err(err) = pending_repo.delete_by_storage(storage_uuid).await {
-        return Ok(ApiResponse::err(
-            "db_error",
-            &format!("failed to delete pending changes: {err}"),
-        ));
-    }
-    if let Err(err) = cursor_repo.delete_by_storage(storage_uuid).await {
-        return Ok(ApiResponse::err(
-            "db_error",
-            &format!("failed to delete sync cursors: {err}"),
-        ));
-    }
-    if let Err(err) = item_repo.delete_by_storage(storage_uuid).await {
-        return Ok(ApiResponse::err(
-            "db_error",
-            &format!("failed to delete items: {err}"),
-        ));
-    }
-    if let Err(err) = vault_repo.delete_by_storage(storage_uuid).await {
-        return Ok(ApiResponse::err(
-            "db_error",
-            &format!("failed to delete vaults: {err}"),
-        ));
-    }
-    if let Err(err) = storage_repo.delete(storage_uuid).await {
-        return Ok(ApiResponse::err(
-            "db_error",
-            &format!("failed to delete storage: {err}"),
-        ));
-    }
-
-    if let Ok(mut config) = load_config(&state.root) {
-        let contexts_to_remove: Vec<String> = config
-            .contexts
-            .iter()
-            .filter(|(_, ctx)| ctx.storage_id.as_deref() == Some(&storage_id))
-            .map(|(name, _)| name.clone())
-            .collect();
-
-        for name in contexts_to_remove {
-            config.contexts.remove(&name);
-            if config.current_context.as_deref() == Some(&name) {
-                config.current_context = None;
-            }
-        }
-        let _ = save_config(&state.root, &config);
-    }
-
-    let _ = move_to_trash;
-
-    Ok(ApiResponse::ok(()))
 }
 
 pub async fn storage_disconnect(
