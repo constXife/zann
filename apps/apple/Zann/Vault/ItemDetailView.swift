@@ -68,7 +68,7 @@ private struct ItemDetailContent: View {
                             }
                             FieldRow(
                                 field: field,
-                                label: strings.fieldLabel(field.key),
+                                label: strings.fieldLabel(field.labelKey),
                                 compact: compact,
                                 revealed: revealed.contains(index) || revealAll,
                                 copied: copied == index,

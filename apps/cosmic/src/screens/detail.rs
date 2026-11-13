@@ -70,7 +70,7 @@ impl Detail {
             .map_err(|err| err.to_string())?
             .into_iter()
             .map(|field| Field {
-                label: field_label(&field.key),
+                label: field_label(&field.label_key),
                 key: field.key,
                 value: field.value,
                 masked: field.masked,

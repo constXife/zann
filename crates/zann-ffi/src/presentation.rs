@@ -58,6 +58,8 @@ impl From<TotpParamsFfi> for TotpParams {
 #[derive(Clone, uniffi::Record)]
 pub struct ItemDetailFieldFfi {
     pub key: String,
+    /// The key the row is labelled by; see `Catalogue.field_label`.
+    pub label_key: String,
     pub value: String,
     pub masked: bool,
     pub multiline: bool,
@@ -74,6 +76,7 @@ impl From<ItemDetailField> for ItemDetailFieldFfi {
     fn from(field: ItemDetailField) -> Self {
         Self {
             key: field.key,
+            label_key: field.label_key,
             value: field.value,
             masked: field.masked,
             multiline: field.multiline,
