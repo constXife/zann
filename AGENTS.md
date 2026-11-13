@@ -11,7 +11,8 @@ document below, the canonical document wins.
 3. [`docs/adr/`](docs/adr/) — architectural decisions:
    - [ADR 0001](docs/adr/0001-shared-client-core.md): shared client core & thin interface shells;
    - [ADR 0002](docs/adr/0002-client-strategy.md): client strategy (`Rust Core + Thin Native Shells` across Linux COSMIC, Apple SwiftUI for macOS/iOS/iPadOS, Android Jetpack Compose, Tauri desktop, and Browser Extension + Daemon);
-   - [ADR 0004](docs/adr/0004-machine-secret-plane.md) & [ADR 0005](docs/adr/0005-runtime-secret-delivery-profiles.md): machine secret plane & runtime delivery profiles.
+   - [ADR 0004](docs/adr/0004-machine-secret-plane.md) & [ADR 0005](docs/adr/0005-runtime-secret-delivery-profiles.md): machine secret plane & runtime delivery profiles;
+   - [ADR 0009](docs/adr/0009-crypto-format-lifecycle.md): cryptographic format lifecycle (Pre-GA single-`v1` + golden tripwires vs post-`v0.Y` append-only envelopes).
 4. [`crates/zann-server/SECURITY.md`](crates/zann-server/SECURITY.md) & [`docs/audit-surface.md`](docs/audit-surface.md) — server threat model and client/server security audit surface.
 5. [`docs/ux/`](docs/ux/) — unified UX contracts, layout breakpoints, and theme tokens.
 6. [`CONTRIBUTING.md`](CONTRIBUTING.md) — workflow, CI gates, and PR conventions.
@@ -31,6 +32,7 @@ Zann is currently **Pre-GA (experimental prior to `v0.Y`)**.
 
 - **Pre-GA proportionality (avoid premature ceremony):**
   - **No fallback or dual-write by default:** When all consumers of an internal API or crate live in this repository, perform a direct cutover in-place and delete the superseded code in the same change.
+  - **Single `v1` crypto envelope until `v0.Y` ([ADR 0009](docs/adr/0009-crypto-format-lifecycle.md)):** Do not spawn `BLOB_VERSION = 2..N` branches Pre-GA; refine `v1` in-place while keeping `tests/fixtures/crypto/` as a mandatory CI tripwire against accidental byte/KDF/AAD drift. Intentional `v1` changes require `!` / `BREAKING CHANGE:`, lossless plaintext export/import notes, and regenerated golden fixtures; starting at `v0.Y`, `v1` becomes strictly append-only. Any key re-wrap or rotation must verify `Decrypt-Before-Commit`.
   - **Compatibility paths require explicit bounds:** Any temporary migration shim must be recorded in [`docs/architecture/capabilities.md`](docs/architecture/capabilities.md) and [`config/architecture-boundaries.json`](config/architecture-boundaries.json) with an owner, compensating test, and measurable removal condition.
   - **Subtractive balance:** Touching a legacy path under an active `MIG-*` exception must narrow or remove the exception rather than expanding it.
 

@@ -382,7 +382,16 @@ cannot downgrade it. Retargeting is an explicit credential-aware operation.
 - Writers use atomic replacement and the appropriate cross-process lock.
 - Readers preserve unknown namespaced data when another client may own it.
 - Crypto compatibility is protected by golden fixtures, not implementation
-  duplication.
+  duplication. Per [`ADR 0009`](adr/0009-crypto-format-lifecycle.md), Pre-GA
+  refines a single `v1` envelope in-place (with golden tests acting as CI
+  tripwires against accidental drift and intentional changes gated on lossless
+  plaintext export/import); starting at `v0.Y`, `v1` becomes strictly
+  append-only (`BLOB_VERSION = 2` for new formats, retaining `v1` decryption).
+- Key rotation and re-wrapping operations MUST enforce `Decrypt-Before-Commit`
+  (trial-decrypting new ciphertexts in memory before committing), and local
+  SQLite upgrades MUST snapshot existing databases before running pending
+  migrations. These are required hardening targets; implementation gaps are
+  recorded in [`ADR 0009`](adr/0009-crypto-format-lifecycle.md#implementation-status).
 - Public application APIs return typed results and stable error kinds.
 - Breaking contract changes include migration notes and conformance fixtures.
 
