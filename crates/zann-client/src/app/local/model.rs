@@ -254,7 +254,8 @@ pub struct StorageSyncState {
     pub server_url: Option<String>,
     /// Local changes no server has confirmed yet.
     pub pending_changes: u64,
-    /// RFC 3339 time any of its vaults last finished a sync.
+    /// RFC 3339 UTC time, to the second, any of its vaults last finished a
+    /// sync.
     pub last_synced_at: Option<String>,
 }
 
