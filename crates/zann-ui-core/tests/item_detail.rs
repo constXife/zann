@@ -149,3 +149,23 @@ fn projection_and_parse_errors_redact_secrets() {
     }
     assert!(project_item_fields("{").is_err());
 }
+
+#[test]
+fn a_field_shown_as_its_code_is_labelled_as_a_code() {
+    let fields = project(
+        json!({
+            "totp_secret": {"kind": "otp", "value": "JBSWY3DPEHPK3PXP"},
+            "username": {"kind": "text", "value": "alice"}
+        }),
+        Value::Null,
+    );
+    let field = |key: &str| fields.iter().find(|field| field.key == key).expect("field");
+    // The row shows the code, so it reads "One-time code", not "TOTP Secret".
+    assert_eq!(field("totp_secret").label_key, "otp");
+    assert_eq!(field("username").label_key, "username");
+    let catalogue = zann_ui_core::Catalogue::new("en");
+    assert_eq!(
+        catalogue.field_label(&field("totp_secret").label_key),
+        "One-time code"
+    );
+}

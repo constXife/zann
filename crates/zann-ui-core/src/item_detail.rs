@@ -20,6 +20,10 @@ pub const MASKED_VALUE: &str = "••••••••";
 #[derive(Clone)]
 pub struct ItemDetailField {
     pub key: String,
+    /// The key the row is labelled by (`Catalogue::field_label`): the field's
+    /// own key, or `otp` for a field shown as its one-time code, since the
+    /// row shows the code and never the secret its key names.
+    pub label_key: String,
     pub value: String,
     pub masked: bool,
     pub multiline: bool,
@@ -44,6 +48,11 @@ pub fn project_item_fields(payload_json: &str) -> Result<Vec<ItemDetailField>, P
             let is_otp = matches!(field.kind, FieldKind::Otp);
             ItemDetailField {
                 key: key.clone(),
+                label_key: if is_otp {
+                    "otp".to_string()
+                } else {
+                    key.clone()
+                },
                 value: field.value.clone(),
                 masked: meta
                     .and_then(|meta| meta.masked)
