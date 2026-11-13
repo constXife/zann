@@ -312,7 +312,7 @@ impl CoreFacade {
     /// `forget_server` until the user connects again.
     pub fn storage_link(&self, storage_id: String) -> CoreResult<StorageLinkFfi> {
         self.inner
-            .storage_link(storage_id)
+            .storage_sync_state(storage_id)
             .map(Into::into)
             .map_err(Into::into)
     }

@@ -967,6 +967,70 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
 }
 
 #[test]
+fn the_sync_indicator_shows_the_most_urgent_state_and_acts_on_it() {
+    use std::time::Instant;
+    use zann_client::app::local::{StorageLink, StorageSyncState};
+    use zann_ui_core::SyncIndicator;
+
+    let (_dir, session) = vault_with_items();
+    let page = local::items(&session.facade(), None, None).unwrap();
+    let now = Instant::now();
+    session.auto_sync().unlocked(now, true);
+    let mut vault = vault::State::new(page, None);
+    assert!(
+        vault.sync_indicator_state().is_none(),
+        "nothing shows before the state is read"
+    );
+
+    let state = |link, pending_changes| StorageSyncState {
+        link,
+        server_url: Some("https://zann.example.test".to_string()),
+        pending_changes,
+        last_synced_at: Some("2026-11-13T07:15:34+00:00".to_string()),
+    };
+    vault.update(
+        vault::Message::SyncStateLoaded(Ok(state(StorageLink::Connected, 3))),
+        &session,
+    );
+    assert!(matches!(
+        vault.sync_indicator_state(),
+        Some(SyncIndicator::Pending {
+            pending_changes: 3,
+            ..
+        })
+    ));
+    assert!(vault.sync_indicator().is_some());
+
+    // Pressing it syncs now, and the indicator shows the sync running.
+    assert!(matches!(
+        vault.update(vault::Message::SyncIndicatorPressed, &session),
+        vault::Outcome::Task(_)
+    ));
+    assert!(matches!(
+        vault.sync_indicator_state(),
+        Some(SyncIndicator::Syncing { .. })
+    ));
+
+    // A storage whose connection is gone leads to connecting it again.
+    vault.update(
+        vault::Message::SyncStateLoaded(Ok(state(StorageLink::Disconnected, 3))),
+        &session,
+    );
+    let vault::Outcome::StaleServer(_, failure) =
+        vault.update(vault::Message::SyncIndicatorPressed, &session)
+    else {
+        panic!("the indicator leads to the reconnect");
+    };
+    assert_eq!(
+        failure,
+        local::SyncFailure::Disconnected {
+            server_url: Some("https://zann.example.test".to_string()),
+            pending_changes: 3,
+        }
+    );
+}
+
+#[test]
 fn the_sync_error_on_screen_can_be_copied() {
     use std::time::Instant;
 

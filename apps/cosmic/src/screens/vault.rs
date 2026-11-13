@@ -125,6 +125,10 @@ pub struct State {
     /// server changed its identity, or no connection syncs it any more), with
     /// that refusal; the banner then leads there.
     stale_server: Option<(String, local::SyncFailure)>,
+    /// What the sync indicator knows about the open storage.
+    sync_state: Option<local::StorageSyncState>,
+    /// A sync this vault started is running.
+    syncing: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -188,6 +192,10 @@ pub enum Message {
     ReviewStaleServer,
     /// Copy the error on screen, which the label itself cannot select.
     CopyError,
+    /// The open storage's sync state, read again.
+    SyncStateLoaded(Result<local::StorageSyncState, String>),
+    /// The sync indicator was pressed: sync now, or lead to reconnecting.
+    SyncIndicatorPressed,
     /// The shown item, read again after a sync changed the vault.
     DetailRefreshed(Result<Detail, String>),
 }
@@ -241,6 +249,8 @@ impl State {
             sync_timer: 0,
             sync_error,
             stale_server: None,
+            sync_state: None,
+            syncing: false,
         };
         state.apply_page(page, true);
         state.rebuild_nav();
@@ -437,6 +447,7 @@ impl State {
                 | Message::HideRevealed(_)
                 | Message::SyncDue(_)
                 | Message::AutoSynced { .. }
+                | Message::SyncStateLoaded(_)
                 | Message::DetailRefreshed(_)
         ) {
             self.last_activity = Instant::now();
@@ -447,6 +458,8 @@ impl State {
                 self.vaults = context.vaults;
                 self.selected_vault_id = context.current_vault_id;
                 self.rebuild_nav();
+                // The open storage may have changed with the vault.
+                return Outcome::Task(Self::load_sync_state(session));
             }
 
             Message::VaultsLoaded(Err(err)) => self.error = Some(err),
@@ -724,6 +737,10 @@ impl State {
             | Message::AutoSynced { .. }
             | Message::ReviewStaleServer
             | Message::DetailRefreshed(_)) => return self.update_auto_sync(message, session),
+
+            message @ (Message::SyncStateLoaded(_) | Message::SyncIndicatorPressed) => {
+                return self.update_sync_status(message, session)
+            }
         }
         Outcome::None
     }
@@ -876,3 +893,4 @@ impl zann_ui_core::ItemLike for ItemSummaryView<'_> {
 
 mod auto_sync;
 mod editing;
+mod sync_status;

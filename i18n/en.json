@@ -724,5 +724,17 @@
     "personalLockedResetDone": "Personal vaults reset",
     "conflict": "Conflict",
     "pending": "Pending"
+  },
+  "sync": {
+    "localOnly": "On this device",
+    "disconnected": "Not connected · {count} unsent",
+    "syncing": "Syncing with {server}…",
+    "failed": "{server} · sync failed",
+    "pending": "{server} · {count} unsent",
+    "synced": "{server} · synced",
+    "lastSynced": "Last synced {time}",
+    "neverSynced": "Not synced yet",
+    "syncNowHint": "Click to sync now",
+    "reconnectHint": "Click to connect to the server again"
   }
 }

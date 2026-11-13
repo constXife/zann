@@ -174,7 +174,7 @@ impl LocalVault {
             .map_err(LocalError::from)
     }
 
-    pub fn storage_link(&self, storage_id: String) -> LocalResult<StorageLink> {
+    pub fn storage_sync_state(&self, storage_id: String) -> LocalResult<StorageSyncState> {
         let id = Uuid::parse_str(&storage_id)
             .map_err(|_| LocalError::InvalidArgument("invalid storage id".to_string()))?;
         let pool = self.pool();
@@ -183,19 +183,27 @@ impl LocalVault {
             .block_on(LocalStorageRepo::new(&pool).get(id))
             .map_err(|err| LocalError::Service(err.to_string()))?
             .ok_or_else(|| LocalError::InvalidArgument("storage not found".to_string()))?;
-        if storage.kind == zann_core::StorageKind::LocalOnly {
-            return Ok(StorageLink::Local);
-        }
-        if self
+        let link = if storage.kind == zann_core::StorageKind::LocalOnly {
+            StorageLink::Local
+        } else if self
             .app_client()?
             .syncs_storage(&storage_id)
             .map_err(LocalError::from)?
         {
-            return Ok(StorageLink::Connected);
-        }
-        Ok(StorageLink::Disconnected {
+            StorageLink::Connected
+        } else {
+            StorageLink::Disconnected
+        };
+        let last_synced_at = self
+            .runtime
+            .block_on(SyncCursorRepo::new(&pool).last_synced_at(id))
+            .map_err(|err| LocalError::Service(err.to_string()))?
+            .map(|at| at.to_rfc3339());
+        Ok(StorageSyncState {
+            link,
             server_url: storage.server_url,
             pending_changes: self.pending_change_count(storage_id)?,
+            last_synced_at,
         })
     }
 
