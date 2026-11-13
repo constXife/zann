@@ -1,4 +1,3 @@
-use base64::Engine;
 use tauri::{Emitter, State};
 use tauri_plugin_biometry::{AuthOptions, BiometryExt};
 
@@ -619,6 +618,7 @@ fn log_master_key_context(_label: &str, _password: &str, _identity: &crate::stat
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
     use std::sync::Mutex;
     use zann_keystore::{KeystoreStatus, KeystoreStatusReason, RememberedUnlock};
 

@@ -566,8 +566,6 @@ pub struct VaultCreateRequest {
     pub kind: Option<i32>,
     #[serde(default)]
     pub cache_policy: Option<i32>,
-    #[serde(default)]
-    pub is_default: Option<bool>,
 }
 
 #[derive(Deserialize)]

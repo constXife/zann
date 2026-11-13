@@ -22,7 +22,8 @@ final class AppModelTests: XCTestCase {
     private func makeModel(
         _ name: String = "local", keystore: MemoryKeystore = MemoryKeystore(), seed: Bool = true
     ) -> AppModel {
-        let database = directory.appendingPathComponent("\(name).sqlite").path
+        let database = directory.appendingPathComponent(name, isDirectory: true)
+            .appendingPathComponent("local.sqlite").path
         let preferences = directory.appendingPathComponent("\(name).preferences.json")
         return AppModel(opening: {
             let core = try createCore(
@@ -202,7 +203,7 @@ final class AppModelTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let first = makeModel()
         await first.submit(password: "correct horse battery", mode: .unlock)
-        try Data("not json".utf8).write(to: directory.appendingPathComponent("unlock.json"))
+        try Data("not json".utf8).write(to: directory.appendingPathComponent("local/unlock.json"))
 
         let model = makeModel()
         XCTAssertEqual(model.screen, .master(.unlock))

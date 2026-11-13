@@ -459,6 +459,13 @@ jobs:
           xcodegen --spec project.yml
           xcodebuild test -quiet -project Zann.xcodeproj -scheme Zann \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath build
+      - name: Upload Apple test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apple-test-results
+          path: apps/apple/build/Logs/Test/*.xcresult
+          retention-days: 7
 
   # Tauri is outside the root workspace, so root tests cannot catch shared API
   # or compatibility changes in its Rust adapter.

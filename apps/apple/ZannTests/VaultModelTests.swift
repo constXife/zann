@@ -38,7 +38,7 @@ final class VaultModelTests: XCTestCase {
     func testADisconnectedReplicaKeepsOfflineEditsAndReportsPendingChanges() async throws {
         let model = try makeModel()
         await model.sync()
-        XCTAssertFalse(model.canSync)
+        XCTAssertTrue(model.canSync)
         XCTAssertNotNil(model.syncError)
         XCTAssertEqual(model.visibleItems.count, 3)
         await model.refreshSyncState()

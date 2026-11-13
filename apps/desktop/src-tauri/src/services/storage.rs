@@ -56,7 +56,6 @@ pub async fn storage_info(
     let file_size = None;
     let last_modified = None;
     let mut last_synced = None;
-    let fingerprint;
 
     let cursor_repo = SyncCursorRepo::new(&state.pool);
     let vault_repo = LocalVaultRepo::new(&state.pool);
@@ -74,7 +73,7 @@ pub async fn storage_info(
         last_synced = latest_sync.map(|dt| dt.to_rfc3339());
     }
 
-    fingerprint = storage.server_fingerprint.clone();
+    let fingerprint = storage.server_fingerprint.clone();
 
     Ok(ApiResponse::ok(StorageInfoResponse {
         id: storage.id.to_string(),
