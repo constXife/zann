@@ -110,17 +110,26 @@ private struct SyncIndicatorButton: View {
             case .noAction: break
             }
         } label: {
-            Label(strings(indicator.labelKey, indicator.labelArgs), systemImage: Symbols.sync(indicator.state))
-                .labelStyle(.titleAndIcon)
+            // The icon carries the state and turns red when it needs
+            // attention; the server and the rest read in the help, so the
+            // toolbar does not say "synced" twice.
+            Label(label, systemImage: Symbols.sync(indicator.state))
+                .labelStyle(.iconOnly)
                 .foregroundStyle(indicator.needsAttention ? Color.red : Color.primary)
         }
         .help(details)
+        .accessibilityLabel(label)
         .disabled(indicator.action == .noAction || app.busy)
     }
 
-    /// When the storage last synced, and what pressing the indicator does.
+    private var label: String {
+        strings(indicator.labelKey, indicator.labelArgs)
+    }
+
+    /// Which server and what state, when the storage last synced, and what
+    /// pressing the indicator does.
     private var details: String {
-        var lines: [String] = []
+        var lines = [label]
         if indicator.state != .localOnly {
             if let at = vault.syncState?.lastSyncedAt.flatMap(Self.parse) {
                 let time = Calendar.current.isDateInToday(at)
