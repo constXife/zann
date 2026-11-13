@@ -345,6 +345,7 @@ fn infinite_scroll_prefetches_and_caps_the_summary_cache() {
                 title: format!("item-{page}-{index}"),
                 path: format!("items/{page}/{index}"),
                 type_id: "login".to_string(),
+                subtitle: None,
                 deleted: false,
             })
             .collect(),

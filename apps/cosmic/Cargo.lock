@@ -8357,6 +8357,7 @@ dependencies = [
  "uuid",
  "zann-core",
  "zann-crypto",
+ "zeroize",
 ]
 
 [[package]]

@@ -31,6 +31,10 @@ The current surface covers:
   including its pinned existing-file opener, exact Config v2 generation lease,
   bounded projection readers, initial personal-key publication and atomic
   storage/catalog/item/checkpoint CAS seams in `zann-db`;
+- local payload decryption in `crates/zann-db/src/services/{mod,items}.rs`,
+  including the list page's subtitle decryption, and the rule in
+  `crates/zann-core/src/item_subtitle.rs` that picks which non-secret
+  payload field a list row shows;
 - server audit-log infrastructure.
 
 `CODEOWNERS`, the `t: security` labeler and the `audit-surface` CI job must be

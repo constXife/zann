@@ -1,6 +1,6 @@
 //! Local vault read models and commands.
 
-pub use zann_core::VaultKind;
+pub use zann_core::{ItemSubtitle, VaultKind};
 
 #[derive(Debug, Clone)]
 pub struct VaultStatus {
@@ -34,6 +34,8 @@ pub struct ItemSummary {
     pub title: String,
     pub path: String,
     pub type_id: String,
+    /// Who or where the item is for; see `zann_core::item_subtitle`.
+    pub subtitle: Option<ItemSubtitle>,
     pub deleted: bool,
 }
 

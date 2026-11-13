@@ -47,6 +47,70 @@ fn ffi_projects_local_commands_results_and_errors() {
 }
 
 #[test]
+fn a_listed_item_carries_its_caption_from_non_secret_fields() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let core = support::open(&root.path().join("local.sqlite"));
+    core.initialize_master_password("adapter-test-password".into())
+        .expect("initialize");
+    let create = |path: &str, payload: &str| {
+        core.item_create(ItemCreate {
+            path: path.into(),
+            title: path.rsplit('/').next().expect("name").into(),
+            type_id: "login".into(),
+            payload_json: payload.into(),
+        })
+        .expect("create")
+    };
+    let with_username = create(
+        "Mail",
+        r#"{"v":1,"typeId":"login","fields":{"username":{"kind":"text","value":"alice"},"password":{"kind":"password","value":"test-secret"}}}"#,
+    );
+    let with_url = create(
+        "Cloud/mail storage",
+        r#"{"v":1,"typeId":"login","fields":{"url":{"kind":"url","value":"https://storage.example.net/box"}}}"#,
+    );
+    let secret_only = create(
+        "Bank",
+        r#"{"v":1,"typeId":"login","fields":{"password":{"kind":"password","value":"test-secret"}}}"#,
+    );
+    let list = |query: Option<&str>| {
+        core.items_list(
+            ItemsFilter {
+                query: query.map(str::to_string),
+                include_deleted: false,
+            },
+            Page {
+                limit: 10,
+                cursor: None,
+            },
+        )
+        .expect("list")
+    };
+
+    let page = list(None);
+    let caption = |id: &str| {
+        page.items
+            .iter()
+            .find(|item| item.id == id)
+            .expect("listed")
+            .caption
+            .clone()
+    };
+    assert_eq!(caption(&with_username.id).as_deref(), Some("alice"));
+    assert_eq!(
+        caption(&with_url.id).as_deref(),
+        Some("storage.example.net · Cloud")
+    );
+    assert_eq!(caption(&secret_only.id), None);
+    assert!(!format!("{:?}", page.items).contains("alice"));
+
+    // A search page carries captions too.
+    let found = list(Some("mail"));
+    assert_eq!(found.items.len(), 2);
+    assert!(found.items.iter().all(|item| item.caption.is_some()));
+}
+
+#[test]
 fn a_storage_no_server_syncs_has_no_server_to_forget() {
     let root = tempfile::tempdir().expect("tempdir");
     let core = support::open(&root.path().join("local.sqlite"));

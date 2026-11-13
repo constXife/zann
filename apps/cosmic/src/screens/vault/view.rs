@@ -193,10 +193,12 @@ pub(super) fn vault_label(vault: &VaultSummary) -> String {
 
 fn item_row(item: &ItemSummary) -> Element<'_, Message> {
     let spacing = theme::spacing();
-    // The title already names the item; the caption says where it lives.
+    // The title names the item; the caption says who or where it is for
+    // and where it lives.
     let mut text = widget::column::with_capacity(2).push(widget::text::body(item.title.clone()));
-    if let Some(folder) = zann_ui_core::folder_of(&item.path) {
-        text = text.push(widget::text::caption(folder.to_string()));
+    let subtitle = item.subtitle.as_ref().map(|subtitle| subtitle.as_str());
+    if let Some(caption) = zann_ui_core::item_caption(subtitle, &item.path) {
+        text = text.push(widget::text::caption(caption));
     }
     widget::row::with_capacity(2)
         .push(
