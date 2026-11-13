@@ -51,7 +51,7 @@ use zann_db::local::{
     LocalProjectionReadError, LocalStorage, LocalStorageProof, LocalStorageRepo, LocalSyncError,
     LocalSyncGenerationProof, LocalSyncRepo, LocalSyncScope, LocalVault, LocalVaultKeyBindError,
     LocalVaultRepo, PendingChangeRepo, PullChange, PullPage, PushCommit, PushOutcome,
-    ResetProjection,
+    ResetProjection, SyncCursorRepo,
 };
 use zann_db::{ExistingSqliteDatabase, SqlitePool};
 
@@ -610,12 +610,17 @@ impl SqliteSyncStore {
             .map(|value| SyncCursor::new(value.clone()))
             .transpose()
             .map_err(map_model_error)?;
-        let last_seq = page
+        let mut last_seq = page
             .checkpoint
             .and_then(|value| value.last_seq)
             .map(SyncSeq::new)
             .transpose()
             .map_err(map_model_error)?;
+        if let (None, Some(cursor)) = (last_seq, cursor.as_ref()) {
+            if cursor.sequence() > 0 {
+                last_seq = Some(self.adopt_legacy_last_seq(scope, cursor).await?);
+            }
+        }
         let pending = page
             .pending
             .iter()
@@ -624,6 +629,30 @@ impl SqliteSyncStore {
         SyncCheckpoint::new(cursor, last_seq, pending)
             .map(|checkpoint| checkpoint.with_more_pending(page.more_pending))
             .map_err(map_model_error)
+    }
+
+    /// MIG-009: a cursor written before migration 0002 added `last_seq` keeps
+    /// its sequence only inside the cursor. The current engine never writes a
+    /// cursor past zero without one, so this records it once, idempotently;
+    /// a cursor that changed meanwhile is a stale checkpoint.
+    async fn adopt_legacy_last_seq(
+        &self,
+        scope: SyncScope,
+        cursor: &SyncCursor,
+    ) -> Result<SyncSeq, SyncStoreError> {
+        let adopted = SyncCursorRepo::new(self.database.pool())
+            .adopt_legacy_last_seq(
+                scope.storage_id(),
+                scope.vault_id(),
+                cursor.as_str(),
+                cursor.sequence(),
+            )
+            .await
+            .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
+        if !adopted {
+            return Err(store_error(SyncStoreErrorKind::StaleCheckpoint));
+        }
+        SyncSeq::new(cursor.sequence()).map_err(map_model_error)
     }
 
     async fn item_states(
@@ -1845,7 +1874,7 @@ mod tests {
         ClientId, ConnectionMetadata, CredentialActivation, CredentialBundle, CredentialPortError,
         CredentialSecret, CredentialStore, LegacyCredentialLocator, LegacyCredentialSource,
     };
-    use zann_db::local::{LocalSyncCheckpoint, SyncCursorRepo};
+    use zann_db::local::LocalSyncCheckpoint;
 
     mod candidate_key;
     mod multi_storage;

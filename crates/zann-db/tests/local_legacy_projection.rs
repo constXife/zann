@@ -14,7 +14,7 @@ use zann_db::local::{
     LocalStorageProof, LocalStorageRepo, LocalSyncGenerationProof, LocalVault,
     LocalVaultKeyBindError, LocalVaultRepo,
 };
-use zann_db::local::{LocalItemRepo, PendingChangeRepo};
+use zann_db::local::{LocalItemRepo, PendingChangeRepo, SyncCursorRepo};
 use zann_db::{connect_sqlite_path_with_max, migrate_local, SqlitePool};
 
 const CACHE_FP: &str = "001122aabbcc";
@@ -223,4 +223,37 @@ async fn a_legacy_vault_without_cached_items_proves_nothing() {
         state(&legacy).await,
         (LocalVault::local_slug(legacy.vault.id), None, false)
     );
+}
+
+#[tokio::test]
+async fn a_legacy_cursor_records_its_sequence_once() {
+    let legacy = legacy(&[]).await;
+    sqlx_core::query::query::<Sqlite>(
+        "INSERT INTO sync_cursors (storage_id, vault_id, cursor, last_seq) VALUES (?1, ?2, 'legacy-44', NULL)",
+    )
+    .bind(legacy.storage.id)
+    .bind(legacy.vault.id)
+    .execute(&legacy.pool)
+    .await
+    .expect("insert a cursor written before last_seq existed");
+    let cursors = SyncCursorRepo::new(&legacy.pool);
+
+    assert!(!cursors
+        .adopt_legacy_last_seq(legacy.storage.id, legacy.vault.id, "another", 44)
+        .await
+        .expect("a cursor that changed is left alone"));
+    assert!(cursors
+        .adopt_legacy_last_seq(legacy.storage.id, legacy.vault.id, "legacy-44", 44)
+        .await
+        .expect("record the sequence"));
+    assert!(!cursors
+        .adopt_legacy_last_seq(legacy.storage.id, legacy.vault.id, "legacy-44", 44)
+        .await
+        .expect("a recorded sequence is kept"));
+    let checkpoint = cursors
+        .get_checkpoint(legacy.storage.id, legacy.vault.id)
+        .await
+        .expect("read checkpoint")
+        .expect("checkpoint kept");
+    assert_eq!(checkpoint.last_seq, Some(44));
 }
