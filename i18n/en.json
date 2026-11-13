@@ -124,6 +124,7 @@
     "kvActions": "Actions",
     "kvMatches": "{count}/{total} matches",
     "kvNoMatches": "No matching keys or values.",
+    "searchMatches": "{count} found for “{query}”",
     "noItems": "No items yet. Create your first item to get started.",
     "noFields": "This item has no fields.",
     "loadMore": "Load more",

@@ -127,13 +127,25 @@ final class VaultModelTests: XCTestCase {
         // Until the core answers, only the loaded page narrows.
         XCTAssertTrue(model.searching)
         XCTAssertEqual(model.visibleItems.count, 0)
+        XCTAssertNil(model.searchMatchCount)
         try await settled(model)
         XCTAssertEqual(model.visibleItems.map(\.title), ["Hetzner"])
         let counts = Dictionary(uniqueKeysWithValues: model.categories.map { ($0.id, $0.count) })
         XCTAssertEqual(counts["all"], 1)
+        XCTAssertEqual(model.searchMatchCount, 1)
+        XCTAssertEqual(model.searchedQuery, "hetz")
+        model.categoryID = "note"
+        XCTAssertEqual(model.searchMatchCount, 0)
+        model.categoryID = "all"
+        model.folder = .path(path: "Cloud")
+        XCTAssertEqual(model.searchMatchCount, 1)
+        model.folder = .withoutFolder
+        XCTAssertEqual(model.searchMatchCount, 0)
+        model.folder = .any
 
         model.query = ""
         try await settled(model)
+        XCTAssertNil(model.searchMatchCount)
         XCTAssertEqual(model.visibleItems.count, 200)
         XCTAssertEqual(model.totalCount, 254)
     }

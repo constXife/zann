@@ -545,6 +545,21 @@ final class VaultModel: ObservableObject {
         refreshVisible()
     }
 
+    /// The query the list now answers.
+    var searchedQuery: String { appliedQuery }
+
+    /// How many items match the search in the open category or folder; nil
+    /// while browsing, or while a newer query is on its way to the core.
+    var searchMatchCount: Int? {
+        guard !appliedQuery.isEmpty, trimmedQuery == appliedQuery, !searching else { return nil }
+        if folder == .any {
+            return categories.first { $0.id == categoryID }.map { Int($0.count) }
+        }
+        // The core counts categories, not folders, so a folder counts the
+        // loaded matches, and only once every one is loaded.
+        return nextCursor == nil ? visibleItems.count : nil
+    }
+
     private var trimmedQuery: String {
         query.trimmingCharacters(in: .whitespacesAndNewlines)
     }
