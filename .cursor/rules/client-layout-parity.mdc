@@ -1,0 +1,24 @@
+---
+description: Preserve semantic layout and interaction parity across zann GUI clients
+alwaysApply: true
+---
+
+# Client Layout Parity
+
+When changing a GUI client under `apps/`, read
+`docs/ux/Layout-Responsive-Spec.md` and compare every shipping GUI client.
+
+- Preserve `navigation sidebar -> items list -> item detail` on desktop.
+- Keep storage/vault context in the sidebar above categories and folders.
+- Keep search/pagination in the items workspace and secret actions in detail.
+- Modifier, hover, focus and loading state must not add/remove layout rows or
+  resize columns. Prefer style-only feedback; use a reserved slot or overlay
+  only when feedback is necessary.
+- Use the whole value surface as the copy target and acknowledge copying by
+  styling that same surface. Hold-to-reveal is Option/Alt on macOS and Shift on
+  Linux/Windows; always clear it on release or focus loss.
+- Share semantics, state transitions and geometry through `zann-ui-core` when
+  practical; keep toolkit-native widget appearance in each client.
+- For layout changes, update the UX spec and state-level tests in the same
+  change. Check COSMIC, Apple and legacy Tauri while they ship; implement the
+  change in each or document a time-bounded waiver with owner and rationale.

@@ -16,6 +16,7 @@ Normative references:
 - [`docs/audit-surface.md`](../../../docs/audit-surface.md)
 - [`docs/architecture/capabilities.md`](../../../docs/architecture/capabilities.md)
 - [`docs/adr/0002-client-strategy.md`](../../../docs/adr/0002-client-strategy.md)
+- [`docs/adr/0009-crypto-format-lifecycle.md`](../../../docs/adr/0009-crypto-format-lifecycle.md)
 
 ## Checklist of Zann Security Invariants
 
@@ -49,6 +50,18 @@ Normative references:
   route through `zann-crypto` (no ad-hoc wrappers in shells or `zann-ffi`).
 - Verify that AAD bindings (vault ID, item ID, key fingerprints) and resource
   bounds on persisted KDF parameters are validated before execution.
+- Enforce [ADR 0009](../../../docs/adr/0009-crypto-format-lifecycle.md) format
+  safety:
+  - No silent changes to `EncryptedBlob`, KDF, AAD, or `EncryptedPayload`
+    encoding: Pre-GA intentional `v1` updates require `!` / `BREAKING CHANGE:`,
+    lossless plaintext export/import instructions, and updated golden fixtures
+    in `tests/fixtures/crypto/`; post-`v0.Y` changes must add a new
+    `BLOB_VERSION` without altering `v1` decryption.
+  - Key re-wrapping and rotation paths (master password, `vault_key`,
+    `ZANN_SMK`) must trial-decrypt the new ciphertext in memory and verify
+    equality before committing (`Decrypt-Before-Commit`).
+  - Schema/storage migrations on existing vaults must not overwrite user data
+    without a pre-migration snapshot or fail-closed export gate.
 - Ensure `scripts/check-audit-surface-deps.sh` passes without widening
   `zann-crypto`'s dependency closure unnecessarily.
 
