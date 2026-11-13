@@ -311,7 +311,10 @@ impl CoreFacade {
     /// Whether a server connection syncs this storage; none does after
     /// `forget_server` until the user connects again.
     pub fn syncs_storage(&self, storage_id: String) -> CoreResult<bool> {
-        self.inner.syncs_storage(storage_id).map_err(Into::into)
+        self.inner
+            .storage_link(storage_id)
+            .map(|link| link == zann_client::app::local::StorageLink::Connected)
+            .map_err(Into::into)
     }
     /// Local changes in this storage that no server has confirmed yet.
     pub fn pending_change_count(&self, storage_id: String) -> CoreResult<u64> {
