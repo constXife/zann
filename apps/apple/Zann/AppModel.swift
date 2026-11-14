@@ -51,6 +51,8 @@ final class AppModel: ObservableObject {
     private let preferencesFile: PreferencesFile?
     private let systemLanguage: String
     private let openBrowser: (URL) -> Void
+    /// One prompt for the launch unlock screen, never for a later lock.
+    private var startupTouchIDPending = false
     /// The last input the app received while unlocked; the idle lock counts
     /// from here, as COSMIC's does.
     private var lastActivity = Date()
@@ -96,6 +98,7 @@ final class AppModel: ObservableObject {
         core = opened?.core
         keystore = opened?.keystore
         touchIDArmed = armed
+        startupTouchIDPending = armed && screen == .master(.unlock)
         keystore?.setPromptReason(strings("unlock.touchIdReason"))
         if let rememberedError {
             error = message(for: rememberedError)
@@ -107,9 +110,19 @@ final class AppModel: ObservableObject {
         keystore?.status()
     }
 
+    /// The unlock view calls this when active. Consume the attempt before
+    /// prompting: the system sheet can deactivate and reactivate the scene.
+    func unlockWithTouchIDAtStartup() async {
+        guard startupTouchIDPending, screen == .master(.unlock), !busy else { return }
+        startupTouchIDPending = false
+        guard keystoreStatus?.biometricsAvailable == true else { return }
+        await unlockWithTouchID()
+    }
+
     /// Prompts for Touch ID; dismissing the prompt leaves no error behind.
     func unlockWithTouchID() async {
         guard let core, !busy, touchIDArmed else { return }
+        startupTouchIDPending = false
         let contents = await perform {
             _ = try core.unlockRemembered()
             return try VaultModel.load(core)
@@ -265,6 +278,7 @@ final class AppModel: ObservableObject {
 
     func submit(password: String, mode: MasterMode) async {
         guard let core, !busy, !password.isEmpty else { return }
+        startupTouchIDPending = false
         let contents = await perform {
             switch mode {
             case .create: _ = try core.initializeMasterPassword(password: password)
