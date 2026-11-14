@@ -352,7 +352,7 @@ jobs:
   extension:
     needs: changes
     if: needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: System dependencies
