@@ -1,13 +1,61 @@
 # Zann for Apple platforms
 
-SwiftUI macOS client over the Rust core. iOS and iPadOS targets come later;
-the shared core is already built for them by `ZannCoreKit`.
+SwiftUI macOS client over the Rust core. iOS and iPadOS app targets are planned;
+`ZannCoreKit` can also package the core for those platforms.
+
+## Prerequisites (Apple silicon)
+
+- Full Xcode, selected with `sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer`.
+  Open Xcode once to accept its license and finish initial component installation.
+  Command Line Tools alone do not provide XCFramework packaging.
+- Rust installed through [rustup](https://rustup.rs/). The repository's
+  `rust-toolchain.toml` selects the workspace toolchain.
+- `jq` (the build script reads Cargo metadata and `Package.swift`) and
+  XcodeGen (generates the app project):
+
+```bash
+brew install jq xcodegen
+rustup target add aarch64-apple-darwin
+```
+
+Run these commands from the repository root so rustup uses its pinned toolchain.
+The local build requires only the macOS SDK and Rust target; iOS components are
+not needed.
+
+## Build and run
+
+For a new account, first [start the development server](../../README.md#1-start-a-server)
+or use an existing server. From the repository root:
 
 ```bash
 apps/apple/ZannCoreKit/build-xcframework.sh debug
 cd apps/apple
-xcodegen --spec project.yml   # brew install xcodegen
-open Zann.xcodeproj           # or: xcodebuild test -scheme Zann -destination 'platform=macOS,arch=arm64'
+xcodegen --spec project.yml
+open Zann.xcodeproj
+```
+
+Run the Zann scheme in Xcode, connect to `http://localhost:8080` (or your server),
+sign in or register, then create/unlock your personal vault with its master
+password. After the first sync, cached vaults can be used offline.
+
+`build-xcframework.sh <debug|release>` replaces `Generated/` with a macOS-only
+XCFramework and Swift bindings. For the full arm64 macOS + iOS + iOS simulator
+package used in CI, install the iOS SDK/platform components in Xcode and run:
+
+```bash
+rustup target add aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim
+apps/apple/ZannCoreKit/build-xcframework.sh debug --all-platforms
+```
+
+The script checks tools, Rust targets and the requested SDKs before compiling.
+Deployment versions come from `ZannCoreKit/Package.swift`.
+
+## Tests
+
+```bash
+swift test --package-path apps/apple/ZannCoreKit
+cd apps/apple
+xcodebuild test -project Zann.xcodeproj -scheme Zann -destination 'platform=macOS,arch=arm64'
 ```
 
 The server tests run against a live server with password sign-in, and skip
