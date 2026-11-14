@@ -24,6 +24,7 @@ pub struct TestApp {
     _guard: support::TestGuard,
     pub(super) app: axum::Router,
     pub(crate) pool: zann_db::PgPool,
+    pub(crate) master_key: std::sync::Arc<SecretKey>,
 }
 
 impl TestApp {
@@ -43,6 +44,14 @@ impl TestApp {
         let guard = support::test_guard().await;
 
         let pool = support::setup_shared_db().await;
+        Self::with_pool(pool, guard).await
+    }
+
+    pub async fn new_with_database(pool: zann_db::PgPool) -> Self {
+        Self::with_pool(pool, support::test_guard().await).await
+    }
+
+    async fn with_pool(pool: zann_db::PgPool, guard: support::TestGuard) -> Self {
         support::reset_db(&pool).await;
         let rules: Vec<PolicyRule> = support::load_policy_rules();
 
@@ -54,13 +63,14 @@ impl TestApp {
 
         let usage_tracker = std::sync::Arc::new(UsageTracker::new(pool.clone(), 100));
         let (secret_policies, secret_default_policy) = support::default_secret_policies();
+        let master_key = std::sync::Arc::new(SecretKey::generate());
         let state = AppState {
             db: pool.clone(),
             db_tx_isolation: zann_server::settings::DbTxIsolation::ReadCommitted,
             started_at: std::time::Instant::now(),
             password_pepper: "pepper".to_string(),
             token_pepper: "pepper".to_string(),
-            server_master_key: Some(std::sync::Arc::new(SecretKey::generate())),
+            server_master_key: Some(master_key.clone()),
 
             identity_key: support::test_identity_key(),
             access_token_ttl_seconds: 3600,
@@ -80,6 +90,7 @@ impl TestApp {
             _guard: guard,
             app,
             pool,
+            master_key,
         }
     }
 

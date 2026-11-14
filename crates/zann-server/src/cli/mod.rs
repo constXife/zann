@@ -2,6 +2,7 @@ use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 pub mod export;
+pub mod import;
 pub mod init;
 pub mod provision;
 pub mod tokens;
@@ -20,6 +21,8 @@ enum Command {
     Migrate,
     /// Export shared server-encrypted vaults in plaintext for local recovery
     Export(export::ExportArgs),
+    /// Restore a plaintext shared-vault export under this server master key
+    Import(import::ImportArgs),
     /// Print OpenAPI spec (optionally to a file)
     Openapi(OpenApiArgs),
     /// Initial setup (first user + vault)
@@ -41,7 +44,11 @@ pub enum RunMode {
     Server,
     Migrate,
     Export(export::ExportArgs),
-    OpenApi { out: Option<PathBuf> },
+    /// Restore a plaintext shared-vault export under this server master key
+    Import(import::ImportArgs),
+    OpenApi {
+        out: Option<PathBuf>,
+    },
     Init(init::InitArgs),
     Provision(provision::ProvisionArgs),
     Token(tokens::TokenArgs),
@@ -53,6 +60,7 @@ pub fn parse_args() -> RunMode {
         None => RunMode::Server,
         Some(Command::Migrate) => RunMode::Migrate,
         Some(Command::Export(args)) => RunMode::Export(args),
+        Some(Command::Import(args)) => RunMode::Import(args),
         Some(Command::Openapi(args)) => RunMode::OpenApi { out: args.out },
         Some(Command::Init(args)) => RunMode::Init(args),
         Some(Command::Provision(args)) => RunMode::Provision(args),
@@ -127,6 +135,26 @@ mod tests {
             "--i-understand-plaintext",
         ]);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_import_requires_a_file_and_explicit_owner() {
+        let cli = Cli::parse_from([
+            "zann-server",
+            "import",
+            "--input",
+            "shared.json",
+            "--owner-email",
+            "owner@example.com",
+            "--i-understand-plaintext",
+        ]);
+        let Some(Command::Import(args)) = cli.command else {
+            panic!("expected import")
+        };
+        assert_eq!(args.input, PathBuf::from("shared.json"));
+        assert_eq!(args.owner_email, "owner@example.com");
+        assert!(args.i_understand_plaintext);
+        assert!(Cli::try_parse_from(["zann-server", "import", "--input", "shared.json"]).is_err());
     }
 
     #[test]

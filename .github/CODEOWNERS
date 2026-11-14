@@ -56,6 +56,17 @@
 /crates/zann-db/src/services/create_item.rs @constXife
 /crates/zann-db/migrations/0005_item_metadata.sql @constXife
 
+# Shared plaintext recovery (#244)
+/crates/zann-server/src/domains/backup/ @constXife
+/crates/zann-server/src/cli/export.rs @constXife
+/crates/zann-server/src/cli/import.rs @constXife
+/crates/zann-server/tests/shared_backup.rs @constXife
+/crates/zann-server/tests/shared_backup/ @constXife
+/crates/zann-db/src/repo/backup.rs @constXife
+/crates/zann-db/src/repo/items.rs @constXife
+/crates/zann-db/src/repo/vaults.rs @constXife
+/crates/zann-db/src/repo/devices.rs @constXife
+
 # Authenticated local browser IPC (#199)
 /crates/zann-daemon/ @constXife
 /crates/zann-native-host/ @constXife

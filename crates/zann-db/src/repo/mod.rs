@@ -28,6 +28,7 @@ pub(crate) mod prelude {
     };
 }
 
+mod backup;
 mod changes;
 mod devices;
 mod groups;
@@ -36,6 +37,7 @@ mod sessions;
 mod users;
 mod vaults;
 
+pub use backup::ServerBackupRepo;
 pub use changes::ChangeRepo;
 pub use devices::{DeviceRepo, ServiceAccountRepo, ServiceAccountSessionRepo};
 pub use groups::{GroupMemberRepo, GroupRepo, OidcGroupMappingRepo};

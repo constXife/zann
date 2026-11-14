@@ -24,6 +24,14 @@ An intentional format cutover must wait for the lossless export/import path
 and its round-trip tests; this documentation change does not authorize a
 cutover or change any persisted bytes.
 
+The #244 implementation candidate adds paged shared-server export and symmetric
+atomic import, with a PostgreSQL round-trip of 132 current typed items under a
+new SMK and destination UUID. Its exact preservation scope and excluded server
+state are documented in [Shared server vault backups](../Server-Backups.md).
+This realizes the server item-data prerequisite in section 3; it does not
+implement NFC or authorize deploying the separate #245 candidate before this
+recovery path has landed and the operator has exported with the old derivation.
+
 ## Context
 
 In a password and secret manager, an accidental change to key derivation, AEAD
