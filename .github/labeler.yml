@@ -12,6 +12,8 @@
           - "crates/zann-db/migrations/0006_browser_login_index.sql"
           - "crates/zann-core/src/constants.rs"
           - "crates/zann-client/src/native_messaging.rs"
+          - "crates/zann-client/src/browser_ipc.rs"
+          - "crates/zann-client/src/browser_ipc/**"
           - "crates/zann-autofill/**"
           - "crates/zann-crypto/**"
           - "crates/zann-ui-core/src/generator/**"

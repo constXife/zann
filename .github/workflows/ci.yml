@@ -377,8 +377,8 @@ jobs:
           node apps/extension/build.mjs
           cargo build -p zann-native-host --locked
           cargo test -p zann-daemon --test chromium_fixture --no-run --locked
-      - name: Shared complete-login search tests
-        run: cargo test -p zann-client --no-default-features --features browser-ipc --test browser_search --locked
+      - name: Shared browser search and usage tests
+        run: cargo test -p zann-client --no-default-features --features browser-ipc --test browser_search --test browser_usage --locked
       - name: Shared login-list presentation tests
         run: cargo test -p zann-ui-core --test login_list --locked
       - name: Browser adapter boundary tests
