@@ -26,12 +26,11 @@ const createWrapper = (options?: {
   const refreshAppStatus = vi.fn();
   const clearSyncErrors = vi.fn();
   const unlockedValue = options?.unlocked ?? false;
-  const selectedStorageValue = options?.selectedStorageId ?? "local";
+  const selectedStorageValue = options?.selectedStorageId ?? "";
   const formatError = options?.formatError ?? ((err: unknown) => String(err));
 
   const Wrapper = defineComponent({
     setup() {
-      const uiSettings = ref({ showLocalStorage: true });
       const appStatus = ref<AppStatus | null>(null);
       const unlocked = ref(unlockedValue);
       const selectedStorageId = ref(selectedStorageValue);
@@ -41,7 +40,6 @@ const createWrapper = (options?: {
 
       api = useAppAuthFlow({
         t: (key) => key,
-        uiSettings,
         appStatus,
         unlocked,
         selectedStorageId,

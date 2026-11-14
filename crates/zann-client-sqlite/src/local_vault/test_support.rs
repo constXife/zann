@@ -62,6 +62,6 @@ impl LocalVault {
             .replace_kdf_identity_if_matches(None, identity)
             .map_err(|err| LocalError::Service(err.to_string()))?;
         *self.storage_id.lock().expect("lock poisoned") = Some(storage_id);
-        self.finish_unlock(master_key)
+        self.finish_unlock(master_key, self.context_generation.load(Ordering::SeqCst))
     }
 }

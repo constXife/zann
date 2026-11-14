@@ -60,7 +60,7 @@ fn a_server_storage_without_a_connection_is_not_synced() {
     core.storage_sync_state(Uuid::now_v7().to_string())
         .expect_err("an unknown storage is not a local one");
     // An explicit sync still says why it cannot run.
-    core.remote_sync(Some(storage_id))
+    core.remote_sync(Some(storage_id), None)
         .expect_err("no server to sync with");
 }
 

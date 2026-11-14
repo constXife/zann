@@ -104,7 +104,8 @@
     "personal": "Личные",
     "shared": "Общие",
     "folders": "Папки",
-    "noFolder": "Без папки"
+    "noFolder": "Без папки",
+    "serverAccount": "Сервер / аккаунт"
   },
   "folder": {
     "rename": "Переименовать папку",
@@ -116,6 +117,10 @@
     "affects": "Затронет {count} записей"
   },
   "items": {
+    "copyField": "Скопировать: {field}",
+    "openWebsite": "Открыть сайт",
+    "websiteOpenFailed": "Не удалось открыть сайт.",
+    "copiedClears": "Скопировано. Буфер обмена очистится через {seconds} сек.",
     "searchPlaceholder": "Поиск",
     "kvSearchPlaceholder": "Поиск по ключам (/)",
     "kvSectionTitle": "Ключ-значение",
@@ -124,6 +129,8 @@
     "kvActions": "Действия",
     "kvMatches": "Совпадений: {count}/{total}",
     "kvNoMatches": "Совпадений не найдено.",
+    "noSearchResults": "Совпадений не найдено.",
+    "clearSearch": "Очистить поиск",
     "searchMatches": "Найдено по «{query}»: {count}",
     "noItems": "Пока нет записей. Создайте первую запись.",
     "noFields": "У этой записи нет полей.",
@@ -303,7 +310,6 @@
     "subtitle": "Подключитесь к серверу Zann и работайте с хранилищем офлайн.",
     "restore": "Восстановить из бэкапа",
     "connect": "Подключить сервер",
-    "useOfflineOnly": "Использовать офлайн",
     "stepOf": "Шаг {current} из {total}",
     "stepConnect": "Подключение",
     "stepSecure": "Защита устройства",
@@ -391,7 +397,6 @@
     "biometricsUnsupported": "Биометрия не поддерживается на этой платформе.",
     "language": "Язык",
     "accounts": {
-      "localVault": "Локальное хранилище",
       "connectedServers": "Подключённые серверы",
       "noServers": "Нет подключённых серверов",
       "lastSynced": "Синхронизировано",
@@ -454,8 +459,8 @@
     "importAppleDuplicates": "Повторяющиеся заголовки: {count}. К ним будет добавлен числовой суффикс; учётные данные не будут перезаписаны.",
     "importAppleInvalidPreview": "Строки без названия будут пропущены: {count}.",
     "importApplePlainWarning": "CSV содержит пароли в открытом виде. Храните его безопасно и удалите, когда он больше не нужен.",
-    "importApplePickerLocalOnly": "Выбранный CSV не является локальным файлом.",
-    "importApplePickerFailed": "Не удалось открыть выбор файла: {error}",
+      "importApplePickerLocalOnly": "Выбранный CSV не является локальным файлом.",
+      "importApplePickerFailed": "Не удалось открыть выбор файла: {error}",
     "importAppleTargetMissing": "Нет доступного хранилища для импорта.",
     "importAppleSuccess": "Apple Passwords импортированы",
     "importAppleFailed": "Ошибка импорта Apple Passwords",
@@ -493,6 +498,20 @@
     "openSettings": "Открыть настройки"
   },
   "create": {
+    "actions": {
+      "login": "Создать логин",
+      "note": "Создать заметку",
+      "card": "Создать карту",
+      "identity": "Добавить личные данные",
+      "api": "Создать API-запись",
+      "kv": "Создать запись ключ-значение",
+      "ssh_key": "Создать SSH-ключ",
+      "database": "Создать запись базы данных",
+      "cloud_iam": "Создать облачные ключи",
+      "file_secret": "Добавить файл",
+      "server_credentials": "Создать учётные данные сервера",
+      "secret": "Создать секрет"
+    },
     "vaultTitle": "Создать хранилище",
     "itemHeader": "Создать секрет",
     "itemTitle": "Имя",
@@ -527,7 +546,7 @@
     "itemFolder": "Папка (необязательно)",
     "itemFolderPlaceholder": "Путь папки",
     "modalBody": "Создание появится в следующей итерации. Пока используйте CLI для создания хранилищ и записей.",
-    "vaultBody": "Новые хранилища создаются локально или на сервере (пока только personal).",
+    "vaultBody": "Новые общие хранилища создаются на подключённом сервере.",
     "itemBody": "Добавьте запись в выбранное хранилище.",
     "vaultName": "Название хранилища",
     "vaultKind": "Тип хранилища",
@@ -548,6 +567,8 @@
     "keyLabel": "Ключ",
     "actionsLabel": "Действия",
     "advanced": "Дополнительно",
+    "additionalFields": "Дополнительные поля",
+    "fieldType": "Тип поля",
     "customFields": "Свои поля",
     "kindText": "Текст",
     "kindPassword": "Пароль",
@@ -630,6 +651,7 @@
     "name_too_long": "Слишком длинное имя.",
     "path_too_long": "Слишком длинный путь.",
     "path_segments_limit": "Слишком глубокий путь.",
+    "item_name_invalid": "Введите имя без /. Папку укажите отдельно.",
     "path_invalid": "Путь содержит недопустимые сегменты.",
     "path_segment_invalid": "Путь содержит служебные сегменты.",
     "path_segment_invalid_chars": "Сегменты пути могут содержать только латинские буквы, цифры, подчёркивания или дефисы.",
@@ -657,7 +679,10 @@
     "hardware_key_unsupported": "Ключ не поддерживает hmac-secret",
     "hardware_key_not_accessible": "Ключ виден системе, но недоступен",
     "hardware_key_unsupported_platform": "Аппаратные ключи пока не поддерживаются на этой платформе",
-    "hardware_key_error": "Ошибка аппаратного ключа"
+    "hardware_key_error": "Ошибка аппаратного ключа",
+    "context_changed": "Открытое хранилище изменилось. Повторите действие.",
+    "storage_empty": "В этом хранилище ещё нет загруженных vaults. Сначала выполните синхронизацию.",
+    "storage_key_mismatch": "В этом хранилище другой мастер-ключ. Текущее хранилище осталось открытым."
   },
   "time": {
     "never": "Никогда",
@@ -669,33 +694,10 @@
     "hoursAgo": "ч назад"
   },
   "storage": {
-    "addStorage": "Добавить хранилище",
     "addServer": "Добавить сервер",
     "servers": "Серверы",
     "noServers": "Нет подключённых серверов",
-    "showLocalVaults": "Показать локальные хранилища",
     "settings": "Настройки хранилищ",
-    "localVault": "Локальное хранилище",
-    "remoteServer": "Удалённый сервер",
-    "remoteServers": "Удалённые серверы",
-    "reveal": "Показать в Finder",
-    "disconnect": "Отключить",
-    "delete": "Удалить...",
-    "eraseCache": "Очистить локальный кеш",
-    "confirmDelete": "Введите DELETE для подтверждения",
-    "deleteWarning": "Данные локального хранилища будут удалены с устройства.",
-    "disconnectWarning": "Сервер будет удалён из приложения. Данные на сервере сохранятся.",
-    "remoteNotAffected": "Удалённые серверы не затрагиваются.",
-    "deleteTitle": "Удалить локальное хранилище",
-    "disconnectTitle": "Отключить сервер?",
-    "moveToTrash": "В корзину",
-    "alsoEraseCache": "Также очистить локальный кеш",
-    "cancel": "Отмена",
-    "fileInfo": "Файл",
-    "sizeInfo": "Размер",
-    "modifiedInfo": "Изменён",
-    "serverInfo": "Сервер",
-    "accountInfo": "Аккаунт",
     "lastSynced": "Синхронизировано"
   },
   "status": {
@@ -720,6 +722,9 @@
     "pending": "Ожидает синхронизации"
   },
   "sync": {
+    "firstSyncTitle": "Первая синхронизация",
+    "firstSyncBody": "Загружаем хранилища. Записи появятся по мере загрузки.",
+    "details": "Синхронизация",
     "disconnected": "Нет подключения · не отправлено: {count}",
     "syncing": "Синхронизация с {server}…",
     "failed": "{server} · ошибка синхронизации",

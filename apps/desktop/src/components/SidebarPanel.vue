@@ -127,7 +127,7 @@ const staleSyncTitle = computed(() => {
         data-testid="storage-dropdown-toggle"
       >
         <span class="flex-shrink-0 text-sm">
-          {{ currentStorage?.kind === StorageKind.Remote ? '☁️' : '📁' }}
+          ☁️
         </span>
 
         <div class="flex-1 min-w-0">

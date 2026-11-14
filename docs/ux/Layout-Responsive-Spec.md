@@ -22,7 +22,7 @@
 - Items list: item rows, filters, selection, conflict badges.
 - Detail view: item fields, reveal/copy actions, TOTP, attachments (if/when enabled).
 - Inspector / right rail: metadata, history, audit, participants, sync status.
-- Global toolbar: search, create, sync status, lock/unlock.
+- Global toolbar: search, create, lock/unlock; sync status may sit here or beside the sidebar vault context.
 
 ## Desktop Vault Home Contract
 
@@ -35,6 +35,24 @@ ownership.
   categories and folders. They are context, not list filters.
 - MUST: Keep search and list pagination in the items workspace, not the
   navigation sidebar.
+- Native shells MAY place the storage sync indicator beside the sidebar's
+  server/account selector. macOS uses two rows: server/account with sync above,
+  vault below. Details and sync actions open in a popover; a single vault
+  shows its name instead of a selector.
+- macOS opens cached content before network synchronization finishes. Sync
+  progress stays in the server indicator; errors and recovery actions belong
+  to its popover, without blocking the workspace or inserting a status banner.
+  Server/vault selectors remain usable during network sync. Progress belongs
+  to the storage being synced; completion must preserve explicit navigation,
+  including when the user leaves a context and returns before an old read ends.
+- On a new device, macOS shows an explicit first-sync explanation before the
+  first cache exists. Committed catalog metadata exposes server/vault navigation
+  immediately; committed pull pages progressively populate the current list.
+  An unfinished first pull must not be presented as an empty vault. Subsequent
+  background sync keeps the compact sidebar indicator and usable cached content.
+- macOS keeps the detail layout stable while replacing an item. Retained
+  content is masked and inactive until the requested item is ready; reveal and
+  copy feedback never carry across selections.
 - MUST: Keep reveal, copy, TOTP and item actions in the detail workspace.
 - SHOULD: Hide the vault selector when the current storage has only one vault;
   hiding it MUST NOT move controls between semantic regions.
@@ -126,3 +144,6 @@ their platform-native controls inside the same semantic regions.
 - Closing a desktop window to tray follows its configured preference. If the
   tray becomes unavailable, a hidden COSMIC window is reopened; the configured
   lock-on-hidden policy applies before closing the window.
+- macOS keeps running when its window closes and provides Open, Lock and Quit
+  through its menu-bar icon. Opening restores the single main window; idle
+  lock and clear-on-exit remain active while no window is visible.

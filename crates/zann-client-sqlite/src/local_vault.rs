@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::SqliteSyncStoreFactory;
 use tokio::runtime::Runtime;
@@ -38,11 +39,15 @@ pub struct LocalVault {
     pool: Mutex<SqlitePool>,
     /// Kept as an exact native path so the pool can be opened again after a restore.
     database_path: PathBuf,
+    context_gate: RwLock<()>,
+    context_generation: AtomicU64,
     storage_id: Mutex<Option<Uuid>>,
     vault_id: Mutex<Option<Uuid>>,
     master_key: Mutex<Option<Arc<SecretKey>>>,
     /// Cancelled on lock, so no sync keeps the master key past it.
-    syncs: in_flight::InFlightSyncs,
+    syncs: in_flight::InFlightOperations,
+    /// Read operations never retain a key after cancellation has completed.
+    item_reads: in_flight::InFlightOperations,
     /// The vault directory. The remembered unlock is persisted there in its own
     /// file, so every client on this machine sees the same enrolments.
     root: PathBuf,
@@ -85,8 +90,10 @@ impl LocalVault {
             .block_on(migrate_local(&pool))
             .map_err(|err| LocalError::Service(err.to_string()))?;
         let storage_id = resolve_storage_id(&self.runtime, &pool)?;
+        let _context = self.context_gate.write().expect("lock poisoned");
         *self.pool.lock().expect("lock poisoned") = pool;
         *self.storage_id.lock().expect("lock poisoned") = storage_id;
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -133,7 +140,11 @@ impl LocalVault {
     /// it. Note the vault-key decryption below doubles as the check that the key
     /// is the right one, so a key recovered from a stale wrapped copy fails here
     /// exactly like a wrong password.
-    fn finish_unlock(&self, master_key: Arc<SecretKey>) -> LocalResult<VaultStatus> {
+    fn finish_unlock(
+        &self,
+        master_key: Arc<SecretKey>,
+        generation: u64,
+    ) -> LocalResult<VaultStatus> {
         let pool = self.pool();
         let repo = LocalVaultRepo::new(&pool);
         let list = |storage_id| {
@@ -162,9 +173,12 @@ impl LocalVault {
             self.check_key_for_new_device(&master_key)?;
             None
         };
+        let _context = self.context_gate.write().expect("lock poisoned");
+        self.check_context_generation(generation)?;
         *self.storage_id.lock().expect("lock poisoned") = storage_id;
         *self.master_key.lock().expect("lock poisoned") = Some(master_key);
         *self.vault_id.lock().expect("lock poisoned") = vault_id;
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
         Ok(VaultStatus { unlocked: true })
     }
 
@@ -175,6 +189,7 @@ impl LocalVault {
         key: String,
         value: String,
     ) -> LocalResult<String> {
+        let _context = self.context_gate.read().expect("lock poisoned");
         let master_key = self.master_key()?;
         let vault_id = self.vault_id()?;
         let pool = self.pool();
@@ -288,10 +303,13 @@ impl LocalVault {
             runtime,
             pool: Mutex::new(pool),
             database_path,
+            context_gate: RwLock::new(()),
+            context_generation: AtomicU64::new(0),
             storage_id: Mutex::new(storage_id),
             vault_id: Mutex::new(None),
             master_key: Mutex::new(None),
-            syncs: in_flight::InFlightSyncs::default(),
+            syncs: in_flight::InFlightOperations::default(),
+            item_reads: in_flight::InFlightOperations::default(),
             root,
         }))
     }
@@ -405,6 +423,7 @@ pub use ports::*;
 mod unlock;
 
 mod session;
+mod sync_progress;
 
 mod items;
 
@@ -413,6 +432,8 @@ mod maintenance;
 mod identity;
 use identity::*;
 
+mod context;
+mod item_read;
 mod selection;
 use selection::*;
 
@@ -479,6 +500,14 @@ impl LocalVaultService for LocalVault {
     fn item_get(&self, id: String) -> LocalResult<ItemDetail> {
         LocalVault::item_get(self, id)
     }
+    fn item_read(
+        &self,
+        id: String,
+        operation: SessionOperation,
+    ) -> LocalResult<zann_core::ItemDetail> {
+        LocalVault::item_read(self, id, operation)
+    }
+
     fn item_create(&self, create: ItemCreate) -> LocalResult<ItemDetail> {
         LocalVault::item_create(self, create)
     }
@@ -543,7 +572,7 @@ impl LocalVaultService for LocalVault {
         LocalVault::set_current_storage(self, id)
     }
 
-    fn current_storage_id(&self) -> LocalResult<String> {
+    fn current_storage_id(&self) -> Option<String> {
         LocalVault::current_storage_id(self)
     }
     fn app_status(&self) -> LocalResult<AppStatus> {
@@ -552,8 +581,12 @@ impl LocalVaultService for LocalVault {
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus> {
         LocalVault::initialize_master_password(self, password)
     }
-    fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome> {
-        LocalVault::remote_sync(self, storage_id)
+    fn remote_sync(
+        &self,
+        storage_id: Option<String>,
+        progress: Option<&LocalSyncObserver>,
+    ) -> LocalResult<LocalSyncOutcome> {
+        LocalVault::remote_sync(self, storage_id, progress)
     }
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()> {
         LocalVault::sync_reset(self, storage_id)
@@ -776,6 +809,14 @@ mod compatibility_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "local_vault/context_tests.rs"]
+mod context_tests;
+
+#[cfg(test)]
+#[path = "local_vault/item_read_tests.rs"]
+mod item_read_tests;
 
 #[cfg(feature = "test-support")]
 mod test_support;

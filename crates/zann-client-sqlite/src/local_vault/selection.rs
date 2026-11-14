@@ -61,13 +61,18 @@ impl LocalVault {
         synced_storage: Option<String>,
         selection_before: Option<Uuid>,
         operation_key: &Arc<SecretKey>,
+        generation: u64,
     ) -> LocalResult<()> {
+        let _context = self.context_gate.write().expect("lock poisoned");
         let key = self.master_key.lock().expect("lock poisoned");
         if !key
             .as_ref()
             .is_some_and(|current| Arc::ptr_eq(current, operation_key))
         {
             return Err(LocalError::Locked);
+        }
+        if self.context_generation.load(Ordering::SeqCst) != generation {
+            return Ok(());
         }
         let mut storage = self.storage_id.lock().expect("lock poisoned");
         let mut selected_vault = self.vault_id.lock().expect("lock poisoned");
@@ -76,11 +81,20 @@ impl LocalVault {
         }
         let pool = self.pool();
         let target = match synced_storage {
-            Some(id) => Some(
-                Uuid::parse_str(&id)
-                    .map_err(|_| LocalError::InvalidArgument("invalid storage id".into()))?,
-            ),
-            None => resolve_storage_id(&self.runtime, &pool)?,
+            Some(id) => {
+                let target = Uuid::parse_str(&id)
+                    .map_err(|_| LocalError::InvalidArgument("invalid storage id".into()))?;
+                // The caller can reach Rust after explicit navigation already
+                // selected another empty replica. Its old target cannot win.
+                if selection_before.is_some_and(|selected| selected != target) {
+                    return Ok(());
+                }
+                Some(target)
+            }
+            None => match selection_before {
+                Some(selected) => Some(selected),
+                None => resolve_storage_id(&self.runtime, &pool)?,
+            },
         };
         let Some(target) = target else {
             return Ok(());
@@ -92,6 +106,8 @@ impl LocalVault {
         let vault = preferred_vault(&self.runtime, &pool, target, &vaults)?;
         *storage = Some(target);
         *selected_vault = vault;
+        self.item_reads.cancel_all();
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 }
@@ -114,14 +130,24 @@ mod tests {
         let storage = Some(core.storage_id().expect("storage"));
         core.lock().expect("lock");
         assert!(matches!(
-            core.select_synced_catalog(None, storage, &key),
+            core.select_synced_catalog(
+                None,
+                storage,
+                &key,
+                core.context_generation.load(Ordering::SeqCst)
+            ),
             Err(LocalError::Locked)
         ));
         assert!(!core.vault_status().expect("status").unlocked);
         core.unlock("fixture master password".into())
             .expect("new unlock");
         assert!(matches!(
-            core.select_synced_catalog(None, storage, &key),
+            core.select_synced_catalog(
+                None,
+                storage,
+                &key,
+                core.context_generation.load(Ordering::SeqCst)
+            ),
             Err(LocalError::Locked)
         ));
     }

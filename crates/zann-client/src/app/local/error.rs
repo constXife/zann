@@ -11,6 +11,12 @@ pub enum LocalError {
     },
     #[error("vault is locked")]
     Locked,
+    #[error("operation cancelled")]
+    Cancelled,
+    #[error("operation deadline exceeded")]
+    DeadlineExceeded,
+    #[error("item read: {0}")]
+    ItemRead(#[source] zann_core::ServiceError),
     #[error("invalid payload: {0}")]
     InvalidPayload(#[source] zann_core::secrets::PayloadError),
     #[error("invalid argument: {0}")]

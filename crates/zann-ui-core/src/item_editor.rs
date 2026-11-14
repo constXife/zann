@@ -101,6 +101,8 @@ pub enum DraftError {
     Payload(#[source] PayloadError),
     #[error("item path is required")]
     Path,
+    #[error("item name must be non-empty and contain no slash")]
+    Name,
     #[error("item type is required")]
     Type,
     #[error("at least one field is required")]
@@ -116,6 +118,7 @@ impl DraftError {
     pub fn translation_key(&self) -> &'static str {
         match self {
             Self::Path => "errors.path_invalid",
+            Self::Name => "errors.item_name_invalid",
             Self::Fields => "errors.fields_required",
             Self::FieldKey => "errors.field_key_invalid",
             Self::DuplicateKey => "errors.field_key_duplicate",
@@ -146,6 +149,39 @@ fn template_fields(type_id: &str) -> Result<Vec<DraftField>, DraftError> {
     })
 }
 impl ItemDraft {
+    /// The editable name, separate from the folder containing the item.
+    pub fn name(&self) -> &str {
+        self.path
+            .rsplit('/')
+            .find(|segment| !segment.trim().is_empty())
+            .unwrap_or(&self.path)
+            .trim()
+    }
+
+    pub fn folder(&self) -> Option<&str> {
+        crate::folder_of(
+            self.path
+                .trim()
+                .trim_end_matches(|c: char| c == '/' || c.is_whitespace()),
+        )
+    }
+
+    /// Applies the two location inputs atomically; a name cannot move an item
+    /// into another folder or disappear into the folder's final segment.
+    pub fn set_location(&mut self, name: &str, folder: &str) -> Result<(), DraftError> {
+        let name = name.trim();
+        if name.is_empty() || name.contains('/') {
+            return Err(DraftError::Name);
+        }
+        let folder = folder.trim().trim_end_matches('/');
+        self.path = if folder.is_empty() {
+            name.to_string()
+        } else {
+            format!("{folder}/{name}")
+        };
+        Ok(())
+    }
+
     pub fn create(type_id: &str) -> Result<Self, DraftError> {
         Ok(Self {
             path: String::new(),
@@ -197,14 +233,8 @@ impl ItemDraft {
     pub fn save(&self) -> Result<ItemSave, DraftError> {
         let payload_json = self.payload_json()?;
         let path = self.path.trim();
-        let title = path
-            .rsplit('/')
-            .find(|segment| !segment.trim().is_empty())
-            .unwrap_or(path)
-            .trim()
-            .to_string();
         Ok(ItemSave {
-            title,
+            title: self.name().to_string(),
             path: path.to_string(),
             type_id: self.type_id.clone(),
             payload_json,

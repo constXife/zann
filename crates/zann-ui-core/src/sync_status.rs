@@ -143,6 +143,14 @@ fn server_label(url: &str) -> String {
         .to_string()
 }
 
+/// A storage context names its server when remote, and its stored name when local.
+pub fn storage_context_label(name: &str, server_url: Option<&str>) -> String {
+    match server_url {
+        Some(url) => server_label(url),
+        None => name.to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

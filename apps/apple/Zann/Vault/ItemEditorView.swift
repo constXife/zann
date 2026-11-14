@@ -11,6 +11,7 @@ struct ItemEditorView: View {
 
     /// Explicit per-field reveals; reset whenever field indices shift.
     @State private var revealed: Set<Int> = []
+    @State private var additionalExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -36,21 +37,20 @@ struct ItemEditorView: View {
     private var location: some View {
         Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
             GridRow {
-                Text(strings("create.itemPath")).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 4) {
-                    TextField(
-                        "Work/GitHub",
-                        text: Binding(get: { editor.path }, set: { editor.setPath($0) })
-                    )
+                Text(strings("create.itemTitle")).foregroundStyle(.secondary)
+                TextField(strings("create.itemTitle"), text: $editor.name)
                     .textFieldStyle(.roundedBorder)
-                    Text(strings("create.itemPathHint"))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                    .accessibilityLabel(strings("create.itemTitle"))
+            }
+            GridRow {
+                Text(strings("create.itemFolder")).foregroundStyle(.secondary)
+                TextField(strings("create.itemFolderPlaceholder"), text: $editor.folder)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel(strings("create.itemFolder"))
             }
             GridRow {
                 Text(strings("create.itemType")).foregroundStyle(.secondary)
-                Picker("", selection: Binding(get: { editor.typeID }, set: { setType($0) })) {
+                Picker(strings("create.itemType"), selection: Binding(get: { editor.typeID }, set: { setType($0) })) {
                     ForEach(ItemEditorModel.typeIDs, id: \.self) { typeID in
                         Label(strings("types.\(typeID)"), systemImage: Symbols.item(typeID))
                             .tag(typeID)
@@ -63,43 +63,54 @@ struct ItemEditorView: View {
     }
 
     private var fieldList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(strings("create.customFields")).font(.headline)
-            if editor.fields.isEmpty {
-                Text(strings("create.noFields")).foregroundStyle(.secondary)
-            } else {
-                VStack(spacing: 0) {
-                    ForEach(Array(editor.fields.enumerated()), id: \.offset) { index, field in
-                        if index > 0 {
-                            Divider().padding(.leading, 12)
+        VStack(alignment: .leading, spacing: 16) {
+            fieldRows(editor.mainFieldIndices, labeled: true)
+            DisclosureGroup(isExpanded: $additionalExpanded) {
+                VStack(alignment: .leading, spacing: 8) {
+                    fieldRows(editor.additionalFieldIndices, labeled: false)
+                    Menu {
+                        ForEach(editor.missingMainFields, id: \.key) { definition in
+                            Button(strings(definition.label)) { editor.addField(definition) }
                         }
-                        FieldEditorRow(
-                            field: field,
-                            strings: strings,
-                            revealed: revealed.contains(index),
-                            key: binding(field, index, \.key, editor.setKey),
-                            value: binding(field, index, \.value, editor.setValue),
-                            kind: binding(field, index, \.kind, editor.setKind),
-                            onToggleReveal: { toggleReveal(index) },
-                            onRemove: { remove(index) }
-                        )
+                        Button(strings("create.customFields")) { editor.addField() }
+                    } label: {
+                        Label(strings("create.addField"), systemImage: "plus")
                     }
+                    .fixedSize()
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .strokeBorder(Color(nsColor: .separatorColor))
-                )
-            }
-            Button {
-                editor.addField()
+                .padding(.top, 8)
             } label: {
-                Label(strings("create.addField"), systemImage: "plus")
+                Text(strings("create.additionalFields"))
             }
         }
+    }
+
+    private func fieldRows(_ indices: [Int], labeled: Bool) -> some View {
+        VStack(spacing: 0) {
+            ForEach(indices, id: \.self) { index in
+                let field = editor.fields[index]
+                if index != indices.first { Divider().padding(.leading, 12) }
+                FieldEditorRow(
+                    field: field,
+                    label: labeled ? editor.label(for: field.key).map { strings($0) } : nil,
+                    strings: strings,
+                    revealed: revealed.contains(index),
+                    key: binding(field, index, \.key, editor.setKey),
+                    value: binding(field, index, \.value, editor.setValue),
+                    kind: binding(field, index, \.kind, editor.setKind),
+                    onToggleReveal: { toggleReveal(index) },
+                    onRemove: { remove(index) }
+                )
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor))
+        )
     }
 
     private var footer: some View {
@@ -144,6 +155,7 @@ struct ItemEditorView: View {
     private func setType(_ typeID: String) {
         editor.setType(typeID)
         revealed = []
+        additionalExpanded = false
     }
 
     private func toggleReveal(_ index: Int) {
@@ -155,78 +167,5 @@ struct ItemEditorView: View {
     private func remove(_ index: Int) {
         editor.removeField(index)
         revealed = []
-    }
-}
-
-private struct FieldEditorRow: View {
-    let field: DraftFieldFfi
-    let strings: Strings
-    let revealed: Bool
-    @Binding var key: String
-    @Binding var value: String
-    @Binding var kind: FieldKindFfi
-    let onToggleReveal: () -> Void
-    let onRemove: () -> Void
-
-    var body: some View {
-        HStack(alignment: field.multiline && !field.masked ? .top : .center, spacing: 8) {
-            TextField(strings("create.fieldKeyPlaceholder"), text: $key)
-                .textFieldStyle(.roundedBorder)
-                .frame(width: 140)
-            valueEditor
-            Button(action: onToggleReveal) {
-                Image(systemName: revealed ? "eye.slash" : "eye")
-            }
-            .buttonStyle(.borderless)
-            .help(strings(revealed ? "create.hideValue" : "create.revealValue"))
-            // Same slot on every row so the value columns line up.
-            .opacity(field.masked ? 1 : 0)
-            .disabled(!field.masked)
-            Picker("", selection: $kind) {
-                ForEach(ItemEditorModel.kinds, id: \.self) { kind in
-                    Text(strings(Self.kindKey(kind))).tag(kind)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 130)
-            Button(action: onRemove) {
-                Image(systemName: "minus.circle")
-            }
-            .buttonStyle(.borderless)
-            .help(strings("create.removeRow"))
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-    }
-
-    @ViewBuilder private var valueEditor: some View {
-        let placeholder = strings("create.fieldValuePlaceholder")
-        if field.masked && !revealed {
-            SecureField(placeholder, text: $value)
-                .textFieldStyle(.roundedBorder)
-                .font(.body.monospaced())
-        } else if field.multiline {
-            TextEditor(text: $value)
-                .font(.body)
-                .frame(minHeight: 80, maxHeight: 160)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(Color(nsColor: .separatorColor))
-                )
-        } else {
-            TextField(placeholder, text: $value)
-                .textFieldStyle(.roundedBorder)
-                .font(field.masked ? .body.monospaced() : .body)
-        }
-    }
-
-    private static func kindKey(_ kind: FieldKindFfi) -> String {
-        switch kind {
-        case .text: return "create.kindText"
-        case .password: return "create.kindPassword"
-        case .url: return "create.kindUrl"
-        case .otp: return "create.kindOtp"
-        case .note: return "create.kindNote"
-        }
     }
 }

@@ -78,7 +78,7 @@ fn initializing_without_server_login_stores_nothing() {
     core.initialize_master_password("correct horse battery".into())
         .expect_err("server required");
     assert!(core.list_storages().expect("storages").is_empty());
-    assert!(core.current_storage_id().is_err());
+    assert!(core.current_storage_id().is_none());
     assert!(core.current_vault_id().is_none());
     assert!(committed_identity(&root).is_none());
 }

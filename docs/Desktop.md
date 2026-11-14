@@ -1,12 +1,12 @@
 ---
 title: Desktop Guide
-description: Desktop app usage and local/offline workflow.
+description: Desktop app setup and offline server replicas.
 ---
 
 ## Overview
 
-The desktop app is the primary client for people. It supports offline-first
-personal vaults and can optionally connect to a server for shared vaults.
+The desktop app is the primary client for people. It connects to a Zann server
+and keeps encrypted offline replicas of personal and shared vaults.
 
 ## Install
 
@@ -19,15 +19,20 @@ bun install
 bun run tauri build
 ```
 
-## Local usage (no server)
+## First use
 
-- Create a personal vault and store secrets locally.
-- The app works offline-first.
+- Connect to a Zann server and sign in or register.
+- Enter the account's master password and complete the first sync.
+- The server provides the vault catalog; the client caches encrypted replicas.
 
-## Shared vaults (with server)
+## Offline use
 
-- Connect to a server to access shared vaults.
-- Use the server for multi-user access and policy enforcement.
+After the first sync, unlock, read, search, edit, export, snapshot and verify
+work offline. Edits stay pending until the server confirms them. Creating a
+shared vault requires a server connection.
+
+Standalone serverless vault creation is no longer supported. Before upgrading
+an old local-only vault, follow the [cutover guide](migrations/server-first-clients.md).
 
 ## Remembered unlock
 

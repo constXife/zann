@@ -69,7 +69,7 @@ pub enum Outcome {
 
 pub struct State {
     stage: Stage,
-    /// Built on first use, because a purely local vault never needs it.
+    /// Built when the user first connects to a server.
     remote: Option<Arc<Remote>>,
     url: String,
     methods: Vec<Method>,

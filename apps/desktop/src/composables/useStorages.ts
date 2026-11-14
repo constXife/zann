@@ -380,23 +380,6 @@ export const useStorages = (options: UseStoragesOptions) => {
     }
   };
 
-  const deleteStorage = async (storageId: string, moveToTrash = false): Promise<boolean> => {
-    try {
-      const response = await invoke<ApiResponse<void>>("storage_delete", { storageId, moveToTrash });
-      if (!response.ok) {
-        const message = response.error?.message ?? "Failed to delete storage";
-        throw createErrorWithCause(message, response.error);
-      }
-      await loadStorages();
-      await options.onReloadVaults();
-      await options.onReloadItems();
-      return true;
-    } catch (err) {
-      options.onFatalError(String(err));
-      return false;
-    }
-  };
-
   const disconnectStorage = async (storageId: string): Promise<boolean> => {
     try {
       const response = await invoke<ApiResponse<void>>("storage_disconnect", { storageId });
@@ -520,7 +503,6 @@ export const useStorages = (options: UseStoragesOptions) => {
     clearSyncErrors,
     getSyncStatus,
     getStorageInfo,
-    deleteStorage,
     disconnectStorage,
     revealStorage,
   };

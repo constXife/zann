@@ -47,6 +47,7 @@ impl From<FieldKindFfi> for FieldKind {
 pub enum DraftErrorKindFfi {
     Payload,
     Path,
+    Name,
     Type,
     Fields,
     FieldKey,
@@ -61,6 +62,7 @@ impl From<DraftError> for CoreError {
         let kind = match error {
             DraftError::Payload(_) => DraftErrorKindFfi::Payload,
             DraftError::Path => DraftErrorKindFfi::Path,
+            DraftError::Name => DraftErrorKindFfi::Name,
             DraftError::Type => DraftErrorKindFfi::Type,
             DraftError::Fields => DraftErrorKindFfi::Fields,
             DraftError::FieldKey => DraftErrorKindFfi::FieldKey,
@@ -172,6 +174,26 @@ impl ItemDraftFfi {
 
     pub fn path(&self) -> String {
         self.0.lock().expect("lock poisoned").path.clone()
+    }
+
+    pub fn name(&self) -> String {
+        self.0.lock().expect("lock poisoned").name().to_string()
+    }
+
+    pub fn folder(&self) -> Option<String> {
+        self.0
+            .lock()
+            .expect("lock poisoned")
+            .folder()
+            .map(str::to_string)
+    }
+
+    pub fn set_location(&self, name: String, folder: String) -> CoreResult<()> {
+        Ok(self
+            .0
+            .lock()
+            .expect("lock poisoned")
+            .set_location(&name, &folder)?)
     }
 
     pub fn set_path(&self, path: String) {

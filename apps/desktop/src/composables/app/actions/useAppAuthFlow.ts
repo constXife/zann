@@ -2,7 +2,6 @@ import { onBeforeUnmount, onMounted, ref } from "vue";
 import type { ComputedRef, Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { UiSettings } from "../../useUiSettings";
 import type { ApiResponse, AppStatus, StorageSummary } from "../../../types";
 import { AuthMethod, StorageKind } from "../../../constants/enums";
 import { createErrorWithCause } from "../../errors";
@@ -24,7 +23,6 @@ type PasswordAuthPayload = {
 
 type AppAuthFlowOptions = {
   t: (key: string, params?: Record<string, unknown>) => string;
-  uiSettings: Ref<UiSettings>;
   appStatus: Ref<AppStatus | null>;
   unlocked: ComputedRef<boolean>;
   selectedStorageId: Ref<string>;
@@ -46,7 +44,6 @@ type AppAuthFlowOptions = {
 
 export function useAppAuthFlow({
   t,
-  uiSettings,
   appStatus,
   unlocked,
   selectedStorageId,

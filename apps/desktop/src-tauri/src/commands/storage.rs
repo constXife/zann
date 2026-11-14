@@ -20,15 +20,6 @@ pub async fn storage_info(
 }
 
 #[tauri::command]
-pub async fn storage_delete(
-    state: State<'_, AppState>,
-    storage_id: String,
-    move_to_trash: bool,
-) -> Result<ApiResponse<()>, String> {
-    storage_service::storage_delete(state, storage_id, move_to_trash).await
-}
-
-#[tauri::command]
 pub async fn storage_disconnect(
     state: State<'_, AppState>,
     storage_id: String,

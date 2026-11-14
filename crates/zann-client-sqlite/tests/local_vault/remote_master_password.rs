@@ -180,15 +180,15 @@ fn second_device_unlocks_the_synced_personal_vault() {
     let core = create_core(make_db_url(device_a.path())).expect("reopen device A");
     core.initialize_master_password(master_password.clone())
         .expect("device A creates the vault");
-    core.remote_sync(Some(storage_id.clone()))
+    core.remote_sync(Some(storage_id.clone()), None)
         .expect("device A publishes the personal vault");
     select_personal_vault(&core, &storage_id);
     let item_id = core
         .debug_create_kv_item("pushed".to_string(), "key".to_string(), "value".to_string())
         .expect("device A creates an item");
-    core.remote_sync(Some(storage_id.clone()))
+    core.remote_sync(Some(storage_id.clone()), None)
         .expect("device A pushes the created item");
-    core.remote_sync(Some(storage_id))
+    core.remote_sync(Some(storage_id), None)
         .expect("device A has nothing left to push");
     drop(core);
 
@@ -213,7 +213,7 @@ fn second_device_unlocks_the_synced_personal_vault() {
     let core = create_core(make_db_url(device_b.path())).expect("reopen device B");
     core.unlock(master_password.clone())
         .expect("device B derives the account's master key");
-    core.remote_sync(Some(prepared.storage_id().to_string()))
+    core.remote_sync(Some(prepared.storage_id().to_string()), None)
         .expect("device B syncs");
     select_personal_vault(&core, prepared.storage_id());
 

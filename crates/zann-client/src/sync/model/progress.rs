@@ -188,9 +188,13 @@ impl SyncOutcome {
 pub enum SyncProgressPhase {
     Authorizing,
     Catalog,
+    /// Catalog reconciliation has durably completed and been validated.
+    CatalogCommitted,
     Pushing,
     Pulling,
     Committing,
+    /// A pull page and its checkpoint have durably completed and been validated.
+    PageCommitted,
     Complete,
 }
 
@@ -202,6 +206,7 @@ pub struct SyncProgress {
     pub(super) vault_count: usize,
     pub(super) pages_committed: usize,
     pub(super) changes_committed: usize,
+    storage_id: Option<Uuid>,
 }
 
 impl SyncProgress {
@@ -220,7 +225,19 @@ impl SyncProgress {
             vault_count,
             pages_committed,
             changes_committed,
+            storage_id: None,
         }
+    }
+
+    pub(crate) fn with_storage(mut self, storage_id: Uuid) -> Self {
+        self.storage_id = Some(storage_id);
+        self
+    }
+
+    /// Local replica identity; present on durable catalog/page notifications.
+    #[must_use]
+    pub fn storage_id(&self) -> Option<Uuid> {
+        self.storage_id
     }
 
     #[must_use]

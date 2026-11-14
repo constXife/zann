@@ -2,6 +2,10 @@
 
 use super::*;
 
+/// Metadata-only durable sync notifications, delivered outside the async runtime
+/// and after releasing selection locks. Consumers may read the committed cache.
+pub type LocalSyncObserver = dyn Fn(crate::app::SyncProgress) + Send + Sync;
+
 pub trait LocalVaultService: Send + Sync {
     #[cfg(debug_assertions)]
     fn debug_create_kv_item(&self, path: String, key: String, value: String)
@@ -21,7 +25,7 @@ pub trait LocalVaultService: Send + Sync {
     fn remove_hardware_key(&self, credential_id: String) -> LocalResult<()>;
     fn remember_with_keystore(&self) -> LocalResult<()>;
     fn forget_remembered(&self) -> LocalResult<()>;
-    /// Forgets the master key and cancels every `remote_sync` in flight.
+    /// Forgets the master key and cancels item reads and remote syncs in flight.
     fn lock(&self) -> LocalResult<VaultStatus>;
     fn vault_status(&self) -> LocalResult<VaultStatus>;
     fn current_vault_id(&self) -> Option<String>;
@@ -29,6 +33,13 @@ pub trait LocalVaultService: Send + Sync {
     fn set_current_vault(&self, id: String) -> LocalResult<VaultStatus>;
     fn items_list(&self, filter: ItemsFilter, page: Page) -> LocalResult<ItemPage>;
     fn item_get(&self, id: String) -> LocalResult<ItemDetail>;
+    /// Reads a typed payload for local presentation without a JSON round trip.
+    /// Cancellation drops pending reads; context changes refuse stale results.
+    fn item_read(
+        &self,
+        id: String,
+        operation: crate::app::SessionOperation,
+    ) -> LocalResult<zann_core::ItemDetail>;
     fn item_create(&self, create: ItemCreate) -> LocalResult<ItemDetail>;
     fn item_update(&self, id: String, update: ItemUpdate) -> LocalResult<ItemDetail>;
     fn item_history_list(&self, id: String, limit: u32) -> LocalResult<Vec<ItemHistorySummary>>;
@@ -57,14 +68,18 @@ pub trait LocalVaultService: Send + Sync {
     fn snapshot_restore_target(&self) -> String;
     fn snapshot_restore(&self, path: String) -> LocalResult<SnapshotRestore>;
     fn list_storages(&self) -> LocalResult<Vec<StorageSummary>>;
+    /// Requires an unlocked session and verifies the target's cached vault keys,
+    /// and chooses its preferred vault atomically; refusal preserves selection.
     fn set_current_storage(&self, id: String) -> LocalResult<()>;
-    /// Moves an unlocked session whose storage holds no item to the storage
-    /// a fresh start would open; a client calls it after a newly connected
-    /// server's first sync.
-    fn current_storage_id(&self) -> LocalResult<String>;
+    /// The selected server replica; an empty pre-sync session has none.
+    fn current_storage_id(&self) -> Option<String>;
     fn app_status(&self) -> LocalResult<AppStatus>;
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus>;
-    fn remote_sync(&self, storage_id: Option<String>) -> LocalResult<LocalSyncOutcome>;
+    fn remote_sync(
+        &self,
+        storage_id: Option<String>,
+        progress: Option<&LocalSyncObserver>,
+    ) -> LocalResult<LocalSyncOutcome>;
     fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()>;
     /// Whether a server connection syncs this storage (none does after
     /// [`Self::forget_server`] until the user connects again), with what a

@@ -1,8 +1,8 @@
 import { ref } from "vue";
-import type { ComputedRef, Ref } from "vue";
+import type { Ref } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import type { UiSettings } from "../../useUiSettings";
-import type { ApiResponse, StorageInfo, StorageSummary } from "../../../types";
+import type { ApiResponse, StorageSummary } from "../../../types";
 import { createErrorWithCause } from "../../errors";
 
 type AppStorageActionsOptions = {
@@ -19,8 +19,6 @@ type AppStorageActionsOptions = {
   runRemoteSync: (storageId?: string | null) => Promise<boolean>;
   refreshStatus: () => Promise<void>;
   refreshAppStatus: () => Promise<void>;
-  getStorageInfo: (storageId: string) => Promise<StorageInfo | null>;
-  deleteStorage: (storageId: string, moveToTrash: boolean) => Promise<boolean>;
   disconnectStorage: (storageId: string) => Promise<boolean>;
   revealStorage: (storageId: string) => Promise<void>;
   openCreateModal: (mode: "item" | "vault") => void;
@@ -49,8 +47,6 @@ export function useAppStorageActions({
   runRemoteSync,
   refreshStatus,
   refreshAppStatus,
-  getStorageInfo,
-  deleteStorage,
   disconnectStorage,
   revealStorage,
   openCreateModal,
@@ -66,9 +62,6 @@ export function useAppStorageActions({
 }: AppStorageActionsOptions) {
   const storageDropdownOpen = ref(false);
   const vaultDropdownOpen = ref(false);
-  const deleteStorageOpen = ref(false);
-  const deleteStorageInfo = ref<StorageInfo | null>(null);
-  const deleteStorageBusy = ref(false);
 
   const toggleStorageDropdown = () => {
     storageDropdownOpen.value = !storageDropdownOpen.value;
@@ -97,32 +90,6 @@ export function useAppStorageActions({
 
   const handleStorageReveal = async (storageId: string) => {
     await revealStorage(storageId);
-  };
-
-  const handleStorageDisconnect = async (storageId: string) => {
-    const info = await getStorageInfo(storageId);
-    if (info) {
-      deleteStorageInfo.value = info;
-      deleteStorageOpen.value = true;
-      settingsOpen.value = false;
-    }
-  };
-
-  const handleStorageDelete = async (storageId: string) => {
-    const info = await getStorageInfo(storageId);
-    if (info) {
-      deleteStorageInfo.value = info;
-      deleteStorageOpen.value = true;
-      settingsOpen.value = false;
-    }
-  };
-
-  const handleStorageGetInfo = async (
-    storageId: string,
-    callback: (info: StorageInfo | null) => void,
-  ) => {
-    const info = await getStorageInfo(storageId);
-    callback(info);
   };
 
   const handleSignOut = async (storageId: string, eraseCache: boolean) => {
@@ -241,43 +208,15 @@ export function useAppStorageActions({
     vaultDropdownOpen.value = false;
   };
 
-  const confirmDeleteStorage = async (moveToTrash: boolean) => {
-    if (!deleteStorageInfo.value) return;
-    deleteStorageBusy.value = true;
-    const success = await deleteStorage(deleteStorageInfo.value.id, moveToTrash);
-    deleteStorageBusy.value = false;
-    if (success) {
-      deleteStorageOpen.value = false;
-      deleteStorageInfo.value = null;
-    }
-  };
-
-  const confirmDisconnectStorage = async (_eraseCache: boolean) => {
-    if (!deleteStorageInfo.value) return;
-    deleteStorageBusy.value = true;
-    const success = await disconnectStorage(deleteStorageInfo.value.id);
-    deleteStorageBusy.value = false;
-    if (success) {
-      deleteStorageOpen.value = false;
-      deleteStorageInfo.value = null;
-    }
-  };
-
   return {
     storageDropdownOpen,
     vaultDropdownOpen,
-    deleteStorageOpen,
-    deleteStorageInfo,
-    deleteStorageBusy,
     toggleStorageDropdown,
     closeStorageDropdown,
     switchStorage,
     openAddStorageWizard,
     openStorageSettings,
     handleStorageReveal,
-    handleStorageDisconnect,
-    handleStorageDelete,
-    handleStorageGetInfo,
     handleSignOut,
     handleRemoveServer,
     handleSignIn,
@@ -290,7 +229,5 @@ export function useAppStorageActions({
     toggleVaultDropdown,
     closeVaultDropdown,
     switchVault,
-    confirmDeleteStorage,
-    confirmDisconnectStorage,
   };
 }

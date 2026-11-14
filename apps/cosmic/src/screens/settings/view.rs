@@ -372,19 +372,19 @@ impl State {
             .push(widget::text::title3(t("settings.backups.importAppleTitle")))
             .push(widget::text::caption(t("settings.backups.importAppleDesc")));
 
-        let target_name = self
+        let target = self
             .storages
             .iter()
-            .find(|storage| storage.id == self.import_target_storage_id)
-            .map_or_else(
-                || t("settings.backups.importTargetLocal"),
-                |storage| storage.name.clone(),
-            );
-        column = column
-            .push(widget::text::caption(t_args(
+            .find(|storage| storage.id == self.import_target_storage_id);
+        let target_label = match target {
+            Some(storage) => t_args(
                 "settings.backups.importAppleTarget",
-                &[("storage", &target_name)],
-            )))
+                &[("storage", &storage.name)],
+            ),
+            None => t("settings.backups.importAppleTargetMissing"),
+        };
+        column = column
+            .push(widget::text::caption(target_label))
             .push(widget::text::caption(t(
                 "settings.backups.importApplePlainWarning",
             )));
@@ -424,7 +424,9 @@ impl State {
             let mut choose_another =
                 widget::button::standard(t("settings.backups.importAppleCancel"));
             if !self.busy {
-                confirm = confirm.on_press(Message::ImportApplePasswords);
+                if target.is_some() {
+                    confirm = confirm.on_press(Message::ImportApplePasswords);
+                }
                 choose_another = choose_another.on_press(Message::ChooseApplePasswords);
             }
             column = column.push(

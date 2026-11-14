@@ -24,7 +24,6 @@ const createI18nPlugin = () =>
       en: {
         storage: {
           lastSynced: "Last synced",
-          localVault: "Local vault",
           servers: "Servers",
         },
         sidebar: { collapse: "Collapse" },

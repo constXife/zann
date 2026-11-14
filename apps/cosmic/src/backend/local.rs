@@ -152,7 +152,7 @@ pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailu
         syncs(facade, storage_id)?;
     }
     facade
-        .remote_sync(storage_id)
+        .remote_sync(storage_id, None)
         .map(|_| ())
         .map_err(SyncFailure::from)
 }
@@ -170,7 +170,7 @@ pub fn sync_and_reload(
     if !syncs(facade, storage_id.clone())? {
         return Ok(None);
     }
-    let outcome = facade.remote_sync(Some(storage_id))?;
+    let outcome = facade.remote_sync(Some(storage_id), None)?;
     if outcome.changes_committed == 0 {
         return Ok(None);
     }
@@ -183,7 +183,7 @@ pub fn sync_and_reload(
 /// still-empty session to that server's personal vault.
 pub fn sync_new_server(facade: &Facade, storage_id: String) -> Result<(), String> {
     facade
-        .remote_sync(Some(storage_id))
+        .remote_sync(Some(storage_id), None)
         .map(|_| ())
         .map_err(|err| err.to_string())
 }
@@ -209,7 +209,9 @@ pub fn storages(facade: &Facade) -> Result<Vec<StorageSummary>, String> {
 }
 
 pub fn current_storage_id(facade: &Facade) -> Result<String, String> {
-    facade.current_storage_id().map_err(|err| err.to_string())
+    facade
+        .current_storage_id()
+        .ok_or_else(|| "no server storage selected".to_string())
 }
 
 pub fn items(
@@ -348,7 +350,7 @@ pub fn remove_hardware_key(facade: &Facade, credential_id: String) -> Result<(),
         .map_err(|err| err.to_string())
 }
 
-/// Writes a plain backup of every local vault. The facade picks the path,
+/// Writes a plain backup of every cached vault. The facade picks the path,
 /// because this client has no file picker of its own — see
 /// docs/adr/0002-client-strategy.md on why being able to leave comes first.
 pub fn export_backup(facade: &Facade) -> Result<BackupExportReport, String> {
@@ -385,7 +387,7 @@ pub fn import_apple_passwords(
     // just imported instead of the previously active shared vault.
     if facade
         .current_storage_id()
-        .is_ok_and(|id| id == target_storage_id)
+        .is_some_and(|id| id == target_storage_id)
     {
         let personal = facade
             .list_vaults()

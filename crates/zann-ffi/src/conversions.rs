@@ -478,10 +478,16 @@ impl From<RetentionFfi> for native::Retention {
 
 impl From<native::StorageSummary> for StorageSummaryFfi {
     fn from(value: native::StorageSummary) -> Self {
+        let display_name = zann_ui_core::sync_status::storage_context_label(
+            &value.name,
+            value.server_url.as_deref(),
+        );
         Self {
             id: value.id,
             name: value.name,
             kind: value.kind,
+            server_url: value.server_url,
+            display_name,
         }
     }
 }
@@ -506,6 +512,7 @@ impl From<StorageSummaryFfi> for native::StorageSummary {
             id: value.id,
             name: value.name,
             kind: value.kind,
+            server_url: value.server_url,
         }
     }
 }

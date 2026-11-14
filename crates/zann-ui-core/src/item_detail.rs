@@ -28,6 +28,9 @@ pub struct ItemDetailField {
     pub masked: bool,
     pub multiline: bool,
     pub totp: Option<TotpParams>,
+    /// An explicitly typed, unmasked HTTP(S) website without embedded credentials.
+    /// Opening it is a separate, user-invoked platform action.
+    pub website_url: Option<String>,
 }
 
 impl fmt::Debug for ItemDetailField {
@@ -39,34 +42,61 @@ impl fmt::Debug for ItemDetailField {
 /// Parse the canonical payload schema and project fields in reading order.
 /// Explicit metadata overrides the field-kind masking and multiline policy.
 pub fn project_item_fields(payload_json: &str) -> Result<Vec<ItemDetailField>, PayloadError> {
-    let payload = EncryptedPayload::from_bytes(payload_json.as_bytes())?;
-    let mut fields: Vec<_> = payload
-        .fields
-        .iter()
-        .map(|(key, field)| {
+    Ok(project_payload_fields(EncryptedPayload::from_bytes(
+        payload_json.as_bytes(),
+    )?))
+}
+
+/// Consumes a decrypted payload, transferring field values to presentation.
+/// No serialization or duplicate full payload is needed by native clients.
+pub fn project_payload_fields(mut payload: EncryptedPayload) -> Vec<ItemDetailField> {
+    let mut fields: Vec<_> = std::mem::take(&mut payload.fields)
+        .into_iter()
+        .map(|(key, mut field)| {
             let meta = field.meta.as_ref();
             let is_otp = matches!(field.kind, FieldKind::Otp);
+            let masked = meta
+                .and_then(|meta| meta.masked)
+                .unwrap_or(matches!(field.kind, FieldKind::Password) || is_otp);
+            let totp = is_otp.then(|| totp_params(&field.value, &payload));
+            let website_url = if field.kind == FieldKind::Url && !masked {
+                website_url(&field.value)
+            } else {
+                None
+            };
             ItemDetailField {
-                key: key.clone(),
                 label_key: if is_otp {
                     "otp".to_string()
                 } else {
                     key.clone()
                 },
-                value: field.value.clone(),
-                masked: meta
-                    .and_then(|meta| meta.masked)
-                    .unwrap_or(matches!(field.kind, FieldKind::Password) || is_otp),
+                key,
+                value: std::mem::take(&mut field.value),
+                masked,
                 multiline: meta
                     .and_then(|meta| meta.multiline)
                     .unwrap_or(matches!(field.kind, FieldKind::Note)),
-                totp: is_otp.then(|| totp_params(&field.value, &payload)),
+                totp,
+                website_url,
             }
         })
         .collect();
 
     fields.sort_by(|left, right| compare_field_keys(&left.key, &right.key));
-    Ok(fields)
+    fields
+}
+
+fn website_url(value: &str) -> Option<String> {
+    let value = value.trim();
+    let (scheme, _) = value.split_once("://")?;
+    if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("http") {
+        return None;
+    }
+    let url = url::Url::parse(value).ok()?;
+    if !url.has_host() || !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    Some(url.into())
 }
 
 /// A bare secret takes parameters from payload.extra's canonical otp_* keys;

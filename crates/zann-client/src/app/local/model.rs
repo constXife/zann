@@ -128,8 +128,8 @@ impl std::fmt::Debug for ItemHistoryDetail {
 
 #[derive(Debug, Clone)]
 pub struct BackupImportOptions {
-    /// Explicit destination server storage. `None` is rejected; the source
-    /// backup never selects the destination account or server.
+    /// Explicit destination server storage. A missing target is rejected;
+    /// backup never selects another account or creates standalone storage.
     pub target_storage_id: Option<String>,
 }
 
@@ -226,7 +226,8 @@ pub struct Retention {
 pub struct StorageSummary {
     pub id: String,
     pub name: String,
-    pub kind: String, // "local" or "remote"
+    pub kind: String, // "remote"
+    pub server_url: Option<String>,
 }
 
 /// Whether a server syncs a storage, from the client config rather than the

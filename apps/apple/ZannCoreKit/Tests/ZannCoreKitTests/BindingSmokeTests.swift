@@ -8,6 +8,14 @@ final class BindingSmokeTests: XCTestCase {
         XCTAssertFalse(itemTypeSchemas().isEmpty)
     }
 
+    func testEmptyCategoryCreationCrossesTheBoundary() throws {
+        let categories = categoryViews(counts: ItemCountsFfi(all: 0, trash: 0, byType: []), scope: .personal)
+        let note = try XCTUnwrap(categories.first { $0.id == "note" }?.createAction)
+        XCTAssertEqual(note.typeId, "note")
+        XCTAssertEqual(note.labelKey, "create.actions.note")
+        XCTAssertNil(categories.first { $0.id == "trash" }?.createAction)
+    }
+
     func testServerUrlNormalizationCrossesTheBoundary() {
         XCTAssertEqual(
             normalizeServerUrl(value: "  https://zann.example  "),
@@ -18,4 +26,5 @@ final class BindingSmokeTests: XCTestCase {
     func testDevicePreferenceDefaultsAreStable() {
         XCTAssertEqual(devicePreferencesDefault(), devicePreferencesDefault())
     }
+
 }

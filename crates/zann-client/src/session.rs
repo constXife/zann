@@ -492,11 +492,19 @@ impl SessionOperation {
         self.deadline
     }
 
-    pub(crate) fn is_cancelled(&self) -> bool {
+    /// Shares cancellation with adapters tracking an operation through lock.
+    #[must_use]
+    pub fn cancellation_handle(&self) -> SessionCancellationHandle {
+        SessionCancellationHandle {
+            state: self.state.clone(),
+        }
+    }
+
+    pub fn is_cancelled(&self) -> bool {
         self.state.cancelled.load(Ordering::Acquire)
     }
 
-    pub(crate) async fn cancelled(&self) {
+    pub async fn cancelled(&self) {
         loop {
             let notified = self.state.notify.notified();
             tokio::pin!(notified);
