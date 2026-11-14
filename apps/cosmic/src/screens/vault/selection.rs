@@ -1,5 +1,5 @@
 //! Replaceable native card reads using the core's cancellation/deadline port.
-use zann_client::app::{SessionCancellationHandle, SessionOperation};
+use zann_client::app::local::{SessionCancellationHandle, SessionOperation};
 
 use super::*;
 

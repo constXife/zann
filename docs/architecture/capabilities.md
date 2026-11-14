@@ -81,7 +81,8 @@ The planned crates identify accepted extraction boundaries. Until they exist:
 - a PR that introduces the planned crate updates the map from **planned** to
   **active** and adds dependency/conformance coverage.
 
-COSMIC card reads consume the canonical cancellable `item_read` port and
+COSMIC card reads consume the canonical cancellable `item_read` port and its
+`app::local::{SessionOperation, SessionCancellationHandle}` controls, plus
 `zann-ui-core::item_detail::project_payload_fields` for field order,
 masking/multiline metadata and TOTP parameter extraction. Editor/history JSON
 inputs use the same projection through `project_item_fields`.
