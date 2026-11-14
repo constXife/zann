@@ -4,14 +4,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use cosmic::iced::{Length, Subscription, Task};
-use cosmic::{theme, widget, Element};
+use cosmic::iced::{Subscription, Task};
 use zann_ui_core::normalize_server_url;
 
-use super::centered;
-use crate::backend::off_thread;
 use crate::backend::remote::{LoginOutcome, Method, OidcStatus, Remote, ServerProbe};
-use crate::i18n::t;
+use crate::backend::{next_view_request, off_thread};
+mod event;
+mod view;
+
+pub use event::{Event, Message, Outcome};
+
+#[cfg(test)]
+mod tests;
 
 /// Which step of the flow the user is on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,44 +34,9 @@ pub enum Stage {
     },
 }
 
-#[derive(Clone, Debug)]
-pub enum Message {
-    UrlInput(String),
-    Probe,
-    Probed(Result<ServerProbe, String>),
-    ChoosePassword,
-    EmailInput(String),
-    FullNameInput(String),
-    PasswordInput(String),
-    TogglePassword,
-    SubmitPassword,
-    StartOidc,
-    OidcStarted(Result<String, String>),
-    OpenAuthUrl,
-    CopyAuthUrl,
-    TrustFingerprint,
-    FingerprintTrusted(Result<(), String>),
-    Outcome(Result<LoginOutcome, String>),
-    Poll,
-    Cancel,
-}
-
-pub enum Outcome {
-    None,
-    Task(Task<Message>),
-    Copy(String),
-    OpenUrl(String),
-    /// The user backed out of connecting.
-    Cancelled,
-    /// A login finished; the shell rebuilds the session and moves on to the
-    /// master password.
-    Connected {
-        storage_id: String,
-        has_personal_keys: bool,
-    },
-}
-
 pub struct State {
+    generation: u64,
+    closed: bool,
     stage: Stage,
     /// Built when the user first connects to a server.
     remote: Option<Arc<Remote>>,
@@ -89,6 +58,8 @@ pub struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            generation: next_view_request(),
+            closed: false,
             stage: Stage::Server,
             remote: None,
             url: String::new(),
@@ -111,10 +82,9 @@ impl State {
     /// Starts at the server stage with an address already filled in, as when
     /// reconnecting to a server that was just forgotten.
     pub fn with_server_url(url: String) -> Self {
-        Self {
-            url,
-            ..Self::default()
-        }
+        let mut state = Self::default();
+        state.url = url;
+        state
     }
 
     pub fn server_url(&self) -> &str {
@@ -127,16 +97,48 @@ impl State {
 
     /// The OIDC listener runs on its own thread and has no way to wake the UI,
     /// so the screen polls it while a browser flow is open.
-    pub fn subscription(&self) -> Subscription<Message> {
+    pub fn subscription(&self) -> Subscription<Event> {
+        if self.closed {
+            return Subscription::none();
+        }
         match self.stage {
             Stage::Oidc | Stage::Fingerprint { .. } => {
-                cosmic::iced::time::every(Duration::from_millis(400)).map(|_| Message::Poll)
+                cosmic::iced::time::every(Duration::from_millis(400))
+                    .with(self.generation)
+                    .map(|(generation, _)| Event {
+                        generation,
+                        message: Message::Poll,
+                    })
             }
             _ => Subscription::none(),
         }
     }
 
-    pub fn update(&mut self, message: Message) -> Outcome {
+    /// Capture an event while this screen owns the input or task.
+    pub fn event(&self, message: Message) -> Event {
+        Event {
+            generation: self.generation,
+            message,
+        }
+    }
+
+    fn task(&self, task: Task<Message>) -> Outcome {
+        let generation = self.generation;
+        Outcome::Task(task.map(move |message| Event {
+            generation,
+            message,
+        }))
+    }
+
+    pub fn update(&mut self, event: Event) -> Outcome {
+        if self.closed || event.generation != self.generation {
+            return Outcome::None;
+        }
+        let message = event.message;
+        // Enter/on_submit is delivered even when the corresponding button is disabled.
+        if !self.accepts(&message) {
+            return Outcome::None;
+        }
         match message {
             Message::UrlInput(value) => self.url = value,
 
@@ -152,7 +154,7 @@ impl State {
                 let Some(remote) = self.remote() else {
                     return Outcome::None;
                 };
-                return Outcome::Task(cosmic::task::future(async move {
+                return self.task(cosmic::task::future(async move {
                     Message::Probed(off_thread(move || remote.probe(url)).await)
                 }));
             }
@@ -160,7 +162,7 @@ impl State {
             Message::Probed(Ok(probe)) => {
                 self.apply_probe(probe);
                 if self.stage == Stage::Oidc {
-                    return Outcome::Task(cosmic::task::message(Message::StartOidc));
+                    return self.task(cosmic::task::message(Message::StartOidc));
                 }
             }
 
@@ -188,7 +190,7 @@ impl State {
                 let register = self.register;
                 let full_name =
                     Some(self.full_name.trim().to_string()).filter(|name| !name.is_empty());
-                return Outcome::Task(cosmic::task::future(async move {
+                return self.task(cosmic::task::future(async move {
                     Message::Outcome(
                         off_thread(move || {
                             remote.password_login(url, email, password, full_name, register)
@@ -206,15 +208,15 @@ impl State {
                 self.busy = true;
                 self.stage = Stage::Oidc;
                 let url = self.url.clone();
-                return Outcome::Task(cosmic::task::future(async move {
+                return self.task(cosmic::task::future(async move {
                     Message::OidcStarted(off_thread(move || remote.oidc_begin(url)).await)
                 }));
             }
 
             Message::OidcStarted(Ok(url)) => {
                 self.busy = false;
-                self.authorization_url = Some(url.clone());
-                return Outcome::OpenUrl(url);
+                self.authorization_url = Some(url);
+                return self.task(cosmic::task::message(Message::OpenAuthUrl));
             }
 
             Message::OidcStarted(Err(err)) => self.fail(err),
@@ -238,7 +240,7 @@ impl State {
                 let login_id = self.login_id.clone();
                 self.busy = true;
                 self.error = None;
-                return Outcome::Task(cosmic::task::future(async move {
+                return self.task(cosmic::task::future(async move {
                     Message::FingerprintTrusted(
                         off_thread(move || remote.trust_fingerprint(login_id)).await,
                     )
@@ -246,8 +248,9 @@ impl State {
             }
 
             Message::FingerprintTrusted(Ok(())) => {
-                self.busy = true;
-                return Outcome::Task(cosmic::task::message(Message::Probe));
+                self.busy = false;
+                self.stage = Stage::Server;
+                return self.task(cosmic::task::message(Message::Probe));
             }
 
             Message::FingerprintTrusted(Err(err)) => self.fail(err),
@@ -285,9 +288,7 @@ impl State {
             }
 
             Message::Cancel => {
-                if let Some(remote) = self.remote.as_ref() {
-                    remote.forget_oidc();
-                }
+                self.close();
                 return Outcome::Cancelled;
             }
         }
@@ -331,14 +332,47 @@ impl State {
                 storage_id,
                 has_personal_keys,
             } => {
-                if let Some(remote) = self.remote.as_ref() {
-                    remote.forget_oidc();
-                }
+                self.close();
                 Outcome::Connected {
                     storage_id,
                     has_personal_keys,
                 }
             }
+        }
+    }
+
+    fn accepts(&self, message: &Message) -> bool {
+        match message {
+            Message::Probe => !self.busy && self.stage == Stage::Server,
+            Message::SubmitPassword => {
+                !self.busy
+                    && self.stage == Stage::Password
+                    && !self.email.trim().is_empty()
+                    && !self.password.is_empty()
+            }
+            Message::StartOidc => {
+                !self.busy
+                    && matches!(self.stage, Stage::Method | Stage::Oidc)
+                    && self.authorization_url.is_none()
+            }
+            Message::TrustFingerprint => {
+                !self.busy && matches!(self.stage, Stage::Fingerprint { .. })
+            }
+            Message::ChoosePassword => !self.busy && self.stage == Stage::Method,
+            Message::UrlInput(_) => !self.busy && self.stage == Stage::Server,
+            Message::EmailInput(_) | Message::FullNameInput(_) | Message::PasswordInput(_) => {
+                !self.busy && self.stage == Stage::Password
+            }
+            _ => true,
+        }
+    }
+
+    fn close(&mut self) {
+        self.closed = true;
+        self.password.clear();
+        self.authorization_url = None;
+        if let Some(remote) = &self.remote {
+            remote.cancel();
         }
     }
 
@@ -359,179 +393,10 @@ impl State {
         self.busy = false;
         self.error = Some(error);
     }
+}
 
-    pub fn view(&self) -> Element<'_, Message> {
-        let spacing = theme::spacing();
-
-        let body = match &self.stage {
-            Stage::Server => self.server_form(),
-            Stage::Method => self.method_picker(),
-            Stage::Password => self.password_form(),
-            Stage::Oidc => self.oidc_wait(),
-            Stage::Fingerprint { old, new } => self.fingerprint_prompt(old, new),
-        };
-
-        let mut column = widget::column::with_capacity(5)
-            .push(widget::text::title3(t(match &self.stage {
-                Stage::Fingerprint { .. } => "wizard.fingerprintChanged",
-                _ => "wizard.connectTitle",
-            })))
-            .spacing(spacing.space_s)
-            .width(Length::Fixed(420.0));
-
-        if let Some(name) = self.server_name.as_ref() {
-            column = column.push(widget::text::caption(name.clone()));
-        }
-
-        column = column.push(body);
-
-        if let Some(error) = self.error.as_ref() {
-            column = column.push(widget::text::caption(error.clone()));
-        }
-
-        centered(column.push(widget::button::text(t("wizard.back")).on_press(Message::Cancel)))
-    }
-
-    fn server_form(&self) -> Element<'_, Message> {
-        let spacing = theme::spacing();
-        let mut submit = widget::button::suggested(t(if self.busy {
-            "wizard.checking"
-        } else {
-            "common.continue"
-        }))
-        .width(Length::Fill);
-        if !self.busy && !self.url.trim().is_empty() {
-            submit = submit.on_press(Message::Probe);
-        }
-
-        widget::column::with_capacity(2)
-            .push(
-                widget::text_input::text_input("https://zann.example.com", &self.url)
-                    .label(t("auth.serverUrl"))
-                    .on_input(Message::UrlInput)
-                    .on_submit(|_| Message::Probe),
-            )
-            .push(submit)
-            .spacing(spacing.space_s)
-            .into()
-    }
-
-    fn method_picker(&self) -> Element<'_, Message> {
-        let spacing = theme::spacing();
-        let mut column = widget::column::with_capacity(self.methods.len() + 1)
-            .push(widget::text::body(t("auth.selectMethod")))
-            .spacing(spacing.space_s);
-
-        for method in &self.methods {
-            column = column.push(match method {
-                Method::Oidc => widget::button::standard(t("auth.oidc"))
-                    .width(Length::Fill)
-                    .on_press(Message::StartOidc),
-                Method::Password => widget::button::standard(t("auth.emailPassword"))
-                    .width(Length::Fill)
-                    .on_press(Message::ChoosePassword),
-            });
-        }
-
-        column.into()
-    }
-
-    fn password_form(&self) -> Element<'_, Message> {
-        let spacing = theme::spacing();
-        let ready = !self.busy && !self.email.trim().is_empty() && !self.password.is_empty();
-        let label = if self.register {
-            "auth.signUp"
-        } else {
-            "auth.signIn"
-        };
-        let mut submit = widget::button::suggested(t(if self.busy {
-            "wizard.processing"
-        } else {
-            label
-        }))
-        .width(Length::Fill);
-        if ready {
-            submit = submit.on_press(Message::SubmitPassword);
-        }
-
-        let mut column = widget::column::with_capacity(4)
-            .push(
-                widget::text_input::text_input("you@example.com", &self.email)
-                    .label(t("auth.email"))
-                    .on_input(Message::EmailInput),
-            )
-            .spacing(spacing.space_s);
-
-        if self.register {
-            column = column.push(
-                widget::text_input::text_input(t("auth.fullName"), &self.full_name)
-                    .label(t("auth.fullName"))
-                    .on_input(Message::FullNameInput),
-            );
-        }
-
-        column
-            .push(
-                widget::text_input::secure_input(
-                    t("auth.password"),
-                    &self.password,
-                    Some(Message::TogglePassword),
-                    self.password_hidden,
-                )
-                .label(t("auth.password"))
-                .on_input(Message::PasswordInput)
-                .on_submit(|_| Message::SubmitPassword),
-            )
-            .push(submit)
-            .into()
-    }
-
-    fn oidc_wait(&self) -> Element<'_, Message> {
-        let spacing = theme::spacing();
-        let mut column = widget::column::with_capacity(3).spacing(spacing.space_s);
-
-        match self.authorization_url.as_ref() {
-            Some(_) => {
-                column = column
-                    .push(widget::text::body(t("wizard.oidcHint")))
-                    .push(
-                        widget::button::link(t("wizard.oidcReopen")).on_press(Message::OpenAuthUrl),
-                    )
-                    .push(widget::button::text(t("auth.copyLink")).on_press(Message::CopyAuthUrl));
-            }
-            None => {
-                let mut start = widget::button::suggested(t(if self.busy {
-                    "wizard.starting"
-                } else {
-                    "wizard.signInSso"
-                }))
-                .width(Length::Fill);
-                if !self.busy {
-                    start = start.on_press(Message::StartOidc);
-                }
-                column = column.push(start);
-            }
-        }
-
-        column.into()
-    }
-
-    fn fingerprint_prompt<'a>(&'a self, old: &'a str, new: &'a str) -> Element<'a, Message> {
-        let spacing = theme::spacing();
-        let mut trust =
-            widget::button::destructive(t("wizard.trustFingerprint")).width(Length::Fill);
-        if !self.busy {
-            trust = trust.on_press(Message::TrustFingerprint);
-        }
-
-        widget::column::with_capacity(6)
-            .push(widget::text::body(t("wizard.fingerprintWarning")))
-            .push(widget::text::caption(t("wizard.oldFingerprint")))
-            .push(widget::text::monotext(old.to_string()))
-            .push(widget::text::caption(t("wizard.newFingerprint")))
-            .push(widget::text::monotext(new.to_string()))
-            .push(trust)
-            .spacing(spacing.space_xxs)
-            .into()
+impl Drop for State {
+    fn drop(&mut self) {
+        self.close();
     }
 }

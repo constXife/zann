@@ -550,32 +550,39 @@ fn connect_walks_the_stages_a_server_dictates() {
     assert_eq!(state.stage(), &connect::Stage::Server);
 
     // One method: skip the picker.
-    state.update(connect::Message::Probed(Ok(ServerProbe {
-        methods: vec![Method::Password],
-        register: true,
-        server_name: Some("Zann Mock".to_string()),
-        fingerprint_changed: None,
-    })));
+    send_connect(
+        &mut state,
+        connect::Message::Probed(Ok(ServerProbe {
+            methods: vec![Method::Password],
+            register: true,
+            server_name: Some("Zann Mock".to_string()),
+            fingerprint_changed: None,
+        })),
+    );
     assert_eq!(state.stage(), &connect::Stage::Password);
 
     // Two methods: ask.
     let mut state = connect::State::default();
-    state.update(connect::Message::Probed(Ok(ServerProbe {
-        methods: vec![Method::Password, Method::Oidc],
-        register: false,
-        server_name: None,
-        fingerprint_changed: None,
-    })));
+    send_connect(
+        &mut state,
+        connect::Message::Probed(Ok(ServerProbe {
+            methods: vec![Method::Password, Method::Oidc],
+            register: false,
+            server_name: None,
+            fingerprint_changed: None,
+        })),
+    );
     assert_eq!(state.stage(), &connect::Stage::Method);
 
     // A changed server key never logs in on its own.
-    state.update(connect::Message::Outcome(Ok(
-        LoginOutcome::FingerprintChanged {
+    send_connect(
+        &mut state,
+        connect::Message::Outcome(Ok(LoginOutcome::FingerprintChanged {
             login_id: "login".to_string(),
             old: "sha256:old".to_string(),
             new: "sha256:new".to_string(),
-        },
-    )));
+        })),
+    );
     assert_eq!(
         state.stage(),
         &connect::Stage::Fingerprint {
@@ -584,10 +591,13 @@ fn connect_walks_the_stages_a_server_dictates() {
         }
     );
 
-    let outcome = state.update(connect::Message::Outcome(Ok(LoginOutcome::Success {
-        storage_id: "storage".to_string(),
-        has_personal_keys: false,
-    })));
+    let outcome = send_connect(
+        &mut state,
+        connect::Message::Outcome(Ok(LoginOutcome::Success {
+            storage_id: "storage".to_string(),
+            has_personal_keys: false,
+        })),
+    );
     assert!(matches!(
         outcome,
         connect::Outcome::Connected { storage_id, has_personal_keys }
@@ -599,7 +609,7 @@ fn connect_walks_the_stages_a_server_dictates() {
 fn cancelling_connect_returns_to_the_shell() {
     let mut state = connect::State::default();
     assert!(matches!(
-        state.update(connect::Message::Cancel),
+        send_connect(&mut state, connect::Message::Cancel),
         connect::Outcome::Cancelled
     ));
 }
@@ -1183,4 +1193,9 @@ fn backend_classifies_the_identity_change_and_forgets_idempotently() {
         local::forget_server(&facade, storage).expect("no server to forget"),
         None
     );
+}
+
+fn send_connect(state: &mut connect::State, message: connect::Message) -> connect::Outcome {
+    let event = state.event(message);
+    state.update(event)
 }
