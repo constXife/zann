@@ -50,9 +50,17 @@ ownership.
   immediately; committed pull pages progressively populate the current list.
   An unfinished first pull must not be presented as an empty vault. Subsequent
   background sync keeps the compact sidebar indicator and usable cached content.
-- macOS keeps the detail layout stable while replacing an item. Retained
+- Desktop clients keep the detail layout stable while replacing an item. Retained
   content is masked and inactive until the requested item is ready; reveal and
   copy feedback never carry across selections.
+- Item selection updates immediately. Replacement reads cancel superseded work;
+  late successes and failures cannot change a newer selection or context.
+  Leaving the selected item's category or search results clears its detail.
+- Empty lists distinguish loading, no search matches and an empty category.
+  Search offers Clear search; an empty category offers its canonical creation
+  action when available (never in Trash). A pending page is not an empty vault.
+  A background sync error must not hide these local list states or their actions;
+  a failed list read is a separate state from a failed network synchronization.
 - MUST: Keep reveal, copy, TOTP and item actions in the detail workspace.
 - SHOULD: Hide the vault selector when the current storage has only one vault;
   hiding it MUST NOT move controls between semantic regions.

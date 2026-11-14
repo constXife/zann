@@ -96,10 +96,14 @@ pub struct State {
     searching: bool,
     nav: nav_bar::Model,
     detail: Option<Detail>,
+    selection: selection::Selection,
     editor: Option<editor::State>,
     history: Option<history::State>,
     editing_generation: u64,
     busy: bool,
+    switching_vault: bool,
+    /// Only a failed list read can replace the list's empty-state actions.
+    list_error: Option<String>,
     error: Option<String>,
     last_activity: Instant,
     /// `0` disables idle locking. The shell keeps this aligned with the shared
@@ -158,7 +162,11 @@ pub enum Message {
         result: Result<ItemsPage, String>,
     },
     Select(String),
-    Loaded(Result<Detail, String>),
+    Loaded {
+        request: u64,
+        result: Result<Detail, String>,
+    },
+    DetailLoading(u64),
     Detail(detail::Message),
     OpenCreate,
     OpenEdit,
@@ -196,8 +204,6 @@ pub enum Message {
     SyncStateLoaded(Result<local::StorageSyncState, String>),
     /// The sync indicator was pressed: sync now, or lead to reconnecting.
     SyncIndicatorPressed,
-    /// The shown item, read again after a sync changed the vault.
-    DetailRefreshed(Result<Detail, String>),
 }
 
 pub enum Outcome {
@@ -231,10 +237,13 @@ impl State {
             searching: false,
             nav: nav_bar::Model::default(),
             detail: None,
+            selection: selection::Selection::default(),
             editor: None,
             history: None,
             editing_generation: 0,
             busy: false,
+            switching_vault: false,
+            list_error: None,
             error: sync_error.clone(),
             last_activity: Instant::now(),
             auto_lock_minutes: 10,
@@ -351,7 +360,7 @@ impl State {
         self.searching = false;
         self.query.clear();
         self.applied_query.clear();
-        self.detail = None;
+        self.clear_selection();
         self.editor = None;
         self.history = None;
         self.editing_generation = crate::backend::next_view_request();
@@ -392,7 +401,11 @@ impl State {
     }
 
     pub fn activate_nav(&mut self, id: nav_bar::Id) {
+        if self.editor.is_some() || self.history.is_some() || self.switching_vault {
+            return;
+        }
         self.nav.activate(id);
+        self.reconcile_selection();
     }
 
     pub fn category_needs_prefetch(&self) -> bool {
@@ -465,11 +478,15 @@ impl State {
                 | Message::SyncDue(_)
                 | Message::AutoSynced { .. }
                 | Message::SyncStateLoaded(_)
-                | Message::DetailRefreshed(_)
+                | Message::Loaded { .. }
+                | Message::DetailLoading(_)
         ) {
             self.last_activity = Instant::now();
         }
 
+        if matches!(message, Message::Detail(_)) && !self.detail_ready() {
+            return Outcome::None;
+        }
         match message {
             Message::VaultsLoaded(Ok(context)) => {
                 self.vaults = context.vaults;
@@ -494,6 +511,8 @@ impl State {
                 let vault_id = vault.id.clone();
                 let worker_id = vault_id.clone();
                 let facade = session.facade();
+                self.clear_selection();
+                self.switching_vault = true;
                 self.busy = true;
                 self.error = None;
                 return Outcome::Task(cosmic::task::future(async move {
@@ -505,6 +524,7 @@ impl State {
             }
 
             Message::VaultSwitched { vault_id, result } => {
+                self.switching_vault = false;
                 self.busy = false;
                 match result {
                     Ok(page) => {
@@ -515,109 +535,30 @@ impl State {
                 }
             }
 
-            Message::QueryInput(value) => return self.schedule_search(value),
-
-            Message::ClearQuery => return self.schedule_search(String::new()),
-
-            Message::EscapeClearQuery => {
-                let search = self.schedule_search(String::new());
-                let focus = widget::text_input::focus(self.search_id.clone());
-                return match search {
-                    Outcome::Task(task) => Outcome::Task(Task::batch([task, focus])),
-                    _ => Outcome::Task(focus),
-                };
-            }
-
-            Message::ListScrolled {
-                remaining,
-                viewport_height,
-            } => {
-                if remaining <= viewport_height * PREFETCH_VIEWPORTS {
-                    return self.load_more(session);
-                }
-            }
-
-            Message::SearchReady(generation) => {
-                if generation != self.list_generation {
-                    return Outcome::None;
-                }
-                let query = self.query.trim().to_string();
-                let backend_query = (!query.is_empty()).then(|| query.clone());
-                let facade = session.facade();
-                return Outcome::Task(cosmic::task::future(async move {
-                    Message::SearchLoaded {
-                        generation,
-                        query,
-                        result: off_thread(move || local::items(&facade, None, backend_query))
-                            .await,
-                    }
-                }));
-            }
-
-            Message::SearchLoaded {
-                generation,
-                query,
-                result,
-            } => {
-                if generation != self.list_generation {
-                    return Outcome::None;
-                }
-                self.searching = false;
-                match result {
-                    Ok(page) => {
-                        if self.detail.as_ref().is_some_and(|detail| {
-                            !page.items.iter().any(|item| item.id == detail.id)
-                        }) {
-                            self.detail = None;
-                        }
-                        self.applied_query = query;
-                        self.apply_page(page, true);
-                        self.rebuild_nav();
-                        if self.category_needs_prefetch() {
-                            return self.load_more(session);
-                        }
-                    }
-                    Err(err) => self.error = Some(err),
-                }
-            }
-
-            Message::LoadMore => {
-                return self.load_more(session);
-            }
-
-            Message::MoreLoaded { generation, result } => {
-                if generation != self.list_generation {
-                    return Outcome::None;
-                }
-                self.busy = false;
-                match result {
-                    Ok(page) => {
-                        self.apply_page(page, false);
-                        self.rebuild_nav();
-                        if self.category_needs_prefetch() {
-                            return self.load_more(session);
-                        }
-                    }
-                    Err(err) => self.error = Some(err),
-                }
-            }
+            message @ (Message::QueryInput(_)
+            | Message::ClearQuery
+            | Message::EscapeClearQuery
+            | Message::ListScrolled { .. }
+            | Message::SearchReady(_)
+            | Message::SearchLoaded { .. }
+            | Message::LoadMore
+            | Message::MoreLoaded { .. }) => return self.update_search(message, session),
 
             Message::Select(id) => {
-                if self.editor.is_some() || self.history.is_some() {
-                    return Outcome::None;
+                if !self.switching_vault
+                    && self.editor.is_none()
+                    && self.history.is_none()
+                    && self.visible().iter().any(|item| item.id == id)
+                {
+                    return Outcome::Task(self.load_detail(id, session));
                 }
-                let facade = session.facade();
-                return Outcome::Task(cosmic::task::future(async move {
-                    Message::Loaded(
-                        off_thread(move || local::item_get(&facade, id).and_then(Detail::parse))
-                            .await,
-                    )
-                }));
             }
-
-            Message::Loaded(Ok(detail)) => self.detail = Some(detail),
-
-            Message::Loaded(Err(err)) => self.error = Some(err),
+            Message::Loaded { request, result } => self.complete_detail(request, result),
+            Message::DetailLoading(request) => {
+                if request == self.selection.request && self.selection.loading() {
+                    self.selection.show_loading = true;
+                }
+            }
 
             message @ (Message::OpenCreate
             | Message::OpenEdit
@@ -742,7 +683,7 @@ impl State {
             Message::ResizeEnd => self.drag = None,
 
             Message::CopyError => {
-                if let Some(error) = self.error.clone() {
+                if let Some(error) = self.displayed_error().cloned() {
                     return Outcome::Copy {
                         value: error,
                         feedback: Task::none(),
@@ -752,8 +693,7 @@ impl State {
 
             message @ (Message::SyncDue(_)
             | Message::AutoSynced { .. }
-            | Message::ReviewStaleServer
-            | Message::DetailRefreshed(_)) => return self.update_auto_sync(message, session),
+            | Message::ReviewStaleServer) => return self.update_auto_sync(message, session),
 
             message @ (Message::SyncStateLoaded(_) | Message::SyncIndicatorPressed) => {
                 return self.update_sync_status(message, session)
@@ -763,6 +703,7 @@ impl State {
     }
 
     fn apply_page(&mut self, page: ItemsPage, replace: bool) {
+        self.list_error = None;
         if replace {
             self.items = page.items;
         } else {
@@ -827,56 +768,6 @@ impl State {
         }
     }
 
-    fn schedule_search(&mut self, value: String) -> Outcome {
-        if self.busy || self.editor.is_some() || self.history.is_some() || value == self.query {
-            return Outcome::None;
-        }
-        self.query = value;
-        self.list_generation = self.list_generation.wrapping_add(1);
-        let generation = self.list_generation;
-        self.searching = true;
-        self.error = None;
-        let delay = if self.query.trim().is_empty() {
-            Duration::ZERO
-        } else {
-            SEARCH_DEBOUNCE
-        };
-        Outcome::Task(cosmic::task::future(async move {
-            if !delay.is_zero() {
-                tokio::time::sleep(delay).await;
-            }
-            Message::SearchReady(generation)
-        }))
-    }
-
-    fn can_load_more(&self) -> bool {
-        self.next_cursor.is_some()
-            && !self.busy
-            && !self.searching
-            && self.editor.is_none()
-            && self.history.is_none()
-            && self.items.len() < ITEM_CACHE_LIMIT
-    }
-
-    fn load_more(&mut self, session: &Session) -> Outcome {
-        if !self.can_load_more() {
-            return Outcome::None;
-        }
-        let Some(cursor) = self.next_cursor.clone() else {
-            return Outcome::None;
-        };
-        let facade = session.facade();
-        let generation = self.list_generation;
-        let query = (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
-        self.busy = true;
-        Outcome::Task(cosmic::task::future(async move {
-            Message::MoreLoaded {
-                generation,
-                result: off_thread(move || local::items(&facade, Some(cursor), query)).await,
-            }
-        }))
-    }
-
     fn vault_scope(&self) -> Option<VaultScope> {
         self.selected_vault_id
             .as_deref()
@@ -897,6 +788,7 @@ impl State {
 
 mod view;
 use view::vault_label;
+pub use view::ListEmptyState;
 
 struct ItemSummaryView<'a>(&'a ItemSummary);
 impl zann_ui_core::ItemLike for ItemSummaryView<'_> {
@@ -917,3 +809,6 @@ impl zann_ui_core::ItemLike for ItemSummaryView<'_> {
 mod auto_sync;
 mod editing;
 mod sync_status;
+
+mod search;
+mod selection;

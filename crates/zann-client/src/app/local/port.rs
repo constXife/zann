@@ -38,7 +38,7 @@ pub trait LocalVaultService: Send + Sync {
     fn item_read(
         &self,
         id: String,
-        operation: crate::app::SessionOperation,
+        operation: SessionOperation,
     ) -> LocalResult<zann_core::ItemDetail>;
     fn item_create(&self, create: ItemCreate) -> LocalResult<ItemDetail>;
     fn item_update(&self, id: String, update: ItemUpdate) -> LocalResult<ItemDetail>;

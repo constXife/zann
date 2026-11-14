@@ -47,7 +47,7 @@ does not authorize another temporary implementation.
 | Sync scheduling | `zann-client::sync::AutoSyncSchedule`, consumed through `zann-client::app::local` | COSMIC and FFI shells | caller-supplied monotonic `now`; the shell's timer and sync call | debounce, interval, unlock/lock or single-flight admission policy in shells or FFI; a scheduled sync starting or completing into a later unlock |
 | SQLite sync persistence | `zann-client-sqlite` **(production adapter)** | native application composition roots | explicit `ClientPaths` plus one pre-resolved native SQLite file location, injected sync port, bounded projection proofs and atomic DB CAS | implicit active target selection, `HOME`/URI path derivation, binding replacement, multiple endpoint/profile caches or direct use from shells |
 | Unlocked storage/vault context | `zann-client-sqlite::local_vault` | native application facade | key-verified selection and preferred vault, context read/write leases | key checks or preferred-vault policy in shells; implicit sync target after explicit selection |
-| Cancellable local item reads | `zann-client::app::local::LocalVaultService::item_read`, implemented by `zann-client-sqlite::local_vault` | native item presentation through FFI | existing `SessionOperation`, coherent context snapshot, typed decrypted payload, lock/selection cancellation | JSON round trips for card projection; SQL or cancellation policy in shells |
+| Cancellable local item reads | `zann-client::app::local::LocalVaultService::item_read`, implemented by `zann-client-sqlite::local_vault` | COSMIC and native item presentation through FFI | existing `SessionOperation`, coherent context snapshot, typed decrypted payload, lock/selection cancellation | JSON round trips for card projection; SQL or cancellation policy in shells |
 | Authenticated application session | private `zann-client::session` owner, exposed only through `zann-client::app::AppClient` | COSMIC, FFI; future CLI adapter | `CredentialStore`, `ClientPaths`, clock, operation deadline and cancellation | constructing `AppSession` directly; password/OIDC login, trust, refresh, logout, token-selection and ambiguity policy in shells and FFI |
 | Authenticated application composition | `zann-client::app` **(active native facade)** | COSMIC and FFI | injected `AppSyncStoreFactory`, `CredentialStore`, explicit `ClientPaths`, operation-scoped master key, progress/cancellation | exposing `AppSession`/`SyncEngine`, bearer access, ambient paths, mutable target/key maps or local orchestration in shells |
 | Offline replica application use cases | `zann-client::app::local` (port), `zann-client-sqlite::local_vault` (native implementation) | COSMIC and FFI adapters | storage/credential ports, `ClientPaths`, clock and progress sink | local application orchestration in COSMIC screens, Apple views or `zann-ffi` |
@@ -81,11 +81,18 @@ The planned crates identify accepted extraction boundaries. Until they exist:
 - a PR that introduces the planned crate updates the map from **planned** to
   **active** and adds dependency/conformance coverage.
 
-COSMIC consumes `zann-ui-core::project_item_fields` for canonical payload
-parsing, field order, masking/multiline metadata and TOTP parameter extraction.
+COSMIC card reads consume the canonical cancellable `item_read` port and its
+`app::local::{SessionOperation, SessionCancellationHandle}` controls, plus
+`zann-ui-core::item_detail::project_payload_fields` for field order,
+masking/multiline metadata and TOTP parameter extraction. Editor/history JSON
+inputs use the same projection through `project_item_fields`.
 Its detail screen retains translation and temporary reveal/copy state. COSMIC
 has no direct `zann-crypto` dependency. The retired Tauri projection and
 crypto copies have been deleted (#249).
+The uncorrelated native `Loaded` and post-sync `DetailRefreshed` paths are
+replaced by one operation-correlated card adapter; superseding a card or dropping
+its screen cancels the core operation. This narrows MIG-006's legacy read path
+without introducing another flow owner.
 
 Category projections also supply empty-state creation actions (target type and
 translation key); Trash supplies none. Shells render these actions and open the

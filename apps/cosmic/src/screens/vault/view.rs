@@ -1,6 +1,42 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListEmptyState {
+    Loading,
+    NoSearchResults,
+    EmptyCategory,
+    Failed,
+}
+
 impl State {
+    pub fn empty_state(&self) -> Option<ListEmptyState> {
+        if !self.visible().is_empty() {
+            None
+        } else if self.searching || self.busy {
+            Some(ListEmptyState::Loading)
+        } else if self.list_error.is_some() {
+            Some(ListEmptyState::Failed)
+        } else if self.category_needs_prefetch() {
+            Some(ListEmptyState::Loading)
+        } else if !self.query.trim().is_empty() {
+            Some(ListEmptyState::NoSearchResults)
+        } else {
+            Some(ListEmptyState::EmptyCategory)
+        }
+    }
+
+    pub(super) fn displayed_error(&self) -> Option<&String> {
+        self.list_error.as_ref().or(self.error.as_ref())
+    }
+
+    pub fn empty_create_action(&self) -> Option<zann_ui_core::categories::CategoryCreateAction> {
+        let selected = self.selected_category()?;
+        category_views(&self.counts, self.vault_scope()?)
+            .into_iter()
+            .find(|view| view.id == selected)?
+            .create_action
+    }
+
     pub fn view(&self) -> Element<'_, Message> {
         widget::row::with_capacity(3)
             .push(widget::container(self.list_view()).width(Length::Fixed(self.list_width())))
@@ -26,12 +62,6 @@ impl State {
     /// never changes the list's geometry.
     fn detail_view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
-        let search = widget::text_input::search_input(t("items.searchPlaceholder"), &self.query)
-            .id(self.search_id.clone())
-            .on_input(Message::QueryInput)
-            .on_clear(Message::ClearQuery)
-            .width(Length::Fill);
-
         let body: Element<'_, Message> = match (
             self.editor.as_ref(),
             self.history.as_ref(),
@@ -51,36 +81,60 @@ impl State {
                     )
                     .push(
                         widget::button::standard(t("items.historyOpen"))
-                            .on_press(Message::OpenHistory),
+                            .on_press_maybe(self.detail_ready().then_some(Message::OpenHistory)),
                     )
-                    .push(widget::button::standard(t("common.edit")).on_press(Message::OpenEdit))
+                    .push(
+                        widget::button::standard(t("common.edit"))
+                            .on_press_maybe(self.detail_ready().then_some(Message::OpenEdit)),
+                    )
                     .spacing(spacing.space_s)
                     .align_y(Alignment::Center);
                 widget::column::with_capacity(2)
                     .push(header)
                     .push(
-                        widget::scrollable(detail.view(self.temporary_reveal).map(Message::Detail))
-                            .height(Length::Fill),
+                        widget::scrollable(
+                            detail
+                                .view_with_interactions(self.temporary_reveal, self.detail_ready())
+                                .map(Message::Detail),
+                        )
+                        .height(Length::Fill),
                     )
                     .spacing(spacing.space_s)
                     .padding(spacing.space_s)
                     .into()
             }
             (None, None, None) => {
-                super::super::centered(widget::text::body(t("items.detailsHint")))
+                let mut placeholder = widget::column::with_capacity(2).spacing(spacing.space_s);
+                if let Some(error) = &self.selection.error {
+                    placeholder = placeholder.push(widget::text::body(error.clone()));
+                    if let Some(id) = self.selected_item_id() {
+                        placeholder = placeholder.push(
+                            widget::button::standard(t("common.retry"))
+                                .on_press(Message::Select(id.to_owned())),
+                        );
+                    }
+                } else if self.selection.loading() {
+                    if self.selection.show_loading {
+                        placeholder = placeholder.push(widget::text::body(t("common.loading")));
+                    }
+                } else {
+                    placeholder = placeholder.push(widget::text::body(t("items.detailsHint")));
+                }
+                super::super::centered(placeholder)
             }
         };
 
-        widget::column::with_capacity(2)
-            .push(widget::container(search).padding(spacing.space_s))
-            .push(body)
-            .height(Length::Fill)
-            .into()
+        body
     }
 
     fn list_view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let visible = self.visible();
+        let search = widget::text_input::search_input(t("items.searchPlaceholder"), &self.query)
+            .id(self.search_id.clone())
+            .on_input(Message::QueryInput)
+            .on_clear(Message::ClearQuery)
+            .width(Length::Fill);
 
         let mut create = widget::button::suggested(t("common.create"));
         if !self.busy && !self.searching && self.editor.is_none() && self.history.is_none() {
@@ -96,14 +150,41 @@ impl State {
             .align_y(Alignment::Center)
             .width(Length::Fill);
 
-        let list: Element<'_, Message> = if visible.is_empty() {
-            widget::text::body(t("items.noItems"))
-                .apply(widget::container)
+        let list: Element<'_, Message> = if let Some(state) = self.empty_state() {
+            let mut content = widget::column::with_capacity(2).spacing(spacing.space_s);
+            match state {
+                ListEmptyState::Loading => {
+                    content = content
+                        .push(widget::progress_bar::indeterminate_circular().size(24.0))
+                        .push(widget::text::body(t("common.loading")))
+                }
+                ListEmptyState::NoSearchResults => {
+                    content = content
+                        .push(widget::text::body(t("items.noSearchResults")))
+                        .push(
+                            widget::button::standard(t("items.clearSearch"))
+                                .on_press(Message::ClearQuery),
+                        );
+                }
+                ListEmptyState::EmptyCategory => {
+                    content = content.push(widget::text::body(t("workspace.emptyBody")));
+                    if let Some(action) = self.empty_create_action() {
+                        let button = widget::button::suggested(t(&action.label_key))
+                            .on_press_maybe(
+                                (!self.busy && self.editor.is_none() && self.history.is_none())
+                                    .then_some(Message::OpenCreate),
+                            );
+                        content = content.push(button);
+                    }
+                }
+                ListEmptyState::Failed => {} // The existing error row carries the failure.
+            }
+            widget::container(content)
                 .width(Length::Fill)
                 .padding(spacing.space_m)
                 .into()
         } else {
-            let selected = self.detail.as_ref().map(|detail| detail.id.as_str());
+            let selected = self.selected_item_id();
             let mut column = widget::list_column();
             for item in &visible {
                 column = column.add(
@@ -140,21 +221,24 @@ impl State {
             .spacing(spacing.space_xs)
             .align_y(Alignment::Center);
 
-        let mut content = widget::column::with_capacity(4).push(toolbar).push(
-            widget::scrollable(list)
-                .height(Length::Fill)
-                .on_scroll(|viewport| {
-                    let offset = viewport.absolute_offset().y;
-                    let bounds = viewport.bounds();
-                    let content = viewport.content_bounds();
-                    Message::ListScrolled {
-                        remaining: (content.height - offset - bounds.height).max(0.0),
-                        viewport_height: bounds.height,
-                    }
-                }),
-        );
+        let mut content = widget::column::with_capacity(5)
+            .push(search)
+            .push(toolbar)
+            .push(
+                widget::scrollable(list)
+                    .height(Length::Fill)
+                    .on_scroll(|viewport| {
+                        let offset = viewport.absolute_offset().y;
+                        let bounds = viewport.bounds();
+                        let content = viewport.content_bounds();
+                        Message::ListScrolled {
+                            remaining: (content.height - offset - bounds.height).max(0.0),
+                            viewport_height: bounds.height,
+                        }
+                    }),
+            );
 
-        if let Some(error) = self.error.as_ref() {
+        if let Some(error) = self.displayed_error() {
             content = content.push(
                 widget::row::with_capacity(2)
                     .push(widget::text::caption(error.clone()).width(Length::Fill))
@@ -166,7 +250,7 @@ impl State {
                     .spacing(spacing.space_xs)
                     .align_y(Alignment::Center),
             );
-            if self.stale_server_banner().is_some() {
+            if self.list_error.is_none() && self.stale_server_banner().is_some() {
                 content = content.push(
                     widget::button::standard(t("items.reviewStaleServer"))
                         .on_press(Message::ReviewStaleServer),
