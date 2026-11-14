@@ -125,6 +125,7 @@ async fn create_item(
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Create.as_i32(),
                     "payload_enc": payload,
                     "checksum": payload_checksum(&[byte]),
@@ -173,6 +174,7 @@ async fn tombstone_update_is_a_conflict_and_rolls_back_other_batch_writes() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": deleted_item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Delete.as_i32(),
                     "base_seq": deleted_create_seq,
                 }],
@@ -194,6 +196,7 @@ async fn tombstone_update_is_a_conflict_and_rolls_back_other_batch_writes() {
                 "changes": [
                     {
                         "item_id": active_item_id,
+                        "tags": null, "favorite": false,
                         "operation": ChangeType::Update.as_i32(),
                         "base_seq": active_create_seq,
                         "payload_enc": [3],
@@ -201,6 +204,7 @@ async fn tombstone_update_is_a_conflict_and_rolls_back_other_batch_writes() {
                     },
                     {
                         "item_id": deleted_item_id,
+                        "tags": null, "favorite": false,
                         "operation": ChangeType::Update.as_i32(),
                         "base_seq": delete_seq,
                         "payload_enc": [4],
@@ -278,6 +282,7 @@ async fn repeated_delete_is_read_only_and_restore_reopens_updates() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Delete.as_i32(),
                     "base_seq": create_seq,
                 }],
@@ -304,6 +309,7 @@ async fn repeated_delete_is_read_only_and_restore_reopens_updates() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Delete.as_i32(),
                     "base_seq": create_seq,
                 }],
@@ -332,6 +338,7 @@ async fn repeated_delete_is_read_only_and_restore_reopens_updates() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Delete.as_i32(),
                     "base_seq": delete_seq,
                 }],
@@ -361,6 +368,7 @@ async fn repeated_delete_is_read_only_and_restore_reopens_updates() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Restore.as_i32(),
                     "base_seq": delete_seq,
                 }],
@@ -392,6 +400,7 @@ async fn repeated_delete_is_read_only_and_restore_reopens_updates() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": restore_seq,
                     "payload_enc": [5],
@@ -426,6 +435,7 @@ async fn concurrent_deletes_with_one_base_have_one_winner() {
             "vault_id": vault_id,
             "changes": [{
                 "item_id": item_id,
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Delete.as_i32(),
                 "base_seq": create_seq,
             }],

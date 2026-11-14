@@ -70,6 +70,7 @@ async fn legacy(item_fingerprints: &[&str]) -> Legacy {
         .expect("insert legacy vault");
     for (index, fingerprint) in item_fingerprints.iter().enumerate() {
         let item = LocalItem {
+            metadata: Some(Default::default()),
             id: Uuid::now_v7(),
             storage_id: storage.id,
             vault_id: vault.id,
@@ -92,6 +93,7 @@ async fn legacy(item_fingerprints: &[&str]) -> Legacy {
             .expect("insert legacy item");
         PendingChangeRepo::new(&pool)
             .create(&LocalPendingChange {
+                metadata: Some(Default::default()),
                 id: Uuid::now_v7(),
                 storage_id: storage.id,
                 vault_id: vault.id,

@@ -91,6 +91,8 @@ pub(crate) struct PersonalPushRequestWire<'a> {
 
 #[derive(Serialize)]
 pub(crate) struct PersonalPushChangeWire<'a> {
+    #[serde(flatten)]
+    pub(crate) metadata: zann_core::ItemMetadata,
     pub(crate) item_id: Uuid,
     pub(crate) operation: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -115,6 +117,8 @@ pub(crate) struct SharedPushRequestWire {
 
 #[derive(Serialize)]
 pub(crate) struct SharedPushChangeWire {
+    #[serde(flatten)]
+    pub(crate) metadata: zann_core::ItemMetadata,
     pub(crate) item_id: Uuid,
     pub(crate) operation: i32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -158,6 +162,8 @@ pub(crate) struct PushConflictWire {
 #[derive(Deserialize)]
 #[cfg_attr(test, derive(Serialize))]
 pub(crate) struct PersonalPullChangeWire {
+    #[serde(flatten)]
+    pub(crate) metadata: zann_core::ItemMetadata,
     pub(crate) item_id: String,
     pub(crate) operation: i32,
     pub(crate) seq: i64,
@@ -173,6 +179,8 @@ pub(crate) struct PersonalPullChangeWire {
 
 #[derive(Deserialize)]
 pub(crate) struct SharedPullChangeWire {
+    #[serde(flatten)]
+    pub(crate) metadata: zann_core::ItemMetadata,
     pub(crate) item_id: String,
     pub(crate) operation: i32,
     pub(crate) seq: i64,
@@ -580,7 +588,8 @@ fn validate_personal_change(
             seq,
             updated_at,
             deleted_at,
-        ),
+        )
+        .with_metadata(change.metadata)?,
         history,
     })
 }
@@ -636,7 +645,8 @@ fn validate_shared_change(
             seq,
             updated_at,
             deleted_at,
-        ),
+        )
+        .with_metadata(change.metadata)?,
         history,
     })
 }
@@ -652,6 +662,7 @@ pub(crate) fn personal_push_request<'a>(
                 return Err(WireError::new(WireErrorKind::Page));
             }
             Ok(PersonalPushChangeWire {
+                metadata: proof.metadata().clone(),
                 item_id: proof.item_id(),
                 operation: proof.operation().as_i32(),
                 payload_enc: proof.payload_enc(),
@@ -696,6 +707,7 @@ pub(crate) fn shared_push_request(
                 validate_typed_payload(payload, type_id)?;
             }
             Ok(SharedPushChangeWire {
+                metadata: proof.metadata().clone(),
                 item_id: proof.item_id(),
                 operation: proof.operation().as_i32(),
                 payload,
@@ -802,7 +814,8 @@ pub(crate) fn validate_push_response(
             seq,
             updated_at,
             deleted_at,
-        );
+        )
+        .with_metadata(local.metadata().clone())?;
         changes.push(PushCommitChange::validated(proof, state, item)?);
     }
     if !applied.is_empty() || !state_by_id.is_empty() {

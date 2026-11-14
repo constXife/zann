@@ -57,6 +57,7 @@ impl From<zann_client::app::local::LocalError> for CoreError {
     fn from(error: zann_client::app::local::LocalError) -> Self {
         use zann_client::app::local::LocalError;
         match error {
+            LocalError::Backup { kind, message, .. } => Self::Service(format!("{kind}: {message}")),
             LocalError::Locked => Self::Locked,
             LocalError::InvalidPayload(source) => Self::InvalidArgument(source.to_string()),
             LocalError::InvalidArgument(message) => Self::InvalidArgument(message),

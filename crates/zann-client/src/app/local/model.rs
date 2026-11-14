@@ -128,11 +128,8 @@ impl std::fmt::Debug for ItemHistoryDetail {
 
 #[derive(Debug, Clone)]
 pub struct BackupImportOptions {
-    /// Storage to import into. `None` — or the string `"local"` — means the
-    /// local-only storage. A remote storage is not supported here yet: that
-    /// path is not exposed through the canonical `zann-client::app` facade yet,
-    /// and it reports `Unimplemented` rather than importing into the wrong
-    /// place.
+    /// Explicit destination server storage. `None` is rejected; the source
+    /// backup never selects the destination account or server.
     pub target_storage_id: Option<String>,
 }
 

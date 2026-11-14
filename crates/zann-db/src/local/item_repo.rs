@@ -19,6 +19,10 @@ pub struct LocalItemRepo<'a> {
 }
 
 impl<'a> LocalItemRepo<'a> {
+    pub async fn has_unknown_metadata(&self) -> Result<bool, sqlx_core::Error> {
+        Ok(query!("SELECT 1 FROM items_cache WHERE metadata IS NULL AND (deleted_at IS NULL OR length(payload_enc) > 0) LIMIT 1").fetch_optional(self.pool).await?.is_some())
+    }
+
     pub fn new(pool: &'a SqlitePool) -> Self {
         Self { pool }
     }
@@ -28,9 +32,9 @@ impl<'a> LocalItemRepo<'a> {
             r#"
             INSERT INTO items_cache (
                 id, storage_id, vault_id, path, name, type_id, payload_enc, checksum, cache_key_fp,
-                version, deleted_at, updated_at, sync_status
+                version, deleted_at, updated_at, sync_status, metadata
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
             "#,
             item.id,
             item.storage_id,
@@ -44,7 +48,8 @@ impl<'a> LocalItemRepo<'a> {
             item.version,
             item.deleted_at,
             item.updated_at,
-            item.sync_status.as_i32()
+            item.sync_status.as_i32(),
+            item.metadata.as_ref().map(sqlx_core::types::Json)
         )
         .execute(self.pool)
         .await
@@ -65,7 +70,7 @@ impl<'a> LocalItemRepo<'a> {
                 version = ?10,
                 deleted_at = ?11,
                 updated_at = ?12,
-                sync_status = ?13
+                sync_status = ?13, metadata = ?14
             WHERE storage_id = ?2 AND id = ?1
             "#,
             item.id,
@@ -80,7 +85,8 @@ impl<'a> LocalItemRepo<'a> {
             item.version,
             item.deleted_at,
             item.updated_at,
-            item.sync_status.as_i32()
+            item.sync_status.as_i32(),
+            item.metadata.as_ref().map(sqlx_core::types::Json)
         )
         .execute(self.pool)
         .await
@@ -118,7 +124,7 @@ impl<'a> LocalItemRepo<'a> {
                     path,
                     name,
                     type_id,
-                    payload_enc,
+                    metadata, payload_enc,
                     checksum,
                     cache_key_fp,
                     version as "version",
@@ -144,7 +150,7 @@ impl<'a> LocalItemRepo<'a> {
                     path,
                     name,
                     type_id,
-                    payload_enc,
+                    metadata, payload_enc,
                     checksum,
                     cache_key_fp,
                     version as "version",
@@ -177,7 +183,7 @@ impl<'a> LocalItemRepo<'a> {
                 path,
                 name,
                 type_id,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 cache_key_fp,
                 version as "version",
@@ -211,7 +217,7 @@ impl<'a> LocalItemRepo<'a> {
                 path,
                 name,
                 type_id,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 cache_key_fp,
                 version as "version",
@@ -244,7 +250,7 @@ impl<'a> LocalItemRepo<'a> {
                 path,
                 name,
                 type_id,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 cache_key_fp,
                 version as "version",
@@ -287,6 +293,7 @@ impl<'a> LocalItemRepo<'a> {
                     THEN octet_length(name) BETWEEN 1 AND ?3 ELSE 0 END
                 AND CASE WHEN typeof(type_id) = 'text'
                     THEN octet_length(type_id) BETWEEN 1 AND ?4 ELSE 0 END
+                AND (metadata IS NULL OR (typeof(metadata) = 'text' AND octet_length(metadata) <= 65536))
                 AND CASE WHEN typeof(payload_enc) = 'blob'
                     THEN length(payload_enc) <= ?5 ELSE 0 END
                 AND CASE WHEN typeof(checksum) = 'text'
@@ -335,7 +342,7 @@ impl<'a> LocalItemRepo<'a> {
                 path,
                 name,
                 type_id,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 cache_key_fp,
                 version as "version",
@@ -371,7 +378,7 @@ impl<'a> LocalItemRepo<'a> {
                     path,
                     name,
                     type_id,
-                    payload_enc,
+                    metadata, payload_enc,
                     checksum,
                     cache_key_fp,
                     version as "version",
@@ -397,7 +404,7 @@ impl<'a> LocalItemRepo<'a> {
                     path,
                     name,
                     type_id,
-                    payload_enc,
+                    metadata, payload_enc,
                     checksum,
                     cache_key_fp,
                     version as "version",
@@ -435,7 +442,7 @@ impl<'a> LocalItemRepo<'a> {
                         path,
                         name,
                         type_id,
-                        payload_enc,
+                        metadata, payload_enc,
                         checksum,
                         cache_key_fp,
                         version as "version",
@@ -472,7 +479,7 @@ impl<'a> LocalItemRepo<'a> {
                         path,
                         name,
                         type_id,
-                        payload_enc,
+                        metadata, payload_enc,
                         checksum,
                         cache_key_fp,
                         version as "version",
@@ -502,7 +509,7 @@ impl<'a> LocalItemRepo<'a> {
                         path,
                         name,
                         type_id,
-                        payload_enc,
+                        metadata, payload_enc,
                         checksum,
                         cache_key_fp,
                         version as "version",
@@ -540,7 +547,7 @@ impl<'a> LocalItemRepo<'a> {
                         path,
                         name,
                         type_id,
-                        payload_enc,
+                        metadata, payload_enc,
                         checksum,
                         cache_key_fp,
                         version as "version",
@@ -583,7 +590,7 @@ impl<'a> LocalItemRepo<'a> {
                         items_cache.path,
                         items_cache.name,
                         items_cache.type_id,
-                        items_cache.payload_enc,
+                        items_cache.metadata, items_cache.payload_enc,
                         items_cache.checksum,
                         items_cache.cache_key_fp,
                         items_cache.version as "version",
@@ -623,7 +630,7 @@ impl<'a> LocalItemRepo<'a> {
                         items_cache.path,
                         items_cache.name,
                         items_cache.type_id,
-                        items_cache.payload_enc,
+                        items_cache.metadata, items_cache.payload_enc,
                         items_cache.checksum,
                         items_cache.cache_key_fp,
                         items_cache.version as "version",
@@ -657,7 +664,7 @@ impl<'a> LocalItemRepo<'a> {
                         items_cache.path,
                         items_cache.name,
                         items_cache.type_id,
-                        items_cache.payload_enc,
+                        items_cache.metadata, items_cache.payload_enc,
                         items_cache.checksum,
                         items_cache.cache_key_fp,
                         items_cache.version as "version",
@@ -698,7 +705,7 @@ impl<'a> LocalItemRepo<'a> {
                         items_cache.path,
                         items_cache.name,
                         items_cache.type_id,
-                        items_cache.payload_enc,
+                        items_cache.metadata, items_cache.payload_enc,
                         items_cache.checksum,
                         items_cache.cache_key_fp,
                         items_cache.version as "version",

@@ -6306,6 +6306,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "zann-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chrono",
+ "ed25519-dalek",
+ "rand 0.8.7",
+ "serde_json",
+ "serde_yaml",
+ "sqlx-core",
+ "sqlx-postgres",
+ "tempfile",
+ "tokio",
+ "tower 0.5.2",
+ "tracing-subscriber",
+ "uuid",
+ "zann-client",
+ "zann-client-sqlite",
+ "zann-core",
+ "zann-crypto",
+ "zann-db",
+ "zann-keystore",
+ "zann-server",
+]
+
+[[package]]
 name = "zann-keystore"
 version = "0.1.0"
 dependencies = [

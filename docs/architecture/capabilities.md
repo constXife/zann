@@ -684,3 +684,30 @@ The server observation must verify its signature and receive explicit trust
 before configured credentials are read. `--insecure` permits loopback HTTP and
 does not disable certificate verification. The CLI and `zann-client-sqlite`
 no longer write `config.json`; MIG-005 remains only for the Tauri writers.
+
+
+### Server backup restoration (#243)
+
+`zann-core::ItemMetadata` owns item tags/favorite. The canonical sync models,
+wire adapters and SQLite item/pending CAS proofs carry the same attributes.
+`zann-client::app::BackupImportSession` binds an explicitly selected storage,
+master key and cancellable deadline; it exposes catalog preparation and sync
+without bearer access. `zann-client-sqlite::maintenance::backup` owns streaming
+file validation and transactional item/history/pending publication. Tauri's
+plain remote importer and its direct routes have been removed.
+
+Personal source vaults map only to the selected account's personal vault.
+Shared vaults match by source identity or deterministic `import-<source UUID>`
+slug, never by nonunique display names. Missing shared vaults are created via
+the canonical pinned transport; only sync materializes the catalog locally.
+Repeated item paths are reported as skipped, deleted backup records are skipped,
+and successful import drains all pending batches before returning.
+
+Migration 0005 leaves previously uncaptured item attributes explicitly unknown
+(SQL NULL). Offline payload reading remains available; sync cannot publish an
+unknown pending attribute set and export cannot invent empty attributes.
+Clean projections can use the existing explicit sync reset followed by full
+sync. Reset refuses pending, dirty or non-server history state; preserve such
+roots and use the cutover instructions in `docs/migrations/item-metadata.md`.
+The test-only `zann-integration-tests` package exercises real HTTP, Postgres
+and SQLite together, without adding client dependencies to the server crate.

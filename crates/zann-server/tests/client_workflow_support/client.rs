@@ -167,6 +167,7 @@ impl LocalClient {
                 .map(|change| {
                     json!({
                         "item_id": change.item_id.to_string(),
+                        "tags": null, "favorite": false,
                         "operation": change.operation,
                         "payload_enc": change.payload_enc,
                         "checksum": change.checksum,

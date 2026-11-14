@@ -528,6 +528,7 @@ impl SessionOperation {
         }
     }
 
+    /// A substep shares this operation's identity, cancellation and deadline.
     pub(crate) fn detached_copy(&self) -> Self {
         Self {
             operation_id: self.operation_id,

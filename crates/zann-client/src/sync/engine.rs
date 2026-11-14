@@ -523,7 +523,7 @@ impl SyncEngine {
                     })?;
 
                 let mut changes = Vec::with_capacity(page.changes.len());
-                for change in page.changes {
+                for mut change in page.changes {
                     let item_id = change.item.item_id();
                     let expected = states.remove(&item_id).ok_or_else(|| {
                         SyncError::new(
@@ -533,6 +533,16 @@ impl SyncEngine {
                         )
                     })?;
                     if let Some(proof) = expected.exact_proof() {
+                        change
+                            .item
+                            .normalize_echo(proof.projection(), vault.plane(), vault.payload_key())
+                            .map_err(|_| {
+                                SyncError::new(
+                                    operation_id,
+                                    SyncErrorKind::ConcurrentLocalChange,
+                                    SyncStage::LoadItemStates,
+                                )
+                            })?;
                         if proof.sync_status() != SyncStatus::Synced
                             || !proof.projection().accepts_pulled(&change.item)
                         {
@@ -741,7 +751,7 @@ impl std::fmt::Debug for SyncEngine {
 }
 
 /// One remote call bounded by the operation's cancellation and deadline.
-pub(super) async fn await_remote<T>(
+pub(crate) async fn await_remote<T>(
     operation: &SessionOperation,
     stage: SyncStage,
     future: RemoteFuture<'_, T>,
@@ -893,7 +903,7 @@ fn validate_item_states_for_push(
     Ok(mapped)
 }
 
-pub(super) fn map_session_error(error: SessionError) -> SyncError {
+pub(crate) fn map_session_error(error: SessionError) -> SyncError {
     let kind = match error.kind() {
         SessionErrorKind::Cancelled => SyncErrorKind::Cancelled,
         SessionErrorKind::DeadlineExceeded => SyncErrorKind::DeadlineExceeded,
@@ -946,6 +956,7 @@ fn map_store_error(
     error: SyncStoreError,
 ) -> SyncError {
     let kind = match error.kind() {
+        SyncStoreErrorKind::MetadataRefreshRequired => SyncErrorKind::MetadataRefreshRequired,
         SyncStoreErrorKind::StaleCheckpoint
         | SyncStoreErrorKind::StaleKeyBinding
         | SyncStoreErrorKind::StaleItem
@@ -1699,6 +1710,7 @@ mod tests {
             Err(error) => panic!("test encryption failed: {error}"),
         };
         PersonalPullChangeWire {
+            metadata: Default::default(),
             item_id: item_id.to_string(),
             operation: ChangeType::Update.as_i32(),
             seq,
@@ -1739,6 +1751,7 @@ mod tests {
             let item_id = Uuid::now_v7();
             vec![personal_page(
                 vec![PersonalPullChangeWire {
+                    metadata: Default::default(),
                     item_id: item_id.to_string(),
                     operation: ChangeType::Update.as_i32(),
                     seq: 2,
@@ -2316,6 +2329,7 @@ mod tests {
             let payload = EncryptedPayload::new("login");
             vec![PullPageWire::Shared(SharedPullPageWire {
                 changes: vec![SharedPullChangeWire {
+                    metadata: Default::default(),
                     item_id: item_id.to_string(),
                     operation: ChangeType::Update.as_i32(),
                     seq: 2,
@@ -2350,6 +2364,7 @@ mod tests {
             let item_id = Uuid::now_v7();
             vec![personal_page(
                 vec![PersonalPullChangeWire {
+                    metadata: Default::default(),
                     item_id: item_id.to_string(),
                     operation: ChangeType::Delete.as_i32(),
                     seq: 2,
@@ -2379,6 +2394,7 @@ mod tests {
         let fixture = fixture_with_vault(VaultPlane::PersonalClient, |vault_id| {
             let item_id = Uuid::now_v7();
             let delete = PersonalPullChangeWire {
+                metadata: Default::default(),
                 item_id: item_id.to_string(),
                 operation: ChangeType::Delete.as_i32(),
                 seq: 2,

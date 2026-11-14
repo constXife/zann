@@ -2,6 +2,13 @@ use crate::app::{SessionError, SessionErrorKind, SyncError, SyncErrorKind};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LocalError {
+    #[error("backup {kind}: {message}")]
+    Backup {
+        kind: String,
+        message: String,
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
     #[error("vault is locked")]
     Locked,
     #[error("invalid payload: {0}")]
@@ -47,6 +54,7 @@ fn sync_error_kind_code(kind: SyncErrorKind) -> &'static str {
         SyncErrorKind::Protocol => "sync_protocol",
         SyncErrorKind::BodyTooLarge => "sync_body_too_large",
         SyncErrorKind::Crypto => "sync_crypto",
+        SyncErrorKind::MetadataRefreshRequired => "sync_metadata_refresh_required",
         SyncErrorKind::Local => "db_error",
         SyncErrorKind::ConcurrentLocalChange => "sync_local_conflict",
         SyncErrorKind::ConcurrentRemoteChange => "sync_conflict",

@@ -38,9 +38,9 @@ impl<'a> PendingChangeRepo<'a> {
             r#"
             INSERT INTO pending_changes (
                 id, storage_id, vault_id, item_id, operation, payload_enc, checksum,
-                path, name, type_id, base_seq, created_at
+                path, name, type_id, base_seq, created_at, metadata
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
             "#,
             change.id,
             change.storage_id,
@@ -53,7 +53,8 @@ impl<'a> PendingChangeRepo<'a> {
             change.name.as_deref(),
             change.type_id.as_deref(),
             change.base_seq,
-            change.created_at
+            change.created_at,
+            change.metadata.as_ref().map(sqlx_core::types::Json)
         )
         .execute(self.pool)
         .await
@@ -74,7 +75,7 @@ impl<'a> PendingChangeRepo<'a> {
                 vault_id,
                 item_id,
                 operation,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 path,
                 name,
@@ -134,7 +135,7 @@ impl<'a> PendingChangeRepo<'a> {
                 vault_id,
                 item_id,
                 operation,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 path,
                 name,
@@ -255,6 +256,7 @@ impl<'a> PendingChangeRepo<'a> {
                     THEN octet_length(item_id) IN (16, 36) ELSE 0 END
                 AND CASE WHEN typeof(operation) = 'integer'
                     THEN operation IN (1, 2, 3, 4) ELSE 0 END
+                AND (metadata IS NULL OR (typeof(metadata) = 'text' AND octet_length(metadata) <= 65536))
                 AND (payload_enc IS NULL OR CASE WHEN typeof(payload_enc) = 'blob'
                     THEN length(payload_enc) <= ?3 ELSE 0 END)
                 AND (checksum IS NULL OR CASE WHEN typeof(checksum) = 'text'
@@ -317,7 +319,7 @@ impl<'a> PendingChangeRepo<'a> {
                 vault_id,
                 item_id,
                 operation,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 path,
                 name,
@@ -358,7 +360,7 @@ impl<'a> PendingChangeRepo<'a> {
                 vault_id,
                 item_id,
                 operation,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 path,
                 name,
@@ -404,6 +406,7 @@ impl<'a> PendingChangeRepo<'a> {
                     THEN octet_length(item_id) IN (16, 36) ELSE 0 END
                 AND CASE WHEN typeof(operation) = 'integer'
                     THEN operation IN (1, 2, 3, 4) ELSE 0 END
+                AND (metadata IS NULL OR (typeof(metadata) = 'text' AND octet_length(metadata) <= 65536))
                 AND (payload_enc IS NULL OR CASE WHEN typeof(payload_enc) = 'blob'
                     THEN length(payload_enc) <= ?3 ELSE 0 END)
                 AND (checksum IS NULL OR CASE WHEN typeof(checksum) = 'text'
@@ -454,7 +457,7 @@ impl<'a> PendingChangeRepo<'a> {
                 vault_id,
                 item_id,
                 operation,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 path,
                 name,
@@ -487,7 +490,7 @@ impl<'a> PendingChangeRepo<'a> {
                 vault_id,
                 item_id,
                 operation,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 path,
                 name,
@@ -518,7 +521,7 @@ impl<'a> PendingChangeRepo<'a> {
                 vault_id,
                 item_id,
                 operation,
-                payload_enc,
+                metadata, payload_enc,
                 checksum,
                 path,
                 name,

@@ -95,6 +95,7 @@ pub(super) async fn apply_shared_pull_change(
     }
 
     let item = LocalItem {
+        metadata: serde_json::from_value(change.clone()).expect("item metadata"),
         id: item_id,
         storage_id,
         vault_id,
@@ -186,6 +187,7 @@ pub(super) async fn apply_personal_pull_change(
     }
 
     let item = LocalItem {
+        metadata: serde_json::from_value(change.clone()).expect("item metadata"),
         id: item_id,
         storage_id,
         vault_id,
@@ -257,6 +259,7 @@ pub(super) async fn build_shared_push_changes(
         if change.operation == ChangeType::Delete {
             changes.push(json!({
                 "item_id": change.item_id.to_string(),
+                "tags": null, "favorite": false,
                 "operation": change.operation,
                 "payload": serde_json::Value::Null,
                 "path": change.path,
@@ -273,6 +276,7 @@ pub(super) async fn build_shared_push_changes(
         let payload_json = serde_json::to_value(payload).expect("payload json");
         changes.push(json!({
             "item_id": change.item_id.to_string(),
+            "tags": null, "favorite": false,
             "operation": change.operation,
             "payload": payload_json,
             "path": change.path,

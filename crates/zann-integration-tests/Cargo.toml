@@ -1,0 +1,37 @@
+[package]
+name = "zann-integration-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+autotests = false
+
+[features]
+postgres-tests = []
+
+[[test]]
+name = "backup_round_trip"
+path = "tests/backup_round_trip.rs"
+required-features = ["postgres-tests"]
+
+[dev-dependencies]
+axum = "0.7"
+chrono = "0.4"
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+rand = "0.8"
+serde_json = "1"
+serde_yaml = "0.9"
+sqlx-core = { version = "0.8", default-features = false, features = ["_rt-tokio", "json"] }
+sqlx-postgres = { version = "0.8", default-features = false }
+tempfile = "3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net"] }
+tower = "0.5"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v7"] }
+zann-client = { path = "../zann-client", default-features = false, features = ["app"] }
+zann-client-sqlite = { path = "../zann-client-sqlite", features = ["local-vault"] }
+zann-core = { path = "../zann-core", default-features = false }
+zann-crypto = { path = "../zann-crypto" }
+zann-db = { path = "../zann-db", default-features = false, features = ["postgres", "sqlite"] }
+zann-keystore = { path = "../zann-keystore", default-features = false }
+zann-server = { path = "../zann-server" }

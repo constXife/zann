@@ -3,6 +3,7 @@ use super::*;
 /// Exact local item projection used as a compare-and-swap proof.
 #[derive(Clone, Eq, PartialEq)]
 pub struct ItemProjection {
+    pub(super) metadata: zann_core::ItemMetadata,
     pub(super) scope: SyncScope,
     pub(super) item_id: Uuid,
     pub(super) path: String,
@@ -18,6 +19,65 @@ pub struct ItemProjection {
 }
 
 impl ItemProjection {
+    /// A shared pull re-encrypts plaintext with a fresh nonce. For a revision
+    /// already confirmed by push, retain its ciphertext only after proving
+    /// exact plaintext and metadata equality. Personal ciphertext stays opaque.
+    pub(crate) fn normalize_echo(
+        &mut self,
+        previous: &Self,
+        plane: VaultPlane,
+        key: &VaultPayloadKey,
+    ) -> Result<(), SyncModelError> {
+        if self.seq != previous.seq {
+            return Ok(());
+        }
+        if self.scope != previous.scope
+            || self.item_id != previous.item_id
+            || self.path != previous.path
+            || self.name != previous.name
+            || self.type_id != previous.type_id
+            || self.metadata != previous.metadata
+            || self.deleted_at.is_some() != previous.deleted_at.is_some()
+        {
+            return Err(SyncModelError::InvalidText);
+        }
+        if self.deleted_at.is_none() {
+            if plane != VaultPlane::SharedServer {
+                return Ok(());
+            }
+            let decode = |item: &Self| {
+                zann_crypto::decrypt_payload(
+                    key.expose(),
+                    self.scope.vault_id(),
+                    self.item_id,
+                    &item.payload_enc,
+                )
+                .map_err(|_| SyncModelError::InvalidText)
+            };
+            if decode(self)? != decode(previous)? {
+                return Err(SyncModelError::InvalidText);
+            }
+        }
+        self.payload_enc.clone_from(&previous.payload_enc);
+        self.checksum = previous.checksum;
+        Ok(())
+    }
+
+    pub fn with_metadata(
+        mut self,
+        metadata: zann_core::ItemMetadata,
+    ) -> Result<Self, SyncModelError> {
+        if !metadata.validate() {
+            return Err(SyncModelError::InvalidText);
+        }
+        self.metadata = metadata;
+        Ok(self)
+    }
+
+    pub fn metadata(&self) -> &zann_core::ItemMetadata {
+        &self.metadata
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn validated(
         scope: SyncScope,
@@ -33,6 +93,7 @@ impl ItemProjection {
         deleted_at: Option<DateTime<Utc>>,
     ) -> Self {
         Self {
+            metadata: Default::default(),
             scope,
             item_id,
             path,
@@ -164,6 +225,7 @@ impl ItemProjection {
                 && self.path == next.path
                 && self.name == next.name
                 && self.type_id == next.type_id
+                && self.metadata == next.metadata
                 && self.checksum == next.checksum
                 && self.deleted_at.is_some() == next.deleted_at.is_some())
     }
@@ -345,6 +407,7 @@ impl fmt::Debug for PendingExpectation {
 /// Exact pending row provenance. Ciphertext is deliberately omitted from Debug.
 #[derive(Clone, Eq, PartialEq)]
 pub struct PendingProof {
+    pub(super) metadata: zann_core::ItemMetadata,
     pub(super) pending_id: Uuid,
     pub(super) scope: SyncScope,
     pub(super) item_id: Uuid,
@@ -359,6 +422,21 @@ pub struct PendingProof {
 }
 
 impl PendingProof {
+    pub fn with_metadata(
+        mut self,
+        metadata: zann_core::ItemMetadata,
+    ) -> Result<Self, SyncModelError> {
+        if !metadata.validate() {
+            return Err(SyncModelError::InvalidText);
+        }
+        self.metadata = metadata;
+        Ok(self)
+    }
+
+    pub fn metadata(&self) -> &zann_core::ItemMetadata {
+        &self.metadata
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         pending_id: Uuid,
@@ -392,6 +470,7 @@ impl PendingProof {
             base_seq,
         )?;
         Ok(Self {
+            metadata: Default::default(),
             pending_id,
             scope,
             item_id,
@@ -510,3 +589,7 @@ pub(super) fn validate_pending_shape(
         _ => Err(SyncModelError::InvalidPendingProof),
     }
 }
+
+#[cfg(test)]
+#[path = "echo_tests.rs"]
+mod echo_tests;

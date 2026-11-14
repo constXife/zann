@@ -193,3 +193,37 @@ fn apple_passwords_preflight_and_import_keep_distinct_duplicate_titles() {
     paths.sort();
     assert_eq!(paths, vec!["Mail".to_string(), "Mail (2)".to_string()]);
 }
+
+#[test]
+fn legacy_unknown_metadata_is_readable_but_never_exported_as_empty_attributes() {
+    let root = CanonicalTempDir::new();
+    let core = create_core(db_url(&root)).unwrap();
+    core.seed_offline_fixture("fixture password".into())
+        .unwrap();
+    let id = core
+        .debug_create_kv_item("legacy/item".into(), "password".into(), "fixture".into())
+        .unwrap();
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let location = zann_db::SqliteFileLocation::from_uri(&db_url(&root)).unwrap();
+    let pool = runtime
+        .block_on(zann_db::connect_sqlite_file_with_max(&location, 1))
+        .unwrap();
+    let storage = uuid::Uuid::parse_str(&core.current_storage_id().unwrap()).unwrap();
+    let repo = zann_db::local::LocalItemRepo::new(&pool);
+    let mut item = runtime
+        .block_on(repo.get_by_id(storage, uuid::Uuid::parse_str(&id).unwrap()))
+        .unwrap()
+        .unwrap();
+    item.metadata = None;
+    runtime.block_on(repo.update(&item)).unwrap();
+    core.item_get(id)
+        .expect("offline ciphertext remains readable");
+    let error = core
+        .backup_export_file(root.join("refused.json").display().to_string())
+        .unwrap_err();
+    assert!(
+        matches!(error, zann_client::app::local::LocalError::Backup { kind, .. } if kind == "backup_metadata_refresh_required")
+    );
+    assert!(!root.join("refused.json").exists());
+    runtime.block_on(pool.close());
+}

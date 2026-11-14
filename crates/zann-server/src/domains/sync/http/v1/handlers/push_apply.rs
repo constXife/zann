@@ -242,6 +242,12 @@ pub(crate) async fn apply_change(
     vault_id: Uuid,
     change: SyncPushChange,
 ) -> Result<ApplyChangeResult, ApplyChangeError> {
+    if !change.metadata.validate() {
+        return Err(ApplyChangeError {
+            status: StatusCode::BAD_REQUEST,
+            error: "invalid_item_metadata",
+        });
+    }
     let operation = change.operation;
     let base_seq = change.base_seq.unwrap_or(0);
     // Serialize writers of an existing item before checking the exact current
@@ -419,8 +425,8 @@ pub(crate) async fn apply_change(
                 path,
                 name,
                 type_id,
-                tags: None,
-                favorite: false,
+                tags: change.metadata.tags,
+                favorite: change.metadata.favorite,
                 payload_enc,
                 checksum,
                 version: 1,
@@ -545,6 +551,8 @@ pub(crate) async fn apply_change(
                 enforce_item_history_limit(conn, item.id).await?;
             }
 
+            item.tags = change.metadata.tags;
+            item.favorite = change.metadata.favorite;
             item.path = next_path;
             item.name = next_name;
             validate_existing_type_id(&item.type_id, change.type_id.as_deref())
@@ -575,7 +583,7 @@ pub(crate) async fn apply_change(
                     version = $7,
                     row_version = $8,
                     device_id = $9,
-                    updated_at = $10
+                    updated_at = $10, tags = $13, favorite = $14
                 WHERE id = $1
                   AND vault_id = $11
                   AND sync_status = $12
@@ -592,7 +600,9 @@ pub(crate) async fn apply_change(
                 item.device_id,
                 item.updated_at,
                 vault_id,
-                SyncStatus::Active.as_i32()
+                SyncStatus::Active.as_i32(),
+                item.tags.as_ref().map(sqlx_core::types::Json),
+                item.favorite
             )
             .execute(&mut *conn)
             .await
@@ -658,6 +668,8 @@ pub(crate) async fn apply_change(
                 change.name.as_deref(),
             )
             .map_err(contract_error)?;
+            item.tags = change.metadata.tags;
+            item.favorite = change.metadata.favorite;
             item.path = next_path;
             item.name = next_name;
             validate_existing_type_id(&item.type_id, change.type_id.as_deref())
@@ -696,7 +708,7 @@ pub(crate) async fn apply_change(
                     deleted_at = $11,
                     deleted_by_user_id = $12,
                     deleted_by_device_id = $13,
-                    updated_at = $14
+                    updated_at = $14, tags = $17, favorite = $18
                 WHERE id = $1
                   AND vault_id = $15
                   AND sync_status = $16
@@ -717,7 +729,9 @@ pub(crate) async fn apply_change(
                 item.deleted_by_device_id,
                 item.updated_at,
                 vault_id,
-                SyncStatus::Tombstone.as_i32()
+                SyncStatus::Tombstone.as_i32(),
+                item.tags.as_ref().map(sqlx_core::types::Json),
+                item.favorite
             )
             .execute(&mut *conn)
             .await

@@ -242,6 +242,7 @@ async fn shared_push_conflict_on_path_collision() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": change_id.to_string(),
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Create.as_i32(),
                     "payload": client_payload,
                     "path": "login",

@@ -27,6 +27,10 @@ pub struct TestApp {
 }
 
 impl TestApp {
+    pub fn router(&self) -> axum::Router {
+        self.app.clone()
+    }
+
     pub async fn new_with_smk() -> Self {
         static INIT: std::sync::Once = std::sync::Once::new();
         INIT.call_once(|| {

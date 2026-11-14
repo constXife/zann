@@ -27,7 +27,7 @@ use url::Url;
 use uuid::Uuid;
 use zann_core::crypto::SecretKey;
 use zann_core::{EncryptedPayload, FieldKind, FieldValue, ItemsService, VaultKind};
-use zann_db::local::{LocalItem, LocalItemRepo, LocalStorage, LocalStorageRepo, LocalVaultRepo};
+use zann_db::local::{LocalItem, LocalItemRepo, LocalStorageRepo, LocalVaultRepo};
 use zann_db::services::{LocalServices, MAX_ITEM_NAME_LEN};
 use zann_db::SqlitePool;
 
@@ -80,16 +80,26 @@ impl BackupCtx {
 
 /// A failure carrying a stable `kind` for the UI to translate, per ADR 0001.
 /// Clients must not parse `message`.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(thiserror::Error)]
 #[error("{message}")]
 pub struct BackupError {
+    #[source]
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
     pub kind: String,
     pub message: String,
 }
 
 impl BackupError {
+    pub fn source(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
+        Self {
+            kind: "backup_failed".into(),
+            message: "backup operation failed".into(),
+            source: Some(error.into()),
+        }
+    }
     pub fn new(kind: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
+            source: None,
             kind: kind.into(),
             message: message.into(),
         }
@@ -110,7 +120,7 @@ impl From<String> for BackupError {
 
 impl From<anyhow::Error> for BackupError {
     fn from(err: anyhow::Error) -> Self {
-        Self::new("backup_failed", err.to_string())
+        Self::source(err)
     }
 }
 
@@ -143,6 +153,9 @@ pub struct PlainBackupVault {
 
 #[derive(Serialize, Deserialize)]
 pub struct PlainBackupItem {
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub favorite: bool,
     pub id: Option<String>,
     pub storage_id: String,
     pub vault_id: String,
@@ -170,14 +183,6 @@ pub struct ImportReport {
     pub skipped_missing_storage: usize,
     pub skipped_missing_vault: usize,
     pub skipped_deleted: usize,
-}
-
-/// Importing into a remote storage still needs the HTTP and token machinery
-/// that lives outside this crate, so the routing decision is made here and the
-/// work is handed back to the caller.
-pub enum ImportOutcome {
-    Done(ImportReport),
-    NeedsRemote(LocalStorage),
 }
 
 pub fn insert_payload_field(
@@ -221,3 +226,11 @@ pub use import::*;
 
 mod stream;
 pub use stream::*;
+
+impl std::fmt::Debug for BackupError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BackupError")
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}

@@ -281,6 +281,7 @@ pub async fn items_resolve_conflict(
         .map_err(|_| "failed to update item")?;
 
     let change = LocalPendingChange {
+        metadata: item.metadata.clone(),
         id: Uuid::now_v7(),
         storage_id,
         vault_id: item.vault_id,

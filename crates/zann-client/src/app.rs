@@ -1829,3 +1829,6 @@ pub use connection_removal::ConnectionRemoval;
 /// Local vault services, independent of SQLite and native adapters.
 mod kdf_identity;
 pub mod local;
+
+mod backup;
+pub use backup::{BackupImportSession, BackupVaultSpec, BACKUP_MAX_VAULTS};

@@ -71,6 +71,7 @@ impl fmt::Debug for LocalSyncGenerationProof {
 /// carries encrypted payload bytes.
 #[derive(PartialEq, Eq)]
 pub struct LocalItemProof {
+    pub metadata: Option<zann_core::ItemMetadata>,
     pub(super) id: Uuid,
     pub(super) storage_id: Uuid,
     pub(super) vault_id: Uuid,
@@ -97,6 +98,7 @@ impl TryFrom<&LocalItem> for LocalItemProof {
         validate_scope(scope)?;
         validate_item(item, scope)?;
         Ok(Self {
+            metadata: item.metadata.clone(),
             id: item.id,
             storage_id: item.storage_id,
             vault_id: item.vault_id,
@@ -128,6 +130,7 @@ pub enum LocalItemExpectation {
 /// push commit's compare-and-swap proof.
 #[derive(PartialEq, Eq)]
 pub struct LocalPendingProof {
+    pub metadata: Option<zann_core::ItemMetadata>,
     pub(super) id: Uuid,
     pub(super) storage_id: Uuid,
     pub(super) vault_id: Uuid,
@@ -148,6 +151,7 @@ impl TryFrom<&LocalPendingChange> for LocalPendingProof {
     fn try_from(change: &LocalPendingChange) -> Result<Self, Self::Error> {
         validate_pending_change(change)?;
         Ok(Self {
+            metadata: change.metadata.clone(),
             id: change.id,
             storage_id: change.storage_id,
             vault_id: change.vault_id,

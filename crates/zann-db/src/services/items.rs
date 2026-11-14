@@ -7,10 +7,7 @@ use zann_core::{
     ItemPreview, ItemPreviewPage, ItemsService, ServiceError, ServiceResult, SyncStatus,
 };
 
-use crate::local::{
-    HistorySource, HistorySyncStatus, LocalItem, LocalItemHistory, LocalItemHistoryRepo,
-    LocalItemRepo, LocalPendingChange, PendingChangeRepo,
-};
+use crate::local::{LocalItem, LocalItemRepo, LocalPendingChange, PendingChangeRepo};
 
 use super::LocalServices;
 
@@ -255,86 +252,19 @@ impl<'a> ItemsService for LocalServices<'a> {
         type_id: String,
         payload: EncryptedPayload,
     ) -> ServiceResult<Uuid> {
-        let normalized_path = Self::normalize_path(&path)?;
-        Self::validate_payload_size(&payload)?;
-        let repo = LocalItemRepo::new(self.pool);
-        if let Some(existing) = repo
-            .get_active_by_vault_path(storage_id, vault_id, &normalized_path)
-            .await
-            .map_err(|err| ServiceError::new("item_lookup_failed", err.to_string()))?
-        {
-            return Err(ServiceError::new(
-                "item_exists",
-                format!("item already exists at {}", existing.path),
-            ));
-        }
-        let now = Utc::now();
-
-        let item_id = Uuid::now_v7();
-        let (payload_enc, key_fp) = self
-            .encrypt_payload(storage_id, vault_id, item_id, &payload)
-            .await?;
-        let checksum = Self::payload_checksum(&payload_enc);
-        let item = LocalItem {
-            id: item_id,
+        self.put_item_with_metadata(
             storage_id,
             vault_id,
-            path: normalized_path.clone(),
-            name: Self::name_from_path(&normalized_path),
+            path,
             type_id,
-            payload_enc,
-            checksum,
-            cache_key_fp: Some(key_fp),
-            version: 1,
-            deleted_at: None,
-            updated_at: now,
-            sync_status: SyncStatus::Modified,
-        };
-        repo.create(&item)
-            .await
-            .map_err(|err| ServiceError::new("item_create_failed", err.to_string()))?;
-        let (source, sync_status) = (HistorySource::Local, HistorySyncStatus::Pending);
-        let history_repo = LocalItemHistoryRepo::new(self.pool);
-        let history = LocalItemHistory {
-            id: Uuid::now_v7(),
-            storage_id,
-            vault_id,
-            item_id,
-            payload_enc: item.payload_enc.clone(),
-            checksum: item.checksum.clone(),
-            version: item.version,
-            change_type: ChangeType::Create,
-            changed_by_email: "local".to_string(),
-            changed_by_name: None,
-            changed_by_device_id: None,
-            changed_by_device_name: None,
-            source,
-            sync_status,
-            created_at: now,
-        };
-        history_repo
-            .create(&history)
-            .await
-            .map_err(|err| ServiceError::new("history_create_failed", err.to_string()))?;
-        self.track_pending(
-            storage_id,
-            LocalPendingChange {
-                id: Uuid::now_v7(),
-                storage_id,
-                vault_id,
-                item_id,
-                operation: ChangeType::Create,
-                payload_enc: Some(item.payload_enc.clone()),
-                checksum: Some(item.checksum.clone()),
-                path: Some(item.path.clone()),
-                name: Some(item.name.clone()),
-                type_id: Some(item.type_id.clone()),
-                base_seq: None,
-                created_at: now,
-            },
+            payload,
+            Default::default(),
         )
-        .await?;
-        Ok(item_id)
+        .await
+        .map_err(|error| match error.downcast::<ServiceError>() {
+            Ok(error) => *error,
+            Err(error) => ServiceError::new("item_create_failed", error.to_string()),
+        })
     }
 
     async fn delete_item(&self, storage_id: Uuid, item_id: Uuid) -> ServiceResult<()> {
@@ -376,6 +306,7 @@ impl<'a> ItemsService for LocalServices<'a> {
         self.track_pending(
             storage_id,
             LocalPendingChange {
+                metadata: item.metadata.clone(),
                 id: Uuid::now_v7(),
                 storage_id,
                 vault_id: item.vault_id,

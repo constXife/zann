@@ -397,6 +397,7 @@ impl<'a> LocalServices<'a> {
         self.track_pending(
             storage_id,
             LocalPendingChange {
+                metadata: item.metadata.clone(),
                 id: Uuid::now_v7(),
                 storage_id,
                 vault_id: item.vault_id,
@@ -488,6 +489,7 @@ impl<'a> LocalServices<'a> {
         self.track_pending(
             storage_id,
             LocalPendingChange {
+                metadata: item.metadata.clone(),
                 id: Uuid::now_v7(),
                 storage_id,
                 vault_id: item.vault_id,
@@ -554,6 +556,7 @@ impl<'a> LocalServices<'a> {
             self.track_pending(
                 storage_id,
                 LocalPendingChange {
+                    metadata: item.metadata.clone(),
                     id: Uuid::now_v7(),
                     storage_id,
                     vault_id: item.vault_id,
@@ -573,6 +576,7 @@ impl<'a> LocalServices<'a> {
             self.track_pending(
                 storage_id,
                 LocalPendingChange {
+                    metadata: item.metadata.clone(),
                     id: Uuid::now_v7(),
                     storage_id,
                     vault_id: item.vault_id,
@@ -649,3 +653,5 @@ mod app;
 mod items;
 mod storages;
 mod vaults;
+
+mod create_item;
