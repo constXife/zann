@@ -397,7 +397,7 @@ func describe(_ error: Error) -> String {
         return "The operation timed out."
     case .InvalidArgument(let message), .Service(let message), .Unimplemented(let message):
         return message
-    case .Unlock(_, let message), .Sync(_, let message):
+    case .Unlock(_, let message), .Sync(_, let message), .Generator(_, _, let message):
         return message
     case .Session(_, let message), .Oidc(_, let message), .Draft(_, _, let message):
         return message

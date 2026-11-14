@@ -2,6 +2,9 @@
   - changed-files:
       - any-glob-to-any-file:
           - "crates/zann-crypto/**"
+          - "crates/zann-ui-core/src/generator/**"
+          - "crates/zann-ffi/src/generator.rs"
+          - "crates/zann-ffi/tests/generator.rs"
           - "crates/zann-core/src/auth.rs"
           - "crates/zann-core/src/api/auth.rs"
           - "crates/zann-client/src/config.rs"

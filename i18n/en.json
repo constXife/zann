@@ -584,6 +584,13 @@
     "publicLabel": "Public",
     "generateSecret": "Generate secret",
     "generatorTitle": "Password generator",
+    "generatorPassword": "Password",
+    "generatorPassphrase": "Passphrase",
+    "generatorWords": "Words",
+    "generatorSeparator": "Word separator",
+    "generatorSpace": "Space",
+    "generatorCapitalize": "Capitalize words",
+    "generatorAddDigit": "Add a random digit",
     "generatorLength": "Length",
     "generatorUpper": "A-Z",
     "generatorLower": "a-z",
@@ -616,6 +623,9 @@
     }
   },
   "errors": {
+    "generatorPasswordLength": "Choose a password length within the allowed range.",
+    "generatorEmptyAlphabet": "Select at least one character class.",
+    "generatorWordCount": "Choose a word count within the allowed range.",
     "import_target_required": "Select a server storage to import into.",
     "generic": "Something went wrong",
     "remote_error": "Server error",

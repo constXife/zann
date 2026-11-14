@@ -35,7 +35,11 @@ The current surface covers:
   including the list page's subtitle decryption, and the rule in
   `crates/zann-core/src/item_subtitle.rs` that picks which non-secret
   payload field a list row shows;
-- server audit-log infrastructure.
+- server audit-log infrastructure;
+- native secret generation in `crates/zann-ui-core/src/generator/**` and its
+  one-to-one `crates/zann-ffi/src/generator.rs` projection: bounded explicit
+  policy, unbiased draws from OS entropy, fail-closed errors, dictionary
+  integrity and redacted/zeroized generated values.
 
 `CODEOWNERS`, the `t: security` labeler and the `audit-surface` CI job must be
 updated in the same change whenever this list grows or moves. Client ownership

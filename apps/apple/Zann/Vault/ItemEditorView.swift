@@ -99,7 +99,11 @@ struct ItemEditorView: View {
                     value: binding(field, index, \.value, editor.setValue),
                     kind: binding(field, index, \.kind, editor.setKind),
                     onToggleReveal: { toggleReveal(index) },
-                    onRemove: { remove(index) }
+                    onRemove: { remove(index) },
+                    onGenerated: { value in
+                        revealed.remove(index)
+                        editor.setValue(index, value)
+                    }
                 )
             }
         }

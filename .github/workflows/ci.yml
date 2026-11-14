@@ -68,6 +68,9 @@ jobs:
               - 'bun.lockb'
               - 'apps/desktop/bun.lock'
             audit_surface:
+              - 'crates/zann-ui-core/src/generator/**'
+              - 'crates/zann-ffi/src/generator.rs'
+              - 'crates/zann-ffi/tests/generator.rs'
               - 'crates/zann-crypto/**'
               - 'tests/fixtures/crypto/**'
               - 'crates/zann-core/src/auth.rs'
@@ -340,6 +343,10 @@ jobs:
         run: cargo clippy -p zann-crypto -p zann-core -p zann-server -p zann-keystore --all-targets -- -D warnings
       - name: Clippy (client security core)
         run: cargo clippy -p zann-client --no-default-features --features remote,os-credentials --all-targets --locked -- -D warnings
+      - name: Clippy (native secret generator and FFI projection)
+        run: cargo clippy -p zann-ui-core -p zann-ffi --all-targets --locked -- -D warnings
+      - name: Tests (native secret generator and FFI projection)
+        run: cargo test -p zann-ui-core -p zann-ffi --locked
       - name: Clippy (authenticated session surface)
         run: cargo clippy -p zann-client --no-default-features --features session --all-targets --locked -- -D warnings
       - name: Clippy (DB-free sync surface)

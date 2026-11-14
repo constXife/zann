@@ -7734,12 +7734,14 @@ name = "zann-ui-core"
 version = "0.1.0"
 dependencies = [
  "data-encoding",
+ "getrandom 0.2.16",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "totp-rs",
  "url",
  "zann-core",
+ "zeroize",
 ]
 
 [[package]]
