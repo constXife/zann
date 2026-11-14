@@ -12,6 +12,8 @@ struct FieldEditorRow: View {
     @Binding var kind: FieldKindFfi
     let onToggleReveal: () -> Void
     let onRemove: () -> Void
+    let onGenerated: (String) -> Void
+    @State private var generatorOpen = false
 
     var body: some View {
         HStack(alignment: field.multiline && !field.masked ? .top : .center, spacing: 8) {
@@ -35,6 +37,20 @@ struct FieldEditorRow: View {
             // Same slot on every row so the value columns line up.
             .opacity(field.masked ? 1 : 0)
             .disabled(!field.masked)
+            if field.kind == .password {
+                Button { generatorOpen.toggle() } label: {
+                    Image(systemName: "dice")
+                }
+                .buttonStyle(.borderless)
+                .help(strings("create.generateSecret"))
+                .accessibilityLabel(strings("create.generateSecret"))
+                .popover(isPresented: $generatorOpen) {
+                    GeneratorView(strings: strings) { value in
+                        onGenerated(value)
+                        generatorOpen = false
+                    }
+                }
+            }
             if label == nil {
                 Picker(strings("create.fieldType"), selection: $kind) {
                     ForEach(ItemEditorModel.kinds, id: \.self) { kind in

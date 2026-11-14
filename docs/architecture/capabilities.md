@@ -53,6 +53,7 @@ does not authorize another temporary implementation.
 | Offline replica application use cases | `zann-client::app::local` (port), `zann-client-sqlite::local_vault` (native implementation) | Tauri, COSMIC and FFI adapters | storage/credential ports, `ClientPaths`, clock and progress sink | local application orchestration in Tauri commands, COSMIC screens or `zann-ffi` |
 | Connect, startup, unlock and idle flows | `zann-flows` **(planned)** | Tauri and COSMIC adapters; future clients | typed effect executor, operation IDs and cancellation | flow reducers in components/screens; toolkit, runtime, filesystem or transport in `zann-flows` |
 | Categories, folders, filters, list captions, item-detail projection and editor drafts | `zann-ui-core`; the list subtitle's payload fields are `zann-core::item_subtitle`, applied where `zann-db` decrypts a list page | Tauri/Vue, COSMIC and future clients | canonical schema/catalogue data, translation and abstract-icon resolver | category, ordering, masking/copy/reveal, TOTP parsing or list-caption policy in components or screens; payload decryption for list rows outside `zann-db` |
+| Native password/passphrase generation | `zann-ui-core::generator` | COSMIC directly; Apple and future non-Rust shells through `zann-ffi` | explicit bounded options, shared defaults and separator catalogue; fallible OS entropy | alphabets, dictionaries, validation, RNG selection or default copies in shells/FFI; generated secrets in Debug/logs |
 | Streaming backup/import/export use cases | `zann-client::app::local` (port), `zann-client-sqlite::maintenance` (native implementation) | native clients and Tauri adapters | `Read`/`Write`, explicit paths, progress and cancellation ports | file dialogs in shared services; parsing/encryption policy in Tauri commands |
 | Runtime secret projection and delivery policy | `zann-client::delivery` **(active; composed by `app`)** | CLI, local daemon and deployment adapters | versioned value-free profiles, injected process launcher and atomic generation sink | resolved secrets in Nix evaluation/store, persisted profiles, argv, logs or audit events; profile resolution, collision or serialization policy in adapters |
 | FFI interoperability | `zann-ffi` | non-Rust consumers | binding generation, runtime bridge and FFI-safe DTO conversion | domain, auth, sync, config, crypto or presentation policy in `zann-ffi`; Rust clients using FFI as their internal API |
@@ -98,6 +99,18 @@ construction. COSMIC and Tauri consume `schemas/item_fields.json` as the one
 field-template catalogue; widget input/reveal state remains shell-owned.
 Window/tray execution stays in each shell, with the shared close-to-tray
 default defined by `zann-ui-core::settings`.
+
+Native editors use `zann-ui-core::generator` for passwords and EFF-wordlist
+passphrases, applying a value only after successful generation, respecting the
+shared field-masking policy and resetting temporary reveal. `zann-ffi` projects
+options, defaults, bounds and typed failures without
+implementing generation. The dictionary and its attribution ship in the binary;
+generation has no network or persistence path. See the module's
+[policy and attribution](../../crates/zann-ui-core/src/generator/README.md).
+Server-managed machine-secret rotation remains a separate server capability
+(`zann-server::domains::secrets::policies`), with configured class minima rather
+than client editor preferences. The legacy Tauri syllable generator is retired
+with `apps/desktop` in #249; no new Tauri bridge or migration shim is introduced.
 
 ## Allowed dependency direction
 

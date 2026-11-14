@@ -3,6 +3,10 @@
 //! The form owns presentation state only. Persistence stays behind the shared
 //! facade and the draft is converted to its JSON wire record only on submit.
 
+pub mod generator;
+#[cfg(test)]
+mod generator_tests;
+
 use std::fmt;
 
 use cosmic::iced::{Alignment, Length};
@@ -36,6 +40,8 @@ pub struct State {
     multiline: Vec<Option<widget::text_editor::Content>>,
     busy: bool,
     error: Option<String>,
+    generator: generator::State,
+    generator_field: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -47,6 +53,8 @@ pub enum Message {
     Multiline(usize, widget::text_editor::Action),
     FieldKind(usize, FieldKind),
     ToggleReveal(usize),
+    OpenGenerator(usize),
+    Generator(generator::Message),
     AddField,
     RemoveField(usize),
     Cancel,
@@ -83,6 +91,10 @@ impl fmt::Debug for Message {
             Self::ToggleReveal(index) => {
                 formatter.debug_tuple("ToggleReveal").field(index).finish()
             }
+            Self::OpenGenerator(index) => {
+                formatter.debug_tuple("OpenGenerator").field(index).finish()
+            }
+            Self::Generator(message) => formatter.debug_tuple("Generator").field(message).finish(),
             Self::AddField => formatter.write_str("AddField"),
             Self::RemoveField(index) => formatter.debug_tuple("RemoveField").field(index).finish(),
             Self::Cancel => formatter.write_str("Cancel"),
@@ -124,11 +136,14 @@ impl State {
             multiline,
             busy: false,
             error: None,
+            generator: generator::State::default(),
+            generator_field: None,
         }
     }
 
     pub fn hide_revealed(&mut self) {
         self.revealed.fill(false);
+        self.generator_field = None;
     }
 
     pub fn is_busy(&self) -> bool {
@@ -155,6 +170,7 @@ impl State {
             Message::Path(value) => self.draft.path = value,
             Message::Type(value) => match self.draft.set_type(value) {
                 Ok(true) => {
+                    self.generator_field = None;
                     self.revealed = vec![false; self.draft.fields.len()];
                     self.multiline = self.draft.fields.iter().map(multiline_content).collect();
                 }
@@ -181,6 +197,7 @@ impl State {
                 }
             }
             Message::FieldKind(index, kind) => {
+                self.generator_field = None;
                 if let Some(field) = self.draft.fields.get_mut(index) {
                     field.value.kind = kind;
                     self.revealed[index] = false;
@@ -192,12 +209,53 @@ impl State {
                     *revealed = !*revealed;
                 }
             }
+            Message::OpenGenerator(index) => {
+                if self
+                    .draft
+                    .fields
+                    .get(index)
+                    .is_some_and(|field| field.value.kind == FieldKind::Password)
+                {
+                    self.generator_field = if self.generator_field == Some(index) {
+                        None
+                    } else {
+                        Some(index)
+                    };
+                }
+            }
+            Message::Generator(generator::Message::Generate) => {
+                if let Some(index) = self.generator_field {
+                    if let Some(field) = self
+                        .draft
+                        .fields
+                        .get_mut(index)
+                        .filter(|field| field.value.kind == FieldKind::Password)
+                    {
+                        match self.generator.generate() {
+                            Ok(value) => {
+                                field.value.value = value.into_string();
+                                self.revealed[index] = false;
+                                self.error = None;
+                                self.generator_field = None;
+                            }
+                            Err(error) => {
+                                self.error = Some(match error.translation_key() {
+                                    Some(key) => t(key),
+                                    None => error.to_string(),
+                                })
+                            }
+                        }
+                    }
+                }
+            }
+            Message::Generator(message) => self.generator.update(message),
             Message::AddField => {
                 self.draft.fields.push(DraftField::blank());
                 self.revealed.push(false);
                 self.multiline.push(None);
             }
             Message::RemoveField(index) => {
+                self.generator_field = None;
                 if index < self.draft.fields.len() {
                     self.draft.fields.remove(index);
                     self.revealed.remove(index);
@@ -275,6 +333,9 @@ impl State {
                 self.revealed[index],
                 self.multiline[index].as_ref(),
             ));
+            if self.generator_field == Some(index) {
+                form = form.push(self.generator.view().map(Message::Generator));
+            }
         }
 
         form =
@@ -348,7 +409,7 @@ fn field_row<'a>(
             .into()
     };
 
-    widget::row::with_capacity(4)
+    let mut row = widget::row::with_capacity(5)
         .push(key)
         .push(
             widget::dropdown(kind_labels, selected_kind, move |kind| {
@@ -356,14 +417,20 @@ fn field_row<'a>(
             })
             .width(Length::Fixed(130.0)),
         )
-        .push(value)
-        .push(
-            widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
-                .on_press(Message::RemoveField(index)),
-        )
-        .spacing(spacing.space_xs)
-        .align_y(Alignment::Center)
-        .into()
+        .push(value);
+    if field.value.kind == FieldKind::Password {
+        row = row.push(
+            widget::button::standard(t("create.generateSecret"))
+                .on_press(Message::OpenGenerator(index)),
+        );
+    }
+    row.push(
+        widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
+            .on_press(Message::RemoveField(index)),
+    )
+    .spacing(spacing.space_xs)
+    .align_y(Alignment::Center)
+    .into()
 }
 
 fn type_label(type_id: &str) -> String {

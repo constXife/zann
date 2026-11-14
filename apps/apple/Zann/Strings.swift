@@ -44,6 +44,9 @@ struct Strings {
         switch failure as? CoreError {
         case .Unlock(let unlockKind, _)?: kind = unlockKind
         case .Sync(let syncKind, _)?: kind = syncKind
+        case .Generator(_, let translationKey, _)?:
+            if let translationKey { return self(translationKey) }
+            kind = nil
         default: kind = nil
         }
         if let kind {

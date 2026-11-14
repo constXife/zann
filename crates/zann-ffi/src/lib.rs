@@ -20,6 +20,8 @@ mod presentation;
 pub use presentation::*;
 mod catalogue;
 pub use catalogue::*;
+mod generator;
+pub use generator::*;
 mod platform;
 pub use platform::*;
 
@@ -55,6 +57,12 @@ pub enum CoreError {
     Draft {
         kind: DraftErrorKindFfi,
         translation_key: String,
+        message: String,
+    },
+    #[error("generator {kind:?}: {message}")]
+    Generator {
+        kind: GeneratorErrorKindFfi,
+        translation_key: Option<String>,
         message: String,
     },
 }

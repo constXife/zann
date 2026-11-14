@@ -27,4 +27,30 @@ final class BindingSmokeTests: XCTestCase {
         XCTAssertEqual(devicePreferencesDefault(), devicePreferencesDefault())
     }
 
+    func testSecretGeneratorCrossesTheBoundaryAndEntersTheTypedDraft() throws {
+        let defaults = generatorDefaults()
+        var options = defaults.password
+        options.length = defaults.maxPasswordLength
+        let secret = try generatePassword(options: options)
+        XCTAssertEqual(secret.count, Int(defaults.maxPasswordLength))
+        let draft = try ItemDraftFfi.create(typeId: "login")
+        let index = try XCTUnwrap(draft.fields().firstIndex { $0.kind == .password })
+        try draft.setFieldValue(index: UInt64(index), value: secret)
+        XCTAssertTrue(draft.fields()[index].masked)
+        XCTAssertEqual(draft.fields()[index].value.count, secret.count)
+
+        var phrase = defaults.passphrase
+        phrase.wordCount = defaults.minWords
+        phrase.separator = .space
+        let value = try generatePassphrase(options: phrase)
+        XCTAssertEqual(value.split(separator: " ").count, Int(defaults.minWords))
+
+        phrase.wordCount = UInt32.max
+        XCTAssertThrowsError(try generatePassphrase(options: phrase)) { error in
+            guard case .Generator(.wordCount, _, _) = error as? CoreError else {
+                return XCTFail("expected typed generator word-count error")
+            }
+        }
+    }
+
 }

@@ -584,6 +584,13 @@
     "publicLabel": "Публичное",
     "generateSecret": "Сгенерировать секрет",
     "generatorTitle": "Генератор пароля",
+    "generatorPassword": "Пароль",
+    "generatorPassphrase": "Парольная фраза",
+    "generatorWords": "Слова",
+    "generatorSeparator": "Разделитель слов",
+    "generatorSpace": "Пробел",
+    "generatorCapitalize": "Слова с заглавной буквы",
+    "generatorAddDigit": "Добавить случайную цифру",
     "generatorLength": "Длина",
     "generatorUpper": "A-Z",
     "generatorLower": "a-z",
@@ -616,6 +623,9 @@
     }
   },
   "errors": {
+    "generatorPasswordLength": "Выберите длину пароля в допустимом диапазоне.",
+    "generatorEmptyAlphabet": "Выберите хотя бы одну группу символов.",
+    "generatorWordCount": "Выберите число слов в допустимом диапазоне.",
     "import_target_required": "Выберите серверное хранилище для импорта.",
     "generic": "Что-то пошло не так",
     "remote_error": "Ошибка сервера",

@@ -14,6 +14,7 @@ pub mod categories;
 pub mod counts;
 pub mod filter;
 pub mod folders;
+pub mod generator;
 pub mod i18n;
 pub mod item;
 pub mod item_detail;
