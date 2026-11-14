@@ -1,14 +1,9 @@
-//! Automatic sync of the open vault. The core's schedule, kept by the session,
-//! decides when; this screen keeps a timer armed for it, runs the sync and
-//! shows what it brought in.
+//! Automatic sync admission stays in the core schedule. A network completion
+//! updates only its source server; list reads are separate correlated effects.
+use super::*;
 use zann_client::app::local::AUTO_SYNC_DEBOUNCE;
 
-use super::*;
-
 impl State {
-    /// Arms a timer for the schedule's next sync. While a sync runs nothing
-    /// is due, so the timer looks again after the debounce; there is always
-    /// one live timer while the vault is open, parked behind Settings too.
     pub fn arm_auto_sync(&mut self, session: &Session) -> Task<Message> {
         let now = Instant::now();
         let due = session
@@ -22,39 +17,30 @@ impl State {
             Message::SyncDue(timer)
         })
     }
-
-    /// A local write committed: the schedule pushes it shortly, and the
-    /// indicator counts it until then.
     pub(super) fn local_change(&mut self, session: &Session) -> Task<Message> {
         session.auto_sync().local_change(Instant::now());
-        Task::batch([self.arm_auto_sync(session), Self::load_sync_state(session)])
+        Task::batch([
+            self.arm_auto_sync(session),
+            self.load_selected_sync_state(session),
+        ])
     }
-
-    /// Runs the sync the schedule admitted with `ticket`, scheduled or asked
-    /// for, and shows it as running until it ends.
     pub(super) fn start_sync(
         &mut self,
         ticket: AutoSyncTicket,
         session: &Session,
     ) -> Task<Message> {
-        self.syncing = true;
-        let facade = session.facade();
-        let storage_id = match local::current_storage_id(&facade) {
-            Ok(id) => id,
-            Err(err) => {
-                self.syncing = false;
-                self.sync_error = Some(err);
-                session.auto_sync().finished(ticket, Instant::now());
-                return self.arm_auto_sync(session);
-            }
+        let Some(storage_id) = self.workspace.storage_id.clone() else {
+            session.auto_sync().finished(ticket, Instant::now());
+            return self.arm_auto_sync(session);
         };
+        self.sync.running_storage = Some(storage_id.clone());
         let list_generation = self.list_generation;
-        let query = (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
+        let facade = session.facade();
         cosmic::task::future(async move {
-            let synced = storage_id.clone();
-            let result = off_thread(move || Ok(local::sync_and_reload(&facade, synced, query)))
+            let target = storage_id.clone();
+            let result = off_thread(move || Ok(local::sync(&facade, Some(target))))
                 .await
-                .unwrap_or_else(|err| Err(local::SyncFailure::Other(err)));
+                .unwrap_or_else(|error| Err(local::SyncFailure::Other(error)));
             Message::AutoSynced {
                 ticket,
                 storage_id,
@@ -63,19 +49,21 @@ impl State {
             }
         })
     }
-
     pub(super) fn update_auto_sync(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
             Message::SyncDue(timer) => {
                 if timer != self.sync_timer {
                     return Outcome::None;
                 }
+                // Context completion rearms the schedule; do not spin on an overdue timer.
+                if self.switching_context || self.selected_storage_id().is_none() {
+                    return Outcome::None;
+                }
                 let Some(ticket) = session.auto_sync().take_due(Instant::now()) else {
                     return Outcome::Task(self.arm_auto_sync(session));
                 };
-                return Outcome::Task(self.start_sync(ticket, session));
+                Outcome::Task(self.start_sync(ticket, session))
             }
-
             Message::AutoSynced {
                 ticket,
                 storage_id,
@@ -83,81 +71,92 @@ impl State {
                 result,
             } => {
                 if !session.auto_sync().finished(ticket, Instant::now()) {
-                    // Started before a lock; this vault never asked for it.
                     return Outcome::None;
                 }
-                self.syncing = false;
-                let arm =
-                    Task::batch([self.arm_auto_sync(session), Self::load_sync_state(session)]);
-                let page = match result {
-                    Ok(page) => {
-                        if self.error.is_some() && self.error == self.sync_error {
-                            self.error = None;
-                        }
-                        self.sync_error = None;
-                        self.stale_server = None;
-                        page
+                self.sync.running_storage = None;
+                let reload = match result {
+                    Ok(outcome) => {
+                        self.sync
+                            .servers
+                            .entry(storage_id.clone())
+                            .or_default()
+                            .failure = None;
+                        outcome.changes_committed > 0 || outcome.vaults_reconciled > 0
                     }
                     Err(failure) => {
-                        let message =
-                            t_args("items.syncFailed", &[("error", &failure.to_string())]);
-                        self.error = Some(message.clone());
-                        self.sync_error = Some(message);
-                        self.stale_server = matches!(
-                            failure,
-                            local::SyncFailure::IdentityChanged
-                                | local::SyncFailure::Disconnected { .. }
-                        )
-                        .then(|| (storage_id, failure));
-                        None
+                        self.sync
+                            .servers
+                            .entry(storage_id.clone())
+                            .or_default()
+                            .failure = Some(failure);
+                        false
                     }
                 };
-                // A newer search or a page load in flight answers for the list
-                // itself; replacing it here would show an older query's page.
-                let Some(page) = page.filter(|_| {
-                    list_generation == self.list_generation && !self.busy && !self.searching
-                }) else {
-                    return Outcome::Task(arm);
-                };
-                self.list_generation = self.list_generation.wrapping_add(1);
-                self.apply_page(page, true);
-                self.reconcile_selection();
-                self.rebuild_nav();
-                return Outcome::Task(Task::batch([
-                    arm,
-                    self.refresh_detail(session),
-                    Self::load_vaults(session),
-                ]));
-            }
-
-            // Settings owns the recovery, the same one its own sync offers.
-            Message::ReviewStaleServer => {
-                if let Some((storage_id, failure)) = self.stale_server_banner() {
-                    return Outcome::StaleServer(storage_id.clone(), failure.clone());
+                let mut tasks = vec![
+                    self.arm_auto_sync(session),
+                    self.load_sync_state(session, storage_id.clone()),
+                ];
+                if reload
+                    && self.selected_storage_id() == Some(storage_id.as_str())
+                    && list_generation == self.list_generation
+                    && !self.busy
+                    && !self.searching
+                    && self.editor.is_none()
+                    && self.history.is_none()
+                {
+                    let facade = session.facade();
+                    let query =
+                        (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
+                    tasks.push(cosmic::task::future(async move {
+                        let result = off_thread(move || {
+                            let context = local::vault_context(&facade)?;
+                            Ok((context, local::items(&facade, None, query)?))
+                        })
+                        .await;
+                        Message::SyncedWorkspaceLoaded {
+                            storage_id,
+                            list_generation,
+                            result,
+                        }
+                    }));
                 }
+                Outcome::Task(Task::batch(tasks))
             }
-
-            _ => unreachable!("only auto-sync messages reach this handler"),
+            Message::SyncedWorkspaceLoaded {
+                storage_id,
+                list_generation,
+                result,
+            } => {
+                if self.selected_storage_id() != Some(storage_id.as_str())
+                    || self.list_generation != list_generation
+                    || self.switching_context
+                    || self.busy
+                    || self.searching
+                    || self.editor.is_some()
+                    || self.history.is_some()
+                {
+                    return Outcome::None;
+                }
+                match result {
+                    Ok((context, page))
+                        if context.current_storage_id.as_deref() == Some(storage_id.as_str())
+                            && context.current_vault_id == self.selected_vault_id =>
+                    {
+                        self.apply_context(context);
+                        self.list_generation = self.list_generation.wrapping_add(1);
+                        self.apply_page(page, true);
+                        self.reconcile_selection();
+                        self.rebuild_nav();
+                        if let Some(id) = self.selected_item_id().map(str::to_owned) {
+                            return Outcome::Task(self.load_detail(id, session));
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(error) => self.list_error = Some(error),
+                }
+                Outcome::None
+            }
+            _ => unreachable!("only sync effects reach this handler"),
         }
-        Outcome::None
-    }
-
-    /// The stale server, while the banner its refusal left is still shown.
-    pub(super) fn stale_server_banner(&self) -> Option<&(String, local::SyncFailure)> {
-        self.stale_server
-            .as_ref()
-            .filter(|_| self.error.is_some() && self.error == self.sync_error)
-    }
-
-    /// The item on screen may have changed on the server. An open editor or
-    /// history keeps what it shows.
-    fn refresh_detail(&mut self, session: &Session) -> Task<Message> {
-        let Some(id) = self.selected_item_id().map(str::to_owned) else {
-            return Task::none();
-        };
-        if self.editor.is_some() || self.history.is_some() {
-            return Task::none();
-        }
-        self.load_detail(id, session)
     }
 }

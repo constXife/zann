@@ -34,6 +34,7 @@ fn replacement_selects_immediately_masks_retained_card_and_blocks_actions() {
         .id
         .clone();
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
     let _first = state.update(vault::Message::Select(first.clone()), &session);
     let request = state.detail_request_id();
     complete(&mut state, &session, request, card(&session, &first));
@@ -91,6 +92,7 @@ fn latest_selection_wins_even_when_returning_to_the_same_item() {
     let a = page.items[0].id.clone();
     let b = page.items[1].id.clone();
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
     let _first = state.update(vault::Message::Select(a.clone()), &session);
     let old = state.detail_request_id();
     let _second = state.update(vault::Message::Select(b.clone()), &session);
@@ -118,6 +120,7 @@ fn filtered_or_replaced_context_cannot_receive_a_late_card() {
     let page = local::items(&session.facade(), None, None).unwrap();
     let id = page.items[0].id.clone();
     let mut state = vault::State::new(page.clone(), None);
+    load_vault_context(&mut state, &session);
     let _pending = state.update(vault::Message::Select(id.clone()), &session);
     let old = state.detail_request_id();
     state.update(vault::Message::QueryInput("no-such-item".into()), &session);
@@ -138,10 +141,12 @@ fn a_destroyed_screen_and_a_failed_read_cannot_restore_an_old_card() {
     let page = local::items(&session.facade(), None, None).unwrap();
     let id = page.items[0].id.clone();
     let mut old = vault::State::new(page.clone(), None);
+    load_vault_context(&mut old, &session);
     let _pending = old.update(vault::Message::Select(id.clone()), &session);
     let previous = old.detail_request_id();
     drop(old);
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
     let _pending = state.update(vault::Message::Select(id.clone()), &session);
     let current = state.detail_request_id();
     assert_ne!(previous, current);

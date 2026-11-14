@@ -35,16 +35,20 @@ ownership.
   categories and folders. They are context, not list filters.
 - MUST: Keep search and list pagination in the items workspace, not the
   navigation sidebar.
-- Native shells MAY place the storage sync indicator beside the sidebar's
-  server/account selector. macOS uses two rows: server/account with sync above,
-  vault below. Details and sync actions open in a popover; a single vault
+- Native desktop shells place the compact storage sync indicator beside the
+  sidebar's server/account selector: server/account with sync above, vault
+  below. Details and sync actions open in a nonmodal popover; a single vault
   shows its name instead of a selector.
-- macOS opens cached content before network synchronization finishes. Sync
+- Desktop clients keep cached content usable during network synchronization. Sync
   progress stays in the server indicator; errors and recovery actions belong
   to its popover, without blocking the workspace or inserting a status banner.
   Server/vault selectors remain usable during network sync. Progress belongs
   to the storage being synced; completion must preserve explicit navigation,
   including when the user leaves a context and returns before an old read ends.
+- Opening sync details never starts a synchronization. The popover exposes the
+  shared sync state, server address, last confirmed sync, failure details and
+  explicit Sync now / Reconnect / recovery actions. Progress and failures stay
+  with their source storage and never appear as list-workspace banners.
 - On a new device, macOS shows an explicit first-sync explanation before the
   first cache exists. Committed catalog metadata exposes server/vault navigation
   immediately; committed pull pages progressively populate the current list.

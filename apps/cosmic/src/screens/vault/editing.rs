@@ -187,7 +187,7 @@ impl State {
                         });
                         return Outcome::Task(Task::batch([
                             refresh_items,
-                            Self::load_vaults(session),
+                            self.load_vaults(session),
                             self.local_change(session),
                         ]));
                     }
@@ -220,7 +220,7 @@ impl State {
                 });
                 return Outcome::Task(Task::batch([
                     refresh_items,
-                    Self::load_vaults(session),
+                    self.load_vaults(session),
                     self.local_change(session),
                 ]));
             }
