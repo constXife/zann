@@ -28,7 +28,7 @@ impl LocalVault {
             let in_flight = self
                 .item_reads
                 .register(operation.operation_id(), operation.cancellation_handle());
-            let master_key = self.master_key()?;
+            let master_key = self.account_key()?;
             (
                 self.storage_id()?,
                 self.vault_id()?,

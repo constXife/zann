@@ -4,6 +4,10 @@ import ZannCoreKit
 
 /// Drives AppModel against the real Rust core over a temporary database and
 /// in-memory platform ports, so no Keychain item or user data is touched.
+private final class EnrollmentRequiredCore: CoreFacade {
+    override func activateConnectedAccount() throws -> Bool { false }
+}
+
 @MainActor
 final class AppModelTests: XCTestCase {
     private var directory: URL!
@@ -158,6 +162,26 @@ final class AppModelTests: XCTestCase {
         XCTAssertTrue(message.contains("device preferences"), message)
     }
 
+    func testFirstAccountUsesADevicePasswordBeforeItsEncryptionPassword() async throws {
+        for existing in [false, true] {
+            let root = directory.appendingPathComponent(UUID().uuidString)
+            let real = try createCore(dbPath: root.appendingPathComponent("local.sqlite").path,
+                keystore: MemoryKeystore(), secretStore: MemorySecretStore())
+            let core = EnrollmentRequiredCore(unsafeFromRawPointer: real.uniffiClonePointer())
+            let model = AppModel(opening: { (core, MemoryKeystore()) },
+                preferences: { PreferencesFile(url: root.appendingPathComponent("preferences.json")) },
+                systemLanguage: "en", openBrowser: { _ in })
+            model.startConnecting()
+            model.connected(.init(hasPersonalKeys: existing))
+            XCTAssertEqual(model.screen, .master(.create))
+            await model.submit(password: "one device unlock password", mode: .create)
+            XCTAssertNil(model.error)
+            XCTAssertFalse(model.busy)
+            XCTAssertNil(model.vault)
+            XCTAssertEqual(model.screen, .master(existing ? .accountUnlock : .accountCreate))
+        }
+    }
+
     func testTouchIDArmsUnlocksAndDisarms() async {
         let keystore = MemoryKeystore()
         let model = makeModel(keystore: keystore)
@@ -177,6 +201,26 @@ final class AppModelTests: XCTestCase {
         await model.setTouchID(false)
         XCTAssertFalse(model.touchIDArmed)
         XCTAssertFalse(keystore.holdsKey)
+    }
+
+    func testPasswordChangeKeepsTouchIDAndRejectsThePreviousPassword() async throws {
+        let model = makeModel(keystore: MemoryKeystore())
+        await model.submit(password: "correct horse battery", mode: .unlock)
+        await model.setTouchID(true)
+        let core = try XCTUnwrap(model.browserCore)
+        try await Task.detached {
+            try core.changeUnlockPassword(current: "correct horse battery", replacement: "new device password")
+        }.value
+        await model.lock()
+        await model.unlockWithTouchID()
+        XCTAssertEqual(model.screen, .vault)
+        await model.lock()
+        await model.submit(password: "correct horse battery", mode: .unlock)
+        XCTAssertEqual(model.screen, .master(.unlock))
+        XCTAssertNotNil(model.error)
+        await model.submit(password: "new device password", mode: .unlock)
+        XCTAssertEqual(model.screen, .vault)
+        XCTAssertNil(model.error)
     }
 
     func testTouchIDChangesRunOneAtATimeAndDisarmWithoutBiometrics() async {

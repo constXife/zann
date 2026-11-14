@@ -12,7 +12,7 @@ impl LocalVault {
         let (_, frame) = context.credential_context().map_err(policy)?;
         login.validate().map_err(policy)?;
         let _lease = self.context_gate.read().expect("lock poisoned");
-        let key = self.master_key()?;
+        let key = self.account_key()?;
         let storage = self.storage_id()?;
         let vault = self.vault_id()?;
         if scope

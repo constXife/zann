@@ -30,14 +30,26 @@ impl App {
                     storage_id,
                     has_personal_keys,
                 } => {
-                    if let Shell::Ready { screen, .. } = &mut self.shell {
-                        let mode = if has_personal_keys {
+                    if let Shell::Ready {
+                        screen, session, ..
+                    } = &mut self.shell
+                    {
+                        let initialized = match session.facade().app_status() {
+                            Ok(status) => status.initialized,
+                            Err(error) => {
+                                self.shell = Shell::Blocked(error.to_string());
+                                return Task::none();
+                            }
+                        };
+                        let mode = if initialized {
                             master::Mode::Unlock
                         } else {
                             master::Mode::Create
                         };
-                        *screen =
-                            Screen::Master(Box::new(master::State::new(mode, Some(storage_id))));
+                        *screen = Screen::Master(Box::new(
+                            master::State::new(mode, Some(storage_id))
+                                .with_account(has_personal_keys),
+                        ));
                     }
                 }
             }

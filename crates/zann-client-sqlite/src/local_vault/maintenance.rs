@@ -31,7 +31,16 @@ impl LocalVault {
         })?;
         let session = self.app_client()?.backup_import_session(
             &target,
-            SecretKey::from_bytes(*ctx.master_key.as_bytes()),
+            SecretKey::from_bytes(
+                *self
+                    .account_key_for_target(
+                        &self
+                            .app_client()?
+                            .configured_target(Some(&target))
+                            .map_err(LocalError::from)?,
+                    )?
+                    .as_bytes(),
+            ),
             operation,
         )?;
         let report = self
@@ -41,7 +50,11 @@ impl LocalVault {
                 PathBuf::from(path),
                 &session,
             ))?;
-        self.select_synced_catalog(Some(target), selection_before, &ctx.master_key, generation)?;
+        let key = self.account_key_for_storage(
+            Uuid::parse_str(&target)
+                .map_err(|_| LocalError::InvalidArgument("invalid storage id".into()))?,
+        )?;
+        self.select_synced_catalog(Some(target), selection_before, &key, generation)?;
         Ok(BackupImportReport {
             imported_items: report.imported_items as u64,
             skipped_existing: report.skipped_existing as u64,
@@ -129,10 +142,11 @@ impl LocalVault {
     /// Needs the key, unlike a snapshot: proving a payload is still readable
     /// means reading it.
     pub fn verify(&self) -> LocalResult<VerifyReport> {
-        let master_key = self.master_key()?;
+        let _root = self.root_key()?;
+        let keys = self.account_keys.lock().expect("lock poisoned").clone();
         let report = self
             .runtime
-            .block_on(crate::maintenance::verify::run(&self.pool(), master_key))?;
+            .block_on(crate::maintenance::verify::run(&self.pool(), keys))?;
         Ok(report.into())
     }
 
@@ -143,11 +157,9 @@ impl LocalVault {
     /// demanding an unlock would suggest a protection that is not there.
     pub fn snapshot_create(&self, retention: Option<Retention>) -> LocalResult<Snapshot> {
         let policy = retention.map(Into::into).unwrap_or_default();
-        let identity = self.kdf_identity()?;
         let snapshot = self.runtime.block_on(crate::maintenance::snapshot::create(
             &self.pool(),
             &self.root,
-            identity.as_ref(),
             &policy,
         ))?;
         Ok(snapshot.into())
@@ -163,13 +175,11 @@ impl LocalVault {
     ) -> LocalResult<Option<Snapshot>> {
         let policy = retention.map(Into::into).unwrap_or_default();
         let max_age = std::time::Duration::from_secs(u64::from(max_age_hours) * 3600);
-        let identity = self.kdf_identity()?;
         let snapshot = self
             .runtime
             .block_on(crate::maintenance::snapshot::create_if_due(
                 &self.pool(),
                 &self.root,
-                identity.as_ref(),
                 max_age,
                 &policy,
             ))?;
@@ -202,26 +212,22 @@ impl LocalVault {
     /// again afterwards, with the password that was in use when the snapshot was
     /// taken.
     ///
-    /// The snapshot's salt is committed to Config v2 when it differs from the
-    /// current one, and a remembered unlock is then dropped — the stored key was
-    /// derived from the salt that has just been replaced, so it would fail every
-    /// unlock until someone thought to clear it.
+    /// The keyring and password wrapper move atomically with SQLite. Remembered
+    /// unlock is disarmed after restore; no separate Config write is required.
     pub fn snapshot_restore(&self, path: String) -> LocalResult<SnapshotRestore> {
         let path = PathBuf::from(path);
         let client = self.app_client()?;
-        let identity = client
-            .kdf_identity()
-            .map_err(|err| LocalError::Service(err.to_string()))?;
-        // Lock before anything moves. If the restore fails halfway, a locked
-        // vault is recoverable; a key held over a database it does not match is
-        // a stream of decryption failures nobody can explain. Locking also
-        // cancels a sync that would otherwise write into the old database.
-        self.lock()?;
-
+        let Some(_maintenance) = client.try_exclusive_local_maintenance() else {
+            self.lock()?;
+            return Err(LocalError::InvalidArgument(
+                "background work is stopping; retry restoration".into(),
+            ));
+        };
+        let context = self.context_gate.write().expect("lock poisoned");
+        self.lock_in_context(&context)?;
         let outcome = self.runtime.block_on(crate::maintenance::snapshot::restore(
             self.pool(),
             &self.root,
-            identity.as_ref(),
             &path,
         ));
 
@@ -230,25 +236,16 @@ impl LocalVault {
         // there — so the vault is fine and only this handle is dead. Returning
         // the error without reopening would turn a recoverable failure into a
         // facade that answers nothing until the app restarts.
-        let reopened = self.reopen_pool();
+        let reopened = self.reopen_pool(&context);
         let outcome = outcome?;
         reopened?;
 
-        let identity_replaced = match outcome.identity {
-            Some(restored) if identity.as_ref() != Some(&restored) => {
-                client
-                    .replace_kdf_identity_if_matches(identity.as_ref(), restored)
-                    .map_err(|err| LocalError::Service(err.to_string()))?;
-                let _ = self.forget_remembered();
-                true
-            }
-            _ => false,
-        };
+        self.lock_in_context(&context)?;
+        self.save_remembered(&RememberedUnlockStore::default())?;
 
         Ok(SnapshotRestore {
             restored_from: outcome.restored_from.display().to_string(),
             replaced_saved_to: outcome.replaced_saved_to.display().to_string(),
-            identity_replaced,
         })
     }
 }

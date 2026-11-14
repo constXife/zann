@@ -7,6 +7,7 @@ impl LocalVault {
             return Err(LocalError::Sync {
                 kind: "context_changed".into(),
                 message: "the open storage changed during the operation".into(),
+                source: None,
             });
         }
         Ok(())
@@ -42,7 +43,7 @@ impl LocalVault {
             .block_on(LocalStorageRepo::new(&pool).get(id))
             .map_err(|error| LocalError::Service(error.to_string()))?
             .ok_or_else(|| LocalError::InvalidArgument("storage not found".into()))?;
-        let master_key = self.master_key()?;
+        let master_key = self.account_key_for_storage(id)?;
         let selected_vault = {
             let vaults = self
                 .runtime

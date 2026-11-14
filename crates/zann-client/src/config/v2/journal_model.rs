@@ -34,8 +34,8 @@ pub struct MigrationStamp {
 pub struct ConfigV2 {
     pub schema_version: u32,
     pub revision: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub identity: Option<ConfigIdentity>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub account_identities: BTreeMap<String, ConfigIdentity>,
     #[serde(default)]
     pub connections: BTreeMap<ConnectionId, ConnectionConfig>,
     #[serde(default)]
@@ -51,7 +51,7 @@ impl ConfigV2 {
         Self {
             schema_version: CONFIG_SCHEMA_VERSION,
             revision: 0,
-            identity: None,
+            account_identities: BTreeMap::new(),
             connections: BTreeMap::new(),
             clients: BTreeMap::new(),
             migration: None,
@@ -253,6 +253,8 @@ pub(super) struct CredentialSlotRef {
 
 #[derive(Deserialize)]
 pub(super) struct ConfigVersionProbe {
+    #[serde(default)]
+    pub(super) identity: Option<serde::de::IgnoredAny>,
     #[serde(default)]
     pub(super) schema_version: Option<u64>,
 }

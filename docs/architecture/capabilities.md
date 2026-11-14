@@ -48,6 +48,7 @@ does not authorize another temporary implementation.
 | KDF, encryption and payload integrity | `zann-crypto` | server and application services | reviewed algorithms, NFC password derivation, payload-version admission and verified key/rotation ciphertexts | implementations or algorithm wrappers in CLI, COSMIC, `zann-client`, `zann-ffi` or `zann-db` |
 | Database persistence | `zann-db` | local application/session services | repository transactions, migrations, streaming readers/writers | SQL and database rows in shells, flows, presentation or protocol |
 | Credential storage implementation | `zann-keystore` | `CredentialStore` adapter | platform keystore backends | direct keyring calls in shells; credentials in config or logs |
+| Device unlock password and account keyring | `zann-client::app::unlock` and `app::account_keys`; persistence adapter in `zann-client-sqlite` | native shells and FFI | independent password KEK, stable device root, bound account envelopes, verified CAS, canonical sync proof/lease | password-derived account keys at startup; shell crypto; separate snapshot key files |
 | Device unlock ports and hardware enrollment | `zann-keystore` | `zann-client-sqlite::local_vault` via injected `Keystore` and `HardwareAuthenticator` | platform adapters; opt-in test fake | raw HID calls or unlock policy in shells |
 | Credential lifecycle and port | `zann-client::credentials` | remote auth and application session | injected `CredentialStore`, clock and revocation policy | token refresh/selection/serialization in CLI, COSMIC or FFI |
 | Paths and persisted client config | `zann-client::config` | all client shells and application services | injected `ClientPaths`, storage backend, versioned migration | independent writers for shared config; implicit home lookup below the composition root |
@@ -362,11 +363,14 @@ requires an explicit repository migration; clients MUST NOT silently
 reinterpret its credential references at a new path. A future schema version
 is not treated as corruption and MUST NOT be replaced from an older backup.
 
-The KDF identity (`identity`: salt and parameters) lives only in Config v2. A
-login commits the account's identity from prelogin, and a snapshot restore
-replaces it by compare-and-swap. Opening a database or setting its master
-password never creates an identity; authentication must commit the account's
-salt and parameters before the device can unlock its server replica.
+Authenticated account KDF identities live only in Config v2's
+`account_identities`, scoped to connection and credential profile. Device unlock
+has an independent KDF and random root. `zann-client::app::unlock` owns the
+keyring policy, and `zann-client-sqlite::local_vault` persists its encrypted
+record in SQLite metadata through `zann-db::local::MetadataRepo`. The device
+password never derives account keys. Snapshots include the keyring inside the
+same SQLite copy; restoring no longer writes an external Config identity.
+See [ADR 0010](../adr/0010-device-unlock-account-keys.md).
 
 If the primary is absent while the predecessor backup exists, initialization
 MUST stop for explicit recovery; it MUST NOT create defaults or remigrate
@@ -732,8 +736,8 @@ zeroizing values at once.
 The superseded `zann-app` package is deleted.
 
 Standalone local-only storage creation is removed (#241). Server authentication
-is the sole production source of Config v2 KDF identity; the local port only
-unlocks and edits server replicas. First sync selects its catalog without a
+is the sole production source of per-account Config v2 KDF identities. The
+local port owns device-unlock initialization and edits only server replicas. First sync selects its catalog without a
 shell follow-up selection heuristic. Disconnected replicas retain offline
 editing, pending history, export, snapshots and verify. SQLite migration 0004
 rejects nonempty legacy local-only data instead of deleting or remapping it.

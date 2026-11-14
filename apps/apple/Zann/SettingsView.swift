@@ -68,6 +68,7 @@ struct SettingsView: View {
                 choice("settings.revealAfter", \.autoHideRevealSeconds,
                        options.autoHideRevealSeconds, label: model.strings.secondsLabel)
             }
+            UnlockPasswordSettings(core: model.browserCore, unlocked: model.isUnlocked, strings: model.strings)
             touchID
             failure
         }

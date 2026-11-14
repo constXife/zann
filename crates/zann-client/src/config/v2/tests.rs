@@ -241,8 +241,12 @@ fn authenticated_targets_publish_complete_generations_and_preserve_metadata() {
     assert_eq!(created.storage_id(), Some("storage-a"));
     assert_eq!(created.profile_name(), "first");
     assert_eq!(
-        created.snapshot().config().identity,
-        Some(config_identity.clone())
+        created
+            .snapshot()
+            .config()
+            .account_identities
+            .get(&identity_slot(&connection_id, "first")),
+        Some(&config_identity)
     );
     let connection = &created.snapshot().config().connections[&connection_id];
     assert_eq!(connection.metadata.address, "https://auth.test");
@@ -670,7 +674,7 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
         },
         IdentityCommit::InitializeOrMatch(enriched.clone()),
         "desktop",
-        "third",
+        "second",
         "third-secret",
         &store,
     )
@@ -695,7 +699,7 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
             },
             IdentityCommit::InitializeOrMatch(conflict),
             "desktop",
-            "conflict",
+            "second",
             "conflict-secret",
             &store,
         )
@@ -724,14 +728,18 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
             replacement: replacement.clone(),
         },
         "desktop",
-        "replacement",
+        "second",
         "replacement-secret",
         &store,
     )
     .expect("explicit exact identity replacement");
     assert_eq!(
-        repo.snapshot().expect("snapshot").config().identity,
-        Some(replacement.clone())
+        repo.snapshot()
+            .expect("snapshot")
+            .config()
+            .account_identities
+            .get(&identity_slot(&connection_id, "second")),
+        Some(&replacement)
     );
 
     let other_id = ConnectionId::deterministic("other", "https://other.test");

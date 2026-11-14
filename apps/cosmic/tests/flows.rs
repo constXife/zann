@@ -468,7 +468,7 @@ fn master_hands_the_open_vault_to_the_shell() {
     assert!(matches!(failed, master::Outcome::None));
 
     let opened = state.update(
-        master::Message::Opened(Ok((page, Some(Err("offline".to_string()))))),
+        master::Message::Opened(Ok(Some((page, Some(Err("offline".to_string())))))),
         &session,
     );
     match opened {

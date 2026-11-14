@@ -46,17 +46,33 @@ const APPLE_PASSWORDS_REQUIRED_HEADERS: [&str; 6] =
 /// here.
 pub struct BackupCtx {
     pub pool: SqlitePool,
-    pub master_key: Arc<SecretKey>,
+    pub account_keys: std::collections::BTreeMap<Uuid, Arc<SecretKey>>,
     pub root: PathBuf,
 }
 
 impl BackupCtx {
-    pub fn new(pool: SqlitePool, master_key: Arc<SecretKey>, root: PathBuf) -> Self {
+    pub fn new(
+        pool: SqlitePool,
+        account_keys: std::collections::BTreeMap<Uuid, Arc<SecretKey>>,
+        root: PathBuf,
+    ) -> Self {
         Self {
             pool,
-            master_key,
+            account_keys,
             root,
         }
+    }
+
+    pub fn key(&self, storage: Uuid) -> Result<&SecretKey, BackupError> {
+        self.account_keys
+            .get(&storage)
+            .map(AsRef::as_ref)
+            .ok_or_else(|| {
+                BackupError::new(
+                    "account_key_missing",
+                    "enroll the account encryption key before exporting or importing",
+                )
+            })
     }
 
     /// Where an export lands when the caller has no preference of its own.

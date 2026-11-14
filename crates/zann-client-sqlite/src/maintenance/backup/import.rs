@@ -49,7 +49,7 @@ pub async fn plain_import(
         }
         mapping.insert(source, matches[0].id);
     }
-    let services = LocalServices::new(&ctx.pool, ctx.master_key.as_ref());
+    let services = LocalServices::new(&ctx.pool, ctx.key(storage_id)?);
     let report = std::sync::Mutex::new(ImportReport::default());
     stream_backup_items_async(&path, |item, _| {
         let mapping = &mapping;

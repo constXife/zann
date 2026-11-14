@@ -96,7 +96,10 @@ pub(super) fn resolve_password_login_anchor_from_config(
         client_id: client_id.clone(),
         client_present: client.is_some(),
         client_active_connection: client.and_then(|client| client.active_connection.clone()),
-        identity: config.identity.clone(),
+        identity: config
+            .account_identities
+            .get(&identity_slot(connection_id, profile_name))
+            .cloned(),
     })
 }
 
@@ -158,7 +161,11 @@ pub(super) fn ensure_password_login_anchor_matches(
     {
         return Err(conflict("client_active_connection"));
     }
-    if config.identity != anchor.identity {
+    if config
+        .account_identities
+        .get(&identity_slot(&anchor.connection_id, &anchor.profile_name))
+        != anchor.identity.as_ref()
+    {
         return Err(conflict("identity"));
     }
     Ok(())
@@ -350,7 +357,12 @@ pub(super) fn apply_password_login_candidate(
     }
     validate_required_metadata("$.password_login.account_subject", account_subject)?;
     validate_required_metadata("$.password_login.access_expires_at", access_expires_at)?;
-    apply_identity_commit(config, &IdentityCommit::InitializeOrMatch(identity.clone()))?;
+    apply_identity_commit(
+        config,
+        &anchor.connection_id,
+        &anchor.profile_name,
+        &IdentityCommit::InitializeOrMatch(identity.clone()),
+    )?;
     let connection = config
         .connections
         .get_mut(&anchor.connection_id)
@@ -390,6 +402,9 @@ pub(super) fn apply_credential_profile_removal(
     profile_name: &str,
     active_after: &ActiveCredentialAfterRemoval,
 ) -> Result<(), ConfigError> {
+    config
+        .account_identities
+        .remove(&identity_slot(connection_id, profile_name));
     let connection = config.connections.get_mut(connection_id).ok_or_else(|| {
         ConfigError::MissingConnection {
             connection_id: connection_id.clone(),

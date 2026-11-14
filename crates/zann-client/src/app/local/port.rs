@@ -36,6 +36,9 @@ pub trait LocalVaultService: Send + Sync {
         -> LocalResult<String>;
 
     fn core_info(&self) -> String;
+    fn change_unlock_password(&self, current: String, replacement: String) -> LocalResult<()>;
+    fn activate_connected_account(&self) -> LocalResult<bool>;
+    fn enroll_account_key(&self, password: String) -> LocalResult<VaultStatus>;
     fn unlock(&self, password: String) -> LocalResult<VaultStatus>;
     fn remembered_unlock(&self) -> LocalResult<RememberedUnlock>;
     fn unlock_remembered(&self) -> LocalResult<VaultStatus>;

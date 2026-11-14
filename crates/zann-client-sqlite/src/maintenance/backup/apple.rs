@@ -205,7 +205,7 @@ pub async fn apple_passwords_import(
     let _ = apple_passwords_preflight(&path)?;
     let mut reader = apple_passwords_reader(&path)?;
     let (storage_id, vault_id) = apple_passwords_target(ctx, target_storage_id.as_deref()).await?;
-    let services = LocalServices::new(&ctx.pool, ctx.master_key.as_ref());
+    let services = LocalServices::new(&ctx.pool, ctx.key(storage_id)?);
     let mut report = ApplePasswordsImportReport::default();
     ctx.log(&format!("apple_import_start path={}", path.display()));
 

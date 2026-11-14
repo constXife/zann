@@ -37,7 +37,12 @@ pub enum LocalError {
         source: Box<dyn std::error::Error + Send + Sync>,
     },
     #[error("sync {kind}: {message}")]
-    Sync { kind: String, message: String },
+    Sync {
+        kind: String,
+        message: String,
+        #[source]
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
+    },
 }
 
 pub type LocalResult<T> = Result<T, LocalError>;
@@ -85,6 +90,7 @@ impl From<SyncError> for LocalError {
         LocalError::Sync {
             kind: sync_error_kind_code(error.kind()).to_string(),
             message,
+            source: Some(Box::new(error)),
         }
     }
 }
@@ -116,6 +122,7 @@ impl From<SessionError> for LocalError {
         LocalError::Sync {
             kind: session_error_kind_code(error.kind()).to_string(),
             message,
+            source: Some(Box::new(error)),
         }
     }
 }

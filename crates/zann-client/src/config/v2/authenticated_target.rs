@@ -34,36 +34,44 @@ pub(super) fn validate_master_key_fingerprint(target: &str) -> Result<(), Config
 #[allow(dead_code)]
 pub(super) fn apply_identity_commit(
     config: &mut ConfigV2,
+    connection: &ConnectionId,
+    profile: &str,
     commit: &IdentityCommit,
 ) -> Result<(), ConfigError> {
+    let slot = identity_slot(connection, profile);
     match commit {
-        IdentityCommit::InitializeOrMatch(observed) => match config.identity.as_mut() {
-            None => config.identity = Some(observed.clone()),
-            Some(stored) => {
-                if stored.kdf_salt != observed.kdf_salt || stored.kdf_params != observed.kdf_params
-                {
-                    return Err(ConfigError::AuthenticatedIdentityConflict {
-                        reason: "KDF identity does not match the stored identity".to_string(),
-                    });
+        IdentityCommit::InitializeOrMatch(observed) => {
+            match config.account_identities.get_mut(&slot) {
+                None => {
+                    config.account_identities.insert(slot, observed.clone());
                 }
-                enrich_identity_field(
-                    "salt_fingerprint",
-                    &mut stored.salt_fingerprint,
-                    &observed.salt_fingerprint,
-                )?;
-                enrich_identity_field(
-                    "first_seen_at",
-                    &mut stored.first_seen_at,
-                    &observed.first_seen_at,
-                )?;
-                enrich_identity_field("email", &mut stored.email, &observed.email)?;
+                Some(stored) => {
+                    if stored.kdf_salt != observed.kdf_salt
+                        || stored.kdf_params != observed.kdf_params
+                    {
+                        return Err(ConfigError::AuthenticatedIdentityConflict {
+                            reason: "KDF identity does not match the stored identity".to_string(),
+                        });
+                    }
+                    enrich_identity_field(
+                        "salt_fingerprint",
+                        &mut stored.salt_fingerprint,
+                        &observed.salt_fingerprint,
+                    )?;
+                    enrich_identity_field(
+                        "first_seen_at",
+                        &mut stored.first_seen_at,
+                        &observed.first_seen_at,
+                    )?;
+                    enrich_identity_field("email", &mut stored.email, &observed.email)?;
+                }
             }
-        },
+        }
         IdentityCommit::ReplaceExact {
             expected,
             replacement,
         } => {
-            let stored = config.identity.as_ref().ok_or_else(|| {
+            let stored = config.account_identities.get(&slot).ok_or_else(|| {
                 ConfigError::AuthenticatedIdentityConflict {
                     reason: "cannot replace a missing identity".to_string(),
                 }
@@ -74,7 +82,7 @@ pub(super) fn apply_identity_commit(
                         .to_string(),
                 });
             }
-            config.identity = Some(replacement.clone());
+            config.account_identities.insert(slot, replacement.clone());
         }
     }
     Ok(())

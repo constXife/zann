@@ -492,8 +492,12 @@ impl SqliteSyncStore {
         let snapshot = self.config.snapshot().map_err(map_config_lease_error)?;
         let identity_email = snapshot
             .config()
-            .identity
-            .as_ref()
+            .account_identities
+            .get(&format!(
+                "{}/{}",
+                target.connection_id(),
+                target.profile_name()
+            ))
             .and_then(|identity| identity.email.as_deref());
         self.database.verify_identity().await?;
         let storage_repository = LocalStorageRepo::new(self.database.pool());

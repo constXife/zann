@@ -22,6 +22,9 @@ class UXDelayedCore: CoreFacade {
                             pendingChanges: 0, lastSyncedAt: "2026-11-13T00:00:00Z")
     }
 
+    // The delayed network adapter stands in for the already-enrolled fixture account.
+    override func activateConnectedAccount() throws -> Bool { true }
+
     override func remoteSync(storageId: String?, progress: SyncCommitObserver?) throws -> SyncOutcomeFfi {
         onSync?()
         onSyncStorage?(storageId)

@@ -27,6 +27,7 @@ pub use connect_flow::*;
 mod generator;
 pub use generator::*;
 mod platform;
+mod unlock;
 pub use platform::*;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
@@ -95,7 +96,7 @@ impl From<zann_client::app::local::LocalError> for CoreError {
             LocalError::Service(message) => Self::Service(message),
             LocalError::Unimplemented(message) => Self::Unimplemented(message),
             LocalError::Unlock { kind, message, .. } => Self::Unlock { kind, message },
-            LocalError::Sync { kind, message } => Self::Sync { kind, message },
+            LocalError::Sync { kind, message, .. } => Self::Sync { kind, message },
         }
     }
 }

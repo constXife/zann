@@ -74,6 +74,10 @@ fn apply_connection_removal(
             connection_id: connection_id.clone(),
         });
     }
+    let prefix = format!("{connection_id}/");
+    config
+        .account_identities
+        .retain(|slot, _| !slot.starts_with(&prefix));
     for client in config.clients.values_mut() {
         if client.active_connection.as_ref() == Some(connection_id) {
             client.active_connection = None;

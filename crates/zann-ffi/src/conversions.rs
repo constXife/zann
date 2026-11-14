@@ -364,7 +364,6 @@ impl From<native::Snapshot> for SnapshotFfi {
     fn from(value: native::Snapshot) -> Self {
         Self {
             path: value.path,
-            identity_path: value.identity_path,
             created_at: value.created_at,
             size_bytes: value.size_bytes,
         }
@@ -375,7 +374,6 @@ impl From<SnapshotFfi> for native::Snapshot {
     fn from(value: SnapshotFfi) -> Self {
         Self {
             path: value.path,
-            identity_path: value.identity_path,
             created_at: value.created_at,
             size_bytes: value.size_bytes,
         }
@@ -387,7 +385,6 @@ impl From<native::SnapshotRestore> for SnapshotRestoreFfi {
         Self {
             restored_from: value.restored_from,
             replaced_saved_to: value.replaced_saved_to,
-            identity_replaced: value.identity_replaced,
         }
     }
 }
@@ -397,7 +394,6 @@ impl From<SnapshotRestoreFfi> for native::SnapshotRestore {
         Self {
             restored_from: value.restored_from,
             replaced_saved_to: value.replaced_saved_to,
-            identity_replaced: value.identity_replaced,
         }
     }
 }

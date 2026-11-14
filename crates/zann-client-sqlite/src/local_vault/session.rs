@@ -41,7 +41,7 @@ impl LocalVault {
     pub fn set_current_vault(&self, id: String) -> LocalResult<VaultStatus> {
         let _context = self.context_gate.write().expect("lock poisoned");
         let pool = self.pool();
-        if self.master_key.lock().expect("lock poisoned").is_none() {
+        if self.device_key.lock().expect("lock poisoned").is_none() {
             return Err(LocalError::Locked);
         }
         let vault_id = Uuid::parse_str(&id)
@@ -99,9 +99,9 @@ impl LocalVault {
 
         // A server cache can have an empty catalog (e.g. personal vaults disabled).
         // No local vault is invented to mark the account initialized.
-        let initialized = !storages.is_empty() && self.kdf_identity()?.is_some();
+        let initialized = self.device_unlock_optional()?.is_some();
 
-        let locked = self.master_key.lock().expect("lock poisoned").is_none();
+        let locked = self.device_key.lock().expect("lock poisoned").is_none();
         let server_connected = self.app_client()?.configured_target(None).is_ok();
 
         Ok(AppStatus {
@@ -117,12 +117,12 @@ impl LocalVault {
     /// projection from scratch. The reset fails while any unconfirmed local
     /// change would be discarded.
     pub fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()> {
-        let master_key = self.master_key()?;
         let client = self.app_client()?;
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
-        let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
+        let key = self.account_key_for_target(&target)?;
+        let operation_key = SecretKey::from_bytes(*key.as_bytes());
         self.runtime
             .block_on(client.reset_sync(target, operation_key))
             .map_err(LocalError::from)

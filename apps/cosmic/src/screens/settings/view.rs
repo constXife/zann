@@ -151,8 +151,12 @@ impl State {
             )),
         );
 
-        let mut sections: Vec<Element<'_, Message>> =
-            vec![auto_lock.into(), clipboard.into(), reveal.into()];
+        let mut sections: Vec<Element<'_, Message>> = vec![
+            auto_lock.into(),
+            clipboard.into(),
+            reveal.into(),
+            self.password.view().map(Message::Password),
+        ];
         if let Some(unlock) = self.unlock_section() {
             sections.push(unlock);
         }

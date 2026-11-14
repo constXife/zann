@@ -6,7 +6,7 @@ pub(super) fn fixture() -> (tempfile::TempDir, Arc<LocalVault>, Uuid, Uuid) {
     let root = dir.path().canonicalize().expect("canonical root");
     let core =
         open_vault(format!("sqlite://{}", root.join("local.sqlite").display())).expect("open");
-    core.seed_offline_fixture(format!("context-{}", Uuid::now_v7()))
+    core.seed_offline_fixture("context fixture password".into())
         .expect("initialize");
     let pool = core.pool();
     let first = core.storage_id().expect("first storage");
@@ -30,6 +30,28 @@ pub(super) fn fixture() -> (tempfile::TempDir, Arc<LocalVault>, Uuid, Uuid) {
         .expect("vaults")
         .remove(0);
     // The same vault ID in two storage contexts must never mix their items.
+    let first_key = core.account_key().expect("first key");
+    let remote_key = Arc::new(SecretKey::generate());
+    vault.vault_key_enc =
+        vault_crypto::rewrap_vault_key(&first_key, &remote_key, vault.id, &vault.vault_key_enc)
+            .expect("independent wrapping");
+    let keyring = core.device_unlock().expect("keyring");
+    let mut candidate = keyring.clone();
+    candidate
+        .insert_account(
+            &core.root_key().expect("root"),
+            remote.id.to_string(),
+            "second-server".into(),
+            "second-subject".into(),
+            &remote_key,
+        )
+        .expect("enroll fixture");
+    core.commit_device_unlock(Some(&keyring), &candidate)
+        .expect("commit fixture");
+    core.account_keys
+        .lock()
+        .expect("keys")
+        .insert(remote.id.to_string(), remote_key);
     vault.storage_id = remote.id;
     core.runtime
         .block_on(LocalVaultRepo::new(&pool).insert_if_absent(&vault))
@@ -87,7 +109,7 @@ fn selection_round_trips_storage_with_personal_and_server_wrapped_shared_vaults(
         vault_key_enc: vec![4, 5, 6],
         key_wrap_type: zann_db::local::KeyWrapType::RemoteServer,
         cache_key_fp: Some(zann_crypto::cache_key_fingerprint(
-            &core.master_key().expect("key"),
+            &core.account_key_for_storage(remote).expect("remote key"),
         )),
         last_synced_at: None,
     };
@@ -194,7 +216,7 @@ fn selection_waits_for_item_context_and_lock_supersedes_pending_unlock() {
         .expect("switch");
     worker.join().expect("worker");
     let generation = core.context_generation.load(Ordering::SeqCst);
-    let key = core.master_key().expect("key");
+    let key = core.account_key().expect("key");
     core.lock().expect("lock");
     assert!(core.finish_unlock(key, generation).is_err());
     assert!(matches!(
@@ -212,7 +234,7 @@ fn a_late_sync_target_cannot_replace_an_explicitly_selected_empty_replica() {
         .expect("empty second catalog");
     core.set_current_storage(second.to_string())
         .expect("second replica");
-    let key = core.master_key().expect("key");
+    let key = core.account_key().expect("key");
     for target in [Some(first.to_string()), None] {
         let generation = core.context_generation.load(Ordering::SeqCst);
         core.select_synced_catalog(target, Some(second), &key, generation)
@@ -220,4 +242,62 @@ fn a_late_sync_target_cannot_replace_an_explicitly_selected_empty_replica() {
         assert_eq!(core.current_storage_id(), Some(second.to_string()));
         assert!(core.current_vault_id().is_none());
     }
+}
+
+#[test]
+fn one_password_change_keeps_both_independent_accounts_readable_after_restart() {
+    let (dir, core, first, remote) = fixture();
+    let first_key = core.account_key_for_storage(first).expect("first key");
+    let second_key = core.account_key_for_storage(remote).expect("second key");
+    assert!(first_key.as_bytes() != second_key.as_bytes());
+    let first_item = core
+        .debug_create_kv_item("First".into(), "key".into(), "first secret".into())
+        .expect("first item");
+    core.set_current_storage(remote.to_string())
+        .expect("second account");
+    let second_item = core
+        .debug_create_kv_item("Second".into(), "key".into(), "second secret".into())
+        .expect("second item");
+    let pool = core.pool();
+    let before = core
+        .runtime
+        .block_on(LocalVaultRepo::new(&pool).list_by_storage(remote))
+        .expect("envelopes");
+    assert!(
+        vault_crypto::decrypt_vault_key(&first_key, before[0].id, &before[0].vault_key_enc)
+            .is_err()
+    );
+    core.change_unlock_password(
+        "context fixture password".into(),
+        "replacement device password".into(),
+    )
+    .expect("change password");
+    let after = core
+        .runtime
+        .block_on(LocalVaultRepo::new(&pool).list_by_storage(remote))
+        .expect("envelopes");
+    assert_eq!(before[0].vault_key_enc, after[0].vault_key_enc);
+    assert_eq!(before[0].cache_key_fp, after[0].cache_key_fp);
+    drop(pool);
+    drop(core);
+    let path = dir
+        .path()
+        .canonicalize()
+        .expect("root")
+        .join("local.sqlite");
+    let core = open_vault(format!("sqlite://{}", path.display())).expect("reopen");
+    assert!(core.unlock("context fixture password".into()).is_err());
+    core.unlock("replacement device password".into())
+        .expect("offline unlock");
+    core.set_current_storage(first.to_string()).expect("first");
+    assert!(core.item_get(first_item).is_ok());
+    core.set_current_storage(remote.to_string())
+        .expect("second");
+    assert!(core.item_get(second_item).is_ok());
+    let export = dir.path().join("both-accounts.json");
+    let report = core
+        .backup_export_file(export.to_str().expect("path").into())
+        .expect("multi-account export");
+    assert_eq!(report.items_count, 2);
+    assert_eq!(core.verify().expect("verify").items_ok, 2);
 }

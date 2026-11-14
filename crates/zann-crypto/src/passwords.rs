@@ -63,6 +63,12 @@ pub fn kdf_fingerprint(kdf_salt: &str, params: &KdfParams) -> Result<String, &'s
     Ok(format!("sha256:{}", hex::encode(hash)))
 }
 
+/// Character count under the same NFC equivalence used by the KDF.
+#[must_use]
+pub fn normalized_password_length(password: &str) -> usize {
+    password.nfc().count()
+}
+
 pub fn derive_auth_hash(
     password: &str,
     kdf_salt: &str,

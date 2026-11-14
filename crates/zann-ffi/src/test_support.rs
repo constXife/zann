@@ -9,4 +9,14 @@ impl CoreFacade {
             .map(Into::into)
             .map_err(Into::into)
     }
+    pub fn seed_offline_storage(
+        &self,
+        storage_id: String,
+        name: String,
+        server_url: String,
+    ) -> CoreResult<String> {
+        self.inner
+            .seed_offline_storage(storage_id, name, server_url)
+            .map_err(Into::into)
+    }
 }

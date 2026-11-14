@@ -6329,6 +6329,7 @@ dependencies = [
  "zann-crypto",
  "zann-db",
  "zann-keystore",
+ "zeroize",
 ]
 
 [[package]]

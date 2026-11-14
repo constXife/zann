@@ -207,6 +207,9 @@ pub(super) fn parse_config(path: &Path, bytes: &[u8]) -> Result<ConfigV2, Config
             supported: CONFIG_SCHEMA_VERSION,
         });
     }
+    if probe.identity.is_some() {
+        return Err(ConfigError::InvalidConfig { path: "$.identity".into(), reason: "pre-keyring configuration: export with the previous build, then connect and import into a fresh client root; existing files are unchanged".into() });
+    }
     let config: ConfigV2 =
         serde_json::from_slice(bytes).map_err(|source| ConfigError::Malformed {
             path: path.to_path_buf(),

@@ -42,7 +42,7 @@ fn the_remembered_unlock_is_kept_out_of_the_client_config() {
     drop(core);
 
     let config = fs::read_to_string(root.join("client-config.json")).expect("client config");
-    assert!(config.contains("\"identity\""));
+    assert!(!config.contains("device_keyring"));
     assert!(
         !config.contains("remembered_unlock"),
         "the client config is shared with clients that would drop this field"

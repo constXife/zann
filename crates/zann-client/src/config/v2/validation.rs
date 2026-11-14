@@ -10,7 +10,12 @@ pub(super) fn validate_config(config: &ConfigV2) -> Result<(), ConfigError> {
             ),
         });
     }
-    if let Some(identity) = &config.identity {
+    validate_count(
+        "$.account_identities",
+        config.account_identities.len(),
+        MAX_PROFILES_TOTAL,
+    )?;
+    for identity in config.account_identities.values() {
         validate_kdf_params(&identity.kdf_params, "$.identity.kdf_params")?;
         validate_string_len(
             "$.identity.kdf_salt",

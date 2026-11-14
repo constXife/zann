@@ -72,6 +72,18 @@ pub fn create_private_file(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 
+/// Reserve a new private output without following or truncating an existing path.
+pub fn create_new_private_file(path: &Path) -> io::Result<File> {
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
 /// Creates (if missing) a data directory and enforces owner-only permissions
 /// on it, including when it already exists.
 pub fn ensure_private_dir(path: &Path) -> io::Result<()> {

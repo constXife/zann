@@ -11,17 +11,22 @@ struct MasterPasswordView: View {
     @State private var confirmation = ""
     @FocusState private var focused: Bool
 
+    private var creating: Bool { mode == .create || mode == .accountCreate }
+    private var account: Bool { mode == .accountCreate || mode == .accountUnlock }
+    private var title: String {
+        model.strings(account ? (creating ? "unlock.accountCreateTitle" : "unlock.accountTitle") : (creating ? "unlock.createTitle" : "unlock.title"))
+    }
     private var canSubmit: Bool {
         guard !password.isEmpty, !model.busy else { return false }
-        return mode == .unlock || password == confirmation
+        return !creating || password == confirmation
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(mode == .create ? "Create a Master Password" : "Unlock Zann")
+            Text(title)
                 .font(.title2.bold())
-            if mode == .create {
-                Text("It encrypts this vault. It cannot be recovered if you forget it.")
+            if creating {
+                Text(model.strings(account ? "unlock.accountHelp" : "unlock.deviceHelp"))
                     .foregroundStyle(.secondary)
             }
             if model.syncAfterUnlock {
@@ -30,14 +35,14 @@ struct MasterPasswordView: View {
                 }
                 Text(model.strings("wizard.syncAfterUnlock")).foregroundStyle(.secondary)
             }
-            SecureField("Master password", text: $password)
+            SecureField(model.strings(account ? "unlock.accountPlaceholder" : "unlock.passwordPlaceholder"), text: $password)
                 .focused($focused)
                 .onSubmit(submit)
-            if mode == .create {
-                SecureField("Repeat master password", text: $confirmation)
+            if creating {
+                SecureField(model.strings("unlock.confirmPassword"), text: $confirmation)
                     .onSubmit(submit)
                 if !confirmation.isEmpty && confirmation != password {
-                    Text("The passwords do not match.").foregroundStyle(.red)
+                    Text(model.strings("unlock.passwordMismatch")).foregroundStyle(.red)
                 }
             }
             if let error = model.error {
@@ -59,7 +64,7 @@ struct MasterPasswordView: View {
                 if model.busy {
                     ProgressView().controlSize(.small)
                 }
-                Button(mode == .create ? "Create Vault" : "Unlock", action: submit)
+                Button(model.strings(creating ? "wizard.create" : "common.unlock"), action: submit)
                     .keyboardShortcut(.defaultAction)
                     .disabled(!canSubmit)
             }

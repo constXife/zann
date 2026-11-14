@@ -201,7 +201,7 @@ pub(super) fn build_provisional_legacy_config(
     deferred_legacy_fields: BTreeSet<String>,
 ) -> Result<ConfigV2, ConfigError> {
     let mut config = ConfigV2::empty();
-    config.identity = legacy.identity.as_ref().map(|identity| ConfigIdentity {
+    let legacy_identity = legacy.identity.as_ref().map(|identity| ConfigIdentity {
         kdf_salt: identity.kdf_salt.clone(),
         kdf_params: identity.kdf_params.clone(),
         salt_fingerprint: identity.salt_fingerprint.clone(),
@@ -337,5 +337,14 @@ pub(super) fn build_provisional_legacy_config(
         deferred_legacy_fields,
     });
     validate_config(&config)?;
+    if let Some(identity) = legacy_identity {
+        for (id, connection) in &config.connections {
+            for profile in connection.credential_profiles.keys() {
+                config
+                    .account_identities
+                    .insert(identity_slot(id, profile), identity.clone());
+            }
+        }
+    }
     Ok(config)
 }

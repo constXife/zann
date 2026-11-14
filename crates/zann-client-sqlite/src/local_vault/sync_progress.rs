@@ -33,7 +33,6 @@ impl LocalVault {
             std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
         );
         let _in_flight = self.syncs.register(operation.operation_id(), cancel);
-        let master_key = self.master_key()?;
         let (wake, mut receiver) = tokio::sync::mpsc::channel(1);
         let progress = Arc::new(CommittedProgress {
             latest: Mutex::new(None),
@@ -43,6 +42,7 @@ impl LocalVault {
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
+        let master_key = self.account_key_for_target(&target)?;
         let (selection_before, generation) = {
             let _context = self.context_gate.read().expect("lock poisoned");
             (

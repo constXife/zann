@@ -1,21 +1,5 @@
 use super::*;
 use uuid::Uuid;
-use zann_client::app::ConfigKdfParams;
-
-fn identity(salt: &str) -> ConfigIdentity {
-    ConfigIdentity {
-        kdf_salt: salt.to_string(),
-        kdf_params: ConfigKdfParams {
-            algorithm: "argon2id".to_string(),
-            iterations: 3,
-            memory_kb: 65536,
-            parallelism: 4,
-        },
-        salt_fingerprint: None,
-        first_seen_at: None,
-        email: None,
-    }
-}
 
 fn temp_root() -> PathBuf {
     let root = std::env::temp_dir().join(format!("zann-snapshot-{}", Uuid::now_v7()));
@@ -43,7 +27,7 @@ async fn creates_a_readable_copy_of_the_database() {
     let root = temp_root();
     let pool = seeded_pool(&root).await;
 
-    let snapshot = create(&pool, &root, None, &RetentionPolicy::default())
+    let snapshot = create(&pool, &root, &RetentionPolicy::default())
         .await
         .expect("snapshot");
 
@@ -141,7 +125,7 @@ fn a_vault_with_no_snapshots_is_always_due() {
 async fn a_recent_snapshot_means_nothing_is_due() {
     let root = temp_root();
     let pool = seeded_pool(&root).await;
-    create(&pool, &root, None, &RetentionPolicy::default())
+    create(&pool, &root, &RetentionPolicy::default())
         .await
         .expect("snapshot");
 
@@ -150,7 +134,6 @@ async fn a_recent_snapshot_means_nothing_is_due() {
         create_if_due(
             &pool,
             &root,
-            None,
             Duration::from_secs(3600),
             &RetentionPolicy::default()
         )
@@ -209,16 +192,14 @@ async fn restoring_puts_the_snapshotted_rows_back() {
     let pool = seeded_pool(&root).await;
     add_storage(&pool, "before").await;
 
-    let snapshot = create(&pool, &root, None, &RetentionPolicy::default())
+    let snapshot = create(&pool, &root, &RetentionPolicy::default())
         .await
         .expect("snapshot");
 
     add_storage(&pool, "after").await;
     assert_eq!(storage_names(&pool).await.len(), 2);
 
-    restore(pool, &root, None, &snapshot.path)
-        .await
-        .expect("restore");
+    restore(pool, &root, &snapshot.path).await.expect("restore");
 
     let pool = reopen(&root).await;
     assert_eq!(
@@ -236,14 +217,12 @@ async fn restoring_keeps_what_it_replaced() {
     let root = temp_root();
     let pool = seeded_pool(&root).await;
     add_storage(&pool, "before").await;
-    let snapshot = create(&pool, &root, None, &RetentionPolicy::default())
+    let snapshot = create(&pool, &root, &RetentionPolicy::default())
         .await
         .expect("snapshot");
     add_storage(&pool, "after").await;
 
-    let outcome = restore(pool, &root, None, &snapshot.path)
-        .await
-        .expect("restore");
+    let outcome = restore(pool, &root, &snapshot.path).await.expect("restore");
 
     assert!(
         outcome.replaced_saved_to.exists(),
@@ -269,14 +248,12 @@ async fn restoring_clears_the_write_ahead_log() {
     let root = temp_root();
     let pool = seeded_pool(&root).await;
     add_storage(&pool, "before").await;
-    let snapshot = create(&pool, &root, None, &RetentionPolicy::default())
+    let snapshot = create(&pool, &root, &RetentionPolicy::default())
         .await
         .expect("snapshot");
     add_storage(&pool, "after").await;
 
-    restore(pool, &root, None, &snapshot.path)
-        .await
-        .expect("restore");
+    restore(pool, &root, &snapshot.path).await.expect("restore");
 
     assert!(
         !root.join("local.sqlite-wal").exists(),
@@ -286,38 +263,33 @@ async fn restoring_clears_the_write_ahead_log() {
 }
 
 #[tokio::test]
-async fn the_kdf_salt_comes_back_with_the_snapshot() {
+async fn snapshot_contains_the_keyring_in_the_same_database() {
     let root = temp_root();
     let pool = seeded_pool(&root).await;
-    let old = identity("old");
-    let snapshot = create(&pool, &root, Some(&old), &RetentionPolicy::default())
+    let keyring = DeviceUnlock::create("snapshot device password")
+        .expect("keyring")
+        .0;
+    let serialized = serde_json::to_string(&keyring).expect("json");
+    zann_db::local::MetadataRepo::new(&pool)
+        .set_value("device_keyring", &serialized)
+        .await
+        .expect("keyring");
+    let snapshot = create(&pool, &root, &RetentionPolicy::default())
         .await
         .expect("snapshot");
-    assert!(snapshot.identity_path.is_some(), "the salt was not saved");
-
-    // The vault is re-initialised: a new salt, and the old one now only
-    // exists beside the snapshot.
-    let new = identity("new");
-    let outcome = restore(pool, &root, Some(&new), &snapshot.path)
-        .await
-        .expect("restore");
-
+    let other =
+        zann_db::connect_sqlite_with_max(&format!("sqlite://{}", snapshot.path.display()), 1)
+            .await
+            .expect("snapshot database");
     assert_eq!(
-        outcome.identity,
-        Some(old),
-        "the restored database cannot be opened: its salt was not returned"
+        zann_db::local::MetadataRepo::new(&other)
+            .get_value("device_keyring")
+            .await
+            .expect("keyring"),
+        Some(serialized)
     );
-    let replaced = list(&root)
-        .expect("list")
-        .into_iter()
-        .find(|listed| listed.path == outcome.replaced_saved_to)
-        .expect("the replaced database is listed");
-    let kept: ConfigIdentity = serde_json::from_str(
-        &std::fs::read_to_string(replaced.identity_path.expect("replaced salt"))
-            .expect("read replaced salt"),
-    )
-    .expect("parse replaced salt");
-    assert_eq!(kept, new, "undoing the restore would lose the current salt");
+    other.close().await;
+    pool.close().await;
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -334,7 +306,7 @@ async fn a_file_that_is_not_a_vault_is_refused() {
         .expect("create stranger");
     other.close().await;
 
-    let err = restore(pool, &root, None, &stranger)
+    let err = restore(pool, &root, &stranger)
         .await
         .expect_err("a foreign database must be refused");
     assert_eq!(err.kind, "snapshot_not_a_vault");
@@ -352,7 +324,7 @@ async fn a_missing_snapshot_is_refused() {
     let root = temp_root();
     let pool = seeded_pool(&root).await;
 
-    let err = restore(pool, &root, None, &root.join("nope.sqlite"))
+    let err = restore(pool, &root, &root.join("nope.sqlite"))
         .await
         .expect_err("a missing file must be refused");
     assert_eq!(err.kind, "snapshot_not_found");
@@ -364,7 +336,7 @@ async fn restoring_the_live_database_over_itself_is_refused() {
     let root = temp_root();
     let pool = seeded_pool(&root).await;
 
-    let err = restore(pool, &root, None, &restore_target(&root))
+    let err = restore(pool, &root, &restore_target(&root))
         .await
         .expect_err("the live database is not a snapshot");
     assert_eq!(err.kind, "snapshot_is_live_database");
@@ -381,7 +353,6 @@ async fn a_stale_snapshot_makes_one_due_again() {
     let taken = create_if_due(
         &pool,
         &root,
-        None,
         Duration::from_secs(24 * 3600),
         &RetentionPolicy::default(),
     )
