@@ -118,6 +118,6 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   allows; zann-ui-core owns the stored form, defaults and option labels.
 
 The database and `preferences.json` live in
-`~/Library/Application Support/com.rlyeh.zann.apple/`, apart from the Tauri
-desktop app's. The app is not sandboxed yet, so session tokens use the
+`~/Library/Application Support/com.rlyeh.zann.apple/`, in the Apple shell's
+explicit application-data container. The app is not sandboxed yet, so session tokens use the
 login keychain.

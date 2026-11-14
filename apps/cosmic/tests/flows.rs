@@ -512,7 +512,7 @@ fn the_nav_header_offers_a_vault_picker_only_for_multiple_vaults() {
 }
 
 #[test]
-fn the_splitter_stays_between_the_tauri_panel_limits() {
+fn the_splitter_stays_within_native_panel_limits() {
     let (_dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = vault::State::new(page, None);
@@ -526,7 +526,7 @@ fn the_splitter_stays_between_the_tauri_panel_limits() {
     state.update(vault::Message::ResizeMove(800.0), &session);
     assert_eq!(state.list_width(), 500.0);
 
-    // Overshoot clamps at Tauri's list maximum without banking the excess.
+    // Overshoot clamps at the native list maximum without banking the excess.
     state.update(vault::Message::ResizeMove(1400.0), &session);
     assert_eq!(state.list_width(), 560.0);
     state.update(vault::Message::ResizeMove(760.0), &session);

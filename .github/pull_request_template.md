@@ -16,7 +16,7 @@
 (Select N/A or complete every applicable item.)
 
 - [ ] N/A — this PR does not change a shared client capability or contract
-- [ ] Shared behavior has one canonical owner; CLI/Tauri/COSMIC only adapt it
+- [ ] Shared behavior has one canonical owner; CLI/COSMIC/Apple only adapt it
 - [ ] Every affected consumer is covered by a contract/conformance test
 - [ ] Config, credential, protocol, or persisted-state changes include a migration/compatibility path
 - [ ] Any temporary architecture exception links to an issue/ADR with a removal condition

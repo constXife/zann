@@ -3,7 +3,7 @@
 - **Status:** Proposed
 - **Proposed:** 2026-11-09
 - **Scope:** `zann-keystore`, `zann-client::app::local`, `zann-client-sqlite`,
-  `zann-ffi`, `apps/cosmic`, `apps/desktop`, and future Apple/Android shells of
+  `zann-ffi`, `apps/cosmic`, `apps/apple`, and future Android shells of
   [ADR 0002](0002-client-strategy.md)
 - **Related:** [ADR 0001](0001-shared-client-core.md),
   [ADR 0002](0002-client-strategy.md), [ADR 0006](0006-passkey-provider.md),
@@ -12,6 +12,9 @@
   [#149](https://github.com/constXife/zann/issues/149)
 
 ## Implementation status
+
+The Tauri application was retired in #249; its findings in the historical
+context below are no longer active work items.
 
 The context below records the proposal-time diagnosis, not a fresh audit of
 every listed defect. As of 2026-11-13, `zann-keystore::HardwareAuthenticator`,
@@ -214,7 +217,7 @@ undifferentiated touches:
 In `LocalVaultService` / `zann-keystore`, this is exposed either as a two-phase
 call (`begin_hardware_key_enroll(label, verification) -> PendingHardwareKey`
 followed by `finish_hardware_key_enroll(pending) -> HardwareKey`) or via a
-progress sink so COSMIC and Tauri update the prompt from
+progress sink so COSMIC and Apple/FFI update the prompt from
 *"Step 1 of 2: Touch your hardware key to register…"* to
 *"Step 2 of 2: Touch again to confirm…"*.
 
@@ -273,7 +276,7 @@ pub trait HardwareAuthenticator: Send + Sync {
 ### 5. Concurrent password entry and structured error propagation
 
 - **Non-blocking password input during hardware wait:** On the unlock screen
-  (COSMIC `screens/master.rs` and Tauri `UnlockModal.vue`), waiting for a
+  (COSMIC `screens/master.rs` and native FFI consumers), waiting for a
   hardware touch tracks a separate `hardware_unlock_op_id` / `hardware_busy`
   state. Typing the master password and pressing Enter is always active; if the
   password unlocks the vault first, any late completion from the hardware-key
@@ -284,8 +287,8 @@ pub trait HardwareAuthenticator: Send + Sync {
   raw Rust error strings.
 - **Independent Hardware Key & Keystore controls:** Enrolling or unlocking with
   a hardware key does not require `KeystoreStatus::supported == true`.
-- **Single `unlock.json` file:** Tauri migrates its inline `remembered` fields
-  from `desktop.json` into `unlock.json` so all local clients share one format.
+- **Single `unlock.json` file:** Native local clients use the canonical
+  remembered-unlock owner; the retired Tauri inline format has no active writer.
 
 ## Consequences
 
@@ -317,7 +320,7 @@ pub trait HardwareAuthenticator: Send + Sync {
 |---|---|---|
 | 1 | `zann-keystore`: `HardwareAuthenticator` trait, `FakeHardwareAuthenticator`, `UnlockLifetime` (`SessionOnly` with `wrapped_slot_key` + `Persistent`), two-step enrollment API, and CTAP2 `clientPin` (`HardwareVerification`) | medium |
 | 2 | `zann-client` & `zann-client-sqlite`: inject `Keystore` + `HardwareAuthenticator` into `LocalVault`, expose lifetime/verification/two-step enrollment and structured error kinds on `LocalVaultService` and `zann-ffi` | medium |
-| 3 | `apps/cosmic` & `apps/desktop`: two-step touch progress, custom key label + auto-detected device name, FIDO2 PIN prompt, `SessionOnly` vs `Persistent` toggle, non-blocking password entry in COSMIC, localized error kinds, and decouple Tauri hardware keys from `keystoreSupported` | low–medium |
+| 3 | `apps/cosmic` & `apps/apple`: two-step touch progress, custom key label + auto-detected device name, FIDO2 PIN prompt, `SessionOnly` vs `Persistent` toggle, non-blocking password entry in COSMIC, and localized error kinds | low–medium |
 | 4 | Platform biometric ACLs: macOS/iOS `SecAccessControl` (`.biometryCurrentSet`, [#146](https://github.com/constXife/zann/issues/146)) and Windows `webauthn.dll` backend | medium |
 
 ## Alternatives considered

@@ -33,26 +33,10 @@ fast-test:
 # E2E
 # ==========================================
 
-e2e: e2e-desktop e2e-cli
-
-e2e-desktop:
-    just desktop-e2e
+e2e: e2e-cli
 
 e2e-cli:
     cargo test -p zann-cli --test e2e -- --nocapture
-
-desktop-test:
-    cd apps/desktop && bun run test
-
-desktop-dev:
-    direnv exec . bash -eo pipefail -c 'cd apps/desktop && bun run tauri dev'
-
-desktop-build:
-    direnv exec . bash -eo pipefail -c 'cd apps/desktop && bun run tauri build'
-
-desktop-e2e +args='':
-    cd apps/desktop && bun run e2e {{args}}
-
 # COSMIC PoC (apps/cosmic): needs the `cosmic` dev shell, see apps/cosmic/README.md
 cosmic-run +args='':
     cd apps/cosmic && cargo run {{args}}
@@ -80,11 +64,10 @@ cosmic-install:
       echo 'exec "$HOME/.local/libexec/zann-cosmic" "$@"'
     } > "$HOME/.local/bin/zann-cosmic"
     chmod 755 "$HOME/.local/bin/zann-cosmic"
-    # One logo for the whole product, so the icons come from the Tauri app
-    # rather than a second copy of the same PNGs.
+    # Shared product icons have one owner outside every client shell.
     for pair in 32:32x32 64:64x64 128:128x128 256:128x128@2x 512:icon; do
       size="${pair%%:*}"; src="${pair##*:}"
-      install -Dm644 "apps/desktop/src-tauri/icons/${src}.png" \
+      install -Dm644 "assets/icons/${src}.png" \
         "$HOME/.local/share/icons/hicolor/${size}x${size}/apps/com.rlyeh.zann.Cosmic.png"
     done
     install -d "$HOME/.local/share/applications"
@@ -175,8 +158,7 @@ test:
 full-test:
     just fast-test
     just server-test-db
-    just desktop-test
-    just desktop-build
+    nix develop .#cosmic --command just cosmic-test
 
 run:
     just server-run

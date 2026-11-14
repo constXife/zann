@@ -1,6 +1,6 @@
 //! Backup: export, import, and Apple Passwords CSV import.
 //!
-//! Lifted out of the Tauri backend so that every client can reach it. The
+//! Canonical native backup implementation shared by every client. The
 //! desktop app used to be the only one able to export a vault, while
 //! `zann-ffi` shipped `Unimplemented` stubs in place of these functions, which
 //! left the COSMIC client with no way to get its own data out.

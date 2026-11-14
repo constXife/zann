@@ -27,8 +27,8 @@
       rustToolchain = toolchainFor pkgs;
 
       # zann-cli ставится и на десктоп, и на aarch64-хосты, поэтому пакет
-      # собирается под обе архитектуры. devShell остаётся x86_64-only —
-      # он тянет Qt и WebKit, которые на aarch64 никому не нужны.
+      # собирается под обе архитектуры. Локальные devShell проверены только
+      # на x86_64; кросс-платформенность CLI проверяется отдельными пакетами.
       packageSystems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -169,13 +169,13 @@
             ]
             ++ runtimeLibs;
 
-          # Иконки лежат у Tauri-приложения: логотип у продукта один.
+          # Общие иконки продукта не принадлежат отдельному клиенту.
           postInstall = ''
             install -Dm644 apps/cosmic/data/com.rlyeh.zann.Cosmic.desktop \
               $out/share/applications/com.rlyeh.zann.Cosmic.desktop
             for pair in 32:32x32 64:64x64 128:128x128 256:128x128@2x 512:icon; do
               size="''${pair%%:*}"; src="''${pair##*:}"
-              install -Dm644 "apps/desktop/src-tauri/icons/''${src}.png" \
+              install -Dm644 "assets/icons/''${src}.png" \
                 "$out/share/icons/hicolor/''${size}x''${size}/apps/com.rlyeh.zann.Cosmic.png"
             done
             wrapProgram $out/bin/zann-cosmic \
@@ -246,30 +246,11 @@
             libxkbcommon
             wayland
             wayland-protocols
-            glib
-            gtk3
-            gdk-pixbuf
-            pango
-            cairo
-            atk
-            libsoup_3
-            webkitgtk_4_1
-            xorg.xvfb
-            libayatana-appindicator
           ];
           LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [
             pkgs.openssl
             pkgs.libxkbcommon
             pkgs.wayland
-            pkgs.glib
-            pkgs.gtk3
-            pkgs.gdk-pixbuf
-            pkgs.pango
-            pkgs.cairo
-            pkgs.atk
-            pkgs.libsoup_3
-            pkgs.webkitgtk_4_1
-            pkgs.libayatana-appindicator
           ];
           OPENSSL_DIR = pkgs.openssl.dev;
           OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";

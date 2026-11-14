@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-08-09
-- **Updated:** 2026-11-13
+- **Updated:** 2026-11-14
 - **Context:** [ADR 0001](0001-shared-client-core.md) settled *how* clients
   share code (`[CORE]` in `zann-client::app` + `[PRESENTATION]` in
   `zann-ui-core` and `zann-flows`, with `zann-ffi` as the UniFFI edge adapter
@@ -63,7 +63,7 @@ used far less often than OS integration surfaces:
 A client that holds personal data must be able to export that data unaided and
 verify its local store. The storage layer (`crates/zann-db/src/lib.rs`) uses
 SQLite WAL, `synchronous=Normal`, and a 5s busy timeout, complemented by:
-- plain and encrypted backup export/import shared across Desktop and COSMIC;
+- plain and encrypted backup export/import shared across native clients;
 - periodic consistent snapshots via SQLite `VACUUM INTO` into `~/.zann/snapshots/`;
 - an unlocked `verify` pass that walks every item, decrypts it, and checks
   `payload_checksum`.
@@ -85,17 +85,12 @@ Native shells own only toolkit widgets and OS integration:
 - **Android (`apps/android`, planned):** Native Kotlin and Jetpack Compose client
   consuming `zann-ffi` (UniFFI Kotlin bindings), paired with Android
   `CredentialProviderService` and `AutofillService`.
-- **Legacy Tauri desktop (`apps/desktop`, scheduled for Pre-GA removal):** Now
-  that native Linux (`apps/cosmic`) and macOS (`apps/apple`) clients exist, the
-  ~27k-line Vue + `src-tauri` fork carries disproportionate `MIG-*` and CI
-  overhead solely for Windows. Rather than migrating its legacy backend,
-  `apps/desktop` will be retired Pre-GA; Windows workflows will be served by
-  `zann-daemon` + the browser extension and a thin native/Iced shell over the
-  stabilized core.
-
-Until that removal lands, Tauri remains a shipping legacy consumer subject to
-the existing capability map, `MIG-*` limits and GUI parity rules. This decision
-does not mark its replacement Windows shell or browser integration as shipped.
+- **Legacy Tauri desktop (retired, #249):** The Vue + `src-tauri` application,
+  its dedicated CI jobs and Tauri-only migration exceptions have been removed.
+  Canonical server backup import (#243) and native password/passphrase
+  generation are available before retirement. Windows workflows are planned
+  for `zann-daemon` + the browser extension and a thin native/Iced shell over
+  the stabilized core; those replacements are not shipped by this removal.
 
 **2. COSMIC is the reference client for the Rust core.**
 It is the daily driver used to prove new capabilities in `zann-client::app`,
@@ -205,11 +200,11 @@ transition. This pre-GA cutover removes those paths in place.
 
 1. **Durability baseline (Complete):** Shared backup export/import, `VACUUM INTO`
    snapshots, and `verify` in `zann-client-sqlite` across native clients.
-2. **Retire `apps/desktop` (Tauri) & finish core alignment (Active):** Port
-   server-backed plain backup import into canonical `LocalVault`, delete
-   `apps/desktop` and its JS/WebDriver CI jobs, and retire the Tauri-only
-   `MIG-001`..`MIG-006` legacy exceptions, keeping `COSMIC` and `Apple` on
-   canonical `zann-client::app` and `zann-ui-core`.
+2. **Tauri retirement (Complete, #249):** Canonical server backup import
+   (#243) and shared password/passphrase generation replace the final legacy
+   dependencies. The application and its five CI jobs are deleted; MIG-001,
+   MIG-003 and MIG-004 are retired. MIG-005/006 retain only COSMIC debt and
+   MIG-009 retains the unrelated database-adoption boundary.
 3. **Browser integration & passkeys:**
    `zann-autofill`, `zann-passkey`, `zann-daemon`, `zann-native-host`, and the
    Chromium/Firefox extension.

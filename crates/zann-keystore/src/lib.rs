@@ -17,7 +17,8 @@ pub struct KeystoreStatus {
     /// Whether a working backend is present on this machine.
     pub supported: bool,
     /// Whether the stored key is additionally guarded by a biometric ACL.
-    /// No current backend provides this; see `docs/Desktop.md`.
+    /// The generic keyring backend provides no biometric ACL; native shells
+    /// inject platform-specific keystores (see `docs/adr/0008-device-unlock.md`).
     pub biometrics_available: bool,
     pub reason: Option<KeystoreStatusReason>,
     /// Backend-specific detail behind `reason`, for diagnostics.

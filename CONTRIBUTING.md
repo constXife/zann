@@ -17,7 +17,8 @@ Optional: enable local git hooks (pre-commit runs `cargo fmt`):
 ## Repository layout
 
 - `crates/` — Rust crates (`zann-cli`, `zann-server`, `zann-core`, `zann-db`, `zann-keystore`)
-- `apps/desktop` — desktop app (Tauri + Bun)
+- `apps/cosmic` — native Linux client (libcosmic)
+- `apps/apple` — SwiftUI macOS client and ZannCoreKit bindings
 - `config/` — configs (CI, dev, policies)
 - `schemas/` — schemas/specs
 - `compose.yaml` — local integration/demo
@@ -26,7 +27,9 @@ Optional: enable local git hooks (pre-commit runs `cargo fmt`):
 
 Requirements:
 - Rust toolchain per `rust-toolchain.toml`
-- Bun for `apps/desktop`
+- Nix with flakes for the COSMIC development shell
+- Xcode and XcodeGen for the Apple client (on macOS)
+- Bun for the documentation site in `docs/starlight`
 - `just` (optional)
 
 Workspace (Rust):
@@ -40,21 +43,15 @@ Just (optional):
 - Full tests: `just full-test` (fast tests + Postgres integration tests)
 - Default test: `just test` (same as `just fast-test`)
 - Architecture boundaries: `just architecture-check`
-- Desktop build: `just desktop-build` (Tauri build)
-- Desktop e2e: `just desktop-e2e` (Webdriver-based)
+- Linux client: `nix develop .#cosmic --command just cosmic-test`
+- Linux package: `nix build .#zann-cosmic`
 - DB tests require Podman and `compose.test.yaml`.
 
-Desktop (Tauri) from `apps/desktop`:
-- Install deps: `bun install`
-- Dev: `bun run tauri dev`
-- Build: `bun run tauri build`
-
-Tauri prerequisites (platform-specific):
-- **macOS**: Xcode Command Line Tools (`xcode-select --install`)
-- **Windows**: Visual Studio Build Tools (C++ workload) and WebView2 Runtime
-- **Linux**: system GTK/WebKit dependencies (see Tauri docs for your distro)
-
-Full prerequisites: https://tauri.app/start/prerequisites/
+Native client setup and platform requirements:
+- [COSMIC](apps/cosmic/README.md) — use the `cosmic` Nix shell, which selects
+  the newer Rust toolchain required by libcosmic.
+- [Apple](apps/apple/README.md) — build ZannCoreKit first, generate the Xcode
+  project, then run the macOS app and tests.
 
 ## PR process
 
@@ -103,7 +100,7 @@ Allowed.
 
 ## Client architecture boundaries
 
-Shared client capabilities have one canonical owner; CLI, Tauri and COSMIC
+Shared client capabilities have one canonical owner; CLI, COSMIC and Apple
 remain platform adapters. The ownership map, allowed dependency direction and
 temporary-exception policy live in `docs/architecture/capabilities.md`; the
 machine-readable baseline lives in `config/architecture-boundaries.json`.

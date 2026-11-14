@@ -20,23 +20,9 @@ forbidden=(zann_db zann_crypto zann_keystore)
 allow_imports=(
   # COSMIC native composition root for the canonical application client.
   apps/cosmic/src/backend/remote.rs
-  # Ф4 — desktop composition root for AppClient sync; remaining services are still a fork.
-  apps/desktop/src-tauri/src/crypto.rs
-  apps/desktop/src-tauri/src/infra/config.rs
-  apps/desktop/src-tauri/src/infra/sync_client.rs
-  apps/desktop/src-tauri/src/services/auth.rs
-  apps/desktop/src-tauri/src/services/backup.rs
-  apps/desktop/src-tauri/src/services/items.rs
-  apps/desktop/src-tauri/src/services/items_history.rs
-  apps/desktop/src-tauri/src/services/session.rs
-  apps/desktop/src-tauri/src/services/storage.rs
-  apps/desktop/src-tauri/src/services/sync.rs
-  apps/desktop/src-tauri/src/services/vaults.rs
-  apps/desktop/src-tauri/src/state.rs
-  apps/desktop/src-tauri/src/types.rs
 )
 
-# Files byte-identical to one under crates/. Ф2 deletes all three.
+# No native shell may keep a byte-identical copy of a core source file.
 allow_copies=(
 )
 

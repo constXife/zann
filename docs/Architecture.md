@@ -1,10 +1,10 @@
 ---
 title: Zann client architecture
-description: Normative architecture shared by the CLI, Tauri, and COSMIC clients.
+description: Normative architecture shared by the CLI, COSMIC, and Apple clients.
 ---
 
-This document describes the target architecture shared by the CLI, Tauri and
-COSMIC clients. It is normative for new code. Existing deviations are migration
+This document describes the target architecture shared by the CLI, COSMIC and
+Apple clients. It is normative for new code. Existing deviations are migration
 exceptions recorded in [`architecture/capabilities.md`](architecture/capabilities.md).
 
 The decision to converge the clients is recorded in
@@ -26,7 +26,7 @@ specified by [`ADR 0005`](adr/0005-runtime-secret-delivery-profiles.md).
 
 ## Non-goals
 
-- Sharing widgets or layout between Vue/Tauri and libcosmic.
+- Sharing widgets or layout between libcosmic and SwiftUI.
 - Forcing the server-only CLI through SQLite or an FFI boundary.
 - Hiding platform integrations such as tray, biometrics or file pickers in the
   domain layer.
@@ -38,7 +38,7 @@ Dependencies point down. Lower layers never import a client framework or call
 back into a shell.
 
 ```text
-CLI / Tauri / COSMIC
+CLI / COSMIC
   |---> zann-client
   |       |---> zann-core
   |       |---> zann-protocol (planned)
@@ -86,11 +86,11 @@ the transitional `zann-app` package has been removed.
 
 ### Shells
 
-The CLI, Tauri backend/frontend and COSMIC app may own:
+The CLI, COSMIC and Apple shells may own:
 
 - argument parsing, terminal formatting and process exit behaviour;
 - widgets, layout, navigation and framework lifecycle;
-- Tauri commands/events and libcosmic tasks/subscriptions;
+- libcosmic tasks/subscriptions and SwiftUI lifecycle adapters;
 - platform clipboard, tray, biometrics, browser and file-dialog adapters;
 - mapping a small, closed set of abstract icons to toolkit icons.
 
@@ -125,16 +125,13 @@ The clean crate exposes one low-level discovery primitive:
 bounds the response body and returns system information only after the signed
 server identity verifies.
 
-COSMIC, FFI and the Tauri sync composition root use the shared `AppClient`.
-Remaining Tauri auth/config paths wait until each can move config,
-trust, auth, refresh and logout together in a tested vertical slice. No dual-write
-bridge is allowed during activation. The
-shared boundary durably records in-flight
+COSMIC and FFI use the shared `AppClient`. The retired Tauri auth/config
+fork has been deleted (#249). The shared boundary durably records in-flight
 password-login, refresh and logout operations. Password login is intentionally
 limited to an already-pinned connection and a present-or-absent profile; it
-cannot create, pin, relocate, open SQLite or activate a shell. Remaining
-activation work is consumer migration plus OIDC and service-token login, local
-storage/sync, and deletion of each legacy writer as a tested vertical slice.
+cannot create, pin, relocate, open SQLite or activate a shell. AppClient owns
+the native activation, OIDC and sync composition above that low-level boundary;
+future service-token session activation must use the same canonical owners.
 
 Headless flows accept typed events and return state plus declarative effects:
 
@@ -410,7 +407,7 @@ Shared behaviour is tested once at its owner and through each consumer adapter:
 - golden tests for crypto, config migrations and protocol serialization;
 - DB-backed auth and sync tests for final state, not log text;
 - flow tests for timeout, cancellation and stale async responses;
-- conformance tests through CLI, Tauri and COSMIC adapters;
+- conformance tests through CLI, COSMIC and Apple/FFI adapters;
 - exact-feature compile/tests plus dependency-closure checks for every thin,
   non-default client surface;
 - dependency and source guards for forbidden implementations in shells.

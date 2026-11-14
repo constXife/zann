@@ -23,7 +23,7 @@ impl State {
     }
 
     /// The detail column remains present with no selection so choosing an item
-    /// never changes the list's geometry, matching the Tauri shell.
+    /// never changes the list's geometry.
     fn detail_view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let search = widget::text_input::search_input(t("items.searchPlaceholder"), &self.query)

@@ -1,6 +1,7 @@
 # Theme Tokens (Light and Dark) - zann
 
-Goal: capture the current desktop (Tauri) color tokens as the baseline for other clients.
+Goal: retain the shared semantic color baseline for native clients. Platform
+controls use toolkit-native styling; these tokens name the common roles.
 
 ## Light Theme Tokens
 
@@ -85,5 +86,5 @@ Goal: capture the current desktop (Tauri) color tokens as the baseline for other
 
 ## Notes
 
-- The desktop app sets `color-scheme: light dark` and uses class-based dark mode.
-- Accent values are hex-defined in the CSS variables (effective values above).
+- Native shells map semantic roles to their light/dark toolkit themes.
+- Accent values above are design references, not a requirement to share CSS.

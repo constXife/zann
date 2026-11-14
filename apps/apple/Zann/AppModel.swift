@@ -350,7 +350,7 @@ final class AppModel: ObservableObject {
     }
 
     /// The database lives under Application Support in a directory named after
-    /// the bundle, apart from the Tauri desktop app's. The Touch ID reason is
+    /// the bundle, isolated from other native client containers. The Touch ID reason is
     /// set by `AppModel` once it knows the language.
     static func openDefaultCore() throws -> (core: CoreFacade, keystore: DeviceKeystore) {
         let keystore = KeychainKeystore(service: try Self.bundleID(), promptReason: "")

@@ -11,4 +11,4 @@ Quick entry point for UX and experience documents.
 ## Reference
 
 - [UX Documentation Set](UX-Documentation-Set.md)
-- [Client Window Map (Tauri reference)](Client-Window-Map.md)
+- [Native Client Window Map](Client-Window-Map.md)

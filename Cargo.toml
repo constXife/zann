@@ -13,7 +13,6 @@ members = [
   "crates/zann-integration-tests",
 ]
 exclude = [
-  "apps/desktop/src-tauri",
   "apps/cosmic",
   "tools/mock-server",
 ]

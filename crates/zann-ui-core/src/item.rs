@@ -1,7 +1,7 @@
 /// The item fields the shared view logic needs.
 ///
 /// Every client already has its own item summary type (`zann_ffi::ItemSummary`,
-/// the Tauri `ItemSummary`, ...). Implementing this trait for it avoids copying
+/// an FFI item projection, ...). Implementing this trait for it avoids copying
 /// items into a crate-local struct just to build a folder tree or run a filter.
 pub trait ItemLike {
     fn title(&self) -> &str;

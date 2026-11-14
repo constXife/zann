@@ -21,7 +21,7 @@ export default defineConfig({
         {
           label: "Clients",
           items: [
-            { label: "Desktop Guide", link: "/desktop/" },
+            { label: "Native Clients", link: "/install/" },
             { label: "CLI Guide", link: "/cli/" },
           ],
         },

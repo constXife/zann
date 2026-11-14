@@ -68,9 +68,8 @@ ownership.
   hides them without changing persistent reveal state. Linux and Windows MUST
   NOT bind this behavior to `Alt`, because it participates in app switching.
 
-Tauri is the current reference implementation for region placement. It is not
-the reference for widget styling: COSMIC, SwiftUI and other clients SHOULD use
-their platform-native controls inside the same semantic regions.
+COSMIC is the reference client for region placement. SwiftUI and other native
+clients SHOULD use platform-native controls inside the same semantic regions.
 
 ## Breakpoint Rules (Layout Table)
 
@@ -130,8 +129,8 @@ their platform-native controls inside the same semantic regions.
 ## Item editing and history in native desktop clients
 
 - Create/edit and history occupy the detail workspace while preserving the
-  navigation and list columns. Tauri uses its existing create/detail surfaces;
-  COSMIC renders native forms and history controls in the same semantic region.
+  navigation and list columns. COSMIC and Apple render native forms and
+  history controls in the same semantic region.
 - Field templates come from `schemas/item_fields.json`. Draft validation and
   payload construction for Rust clients belong to `zann-ui-core::item_editor`.
 - Duplicate or invalid field keys prevent submission. Editing preserves typed

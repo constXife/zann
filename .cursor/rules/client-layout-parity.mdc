@@ -20,5 +20,5 @@ When changing a GUI client under `apps/`, read
 - Share semantics, state transitions and geometry through `zann-ui-core` when
   practical; keep toolkit-native widget appearance in each client.
 - For layout changes, update the UX spec and state-level tests in the same
-  change. Check COSMIC, Apple and legacy Tauri while they ship; implement the
+  change. Check COSMIC and Apple; implement the
   change in each or document a time-bounded waiver with owner and rationale.

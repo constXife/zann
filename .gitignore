@@ -6,15 +6,11 @@ tmp
 **/node_modules
 /docs/starlight/.astro
 /docs/starlight/dist
-/docs/starlight/public/screenshots
 /docs/openapi.json
 /docs/starlight/src/content/docs
 
 target
 /docs/api/dist
-apps/desktop/src-tauri/target
-apps/desktop/src-tauri/gen
-apps/desktop/dist
 
 /docs/api/bun.lockb
 .env

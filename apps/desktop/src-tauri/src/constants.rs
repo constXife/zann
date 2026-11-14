@@ -1,9 +1,0 @@
-pub const CONFIG_FILENAME: &str = "config.json";
-pub const LOCAL_DB_FILENAME: &str = "local.sqlite";
-pub const SETTINGS_FILENAME: &str = "desktop.json";
-pub const SECURITY_PROFILES_YAML: &str = include_str!("../../../../schemas/security_profiles.yaml");
-pub const TOKEN_OIDC: &str = "oidc";
-pub const TOKEN_SESSION: &str = "session";
-pub const REFRESH_SKEW_SECONDS: i64 = 30;
-pub const BIOMETRY_DOMAIN: &str = "zann";
-pub const BIOMETRY_NAME: &str = "dwk";
