@@ -36,6 +36,9 @@ The current surface covers:
   `crates/zann-core/src/item_subtitle.rs` that picks which non-secret
   payload field a list row shows;
 - server audit-log infrastructure;
+- privileged shared plaintext backup admission/publication in
+  `zann-server/src/domains/backup/**`, its `cli/{export,import}.rs` adapters,
+  and transaction/paged source reads in `zann-db/src/repo/{backup,vaults,devices,items}.rs`;
 - native secret generation in `crates/zann-ui-core/src/generator/**` and its
   one-to-one `crates/zann-ffi/src/generator.rs` projection: bounded explicit
   policy, unbiased draws from OS entropy, fail-closed errors, dictionary

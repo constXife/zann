@@ -75,6 +75,7 @@ async fn main() {
         run_mode,
         cli::RunMode::Server
             | cli::RunMode::Export(_)
+            | cli::RunMode::Import(_)
             | cli::RunMode::Init(_)
             | cli::RunMode::Provision(_)
             | cli::RunMode::Token(_)
@@ -118,6 +119,13 @@ async fn main() {
     }
     if let cli::RunMode::Export(export_args) = run_mode {
         if let Err(err) = cli::export::run(&settings, &db, &export_args).await {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let cli::RunMode::Import(args) = run_mode {
+        if let Err(err) = cli::import::run(&settings, &db, args).await {
             eprintln!("{err}");
             std::process::exit(1);
         }

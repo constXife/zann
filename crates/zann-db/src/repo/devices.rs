@@ -10,6 +10,13 @@ impl<'a> DeviceRepo<'a> {
     }
 
     pub async fn create(&self, device: &Device) -> Result<(), sqlx_core::Error> {
+        Self::create_in(&mut *self.pool.acquire().await?, device).await
+    }
+
+    pub async fn create_in(
+        connection: &mut sqlx_postgres::PgConnection,
+        device: &Device,
+    ) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
             INSERT INTO devices (
@@ -30,7 +37,7 @@ impl<'a> DeviceRepo<'a> {
             device.revoked_at,
             device.created_at
         )
-        .execute(self.pool)
+        .execute(connection)
         .await
         .map(|_| ())
     }

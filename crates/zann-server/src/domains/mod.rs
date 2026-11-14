@@ -1,5 +1,6 @@
 pub mod access_control;
 pub mod auth;
+pub mod backup;
 pub mod devices;
 pub mod errors;
 pub mod groups;
