@@ -6,6 +6,8 @@ use tracing_subscriber::EnvFilter;
 use zann_core::{CachePolicy, VaultEncryptionType, VaultKind};
 use zann_crypto::crypto::SecretKey;
 
+#[path = "shared_plaintext/payload_versions.rs"]
+mod payload_versions;
 mod support;
 
 use tokio::sync::Semaphore;
@@ -29,6 +31,7 @@ struct TestApp {
     token_pepper: String,
     kdf_params: KdfParams,
     config: ServerConfig,
+    master_key: std::sync::Arc<SecretKey>,
 }
 
 impl TestApp {
@@ -69,13 +72,14 @@ impl TestApp {
             memory_kb: config.auth.kdf.memory_kb,
             parallelism: config.auth.kdf.parallelism,
         };
+        let master_key = std::sync::Arc::new(SecretKey::generate());
         let state = AppState {
             db: pool.clone(),
             db_tx_isolation: zann_server::settings::DbTxIsolation::ReadCommitted,
             started_at: std::time::Instant::now(),
             password_pepper: "pepper".to_string(),
             token_pepper: token_pepper.clone(),
-            server_master_key: Some(std::sync::Arc::new(SecretKey::generate())),
+            server_master_key: Some(master_key.clone()),
 
             identity_key: support::test_identity_key(),
             access_token_ttl_seconds: 3600,
@@ -98,6 +102,7 @@ impl TestApp {
             token_pepper,
             kdf_params,
             config,
+            master_key,
         }
     }
 

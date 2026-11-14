@@ -965,7 +965,7 @@ fn decode_plaintext_payload(
 }
 
 fn validate_typed_payload(payload: &EncryptedPayload, type_id: &str) -> Result<(), WireError> {
-    if payload.v != 1 || payload.type_id != type_id {
+    if payload.v != zann_crypto::PAYLOAD_VERSION || payload.type_id != type_id {
         return Err(WireError::new(WireErrorKind::Payload));
     }
     validate_required(&payload.type_id, MAX_TYPE_ID_BYTES)?;

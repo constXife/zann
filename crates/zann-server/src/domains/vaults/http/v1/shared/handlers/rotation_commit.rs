@@ -321,7 +321,7 @@ pub(crate) async fn rotate_commit(
     field.value = candidate.into_string();
 
     let new_payload_enc =
-        match core_crypto::encrypt_payload(&vault_key, vault.id, item.id, &payload) {
+        match core_crypto::encrypt_payload_verified(&vault_key, vault.id, item.id, &payload) {
             Ok(value) => value,
             Err(_) => {
                 return (

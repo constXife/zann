@@ -1159,6 +1159,14 @@ pub(crate) async fn update_shared_item(
         )
             .into_response();
     }
+    if let Err(error) = crate::domains::items::payload_admission::ensure_supported(
+        &vault,
+        state.server_master_key.as_deref(),
+        locked.id,
+        &locked.payload_enc,
+    ) {
+        return crate::domains::items::http::v1::map_items_error(error);
+    }
     if let Err(err) = history_repo.create_in(&mut tx, &history).await {
         tracing::error!(event = "item_history_create_failed", error = %err, item_id = %item.id);
         return (
@@ -1408,6 +1416,14 @@ pub(crate) async fn delete_shared_item(
             }),
         )
             .into_response();
+    }
+    if let Err(error) = crate::domains::items::payload_admission::ensure_supported(
+        &vault,
+        state.server_master_key.as_deref(),
+        locked.id,
+        &locked.payload_enc,
+    ) {
+        return crate::domains::items::http::v1::map_items_error(error);
     }
     if let Err(err) = history_repo.create_in(&mut tx, &history).await {
         tracing::error!(event = "item_history_create_failed", error = %err, item_id = %item.id);

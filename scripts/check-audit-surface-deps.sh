@@ -16,6 +16,7 @@ allowed_deps=(
   sha2
   subtle
   tracing
+  unicode-normalization
   uuid
   zeroize
   proptest

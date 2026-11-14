@@ -34,6 +34,13 @@ impl<'a> PendingChangeRepo<'a> {
     }
 
     pub async fn create(&self, change: &LocalPendingChange) -> Result<(), sqlx_core::Error> {
+        Self::create_in(&mut *self.pool.acquire().await?, change).await
+    }
+
+    pub(crate) async fn create_in(
+        connection: &mut sqlx_sqlite::SqliteConnection,
+        change: &LocalPendingChange,
+    ) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
             INSERT INTO pending_changes (
@@ -56,7 +63,7 @@ impl<'a> PendingChangeRepo<'a> {
             change.created_at,
             change.metadata.as_ref().map(sqlx_core::types::Json)
         )
-        .execute(self.pool)
+        .execute(connection)
         .await
         .map(|_| ())
     }

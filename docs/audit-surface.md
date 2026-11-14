@@ -47,6 +47,11 @@ The current surface covers:
   including the list page's subtitle decryption, and the rule in
   `crates/zann-core/src/item_subtitle.rs` that picks which non-secret
   payload field a list row shows;
+- payload-version admission in `zann-crypto/src/secrets/codec.rs`, local
+  exact-source edit/history/pending transactions in
+  `zann-db/src/local/item_repo/edit.rs`, and shared-server payload admission
+  in `zann-server/src/domains/items/payload_admission.rs` and its item,
+  secret and sync mutation callers;
 - server audit-log infrastructure;
 - privileged shared plaintext backup admission/publication in
   `zann-server/src/domains/backup/**`, its `cli/{export,import}.rs` adapters,

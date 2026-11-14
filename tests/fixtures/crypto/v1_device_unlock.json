@@ -1,0 +1,10 @@
+{
+  "dwk_aad_utf8": "zann:dwk:wrap:v1",
+  "dwk_base64": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwM=",
+  "expected_dwk_base64": "cvfIvpI9H8blkx9XPB8Kq6xqUeH/VTsOXgdISfd+xVw=",
+  "fido_context": "zann 2026-08-08 fido2 device wrapping key",
+  "hmac_output_base64": "CQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQk=",
+  "master_key_base64": "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+  "synthetic_only": true,
+  "wrapped_master_key_base64": "WkFOAQAAAAABAUgAAAAYAAAASnpWUIaPhwbXCK5DF/D/kyRoXVY0gMj9qA2lmxd1YtP+PAB8hO08P0vcfoSfdIry2g3/GO5WyEQi1fOl4WxlosGwLIqv1RoDQm4ccv7oExhyd4A4iJ3Rl11P/aeu/WU6+U/NrOeEUSVMJ0rbn6+eDJIe9UzZPkUwSRsxCZmGi970NhzYIuW+86AN/ue5BbcT"
+}

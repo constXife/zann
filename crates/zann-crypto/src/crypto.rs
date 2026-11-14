@@ -3,8 +3,9 @@ use chacha20poly1305::{XChaCha20Poly1305, XNonce};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use tracing::instrument;
-use zeroize::{Zeroize, ZeroizeOnDrop};
+use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
 const BLOB_MAGIC: [u8; 3] = *b"ZAN";
 const BLOB_VERSION: u8 = 1;
@@ -22,13 +23,14 @@ pub struct EncryptedBlob {
     pub ciphertext: Vec<u8>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CryptoError {
     InvalidBlob,
     UnsupportedVersion(u8),
     UnsupportedAlgorithm(u8),
     EncryptionFailed,
     DecryptionFailed,
+    VerificationFailed,
 }
 
 impl std::fmt::Display for CryptoError {
@@ -41,6 +43,7 @@ impl std::fmt::Display for CryptoError {
             Self::UnsupportedAlgorithm(alg) => write!(f, "unsupported algorithm: {alg}"),
             Self::EncryptionFailed => write!(f, "encryption failed"),
             Self::DecryptionFailed => write!(f, "decryption failed"),
+            Self::VerificationFailed => write!(f, "new ciphertext verification failed"),
         }
     }
 }
@@ -167,6 +170,34 @@ pub fn decrypt_blob(
     aad: &[u8],
 ) -> Result<Vec<u8>, CryptoError> {
     decrypt_v1_envelope(key, blob, aad)
+}
+
+/// Verifies a candidate before its owning mutation may commit it. The proof
+/// includes serialization/parsing, the target key, the AAD and exact plaintext.
+pub fn verify_blob_plaintext(
+    key: &SecretKey,
+    candidate: &EncryptedBlob,
+    aad: &[u8],
+    expected: &[u8],
+) -> Result<(), CryptoError> {
+    let encoded = candidate.to_bytes();
+    let parsed = EncryptedBlob::from_bytes(&encoded)?;
+    let actual = Zeroizing::new(decrypt_blob(key, &parsed, aad)?);
+    if !bool::from(actual.as_slice().ct_eq(expected)) {
+        return Err(CryptoError::VerificationFailed);
+    }
+    Ok(())
+}
+
+/// Encrypt and trial-decrypt once, before returning commit-ready ciphertext.
+pub fn encrypt_blob_verified(
+    key: &SecretKey,
+    plaintext: &[u8],
+    aad: &[u8],
+) -> Result<EncryptedBlob, CryptoError> {
+    let candidate = encrypt_blob(key, plaintext, aad)?;
+    verify_blob_plaintext(key, &candidate, aad, plaintext)?;
+    Ok(candidate)
 }
 
 fn parse_v1_envelope(bytes: &[u8]) -> Result<EncryptedBlob, CryptoError> {

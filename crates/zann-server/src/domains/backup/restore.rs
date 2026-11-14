@@ -1,7 +1,6 @@
 use super::{format::*, reader::Prepared, BackupError, ImportOptions, ImportReport};
 use chrono::Utc;
 use std::io::{BufRead, Read};
-use subtle::ConstantTimeEq;
 use uuid::Uuid;
 use zann_core::{
     CachePolicy, Device, Item, SyncStatus, Vault, VaultEncryptionType, VaultKind, VaultMember,
@@ -84,11 +83,8 @@ async fn restore(
         } else {
             let id = uuid(&header.id)?;
             let key = SecretKey::generate();
+            // The canonical writer includes Decrypt-Before-Commit verification.
             let wrapped = crypto::encrypt_vault_key(smk, id, &key)?;
-            let proof = crypto::decrypt_vault_key(smk, id, &wrapped)?;
-            if !bool::from(proof.as_bytes().ct_eq(key.as_bytes())) {
-                return Err(BackupError::Invalid("backup_verification_failed"));
-            }
             let vault = Vault {
                 id,
                 slug: header.slug.clone(),
@@ -141,14 +137,7 @@ async fn restore(
             .get(index)
             .ok_or(BackupError::Invalid("invalid_staged_vault"))?;
         let id = uuid(&item.id)?;
-        let plaintext = Zeroizing::new(item.payload.to_bytes()?);
-        let encrypted = crypto::encrypt_payload_bytes(key, *vault_id, id, &plaintext)?;
-        let proof = Zeroizing::new(crypto::decrypt_payload_bytes(
-            key, *vault_id, id, &encrypted,
-        )?);
-        if !bool::from(proof.as_slice().ct_eq(&plaintext)) {
-            return Err(BackupError::Invalid("backup_verification_failed"));
-        }
+        let encrypted = crypto::encrypt_payload_verified(key, *vault_id, id, &item.payload)?;
         let deleted = item.deleted_at.as_deref().map(timestamp).transpose()?;
         let updated = timestamp(&item.updated_at)?;
         ItemRepo::new(db)

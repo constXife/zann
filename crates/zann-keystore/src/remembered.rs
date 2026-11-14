@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use zann_crypto::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
+use zann_crypto::crypto::{decrypt_blob, encrypt_blob_verified, EncryptedBlob, SecretKey};
 
 use crate::{Keystore, KeystoreError};
 
@@ -75,6 +75,8 @@ pub enum UnlockError {
     HardwareKey(#[from] crate::FidoError),
     #[error("stored unlock data is corrupt: {message}")]
     Corrupt { message: String },
+    #[error("ciphertext verification: {0}")]
+    Crypto(#[source] zann_crypto::CryptoError),
 }
 
 impl UnlockError {
@@ -93,7 +95,7 @@ impl UnlockError {
                 KeystoreError::Internal { .. } => "keystore_unavailable",
             },
             Self::HardwareKey(err) => err.kind(),
-            Self::Corrupt { .. } => "keystore_error",
+            Self::Corrupt { .. } | Self::Crypto(_) => "keystore_error",
         }
     }
 }
@@ -121,8 +123,8 @@ fn b64() -> base64::engine::general_purpose::GeneralPurpose {
 
 fn wrap(dwk: &[u8; 32], master_key: &[u8; 32]) -> Result<String, UnlockError> {
     use base64::Engine;
-    let blob = encrypt_blob(&SecretKey::from_bytes(*dwk), master_key, DWK_AAD)
-        .map_err(|err| corrupt(err.to_string()))?;
+    let blob = encrypt_blob_verified(&SecretKey::from_bytes(*dwk), master_key, DWK_AAD)
+        .map_err(UnlockError::Crypto)?;
     Ok(b64().encode(blob.to_bytes()))
 }
 
@@ -182,8 +184,9 @@ impl RememberedUnlock {
         master_key: &[u8; 32],
     ) -> Result<(), UnlockError> {
         let dwk = SecretKey::generate();
+        let wrapped = wrap(dwk.as_bytes(), master_key)?;
         keystore.store_dwk(dwk.as_bytes())?;
-        self.wrapped_master_key = Some(wrap(dwk.as_bytes(), master_key)?);
+        self.wrapped_master_key = Some(wrapped);
         self.unlock_source = UnlockSource::Keystore;
         Ok(())
     }

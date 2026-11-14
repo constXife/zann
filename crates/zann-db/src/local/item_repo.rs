@@ -14,6 +14,8 @@ const MAX_ITEM_CHECKSUM_BYTES: i64 = 256;
 const CACHE_KEY_FINGERPRINT_BYTES: i64 = 12;
 const MAX_TIMESTAMP_BYTES: i64 = 64;
 
+mod edit;
+
 pub struct LocalItemRepo<'a> {
     pool: &'a SqlitePool,
 }

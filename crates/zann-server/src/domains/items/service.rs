@@ -575,6 +575,12 @@ pub async fn upload_item_file(
     if locked.vault_id != vault.id || locked.row_version != item.row_version {
         return Err(ItemsError::Conflict("row_version_conflict"));
     }
+    super::payload_admission::ensure_supported(
+        &vault,
+        state.server_master_key.as_deref(),
+        locked.id,
+        &locked.payload_enc,
+    )?;
     if locked.sync_status != SyncStatus::Active {
         return Err(ItemsError::NotFound);
     }
@@ -1199,6 +1205,12 @@ pub async fn update_item(
     if locked.vault_id != vault.id || locked.row_version != item.row_version {
         return Err(ItemsError::Conflict("row_version_conflict"));
     }
+    super::payload_admission::ensure_supported(
+        &vault,
+        state.server_master_key.as_deref(),
+        locked.id,
+        &locked.payload_enc,
+    )?;
     history_repo
         .create_in(&mut tx, &history)
         .await
@@ -1329,6 +1341,12 @@ pub async fn delete_item(
     if locked.vault_id != vault.id || locked.row_version != item.row_version {
         return Err(ItemsError::Conflict("row_version_conflict"));
     }
+    super::payload_admission::ensure_supported(
+        &vault,
+        state.server_master_key.as_deref(),
+        locked.id,
+        &locked.payload_enc,
+    )?;
     history_repo
         .create_in(&mut tx, &history)
         .await
@@ -1563,6 +1581,18 @@ pub async fn restore_item_version(
             ItemsError::DbError
         })?
         .ok_or(ItemsError::NotFound)?;
+    super::payload_admission::ensure_supported(
+        &vault,
+        state.server_master_key.as_deref(),
+        item.id,
+        &item.payload_enc,
+    )?;
+    super::payload_admission::ensure_supported(
+        &vault,
+        state.server_master_key.as_deref(),
+        item.id,
+        &history.payload_enc,
+    )?;
     if history.checksum == item.checksum && item.sync_status == SyncStatus::Active {
         return Err(ItemsError::BadRequest("no_changes"));
     }

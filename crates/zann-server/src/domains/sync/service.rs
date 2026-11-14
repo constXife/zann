@@ -780,6 +780,18 @@ pub(crate) async fn sync_push(
     let device_id = prep.device_id;
 
     let mut applied = Vec::new();
+    let shared_payload_key = if vault.encryption_type == VaultEncryptionType::Server {
+        let smk = state
+            .server_master_key
+            .as_deref()
+            .ok_or(SyncError::Internal("smk_missing"))?;
+        Some(
+            core_crypto::decrypt_vault_key(smk, vault.id, &vault.vault_key_enc)
+                .map_err(|error| SyncError::Internal(error.as_code()))?,
+        )
+    } else {
+        None
+    };
     let mut applied_changes = Vec::new();
     let mut conflicts = Vec::new();
 
@@ -796,7 +808,16 @@ pub(crate) async fn sync_push(
     }
 
     for change in changes {
-        match apply_change(&mut tx, identity, device_id, vault.id, change).await {
+        match apply_change(
+            &mut tx,
+            identity,
+            device_id,
+            vault.id,
+            shared_payload_key.as_ref(),
+            change,
+        )
+        .await
+        {
             Ok(ApplyChangeResult::Applied {
                 item_id,
                 applied_change,
@@ -821,6 +842,7 @@ pub(crate) async fn sync_push(
                     axum::http::StatusCode::PAYLOAD_TOO_LARGE => {
                         Err(SyncError::PayloadTooLarge(err.error))
                     }
+                    axum::http::StatusCode::CONFLICT => Err(SyncError::Conflict(err.error)),
                     axum::http::StatusCode::INTERNAL_SERVER_ERROR => {
                         Err(SyncError::Internal(err.error))
                     }
