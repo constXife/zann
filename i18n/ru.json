@@ -382,6 +382,8 @@
       "language": "Язык",
       "languageSystem": "Язык системы",
       "behavior": "Поведение",
+      "hideDockWhenClosed": "Скрывать значок в Dock, когда все окна закрыты",
+      "hideDockWhenClosedHelp": "Zann продолжает работать в строке меню. Значок в Dock вернётся при открытии окна.",
       "closeToTray": "Сворачивать в трей вместо выхода",
       "closeToTrayHelp": "Zann продолжает работать в фоне при закрытии окна.",
       "trash": "Корзина",

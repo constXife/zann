@@ -1,11 +1,11 @@
 import SwiftUI
 import ZannCoreKit
 
-/// The device settings COSMIC also offers, as a native Settings window (⌘,).
-/// zann-ui-core supplies the choices and their labels; every change goes
-/// through `AppModel.updatePreferences`, which saves before applying it.
+/// Shared device policies are saved through AppModel; macOS-only Dock
+/// preferences are owned and persisted by DockVisibility.
 struct SettingsView: View {
     @EnvironmentObject private var model: AppModel
+    @EnvironmentObject private var dock: DockVisibility
     private let options = devicePreferenceOptions()
 
     var body: some View {
@@ -33,6 +33,13 @@ struct SettingsView: View {
                 ForEach(options.languages, id: \.code) { language in
                     Text(language.name).tag(Optional(language.code))
                 }
+            }
+            Section(model.strings("settings.general.behavior")) {
+                Toggle(model.strings("settings.general.hideDockWhenClosed"),
+                       isOn: $dock.hideWhenClosed)
+                Text(model.strings("settings.general.hideDockWhenClosedHelp"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             failure
         }

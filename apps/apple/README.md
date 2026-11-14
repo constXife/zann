@@ -68,10 +68,14 @@ rules, URL normalization, field ordering and TOTP stay in Rust.
   key that reveals masked values while pressed, and the lock triggers (input
   as activity, the idle tick, focus loss, hiding and minimizing) whose effect
   `AppModel` decides from `DevicePreferences`.
-  The menu-bar key icon offers Open, Lock and Quit. Closing the window keeps
+  Left-clicking the menu-bar key icon opens its single window; right-clicking
+  (or Ctrl-clicking) offers Open, Lock and Quit. Closing the window keeps
   Zann running; Open raises or restores its single window. Lock-on-hidden and
   idle lock continue to apply with the window closed, and Quit still honours
   clear-on-exit. Security event observers live for the app's lifetime.
+  By default, closing the last window also hides the Dock icon; reopening a
+  window restores it. Minimized windows keep the icon. General settings can
+  keep the icon visible after closing, using a macOS-only UserDefaults preference.
 
 - `Zann/Connect/` signs this Mac in to a server through the core's
   `RemoteSession`: probe and pin the server, confirm a changed fingerprint,

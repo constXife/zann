@@ -22,6 +22,8 @@ private struct TestHostApp: App {
 }
 
 struct ZannApp: App {
+    @NSApplicationDelegateAdaptor(ApplicationLifecycle.self) private var lifecycle
+    @StateObject private var dock = DockVisibility()
     @StateObject private var model = AppModel(
         opening: AppModel.openDefaultCore,
         preferences: AppModel.defaultPreferencesFile,
@@ -31,11 +33,14 @@ struct ZannApp: App {
     // Security observers must outlive a closed vault window while the app
     // remains in the menu bar (idle lock and clear-on-exit included).
     @State private var lockTriggers: LockTriggers?
+    @State private var menuBar: MenuBarController?
 
     var body: some Scene {
         Window("Zann", id: mainWindowID) {
             RootView()
                 .environmentObject(model)
+                .environmentObject(dock)
+                .background(MenuBarInstaller(controller: $menuBar, model: model, dock: dock))
                 .onAppear {
                     if lockTriggers == nil { lockTriggers = LockTriggers(model: model) }
                 }
@@ -71,12 +76,8 @@ struct ZannApp: App {
                     .disabled(!model.isUnlocked)
             }
         }
-        MenuBarExtra("Zann", systemImage: "key.fill") {
-            MenuBarControls().environmentObject(model)
-        }
-        .menuBarExtraStyle(.menu)
         Settings {
-            SettingsView().environmentObject(model)
+            SettingsView().environmentObject(model).environmentObject(dock)
         }
     }
 }

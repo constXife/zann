@@ -382,6 +382,8 @@
       "language": "Language",
       "languageSystem": "System language",
       "behavior": "Behavior",
+      "hideDockWhenClosed": "Hide Dock icon when all windows are closed",
+      "hideDockWhenClosedHelp": "Zann keeps running in the menu bar. The Dock icon returns when you open a window.",
       "closeToTray": "Close to tray instead of quitting",
       "closeToTrayHelp": "Zann stays running in the background when you close the window.",
       "trash": "Trash",
