@@ -49,6 +49,17 @@ impl LocalVault {
         self.finish_unlock(Arc::new(SecretKey::from_bytes(master_key)), generation)
     }
 
+    /// Hardware presence extends an idle session only for its active unlock source.
+    pub fn idle_unlock_key_present(&self) -> LocalResult<bool> {
+        let remembered = self.load_remembered()?;
+        if remembered.unlock_source != UnlockSource::HardwareKey {
+            return Ok(false);
+        }
+        Ok(remembered
+            .connected_hardware_key(self.authenticator.as_ref())
+            .is_some())
+    }
+
     /// Whether an enrolled authenticator is connected. Silent: no touch, so
     /// this is safe to poll for auto-lock.
     pub fn hardware_key_present(&self) -> LocalResult<bool> {
@@ -102,6 +113,10 @@ impl LocalVault {
         &self,
         _context: &std::sync::RwLockWriteGuard<'_, ()>,
     ) -> LocalResult<VaultStatus> {
+        {
+            let _entered = self.runtime.enter();
+            self.recovery.lock().expect("recovery lock").take();
+        }
         self.context_generation.fetch_add(1, Ordering::SeqCst);
         *self.device_key.lock().expect("lock poisoned") = None;
         self.account_keys.lock().expect("lock poisoned").clear();
@@ -152,6 +167,16 @@ impl LocalVault {
         root: Arc<SecretKey>,
         generation: u64,
     ) -> LocalResult<VaultStatus> {
+        let context = self.context_gate.write().expect("lock poisoned");
+        self.check_context_generation(generation)?;
+        self.finish_unlock_in_context(root, &context)
+    }
+
+    pub(super) fn finish_unlock_in_context(
+        &self,
+        root: Arc<SecretKey>,
+        _context: &std::sync::RwLockWriteGuard<'_, ()>,
+    ) -> LocalResult<VaultStatus> {
         let keyring = self.device_unlock()?;
         let keys = keyring.account_keys(&root).map_err(keyring_error)?;
         let pool = self.pool();
@@ -169,8 +194,6 @@ impl LocalVault {
         } else {
             None
         };
-        let _context = self.context_gate.write().expect("lock poisoned");
-        self.check_context_generation(generation)?;
         *self.device_key.lock().expect("lock poisoned") = Some(root);
         *self.account_keys.lock().expect("lock poisoned") = keys;
         *self.storage_id.lock().expect("lock poisoned") = storage;
@@ -181,8 +204,13 @@ impl LocalVault {
 }
 
 pub(super) fn keyring_error<E: std::error::Error + Send + Sync + 'static>(source: E) -> LocalError {
+    let error: &(dyn std::error::Error + 'static) = &source;
+    let kind = match error.downcast_ref::<zann_client::app::unlock::DeviceUnlockError>() {
+        Some(zann_client::app::unlock::DeviceUnlockError::Password(policy)) => policy.code(),
+        _ => "device_unlock",
+    };
     LocalError::Unlock {
-        kind: "device_unlock".into(),
+        kind: kind.into(),
         message: source.to_string(),
         source: Box::new(source),
     }

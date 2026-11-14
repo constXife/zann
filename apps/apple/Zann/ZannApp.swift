@@ -105,10 +105,12 @@ struct RootView: View {
             ContentUnavailableNotice(title: "Zann could not open its database", message: message)
         case .welcome:
             WelcomeView()
+        case .accounts:
+            if let recovery = model.recovery { RecoveryView(recovery: recovery) }
         case .connect:
             if let connect = model.connect {
                 ConnectView(connect: connect)
-            }
+            } else { ProgressView(model.strings("common.loading")) }
         case .master(let mode):
             MasterPasswordView(mode: mode)
         case .vault:

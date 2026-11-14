@@ -1,27 +1,23 @@
-//! The master password: create a vault or open an existing one.
+//! Device unlock and account enrollment adapter.
+mod view;
 
-use cosmic::iced::{Length, Task};
-use cosmic::{theme, widget, Element};
+use cosmic::iced::Task;
 
-use super::centered;
 use crate::backend::local::{self, ItemsPage};
 use crate::backend::off_thread;
 use crate::i18n::t;
 use crate::session::Session;
 use zann_client::app::local::RememberedUnlock;
 
-/// Whether the screen creates a vault or opens one that already exists.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Create,
-    Unlock,
-    AccountCreate,
-    AccountUnlock,
-}
-
+pub use zann_flows::unlock::Phase as Mode;
 pub struct State {
+    operations: zann_flows::unlock::Operations,
+    startup: bool,
+    platform_prompt: bool,
     mode: Mode,
-    account_mode: Option<Mode>,
+    connected_keys: Option<bool>,
+    select_after: Option<String>,
+    account_label: Option<String>,
     confirmation: String,
     /// Whether this device can open the vault without the master password, and
     /// with what. Absent until the shell has asked the facade.
@@ -58,9 +54,11 @@ pub enum Message {
     ConfirmationInput(String),
     ToggleVisibility,
     Submit,
+    UseUnlocked,
+    Recovery,
     /// The vault contents, plus the outcome of the sync that ran on the way
     /// in, if one did; a failed one did not stop the vault opening.
-    Opened(Result<OpenResult, String>),
+    Opened(zann_flows::OperationId, Result<OpenResult, String>),
 }
 
 impl std::fmt::Debug for Message {
@@ -72,6 +70,7 @@ impl std::fmt::Debug for Message {
 pub enum Outcome {
     None,
     Task(Task<Message>),
+    Recovery,
     Opened {
         page: ItemsPage,
         synced: Option<Result<(), String>>,
@@ -80,9 +79,17 @@ pub enum Outcome {
 
 impl State {
     pub fn new(mode: Mode, sync_after: Option<String>) -> Self {
+        static NEXT_INSTANCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         Self {
+            operations: zann_flows::unlock::Operations::new(
+                NEXT_INSTANCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            ),
             mode,
-            account_mode: None,
+            startup: false,
+            platform_prompt: false,
+            connected_keys: None,
+            select_after: None,
+            account_label: None,
             confirmation: String::new(),
             remembered: None,
             password: String::new(),
@@ -94,17 +101,33 @@ impl State {
         }
     }
 
+    pub fn at_startup(mut self) -> Self {
+        self.startup = true;
+        self
+    }
+    pub fn platform_prompt_pending(&self) -> bool {
+        self.busy && self.platform_prompt
+    }
+    pub fn current_operation(&self) -> Option<zann_flows::OperationId> {
+        self.operations.active()
+    }
+
+    pub fn with_storage(mut self, id: String) -> Self {
+        self.select_after = Some(id);
+        self
+    }
+    pub fn with_account_label(mut self, label: String) -> Self {
+        self.account_label = Some(label);
+        self
+    }
+
     pub fn with_account(mut self, has_keys: bool) -> Self {
-        self.account_mode = Some(if has_keys {
-            Mode::AccountUnlock
-        } else {
-            Mode::AccountCreate
-        });
+        self.connected_keys = Some(has_keys);
         self
     }
 
     fn creating(&self) -> bool {
-        matches!(self.mode, Mode::Create | Mode::AccountCreate)
+        self.mode.creating()
     }
 
     /// Carry a message onto the unlock screen from whatever sent the user back
@@ -120,11 +143,19 @@ impl State {
                 let armed = remembered.armed;
                 self.remembered = Some(remembered);
                 // A key already in the port should not need a click as well.
-                if armed && self.mode == Mode::Unlock && !self.busy {
+                let automatic = zann_flows::unlock::attempt_remembered_at_startup(
+                    self.startup,
+                    armed,
+                    self.mode,
+                );
+                self.startup = false;
+                if automatic && !self.busy {
                     return self.unlock_remembered(session);
                 }
             }
 
+            Message::Recovery if !self.busy => return Outcome::Recovery,
+            Message::Recovery => {}
             Message::UseRemembered => return self.unlock_remembered(session),
 
             Message::PasswordInput(value) => self.password = value,
@@ -132,39 +163,67 @@ impl State {
 
             Message::ToggleVisibility => self.hidden = !self.hidden,
 
-            Message::Submit => {
+            Message::Submit | Message::UseUnlocked => {
+                self.platform_prompt = false;
+                let use_unlocked = matches!(message, Message::UseUnlocked);
                 if self.busy
-                    || self.password.is_empty()
-                    || (self.creating() && self.password != self.confirmation)
+                    || (!use_unlocked && self.password.is_empty())
+                    || (!use_unlocked
+                        && self.creating()
+                        && (self.password != self.confirmation
+                            || zann_ui_core::password::password_feedback(&self.password)
+                                .validation_key
+                                .is_some()))
                 {
                     return Outcome::None;
                 }
+                let Some(id) = self.operations.begin() else {
+                    return Outcome::None;
+                };
                 let facade = session.facade();
                 let password = std::mem::take(&mut self.password);
                 self.confirmation.clear();
                 let storage = self.sync_after.clone();
+                let selected = self.select_after.clone();
                 let mode = self.mode;
                 self.busy = true;
                 self.error = None;
                 return Outcome::Task(cosmic::task::future(async move {
                     Message::Opened(
+                        id,
                         off_thread(move || {
-                            match mode {
-                                Mode::Create => {
-                                    local::initialize_master_password(&facade, password)?
+                            if !use_unlocked {
+                                match mode {
+                                    Mode::Create => {
+                                        local::initialize_master_password(&facade, password)?
+                                    }
+                                    Mode::Unlock => local::unlock(&facade, password)?,
+                                    Mode::AccountCreate | Mode::AccountUnlock => {
+                                        facade
+                                            .enroll_account_key(password)
+                                            .map_err(|e| e.to_string())?;
+                                    }
                                 }
-                                Mode::Unlock => local::unlock(&facade, password)?,
-                                Mode::AccountCreate | Mode::AccountUnlock => {
-                                    facade
-                                        .enroll_account_key(password)
-                                        .map_err(|e| e.to_string())?;
-                                }
+                            }
+                            if let Some(selected) = selected {
+                                facade
+                                    .set_current_storage(selected)
+                                    .map_err(|e| e.to_string())?;
                             }
                             if storage.is_some()
                                 && matches!(mode, Mode::Create | Mode::Unlock)
                                 && !facade
                                     .activate_connected_account()
                                     .map_err(|e| e.to_string())?
+                            {
+                                return Ok(OpenResult::AccountKeyRequired);
+                            }
+                            if facade.current_storage_id().is_none()
+                                && !facade
+                                    .setup_accounts()
+                                    .map_err(|e| e.to_string())?
+                                    .iter()
+                                    .any(|account| account.enrolled)
                             {
                                 return Ok(OpenResult::AccountKeyRequired);
                             }
@@ -181,20 +240,33 @@ impl State {
                 }));
             }
 
-            Message::Opened(Ok(OpenResult::Vault { page, synced })) => {
+            Message::Opened(id, Ok(OpenResult::Vault { page, synced })) => {
+                if !self.operations.finish(id) {
+                    return Outcome::None;
+                }
                 self.busy = false;
                 self.sync_after = None;
                 return Outcome::Opened { page, synced };
             }
 
-            Message::Opened(Ok(OpenResult::AccountKeyRequired)) => {
+            Message::Opened(id, Ok(OpenResult::AccountKeyRequired)) => {
+                if !self.operations.finish(id) {
+                    return Outcome::None;
+                }
                 self.busy = false;
-                if let Some(mode) = self.account_mode {
-                    self.mode = mode;
+                if let zann_flows::unlock::Route::Password(phase) =
+                    zann_flows::unlock::after_device_unlock(false, self.connected_keys)
+                {
+                    self.mode = phase;
+                } else {
+                    return Outcome::Recovery;
                 }
             }
 
-            Message::Opened(Err(err)) => {
+            Message::Opened(id, Err(err)) => {
+                if !self.operations.finish(id) {
+                    return Outcome::None;
+                }
                 self.busy = false;
                 self.error = Some(err);
             }
@@ -209,14 +281,25 @@ impl State {
         if self.busy {
             return Outcome::None;
         }
+        let Some(id) = self.operations.begin() else {
+            return Outcome::None;
+        };
+        self.platform_prompt = true;
         let facade = session.facade();
         let storage = self.sync_after.clone();
+        let selected = self.select_after.clone();
         self.busy = true;
         self.error = None;
         Outcome::Task(cosmic::task::future(async move {
             Message::Opened(
+                id,
                 off_thread(move || {
                     local::unlock_remembered(&facade)?;
+                    if let Some(selected) = selected {
+                        facade
+                            .set_current_storage(selected)
+                            .map_err(|e| e.to_string())?;
+                    }
                     if storage.is_some()
                         && !facade
                             .activate_connected_account()
@@ -225,101 +308,19 @@ impl State {
                         return Ok(OpenResult::AccountKeyRequired);
                     }
                     let synced = storage.map(|storage| local::sync_new_server(&facade, storage));
+                    if facade.current_storage_id().is_none()
+                        && !facade
+                            .setup_accounts()
+                            .map_err(|e| e.to_string())?
+                            .iter()
+                            .any(|account| account.enrolled)
+                    {
+                        return Ok(OpenResult::AccountKeyRequired);
+                    }
                     local::items(&facade, None, None).map(|page| OpenResult::Vault { page, synced })
                 })
                 .await,
             )
         }))
-    }
-
-    pub fn view(&self) -> Element<'_, Message> {
-        let spacing = theme::spacing();
-        let (title, action) = match self.mode {
-            Mode::Create => ("unlock.createTitle", "wizard.create"),
-            Mode::AccountCreate => ("unlock.accountCreateTitle", "wizard.create"),
-            Mode::AccountUnlock => ("unlock.accountTitle", "common.unlock"),
-            Mode::Unlock => ("unlock.title", "common.unlock"),
-        };
-
-        let mut submit = widget::button::suggested(t(if self.busy {
-            "wizard.processing"
-        } else {
-            action
-        }))
-        .width(Length::Fill);
-        if !self.busy
-            && !self.password.is_empty()
-            && (!self.creating() || self.password == self.confirmation)
-        {
-            submit = submit.on_press(Message::Submit);
-        }
-
-        let mut form = widget::column::with_capacity(5)
-            .push(widget::text::title3(t(title)))
-            .push(
-                widget::text_input::secure_input(
-                    t(
-                        if matches!(self.mode, Mode::AccountCreate | Mode::AccountUnlock) {
-                            "unlock.accountPlaceholder"
-                        } else {
-                            "unlock.passwordPlaceholder"
-                        },
-                    ),
-                    &self.password,
-                    Some(Message::ToggleVisibility),
-                    self.hidden,
-                )
-                .on_input(Message::PasswordInput)
-                .on_submit(|_| Message::Submit),
-            )
-            .spacing(spacing.space_s)
-            .width(Length::Fixed(360.0));
-
-        if self.creating() {
-            form = form.push(
-                widget::text_input::secure_input(
-                    t("unlock.confirmPassword"),
-                    &self.confirmation,
-                    None::<Message>,
-                    true,
-                )
-                .on_input(Message::ConfirmationInput)
-                .on_submit(|_| Message::Submit),
-            );
-        }
-        form = form.push(widget::text::caption(t(
-            if matches!(self.mode, Mode::AccountCreate | Mode::AccountUnlock) {
-                "unlock.accountHelp"
-            } else {
-                "unlock.deviceHelp"
-            },
-        )));
-
-        if self.sync_after.is_some() {
-            form = form.push(widget::text::caption(t("wizard.syncAfterUnlock")));
-        }
-
-        if let Some(notice) = self.notice.as_ref() {
-            form = form.push(widget::text::body(notice.clone()));
-        }
-
-        if let Some(error) = self.error.as_ref() {
-            form = form.push(widget::text::caption(error.clone()));
-        }
-
-        if self.remembered.as_ref().is_some_and(|state| state.armed) && self.mode == Mode::Unlock {
-            let label = if self.busy {
-                t("unlock.hardwareKeyTouch")
-            } else {
-                t("unlock.savedUnlock")
-            };
-            let mut retry = widget::button::standard(label).width(Length::Fill);
-            if !self.busy {
-                retry = retry.on_press(Message::UseRemembered);
-            }
-            form = form.push(retry);
-        }
-
-        centered(form.push(submit))
     }
 }

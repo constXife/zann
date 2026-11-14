@@ -14,5 +14,6 @@ thiserror = "1"
 totp-rs = "5"
 url = "2"
 zeroize = "1"
+zxcvbn = { version = "3.1.1", default-features = false }
 zann-autofill = { path = "../zann-autofill" }
 zann-core = { path = "../zann-core", default-features = false }

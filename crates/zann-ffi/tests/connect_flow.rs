@@ -1,6 +1,6 @@
 use zann_ffi::*;
 
-fn probe(flow: &ConnectFlowFfi) -> ConnectOperationFfi {
+fn probe(flow: &ConnectFlowFfi) -> FlowOperationFfi {
     let effects = flow.dispatch(ConnectActionFfi::Probe {
         url: " https://example.test/ ".into(),
     });

@@ -38,6 +38,7 @@ impl Keystore for GatedKeystore {
 
 #[test]
 fn restore_excludes_unlock_and_late_remembered_publication() {
+    let _serial = super::MAINTENANCE_TEST_LOCK.lock().expect("serial");
     let dir = tempfile::tempdir().expect("root");
     let root = dir.path().canonicalize().expect("canonical root");
     let (entered_tx, entered_rx) = mpsc::sync_channel(1);

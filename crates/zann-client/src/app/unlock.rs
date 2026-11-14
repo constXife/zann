@@ -14,6 +14,8 @@ const ROOT_CHECK: &[u8] = b"Zann device unlock root";
 
 #[derive(Debug, thiserror::Error)]
 pub enum DeviceUnlockError {
+    #[error(transparent)]
+    Password(#[from] zann_core::unlock::NewPasswordError),
     #[error("cannot open the local keyring")]
     Crypto(#[from] CryptoError),
     #[error("invalid keyring encoding")]
@@ -47,17 +49,7 @@ fn open_key(key: &SecretKey, bytes: &str, aad: &[u8]) -> Result<SecretKey, Devic
 }
 
 pub fn validate_unlock_password(password: &str) -> Result<(), DeviceUnlockError> {
-    if zann_crypto::passwords::normalized_password_length(password) < 8 {
-        return Err(DeviceUnlockError::Invalid(
-            "password must be at least 8 characters",
-        ));
-    }
-    if password.starts_with(char::is_whitespace) || password.ends_with(char::is_whitespace) {
-        return Err(DeviceUnlockError::Invalid(
-            "password must not start or end with whitespace",
-        ));
-    }
-    Ok(())
+    zann_core::unlock::validate_new_password(password).map_err(DeviceUnlockError::Password)
 }
 
 impl DeviceUnlock {

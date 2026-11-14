@@ -1,10 +1,6 @@
 use crate::AuthMethodFfi;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Record)]
-pub struct ConnectOperationFfi {
-    pub instance: u64,
-    pub sequence: u64,
-}
+pub use crate::unlock_flow::FlowOperationFfi;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
 pub enum ConnectStepFfi {
     Probe,
@@ -68,29 +64,29 @@ pub enum ConnectActionFfi {
 #[derive(Clone, uniffi::Enum)]
 pub enum ConnectCompletionFfi {
     Probed {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         probe: ConnectProbeFfi,
     },
     Trusted {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         info: ConnectServerFfi,
     },
     Password {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         storage_id: String,
         has_personal_keys: bool,
     },
     OidcStarted {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         url: String,
     },
     OidcFinished {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         storage_id: String,
         has_personal_keys: bool,
     },
     Failed {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         step: ConnectStepFfi,
         message: Option<String>,
     },
@@ -98,16 +94,16 @@ pub enum ConnectCompletionFfi {
 #[derive(uniffi::Enum)]
 pub enum ConnectEffectFfi {
     Probe {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         url: String,
         connection_name: String,
         profile_name: String,
     },
     TrustFingerprint {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
     },
     Password {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         email: String,
         password: String,
         full_name: Option<String>,
@@ -115,22 +111,22 @@ pub enum ConnectEffectFfi {
         timeout_ms: u64,
     },
     BeginOidc {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         timeout_ms: u64,
     },
     FinishOidc {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
     },
     Cancel {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
     },
     ResetConnection,
     OpenBrowser {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         url: String,
     },
     CopyBrowserUrl {
-        id: ConnectOperationFfi,
+        id: FlowOperationFfi,
         url: String,
     },
     Connected {

@@ -1,15 +1,15 @@
 use super::{flow, records::*};
 use crate::AuthMethodFfi;
 
-impl From<ConnectOperationFfi> for flow::OperationId {
-    fn from(id: ConnectOperationFfi) -> Self {
+impl From<FlowOperationFfi> for flow::OperationId {
+    fn from(id: FlowOperationFfi) -> Self {
         Self {
             instance: id.instance,
             sequence: id.sequence,
         }
     }
 }
-impl From<flow::OperationId> for ConnectOperationFfi {
+impl From<flow::OperationId> for FlowOperationFfi {
     fn from(id: flow::OperationId) -> Self {
         Self {
             instance: id.instance,

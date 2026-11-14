@@ -63,7 +63,9 @@ does not authorize another temporary implementation.
 | Authenticated application composition | `zann-client::app` **(active native facade)** | COSMIC and FFI | injected `AppSyncStoreFactory`, `CredentialStore`, explicit `ClientPaths`, operation-scoped master key, progress/cancellation | exposing `AppSession`/`SyncEngine`, bearer access, ambient paths, mutable target/key maps or local orchestration in shells |
 | Offline replica application use cases | `zann-client::app::local` (port), `zann-client-sqlite::local_vault` (native implementation) | COSMIC and FFI adapters | storage/credential ports, `ClientPaths`, clock and progress sink | local application orchestration in COSMIC screens, Apple views or `zann-ffi` |
 | Connect flow | `zann-flows::connect` **(active)** | COSMIC directly; Apple through the pure `zann-ffi::ConnectFlowFfi` projection | canonical auth/trust executors, opaque native capabilities, typed effects, instance/operation/phase IDs and cancellation | method/registration, Back/Cancel and result-admission policy in shells/FFI; toolkit, runtime, filesystem or transport in `zann-flows` |
-| Startup, unlock/remembered unlock and idle flows | `zann-flows` **(planned slices)** | native adapters; future clients | typed effect executor, operation IDs and cancellation | new flow reducers in components/screens |
+| Unlock routing, operation admission and lock timing | `zann-flows::unlock` **(active policy slice)** | COSMIC directly; Apple through pure FFI projections | four password phases, explicit enrollment hints, operation IDs, startup remembered admission, focus and idle policy | copied phase reducers, per-vault idle timers, stale unlock results reopening the UI |
+| New-password policy and strength feedback | `zann-core::unlock`; `zann-ui-core::password` | native creation/change forms through Rust or FFI | NFC length and edge-whitespace validation; bounded value-free strength keys | trimming existing credentials, shell scoring or validation copies |
+| Scoped local account forget and device reset | `zann-client::app::local`; `zann-client-sqlite::local_vault::recovery`, `zann-db::local::recovery` | native account recovery screens only | exact preview token/source, encrypted snapshot, unsent-data confirmation, reserved SQLite writer, canonical Config connection removal | browser IPC access; shell SQL; deletion before snapshot/source proof; remote encryption recovery promises |
 | Categories, folders, filters, list captions, item-detail projection and editor drafts | `zann-ui-core`; the list subtitle's payload fields are `zann-core::item_subtitle`, applied where `zann-db` decrypts a list page | COSMIC, Apple/FFI and future clients | canonical schema/catalogue data, translation and abstract-icon resolver | category, ordering, masking/copy/reveal, TOTP parsing or list-caption policy in components or screens; payload decryption for list rows outside `zann-db` |
 | Native password/passphrase generation | `zann-ui-core::generator` | COSMIC directly; Apple and future non-Rust shells through `zann-ffi`; browser through `zann-browser` | explicit bounded options, shared defaults and separator catalogue; fallible OS entropy | alphabets, dictionaries, validation, RNG selection or default copies in shells/FFI; generated secrets in Debug/logs |
 | Streaming backup/import/export use cases | `zann-client::app::local` (port), `zann-client-sqlite::maintenance` (native implementation) | native clients | `Read`/`Write`, explicit paths, progress and cancellation ports | file dialogs in shared services; parsing/encryption policy in shells |
@@ -78,7 +80,7 @@ The planned crates identify accepted extraction boundaries. Until they exist:
   serde-only `zann-protocol` extraction; server handlers and
   the private `zann-client` transport MUST import those types directly, cover them with
   golden serialization fixtures and MUST NOT copy them into a shell;
-- new cross-client flow policy MUST live in `zann-flows`. Connect is active and
+- new cross-client flow policy MUST live in `zann-flows`. Connect and the shared unlock policy are active and
   has no shell-local migration exception. Remaining legacy flow fixes stay
   within MIG-006, add parity coverage and MUST NOT expand either implementation;
 - local vault operations are exposed through `zann-client::app::local` and
@@ -372,6 +374,26 @@ password never derives account keys. Snapshots include the keyring inside the
 same SQLite copy; restoring no longer writes an external Config identity.
 See [ADR 0010](../adr/0010-device-unlock-account-keys.md).
 
+Scoped recovery first saves an encrypted SQLite snapshot without pruning prior
+recovery copies. A pinned preview connection supplies `PRAGMA data_version` and
+an exact bounded keyring source. `BEGIN IMMEDIATE` reserves the writer and checks
+both before external side effects or deletion. Account forget retires only the
+selected connection's sign-ins/trust pin through the existing Config journal,
+then removes its local replica and key slot; other account keys and the device
+password remain intact. Whole-device reset removes all local key slots/cache and
+disarms remembered unlock, retaining Config sign-ins and preferences. Remote data
+is never changed. An external commit failure can leave a disconnected encrypted
+replica; retry is explicit, and no failed reset is reported as successful.
+
+Recovery rotates the database instance UUID in the deletion transaction. Every
+ordinary pinned SQLite pool installs connection-local TEMP write guards over all
+local tables, capturing its original UUID once per pool, including replacement
+connections. An old pool cannot mutate a reset database; missing identity fails
+closed. Only explicit unpinned maintenance can rotate identity. TEMP guards do not
+enter snapshots or change the persisted schema. A separate pinned identity probe
+keeps native cancellation/status independent of a fully occupied worker pool.
+
+
 If the primary is absent while the predecessor backup exists, initialization
 MUST stop for explicit recovery; it MUST NOT create defaults or remigrate
 legacy state. A recovered revision must be newer than the potentially lost
@@ -635,7 +657,7 @@ the current scope; they do not permit additional call sites or dependencies.
 | ID | Owner | Frozen legacy scope | Risk | Compensating control | Removal condition |
 |---|---|---|---|---|---|
 | MIG-005 | `@constXife` | COSMIC default-root resolver in `apps/cosmic/src/backend/mod.rs` (`ZANN_DB_URL`, home-directory lookup and current-directory fallback) | implicit root selection | explicit-path and active-database binding tests; no new root derivation below the composition boundary | an explicit client root replaces the legacy shell-local default-root fallback (ADR phase 2) |
-| MIG-006 | `@constXife` | remaining `apps/cosmic/src/screens/vault.rs` and its screen submodules; Connect is extracted and excluded | divergent UI behaviour and stale async results | native vault operation-ID tests; shared Connect reducer/FFI conformance and native cancellation tests prevent reintroducing extracted policy | remaining native flows consume `zann-flows` and `zann-ui-core`; shell-local flow policy is deleted (ADR phase 6); [#258](https://github.com/constXife/zann/issues/258), expires 2026-11-16 |
+| MIG-006 | `@constXife` | remaining `apps/cosmic/src/screens/vault.rs` and its screen submodules; Connect and unlock routing/admission/focus/idle policy are extracted and excluded | divergent UI behaviour and stale async results | native vault operation-ID tests; shared Connect/unlock policy tests, FFI conformance, scoped recovery and native cancellation tests prevent reintroducing extracted policy | remaining native flows consume `zann-flows` and `zann-ui-core`; shell-local flow policy is deleted (ADR phase 6); [#258](https://github.com/constXife/zann/issues/258), expires 2026-11-16 |
 | MIG-009 | `@constXife` | `zann-db` local vault key binding (`bind_cache_key_fingerprints_in`, the leased claim) the catalog slug check in `zann-client-sqlite::reconcile_catalog_rows`, and `SyncCursorRepo::adopt_legacy_last_seq` from the checkpoint load: a pre-`0002` remote vault with the internal `local::<id>` slug and no bound key, and its cursor without `last_seq` | a legacy projection claimed under a key it was not encrypted with | adoption only when every cached item carries the catalog-proven key fingerprint and every pending change has its item; a cursor's sequence is recorded only while `last_seq` is NULL and the cursor is unchanged; `crates/zann-db/tests/local_legacy_projection.rs` | no database predating migration `0002` remains (every legacy device has synced once); expires 2027-02-13 |
 
 The entries that still predate the exception policy have `@constXife` as owner;

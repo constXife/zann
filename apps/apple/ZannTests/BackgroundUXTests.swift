@@ -119,7 +119,7 @@ private final class BootstrapCore: UXDelayedCore {
             preferences: { PreferencesFile(url: self.directory.appendingPathComponent("prefs.json")) },
             systemLanguage: "en", openBrowser: { _ in })
         app.startConnecting()
-        app.connected(.init(hasPersonalKeys: true))
+        await app.connected(.init(storageID: try XCTUnwrap(core.currentStorageId()), hasPersonalKeys: true))
         let unlock = Task { await app.submit(password: "fixture master password", mode: .unlock) }
         await fulfillment(of: [started], timeout: 4)
         XCTAssertEqual(app.screen, .vault, "network sync must not hold the password screen")

@@ -461,17 +461,39 @@ fn master_hands_the_open_vault_to_the_shell() {
     let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = master::State::new(master::Mode::Unlock, None);
 
+    state.update(
+        master::Message::PasswordInput("fixture master password".into()),
+        &session,
+    );
+    state.update(master::Message::Submit, &session);
+    let first_operation = state.current_operation().expect("first operation");
     let failed = state.update(
-        master::Message::Opened(Err("invalid password".to_string())),
+        master::Message::Opened(first_operation, Err("invalid password".to_string())),
         &session,
     );
     assert!(matches!(failed, master::Outcome::None));
 
+    state.update(
+        master::Message::PasswordInput("fixture master password".into()),
+        &session,
+    );
+    state.update(master::Message::Submit, &session);
+    let second_operation = state.current_operation().expect("second operation");
+    assert!(matches!(
+        state.update(
+            master::Message::Opened(first_operation, Err("late response".into())),
+            &session
+        ),
+        master::Outcome::None
+    ));
     let opened = state.update(
-        master::Message::Opened(Ok(master::OpenResult::Vault {
-            page,
-            synced: Some(Err("offline".to_string())),
-        })),
+        master::Message::Opened(
+            second_operation,
+            Ok(master::OpenResult::Vault {
+                page,
+                synced: Some(Err("offline".to_string())),
+            }),
+        ),
         &session,
     );
     match opened {

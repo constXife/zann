@@ -22,13 +22,17 @@ struct UnlockPasswordSettings: View {
         .onChange(of: unlocked) { _ in clear(); presenting = false }
     }
 
+    private var feedback: PasswordFeedbackFfi { passwordCreationFeedback(password: replacement) }
+
     private var form: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(strings("unlock.changePassword")).font(.title2.bold())
             Text(strings("unlock.changeHelp")).foregroundStyle(.secondary)
             SecureField(strings("unlock.currentPassword"), text: $current)
             SecureField(strings("unlock.newPassword"), text: $replacement)
-            SecureField(strings("unlock.confirmPassword"), text: $confirmation)
+            if let key = feedback.strengthKey { Text(strings(key)).font(.caption).foregroundStyle(.secondary) }
+            if let key = feedback.validationKey { Text(strings(key)).font(.caption).foregroundStyle(.red) }
+            SecureField(strings("unlock.confirmDevicePassword"), text: $confirmation)
             if !confirmation.isEmpty && replacement != confirmation {
                 Text(strings("unlock.passwordMismatch")).foregroundStyle(.red)
             }
@@ -39,7 +43,7 @@ struct UnlockPasswordSettings: View {
                 if saving { ProgressView().controlSize(.small) }
                 Button(strings("unlock.changePassword")) { change() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(!unlocked || saving || current.isEmpty || replacement.isEmpty || replacement != confirmation)
+                    .disabled(!unlocked || saving || current.isEmpty || replacement.isEmpty || replacement != confirmation || feedback.validationKey != nil)
             }
         }
         .textFieldStyle(.roundedBorder)

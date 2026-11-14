@@ -43,6 +43,7 @@ pub trait LocalVaultService: Send + Sync {
     fn remembered_unlock(&self) -> LocalResult<RememberedUnlock>;
     fn unlock_remembered(&self) -> LocalResult<VaultStatus>;
     fn hardware_key_present(&self) -> LocalResult<bool>;
+    fn idle_unlock_key_present(&self) -> LocalResult<bool>;
     /// Reports completion of Touch 1 before blocking for Touch 2.
     fn enroll_hardware_key(
         &self,
@@ -101,6 +102,14 @@ pub trait LocalVaultService: Send + Sync {
     /// The selected server replica; an empty pre-sync session has none.
     fn current_storage_id(&self) -> Option<String>;
     fn app_status(&self) -> LocalResult<AppStatus>;
+    fn setup_accounts(&self) -> LocalResult<Vec<SetupAccount>>;
+    fn prepare_local_recovery(&self, scope: RecoveryScope) -> LocalResult<RecoveryPreview>;
+    fn cancel_local_recovery(&self, id: String) -> LocalResult<()>;
+    fn confirm_local_recovery(
+        &self,
+        id: String,
+        discard_unsent: bool,
+    ) -> LocalResult<RecoveryOutcome>;
     fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus>;
     fn remote_sync(
         &self,

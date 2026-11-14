@@ -6,11 +6,12 @@ struct WelcomeView: View {
     var body: some View {
         VStack(spacing: 16) {
             Text("Zann").font(.largeTitle.bold())
-            Text("Connect to your Zann server. Your encrypted vault stays available offline.")
+            Text(model.strings("wizard.welcomeSubtitle"))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Button(model.strings("wizard.connect")) { model.startConnecting() }
                 .controlSize(.large)
+            Button(model.strings("recovery.title")) { model.showAccountRecovery() }
             if let error = model.error {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
             }

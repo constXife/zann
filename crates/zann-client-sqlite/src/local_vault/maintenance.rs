@@ -225,6 +225,13 @@ impl LocalVault {
         };
         let context = self.context_gate.write().expect("lock poisoned");
         self.lock_in_context(&context)?;
+        self.runtime.block_on(
+            self.identity_probe
+                .lock()
+                .expect("identity lock")
+                .pool()
+                .close(),
+        );
         let outcome = self.runtime.block_on(crate::maintenance::snapshot::restore(
             self.pool(),
             &self.root,

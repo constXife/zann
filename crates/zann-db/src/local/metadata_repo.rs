@@ -79,15 +79,24 @@ impl<'a> MetadataRepo<'a> {
         key: &str,
         maximum: i64,
     ) -> Result<Option<String>, sqlx_core::Error> {
-        let row = query!("SELECT CASE WHEN length(CAST(value AS BLOB)) <= ?2 THEN value ELSE NULL END AS value FROM metadata WHERE key = ?1", key, maximum).fetch_optional(self.pool).await?;
-        match row {
-            None => Ok(None),
-            Some(row) => row
-                .try_get::<Option<String>, _>("value")?
-                .map(Some)
-                .ok_or_else(|| {
-                    sqlx_core::Error::Protocol("metadata exceeds its size limit".into())
-                }),
-        }
+        read_bounded(self.pool, key, maximum).await
+    }
+}
+
+/// The same bounded reader for a pinned preview connection or transaction.
+pub(crate) async fn read_bounded<'e>(
+    executor: impl sqlx_core::executor::Executor<'e, Database = crate::Sqlite>,
+    key: &'e str,
+    maximum: i64,
+) -> Result<Option<String>, sqlx_core::Error> {
+    let row = query!("SELECT CASE WHEN typeof(value) = 'text' AND length(CAST(value AS BLOB)) <= ?2 THEN value ELSE NULL END AS value FROM metadata WHERE key = ?1", key, maximum).fetch_optional(executor).await?;
+    match row {
+        None => Ok(None),
+        Some(row) => row
+            .try_get::<Option<String>, _>("value")?
+            .map(Some)
+            .ok_or_else(|| {
+                sqlx_core::Error::Protocol("metadata is invalid or exceeds its size limit".into())
+            }),
     }
 }

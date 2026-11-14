@@ -13,6 +13,7 @@
 //! owns its own state and messages and reports back through its `Outcome`.
 
 mod connect_routing;
+mod unlock_routing;
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -27,7 +28,7 @@ use zann_client::app::local::AutoSyncTicket;
 use zann_cosmic::backend::local::SyncFailure;
 use zann_cosmic::i18n::t;
 use zann_cosmic::preferences::{self, Store};
-use zann_cosmic::screens::{self, connect, master, settings, vault, welcome, Screen};
+use zann_cosmic::screens::{self, accounts, connect, master, settings, vault, welcome, Screen};
 use zann_cosmic::session::Session;
 use zann_cosmic::tray;
 use zann_ui_core::{DevicePreferences, SettingsSection};
@@ -73,6 +74,8 @@ struct App {
     core: Core,
     shell: Shell,
     window_width: f32,
+    last_activity: std::time::Instant,
+    idle_check_pending: bool,
     preferences: DevicePreferences,
     close_to_tray: bool,
     tray_available: bool,
@@ -87,6 +90,7 @@ enum Message {
     Welcome(welcome::Message),
     Connect(connect::Event),
     Master(master::Message),
+    Accounts(accounts::Message),
     Settings(settings::Message),
     /// A sync started from Settings ended; the ticket goes back to the
     /// session's schedule.
@@ -108,6 +112,8 @@ enum Message {
     Unfocused,
     TemporaryReveal(bool),
     Activity,
+    IdleCheck,
+    IdlePresence(Result<bool, String>),
     ClipboardExpired(u64),
     ClipboardRead(Option<String>),
 }
@@ -225,7 +231,9 @@ impl cosmic::Application for App {
                 Ok((session, status, store, close_to_tray)) => {
                     let preferences = store.load();
                     let screen = if status.initialized {
-                        Screen::Master(Box::new(master::State::new(master::Mode::Unlock, None)))
+                        Screen::Master(Box::new(
+                            master::State::new(master::Mode::Unlock, None).at_startup(),
+                        ))
                     } else if status.storages_count > 0 {
                         // A server login already happened but the vault was never
                         // created — finish where that left off.
@@ -254,6 +262,8 @@ impl cosmic::Application for App {
             core,
             shell,
             window_width: WINDOW_SIZE.width,
+            last_activity: std::time::Instant::now(),
+            idle_check_pending: false,
             preferences,
             close_to_tray,
             tray_available: false,
@@ -397,7 +407,13 @@ impl cosmic::Application for App {
             _ => None,
         });
 
+        let idle = if self.preferences.auto_lock_minutes == 0 {
+            Subscription::none()
+        } else {
+            cosmic::iced::time::every(std::time::Duration::from_secs(1)).map(|_| Message::IdleCheck)
+        };
         Subscription::batch([
+            idle,
             screen,
             shell_events,
             tray::subscription().map(Message::Tray),
@@ -434,6 +450,10 @@ impl cosmic::Application for App {
                 }
                 return Task::none();
             }
+            Message::Master(message) => return self.update_master(message),
+            Message::Accounts(message) => return self.update_accounts(message),
+            Message::IdleCheck => return self.check_session_idle(),
+            Message::IdlePresence(result) => return self.finish_idle_check(result),
             Message::Lock => return self.lock(),
             Message::OpenSettings => return self.open_settings(),
             Message::ReviewStaleServer(storage_id, failure) => {
@@ -498,7 +518,22 @@ impl cosmic::Application for App {
                     vault.set_temporary_reveal(false);
                     vault.hide_editor_revealed();
                 }
-                return if self.preferences.lock_on_focus_loss {
+                let (pending, platform_prompt) = match &self.shell {
+                    Shell::Ready {
+                        screen: Screen::Master(state),
+                        ..
+                    } => (
+                        state.current_operation().is_some(),
+                        state.platform_prompt_pending(),
+                    ),
+                    _ => (false, false),
+                };
+                return if self.preferences.lock_on_focus_loss
+                    && zann_flows::unlock::focus_lock_required(
+                        self.is_unlocked(),
+                        pending,
+                        platform_prompt,
+                    ) {
                     self.lock()
                 } else {
                     Task::none()
@@ -511,20 +546,17 @@ impl cosmic::Application for App {
                 } = &mut self.shell
                 {
                     vault.set_temporary_reveal(held);
-                    if held {
-                        vault.record_activity();
-                    }
+                    if held {}
                 }
                 return Task::none();
             }
             Message::Activity => {
+                self.last_activity = std::time::Instant::now();
                 if let Shell::Ready {
                     screen: Screen::Vault(vault),
                     ..
                 } = &mut self.shell
-                {
-                    vault.record_activity();
-                }
+                {}
                 return Task::none();
             }
             Message::ClipboardExpired(generation) => {
@@ -545,10 +577,6 @@ impl cosmic::Application for App {
             }
             _ => {}
         }
-
-        let content_width = self.content_width();
-        let auto_lock_minutes = self.preferences.auto_lock_minutes;
-        let reveal_seconds = self.preferences.auto_hide_reveal_seconds;
 
         let Shell::Ready { session, screen } = &mut self.shell else {
             return Task::none();
@@ -571,33 +599,6 @@ impl cosmic::Application for App {
             }
 
             Message::Connect(message) => self.update_connect(message),
-
-            Message::Master(message) => {
-                let Screen::Master(state) = &mut *screen else {
-                    return Task::none();
-                };
-                match state.update(message, session) {
-                    master::Outcome::None => Task::none(),
-                    master::Outcome::Task(task) => lift(task, Message::Master),
-                    master::Outcome::Opened { page, synced } => {
-                        session
-                            .auto_sync()
-                            .unlocked(std::time::Instant::now(), synced.is_some());
-                        let sync_error = synced.and_then(Result::err);
-                        let mut vault = vault::State::new(page, sync_error);
-                        let load_vaults = vault.load_vaults(session);
-                        vault.set_content_width(content_width);
-                        vault.set_auto_lock_minutes(auto_lock_minutes);
-                        vault.set_reveal_seconds(reveal_seconds);
-                        let auto_sync = vault.arm_auto_sync(session);
-                        *screen = Screen::Vault(Box::new(vault));
-                        lift(
-                            cosmic::iced::Task::batch([load_vaults, auto_sync]),
-                            Message::Vault,
-                        )
-                    }
-                }
-            }
 
             Message::Vault(message) => {
                 let (Screen::Vault(state) | Screen::Settings { vault: state, .. }) = &mut *screen
@@ -629,12 +630,16 @@ impl cosmic::Application for App {
             | Message::WindowClosed(_)
             | Message::Tray(_)
             | Message::ShowWindow(_)
+            | Message::IdleCheck
+            | Message::IdlePresence(_)
             | Message::Unfocused
             | Message::TemporaryReveal(_)
             | Message::Activity
             | Message::ClipboardExpired(_)
             | Message::ClipboardRead(_)
             | Message::Settings(_)
+            | Message::Master(_)
+            | Message::Accounts(_)
             | Message::ManualSynced(..) => Task::none(),
         }
     }
@@ -646,6 +651,7 @@ impl cosmic::Application for App {
                 Screen::Welcome => welcome::view().map(Message::Welcome),
                 Screen::Connect { state, .. } => state.view().map(Message::Connect),
                 Screen::Master(state) => state.view().map(Message::Master),
+                Screen::Accounts(state) => state.view().map(Message::Accounts),
                 Screen::Vault(state) => state.view().map(Message::Vault),
                 Screen::Settings { state, .. } => state.view().map(Message::Settings),
             },
@@ -655,13 +661,16 @@ impl cosmic::Application for App {
 
 impl App {
     fn is_unlocked(&self) -> bool {
-        matches!(
-            self.shell,
-            Shell::Ready {
-                screen: Screen::Vault(_) | Screen::Settings { .. },
-                ..
-            }
-        )
+        match &self.shell {
+            Shell::Ready { session, .. } => match session.facade().vault_status() {
+                Ok(status) => status.unlocked,
+                Err(error) => {
+                    eprintln!("could not read unlock status: {error}");
+                    false
+                }
+            },
+            Shell::Blocked(_) => false,
+        }
     }
 
     fn can_open_settings(&self) -> bool {
@@ -679,11 +688,35 @@ impl App {
             let Shell::Ready { session, screen } = &mut self.shell else {
                 return Task::none();
             };
-            if !matches!(screen, Screen::Vault(_) | Screen::Settings { .. }) {
+            let pending =
+                matches!(screen, Screen::Master(state) if state.current_operation().is_some());
+            let unlocked = match session.facade().vault_status() {
+                Ok(status) => status.unlocked,
+                Err(error) => {
+                    self.shell = Shell::Blocked(error.to_string());
+                    return Task::none();
+                }
+            };
+            if !unlocked && !pending {
                 return Task::none();
             }
             session.lock();
-            *screen = Screen::Master(Box::new(master::State::new(master::Mode::Unlock, None)));
+            let status = match session.facade().app_status() {
+                Ok(status) => status,
+                Err(error) => {
+                    self.shell = Shell::Blocked(error.to_string());
+                    return Task::none();
+                }
+            };
+            let locked = Screen::Master(Box::new(master::State::new(
+                zann_flows::unlock::device_phase(status.initialized),
+                None,
+            )));
+            if let Screen::Connect { return_to, .. } = screen {
+                *return_to = Some(Box::new(locked));
+                return Task::none();
+            }
+            *screen = locked;
             remembered_unlock_task(session)
         };
 
@@ -834,7 +867,6 @@ impl App {
                     if language_changed {
                         vault.refresh_translations();
                     }
-                    vault.set_auto_lock_minutes(self.preferences.auto_lock_minutes);
                     vault.set_reveal_seconds(self.preferences.auto_hide_reveal_seconds);
                 }
                 Screen::Settings { state, vault } => {
@@ -843,7 +875,6 @@ impl App {
                     if language_changed {
                         vault.refresh_translations();
                     }
-                    vault.set_auto_lock_minutes(self.preferences.auto_lock_minutes);
                     vault.set_reveal_seconds(self.preferences.auto_hide_reveal_seconds);
                 }
                 _ => {}

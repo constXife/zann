@@ -64,6 +64,9 @@ impl State {
         !self.current.is_empty()
             && !self.replacement.is_empty()
             && self.replacement == self.confirmation
+            && zann_ui_core::password::password_feedback(&self.replacement)
+                .validation_key
+                .is_none()
     }
 
     pub(super) fn view(&self) -> Element<'_, Message> {
@@ -93,7 +96,7 @@ impl State {
             )
             .add(
                 widget::text_input::secure_input(
-                    t("unlock.confirmPassword"),
+                    t("unlock.confirmDevicePassword"),
                     &self.confirmation,
                     None::<Message>,
                     true,
@@ -102,6 +105,13 @@ impl State {
             )
             .add(widget::text::caption(t("unlock.changeHelp")))
             .add(button);
+        let feedback = zann_ui_core::password::password_feedback(&self.replacement);
+        if let Some(key) = feedback.strength_key {
+            section = section.add(widget::text::caption(t(key)));
+        }
+        if let Some(key) = feedback.validation_key {
+            section = section.add(widget::text::caption(t(key)));
+        }
         if let Some(notice) = &self.notice {
             section = section.add(widget::text::caption(notice));
         }

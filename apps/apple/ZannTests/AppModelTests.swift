@@ -172,7 +172,7 @@ final class AppModelTests: XCTestCase {
                 preferences: { PreferencesFile(url: root.appendingPathComponent("preferences.json")) },
                 systemLanguage: "en", openBrowser: { _ in })
             model.startConnecting()
-            model.connected(.init(hasPersonalKeys: existing))
+            await model.connected(.init(storageID: "pending-test-account", hasPersonalKeys: existing))
             XCTAssertEqual(model.screen, .master(.create))
             await model.submit(password: "one device unlock password", mode: .create)
             XCTAssertNil(model.error)
