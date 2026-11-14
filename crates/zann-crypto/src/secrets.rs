@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
-use tracing::instrument;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+mod codec;
+pub use codec::{PayloadError, PAYLOAD_VERSION};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -91,6 +93,7 @@ impl ZeroizeOnDrop for FieldValue {}
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EncryptedPayload {
+    #[serde(serialize_with = "codec::serialize_version")]
     pub v: u32,
     #[serde(rename = "typeId")]
     pub type_id: String,
@@ -139,48 +142,6 @@ impl Drop for EncryptedPayload {
 }
 
 impl ZeroizeOnDrop for EncryptedPayload {}
-
-pub enum PayloadError {
-    InvalidJson(serde_json::Error),
-}
-
-impl fmt::Debug for PayloadError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("PayloadError::InvalidJson(<redacted>)")
-    }
-}
-
-impl std::fmt::Display for PayloadError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::InvalidJson(_) => formatter.write_str("invalid payload json"),
-        }
-    }
-}
-
-impl std::error::Error for PayloadError {}
-
-impl EncryptedPayload {
-    #[must_use]
-    pub fn new(type_id: impl Into<String>) -> Self {
-        Self {
-            v: 1,
-            type_id: type_id.into(),
-            fields: HashMap::new(),
-            extra: None,
-        }
-    }
-
-    #[instrument(level = "debug", skip(self))]
-    pub fn to_bytes(&self) -> Result<Vec<u8>, PayloadError> {
-        serde_json::to_vec(self).map_err(PayloadError::InvalidJson)
-    }
-
-    #[instrument(level = "debug", skip(bytes), fields(bytes_len = bytes.len()))]
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self, PayloadError> {
-        serde_json::from_slice(bytes).map_err(PayloadError::InvalidJson)
-    }
-}
 
 #[cfg(test)]
 mod tests {

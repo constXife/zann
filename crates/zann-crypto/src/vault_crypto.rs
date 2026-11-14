@@ -1,8 +1,10 @@
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::crypto::{decrypt_blob, encrypt_blob, EncryptedBlob, SecretKey};
-use crate::EncryptedPayload;
+use crate::crypto::{
+    decrypt_blob, encrypt_blob, encrypt_blob_verified, CryptoError, EncryptedBlob, SecretKey,
+};
+use crate::{EncryptedPayload, PayloadError};
 use tracing::instrument;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +14,8 @@ pub enum VaultCryptoError {
     InvalidPayload,
     EncryptFailed,
     DecryptFailed,
+    VerificationFailed(CryptoError),
+    UnsupportedPayloadVersion(u32),
 }
 
 impl VaultCryptoError {
@@ -23,6 +27,8 @@ impl VaultCryptoError {
             Self::InvalidPayload => "invalid_payload",
             Self::EncryptFailed => "encrypt_failed",
             Self::DecryptFailed => "decrypt_failed",
+            Self::VerificationFailed(_) => "verification_failed",
+            Self::UnsupportedPayloadVersion(_) => "unsupported_payload_version",
         }
     }
 }
@@ -35,11 +41,42 @@ impl std::fmt::Display for VaultCryptoError {
             Self::InvalidPayload => write!(f, "invalid payload"),
             Self::EncryptFailed => write!(f, "encryption failed"),
             Self::DecryptFailed => write!(f, "decryption failed"),
+            Self::VerificationFailed(source) => {
+                write!(f, "new ciphertext verification failed: {source}")
+            }
+            Self::UnsupportedPayloadVersion(version) => {
+                write!(f, "unsupported payload version: {version}")
+            }
         }
     }
 }
 
-impl std::error::Error for VaultCryptoError {}
+impl std::error::Error for VaultCryptoError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::VerificationFailed(source) => Some(source),
+            _ => None,
+        }
+    }
+}
+
+fn verified_encryption_error(error: CryptoError) -> VaultCryptoError {
+    match error {
+        CryptoError::EncryptionFailed => VaultCryptoError::EncryptFailed,
+        source => VaultCryptoError::VerificationFailed(source),
+    }
+}
+
+impl From<PayloadError> for VaultCryptoError {
+    fn from(error: PayloadError) -> Self {
+        match error {
+            PayloadError::UnsupportedPayloadVersion(version) => {
+                Self::UnsupportedPayloadVersion(version)
+            }
+            PayloadError::InvalidJson(_) => Self::InvalidPayload,
+        }
+    }
+}
 
 #[must_use]
 pub fn vault_key_aad(vault_id: Uuid) -> Vec<u8> {
@@ -71,8 +108,8 @@ pub fn encrypt_vault_key(
     vault_key: &SecretKey,
 ) -> Result<Vec<u8>, VaultCryptoError> {
     let aad = vault_key_aad(vault_id);
-    let blob = encrypt_blob(master_key, vault_key.as_bytes(), &aad)
-        .map_err(|_| VaultCryptoError::EncryptFailed)?;
+    let blob = encrypt_blob_verified(master_key, vault_key.as_bytes(), &aad)
+        .map_err(verified_encryption_error)?;
     Ok(blob.to_bytes())
 }
 
@@ -94,6 +131,17 @@ pub fn decrypt_vault_key(
     let mut key = [0u8; 32];
     key.copy_from_slice(&key_bytes);
     Ok(SecretKey::from_bytes(key))
+}
+
+/// Retains the vault key and uses the canonical Decrypt-Before-Commit writer.
+pub fn rewrap_vault_key(
+    old_master_key: &SecretKey,
+    new_master_key: &SecretKey,
+    vault_id: Uuid,
+    vault_key_enc: &[u8],
+) -> Result<Vec<u8>, VaultCryptoError> {
+    let key = decrypt_vault_key(old_master_key, vault_id, vault_key_enc)?;
+    encrypt_vault_key(new_master_key, vault_id, &key)
 }
 
 #[instrument(
@@ -142,7 +190,7 @@ pub fn encrypt_rotation_candidate(
 ) -> Result<Vec<u8>, VaultCryptoError> {
     let aad = rotation_candidate_aad(vault_id, item_id);
     let blob =
-        encrypt_blob(vault_key, candidate, &aad).map_err(|_| VaultCryptoError::EncryptFailed)?;
+        encrypt_blob_verified(vault_key, candidate, &aad).map_err(verified_encryption_error)?;
     Ok(blob.to_bytes())
 }
 
@@ -174,12 +222,21 @@ pub fn encrypt_payload(
     item_id: Uuid,
     payload: &EncryptedPayload,
 ) -> Result<Vec<u8>, VaultCryptoError> {
-    let payload_bytes = Zeroizing::new(
-        payload
-            .to_bytes()
-            .map_err(|_| VaultCryptoError::InvalidPayload)?,
-    );
+    let payload_bytes = Zeroizing::new(payload.to_bytes().map_err(VaultCryptoError::from)?);
     encrypt_payload_bytes(vault_key, vault_id, item_id, &payload_bytes)
+}
+
+/// Rotation writes verify the exact new payload before their transaction commits.
+pub fn encrypt_payload_verified(
+    vault_key: &SecretKey,
+    vault_id: Uuid,
+    item_id: Uuid,
+    payload: &EncryptedPayload,
+) -> Result<Vec<u8>, VaultCryptoError> {
+    let bytes = Zeroizing::new(payload.to_bytes().map_err(VaultCryptoError::from)?);
+    let blob = encrypt_blob_verified(vault_key, &bytes, &payload_aad(vault_id, item_id))
+        .map_err(verified_encryption_error)?;
+    Ok(blob.to_bytes())
 }
 
 #[instrument(
@@ -199,7 +256,7 @@ pub fn decrypt_payload(
         item_id,
         payload_enc,
     )?);
-    EncryptedPayload::from_bytes(&payload_bytes).map_err(|_| VaultCryptoError::InvalidPayload)
+    EncryptedPayload::from_bytes(&payload_bytes).map_err(VaultCryptoError::from)
 }
 
 #[must_use]

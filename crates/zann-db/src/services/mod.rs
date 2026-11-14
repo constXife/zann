@@ -160,29 +160,24 @@ impl<'a> LocalServices<'a> {
         ))
     }
 
-    async fn track_pending(
+    async fn commit_item_edit(
         &self,
-        storage_id: Uuid,
-        change: LocalPendingChange,
+        expected: &crate::local::LocalItem,
+        item: &crate::local::LocalItem,
+        history: Option<&LocalItemHistory>,
+        pending: Option<&LocalPendingChange>,
     ) -> ServiceResult<()> {
-        let repo = PendingChangeRepo::new(self.pool);
-        let mut merged = change;
-        let existing = repo
-            .list_by_item(storage_id, merged.item_id)
+        let committed = LocalItemRepo::new(self.pool)
+            .commit_edit(expected, item, history, pending)
             .await
-            .map_err(|err| ServiceError::new("pending_change_failed", err.to_string()))?;
-        if let Some(first) = existing.first() {
-            if first.operation == ChangeType::Create {
-                merged.operation = ChangeType::Create;
-                merged.base_seq = None;
-            } else if first.base_seq.is_some() {
-                merged.base_seq = first.base_seq;
-            }
-            let _ = repo.delete_by_item(storage_id, merged.item_id).await;
+            .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
+        if !committed {
+            return Err(ServiceError::new(
+                "item_conflict",
+                "item changed during the edit",
+            ));
         }
-        repo.create(&merged)
-            .await
-            .map_err(|err| ServiceError::new("pending_change_failed", err.to_string()))
+        Ok(())
     }
 
     /// Unwrap a vault key with the master key held by this service.
@@ -277,8 +272,15 @@ impl<'a> LocalServices<'a> {
         };
         // The plaintext bytes are wiped once parsed; the payload zeroizes itself.
         let bytes = Zeroizing::new(bytes);
-        EncryptedPayload::from_bytes(&bytes)
-            .map_err(|err| ServiceError::new("payload_decode_failed", err.to_string()))
+        EncryptedPayload::from_bytes(&bytes).map_err(|err| {
+            let kind = match &err {
+                zann_core::PayloadError::UnsupportedPayloadVersion(_) => {
+                    "unsupported_payload_version"
+                }
+                zann_core::PayloadError::InvalidJson(_) => "payload_decode_failed",
+            };
+            ServiceError::new(kind, err.to_string())
+        })
     }
 
     pub async fn decrypt_payload_for_item(
@@ -350,6 +352,7 @@ impl<'a> LocalServices<'a> {
                 }
             }
         }
+        let expected = item.clone();
         let prev_version = item.version;
         let prev_payload_enc = item.payload_enc.clone();
         let prev_checksum = item.checksum.clone();
@@ -369,12 +372,8 @@ impl<'a> LocalServices<'a> {
         item.path = normalized_path.clone();
         item.type_id = type_id;
         item.sync_status = SyncStatus::Modified;
-        repo.update(&item)
-            .await
-            .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
-        if !Self::payloads_equal(&prev_payload, &payload)? {
+        let history = if !Self::payloads_equal(&prev_payload, &payload)? {
             let (source, sync_status) = (HistorySource::Local, HistorySyncStatus::Pending);
-            let history_repo = LocalItemHistoryRepo::new(self.pool);
             let history = LocalItemHistory {
                 id: Uuid::now_v7(),
                 storage_id,
@@ -392,11 +391,15 @@ impl<'a> LocalServices<'a> {
                 sync_status,
                 created_at: now,
             };
-            let _ = history_repo.create(&history).await;
-        }
-        self.track_pending(
-            storage_id,
-            LocalPendingChange {
+            Some(history)
+        } else {
+            None
+        };
+        self.commit_item_edit(
+            &expected,
+            &item,
+            history.as_ref(),
+            Some(&LocalPendingChange {
                 metadata: item.metadata.clone(),
                 id: Uuid::now_v7(),
                 storage_id,
@@ -410,7 +413,7 @@ impl<'a> LocalServices<'a> {
                 type_id: Some(item.type_id.clone()),
                 base_seq: Some(prev_version),
                 created_at: now,
-            },
+            }),
         )
         .await?;
         Ok(item.id)
@@ -448,6 +451,14 @@ impl<'a> LocalServices<'a> {
             return Err(ServiceError::new("history_no_changes", "no changes"));
         }
 
+        // Both the current item and the replacement must be understood before
+        // writing history, replacing ciphertext, or publishing a pending edit.
+        self.decrypt_payload(storage_id, item.vault_id, item.id, &item.payload_enc)
+            .await?;
+        self.decrypt_payload(storage_id, item.vault_id, item.id, &history.payload_enc)
+            .await?;
+
+        let expected = item.clone();
         let prev_version = item.version;
         let now = Utc::now();
         let (source, sync_status) = (HistorySource::Local, HistorySyncStatus::Pending);
@@ -468,10 +479,6 @@ impl<'a> LocalServices<'a> {
             sync_status,
             created_at: now,
         };
-        history_repo
-            .create(&history_snapshot)
-            .await
-            .map_err(|err| ServiceError::new("history_create_failed", err.to_string()))?;
 
         let key = self.payload_key_for_id(storage_id, item.vault_id).await?;
         let key_fp = Self::key_fingerprint(&key);
@@ -482,13 +489,11 @@ impl<'a> LocalServices<'a> {
         item.updated_at = now;
         item.deleted_at = None;
         item.sync_status = SyncStatus::Modified;
-        repo.update(&item)
-            .await
-            .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
-
-        self.track_pending(
-            storage_id,
-            LocalPendingChange {
+        self.commit_item_edit(
+            &expected,
+            &item,
+            Some(&history_snapshot),
+            Some(&LocalPendingChange {
                 metadata: item.metadata.clone(),
                 id: Uuid::now_v7(),
                 storage_id,
@@ -502,7 +507,7 @@ impl<'a> LocalServices<'a> {
                 type_id: Some(item.type_id.clone()),
                 base_seq: Some(prev_version),
                 created_at: now,
-            },
+            }),
         )
         .await?;
 
@@ -521,6 +526,9 @@ impl<'a> LocalServices<'a> {
         if item.deleted_at.is_none() {
             return Err(ServiceError::new("item_not_deleted", "item is not deleted"));
         }
+        self.decrypt_payload(storage_id, item.vault_id, item.id, &item.payload_enc)
+            .await?;
+        let expected = item.clone();
         let pending_repo = PendingChangeRepo::new(self.pool);
         let pending = pending_repo
             .list_by_item(storage_id, item_id)
@@ -543,19 +551,17 @@ impl<'a> LocalServices<'a> {
                 item.name = Self::name_from_path(&item.path);
             }
         }
-        let _ = pending_repo.delete_by_item(storage_id, item_id).await;
         let prev_version = item.version;
         item.deleted_at = None;
         item.sync_status = SyncStatus::Modified;
         item.updated_at = Utc::now();
         item.version = item.version.saturating_add(1);
-        repo.update(&item)
-            .await
-            .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
         if has_pending_create || was_local_only_delete {
-            self.track_pending(
-                storage_id,
-                LocalPendingChange {
+            self.commit_item_edit(
+                &expected,
+                &item,
+                None,
+                Some(&LocalPendingChange {
                     metadata: item.metadata.clone(),
                     id: Uuid::now_v7(),
                     storage_id,
@@ -569,13 +575,15 @@ impl<'a> LocalServices<'a> {
                     type_id: Some(item.type_id.clone()),
                     base_seq: None,
                     created_at: item.updated_at,
-                },
+                }),
             )
             .await?;
         } else {
-            self.track_pending(
-                storage_id,
-                LocalPendingChange {
+            self.commit_item_edit(
+                &expected,
+                &item,
+                None,
+                Some(&LocalPendingChange {
                     metadata: item.metadata.clone(),
                     id: Uuid::now_v7(),
                     storage_id,
@@ -589,7 +597,7 @@ impl<'a> LocalServices<'a> {
                     type_id: Some(item.type_id.clone()),
                     base_seq: Some(prev_version),
                     created_at: item.updated_at,
-                },
+                }),
             )
             .await?;
         }

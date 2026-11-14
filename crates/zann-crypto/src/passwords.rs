@@ -4,6 +4,8 @@ use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
+use unicode_normalization::UnicodeNormalization;
+use zeroize::Zeroizing;
 
 #[derive(Debug, Clone)]
 pub struct KdfParams {
@@ -78,6 +80,9 @@ pub fn derive_auth_hash(
     )
     .map_err(|_| "invalid_kdf_params")?;
     let argon2 = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    // Password equivalence is owned here, before every client/server KDF.
+    // NFC preserves compatibility distinctions and all whitespace.
+    let password = Zeroizing::new(password.nfc().collect::<String>());
     let mut key = [0u8; 32];
     argon2
         .hash_password_into(password.as_bytes(), &salt_bytes, &mut key)

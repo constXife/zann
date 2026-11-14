@@ -240,6 +240,7 @@ pub(crate) async fn apply_change(
     identity: &Identity,
     device_id: Uuid,
     vault_id: Uuid,
+    shared_payload_key: Option<&zann_crypto::SecretKey>,
     change: SyncPushChange,
 ) -> Result<ApplyChangeResult, ApplyChangeError> {
     if !change.metadata.validate() {
@@ -373,6 +374,20 @@ pub(crate) async fn apply_change(
     }
 
     let now = Utc::now();
+    if let (Some(key), Some(item)) = (shared_payload_key, existing.as_ref()) {
+        crate::domains::items::payload_admission::admit(key, vault_id, item.id, &item.payload_enc)
+            .map_err(|error| match error {
+                crate::domains::errors::ServiceError::Conflict(code) => ApplyChangeError {
+                    status: StatusCode::CONFLICT,
+                    error: code,
+                },
+                crate::domains::errors::ServiceError::Internal(code) => ApplyChangeError {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    error: code,
+                },
+                _ => db_error(),
+            })?;
+    }
     let item_version = match (operation, existing) {
         (ChangeType::Create, None) => {
             let (payload_enc, checksum) =

@@ -186,7 +186,7 @@ pub(crate) fn validate_typed_payload(
     type_id: &str,
 ) -> Result<(), ItemContractError> {
     let type_id = canonical_type_id(type_id)?;
-    if payload.v != 1 || payload.type_id != type_id {
+    if payload.v != zann_crypto::PAYLOAD_VERSION || payload.type_id != type_id {
         return Err(ItemContractError::InvalidPayload);
     }
 

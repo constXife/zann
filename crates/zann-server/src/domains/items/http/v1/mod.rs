@@ -45,7 +45,7 @@ pub fn router() -> Router<AppState> {
         )
 }
 
-fn map_items_error(error: ItemsError) -> axum::response::Response {
+pub(crate) fn map_items_error(error: ItemsError) -> axum::response::Response {
     match error {
         ItemsError::ForbiddenNoBody => StatusCode::FORBIDDEN.into_response(),
         ItemsError::Forbidden(code) => (

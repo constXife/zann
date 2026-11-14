@@ -12,19 +12,26 @@
 ## Implementation status
 
 Accepted policy does not mean every hardening item below is implemented.
-As of 2026-11-13, `zann-crypto` has a single `BLOB_VERSION = 1` envelope and
-`tests/fixtures/crypto/v1_local_vault.json` is exercised by
-`crates/zann-crypto/tests/compatibility.rs`. `LocalVault::open` still invokes
-`migrate_local` without an automatic pre-migration snapshot. NFC normalization,
-forward-safe payload handling, broader fixtures, systematic
-`Decrypt-Before-Commit`, pre-migration snapshots and complete canonical/server
-plain import/export remain required implementation work.
+The #245 candidate adds centralized NFC derivation, typed payload-version
+admission, verified key/rotation writers and password/device/rotation golden
+vectors alongside the unchanged `v1_local_vault.json`. Local mutation admission
+is coupled to an exact-source transaction; shared-server mutations admit the
+locked source payload. See the [corpus](../../tests/fixtures/crypto/README.md)
+and [breaking cutover notes](../migrations/crypto-v1-nfc.md).
+
+The NFC candidate builds on the merged #244 / PR #264 recovery path. Operators
+can build that pre-NFC revision and export current server item data with the old
+password derivation before upgrading. Its streaming restore round-trip is
+implemented and tested. Canonical client backup import is implemented (#243).
+`LocalVault::open` still invokes `migrate_local`
+without an automatic pre-migration snapshot; that separate hardening remains
+outstanding.
 
 An intentional format cutover must wait for the lossless export/import path
 and its round-trip tests; this documentation change does not authorize a
 cutover or change any persisted bytes.
 
-The #244 implementation candidate adds paged shared-server export and symmetric
+The merged #244 implementation adds paged shared-server export and symmetric
 atomic import, with a PostgreSQL round-trip of 132 current typed items under a
 new SMK and destination UUID. Its exact preservation scope and excluded server
 state are documented in [Shared server vault backups](../Server-Backups.md).

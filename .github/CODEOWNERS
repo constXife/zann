@@ -81,3 +81,14 @@
 /crates/zann-browser/ @constXife
 /crates/zann-db/src/services/create_item.rs @constXife
 /crates/zann-db/src/local/item_history_repo.rs @constXife
+# Payload admission and atomic mutation publication (#245)
+/crates/zann-db/src/local/item_repo/ @constXife
+/crates/zann-db/tests/local_payload_versions.rs @constXife
+/crates/zann-server/src/domains/items/payload_admission.rs @constXife
+/crates/zann-server/src/domains/items/service.rs @constXife
+/crates/zann-server/src/domains/secrets/service.rs @constXife
+/crates/zann-server/src/domains/sync/service.rs @constXife
+/crates/zann-server/src/domains/sync/http/v1/handlers/push_apply.rs @constXife
+/crates/zann-server/src/domains/vaults/http/v1/shared/handlers/rotation_commit.rs @constXife
+/crates/zann-server/src/domains/items/http/v1/mod.rs @constXife
+/crates/zann-server/src/domains/vaults/http/v1/shared/handlers/items.rs @constXife

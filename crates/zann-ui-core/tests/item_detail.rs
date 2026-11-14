@@ -199,7 +199,9 @@ fn projection_and_parse_errors_redact_secrets() {
         let error = project_item_fields(&payload.to_string()).expect_err("invalid schema");
         assert!(!format!("{error:?} {error}").contains(sentinel));
         // The canonical error retains the original serde diagnostic for callers.
-        let zann_core::secrets::PayloadError::InvalidJson(source) = error;
+        let zann_core::secrets::PayloadError::InvalidJson(source) = error else {
+            panic!("expected JSON schema error");
+        };
         assert!(source.column() > 0);
     }
     assert!(project_item_fields("{").is_err());

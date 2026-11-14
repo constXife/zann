@@ -181,7 +181,7 @@ fn challenge() -> [u8; 32] {
     [0u8; 32]
 }
 
-fn derive_key(hmac_output: &[u8; 32]) -> [u8; 32] {
+pub(super) fn derive_key(hmac_output: &[u8; 32]) -> [u8; 32] {
     blake3::derive_key(DWK_CONTEXT, hmac_output)
 }
 

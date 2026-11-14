@@ -276,6 +276,9 @@ impl<'a> ItemsService for LocalServices<'a> {
         else {
             return Err(ServiceError::new("item_not_found", "item not found"));
         };
+        self.decrypt_payload(storage_id, item.vault_id, item.id, &item.payload_enc)
+            .await?;
+        let expected = item.clone();
         let pending_repo = PendingChangeRepo::new(self.pool);
         let pending = pending_repo
             .list_by_item(storage_id, item_id)
@@ -285,14 +288,11 @@ impl<'a> ItemsService for LocalServices<'a> {
             .iter()
             .any(|change| change.operation == ChangeType::Create && change.base_seq.is_none());
         if has_pending_create {
-            let _ = pending_repo.delete_by_item(storage_id, item_id).await;
             item.deleted_at = Some(Utc::now());
             item.sync_status = SyncStatus::LocalDeleted;
             item.updated_at = Utc::now();
             item.version = item.version.saturating_add(1);
-            repo.update(&item)
-                .await
-                .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
+            self.commit_item_edit(&expected, &item, None, None).await?;
             return Ok(());
         }
         let prev_version = item.version;
@@ -300,12 +300,11 @@ impl<'a> ItemsService for LocalServices<'a> {
         item.sync_status = SyncStatus::Tombstone;
         item.updated_at = Utc::now();
         item.version = item.version.saturating_add(1);
-        repo.update(&item)
-            .await
-            .map_err(|err| ServiceError::new("item_update_failed", err.to_string()))?;
-        self.track_pending(
-            storage_id,
-            LocalPendingChange {
+        self.commit_item_edit(
+            &expected,
+            &item,
+            None,
+            Some(&LocalPendingChange {
                 metadata: item.metadata.clone(),
                 id: Uuid::now_v7(),
                 storage_id,
@@ -319,7 +318,7 @@ impl<'a> ItemsService for LocalServices<'a> {
                 type_id: Some(item.type_id.clone()),
                 base_seq: Some(prev_version),
                 created_at: item.updated_at,
-            },
+            }),
         )
         .await?;
         Ok(())

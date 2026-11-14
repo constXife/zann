@@ -26,18 +26,34 @@ fn separate_name_and_folder_inputs_rename_move_and_reject_missing_names_atomical
 }
 
 #[test]
-fn edit_preserves_typed_metadata_extras_and_payload_version() {
-    let json = r#"{"v":7,"typeId":"custom","fields":{"z":{"kind":"text","value":"sentinel","meta":{"masked":true,"multiline":true,"readonly":true}},"username":{"kind":"text","value":"user"}},"extra":{"issuer":"source"}}"#;
+fn edit_preserves_typed_metadata_extras_and_supported_payload_version() {
+    let json = r#"{"v":1,"typeId":"custom","fields":{"z":{"kind":"text","value":"sentinel","meta":{"masked":true,"multiline":true,"readonly":true}},"username":{"kind":"text","value":"user"}},"extra":{"issuer":"source"}}"#;
     let mut draft = ItemDraft::edit("group/item".into(), json).unwrap();
     assert_eq!(draft.fields[0].key, "username");
     assert!(draft.fields[1].masked());
     draft.fields[1].value.value = "edited".into();
     let payload: serde_json::Value = serde_json::from_str(&draft.payload_json().unwrap()).unwrap();
-    assert_eq!(payload["v"], 7);
+    assert_eq!(payload["v"], 1);
     assert_eq!(payload["typeId"], "custom");
     assert_eq!(payload["extra"]["issuer"], "source");
     assert_eq!(payload["fields"]["z"]["meta"]["readonly"], true);
     assert!(!format!("{draft:?} {:?}", draft.fields).contains("sentinel"));
+}
+
+#[test]
+fn future_payloads_cannot_become_editable_drafts() {
+    let error = ItemDraft::edit(
+        "item".into(),
+        r#"{"fields":{"x":{"kind":"future-kind","value":"private-sentinel"}},"v":7}"#,
+    )
+    .unwrap_err();
+    assert!(matches!(
+        error,
+        DraftError::Payload(zann_core::secrets::PayloadError::UnsupportedPayloadVersion(
+            7
+        ))
+    ));
+    assert!(!format!("{error:?} {error}").contains("sentinel"));
 }
 
 #[test]

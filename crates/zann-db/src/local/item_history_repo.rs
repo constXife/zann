@@ -12,6 +12,13 @@ impl<'a> LocalItemHistoryRepo<'a> {
     }
 
     pub async fn create(&self, history: &LocalItemHistory) -> Result<(), sqlx_core::Error> {
+        Self::create_in(&mut *self.pool.acquire().await?, history).await
+    }
+
+    pub(crate) async fn create_in(
+        connection: &mut sqlx_sqlite::SqliteConnection,
+        history: &LocalItemHistory,
+    ) -> Result<(), sqlx_core::Error> {
         query!(
             r#"
             INSERT INTO item_history (
@@ -49,7 +56,7 @@ impl<'a> LocalItemHistoryRepo<'a> {
             history.sync_status.as_i32(),
             history.created_at
         )
-        .execute(self.pool)
+        .execute(connection)
         .await
         .map(|_| ())
     }

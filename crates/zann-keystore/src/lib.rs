@@ -306,3 +306,6 @@ mod tests {
 
 #[cfg(all(test, feature = "remembered"))]
 mod hardware_tests;
+
+#[cfg(all(test, feature = "remembered"))]
+mod compatibility;

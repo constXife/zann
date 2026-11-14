@@ -156,6 +156,17 @@ jobs:
               - 'crates/zann-db/src/repo/items.rs'
               - 'crates/zann-db/src/repo/vaults.rs'
               - 'crates/zann-db/src/repo/devices.rs'
+              - 'crates/zann-db/src/local/item_repo/**'
+              - 'crates/zann-db/src/local/item_history_repo.rs'
+              - 'crates/zann-db/tests/local_payload_versions.rs'
+              - 'crates/zann-server/src/domains/items/payload_admission.rs'
+              - 'crates/zann-server/src/domains/items/http/v1/mod.rs'
+              - 'crates/zann-server/src/domains/vaults/http/v1/shared/handlers/items.rs'
+              - 'crates/zann-server/src/domains/items/service.rs'
+              - 'crates/zann-server/src/domains/secrets/service.rs'
+              - 'crates/zann-server/src/domains/sync/service.rs'
+              - 'crates/zann-server/src/domains/sync/http/v1/handlers/push_apply.rs'
+              - 'crates/zann-server/src/domains/vaults/http/v1/shared/handlers/rotation_commit.rs'
               - 'crates/zann-keystore/**'
             # The architecture guard is intentionally cheap. Run it whenever a
             # client shell, a shared capability, or their dependency manifests
@@ -352,11 +363,11 @@ jobs:
       - name: Tests (native framing isolation)
         run: cargo test -p zann-client --no-default-features --features native-messaging --test native_messaging --locked
       - name: Tests (audit-surface)
-        run: cargo test -p zann-crypto -p zann-autofill
+        run: cargo test -p zann-crypto -p zann-autofill -p zann-keystore --locked
       - name: Tests (pull-only SQLite sync adapter)
         run: cargo test -p zann-client-sqlite --locked
       - name: Tests (SQLite sync and path seams)
-        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration --test local_history
+        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration --test local_history --test local_payload_versions
 
   extension:
     needs: changes

@@ -539,6 +539,7 @@ pub async fn set_secret(
         update_secret_aggregate(
             state,
             identity,
+            &vault,
             expected_row_version,
             &item,
             ChangeType::Update,
@@ -681,6 +682,7 @@ pub async fn rotate_secret(
     update_secret_aggregate(
         state,
         identity,
+        &vault,
         expected_row_version,
         &item,
         ChangeType::Update,
@@ -745,6 +747,7 @@ async fn create_secret_aggregate(
 async fn update_secret_aggregate(
     state: &AppState,
     identity: &Identity,
+    vault: &Vault,
     expected_row_version: i64,
     item: &Item,
     change_type: ChangeType,
@@ -771,6 +774,12 @@ async fn update_secret_aggregate(
     if locked.type_id != SECRET_TYPE_ID || locked.sync_status != SyncStatus::Active {
         return Err(SecretError::NotFound);
     }
+    crate::domains::items::payload_admission::ensure_supported(
+        vault,
+        state.server_master_key.as_deref(),
+        locked.id,
+        &locked.payload_enc,
+    )?;
     let expected_version =
         next_item_version(locked.version).map_err(|_| SecretError::Conflict("invalid_version"))?;
     if item.version != expected_version {
@@ -1148,8 +1157,8 @@ fn encrypt_secret_payload(
             }
         }
     })?;
-    let payload_enc =
-        core_crypto::encrypt_payload(&vault_key, vault.id, item_id, &typed).map_err(|err| {
+    let payload_enc = core_crypto::encrypt_payload_verified(&vault_key, vault.id, item_id, &typed)
+        .map_err(|err| {
             tracing::error!(event = "secret_encrypt_failed", error = %err);
             SecretError::Internal("payload_encrypt_failed")
         })?;
