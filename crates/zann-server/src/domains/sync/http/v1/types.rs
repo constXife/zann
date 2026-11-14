@@ -45,6 +45,8 @@ pub(crate) struct SyncSharedPullResponse {
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct SyncPullChange {
+    #[serde(flatten)]
+    pub(crate) metadata: zann_core::ItemMetadata,
     pub(crate) item_id: String,
     pub(crate) operation: ChangeType,
     pub(crate) seq: i64,
@@ -60,6 +62,8 @@ pub(crate) struct SyncPullChange {
 
 #[derive(Serialize, JsonSchema)]
 pub(crate) struct SyncSharedPullChange {
+    #[serde(flatten)]
+    pub(crate) metadata: zann_core::ItemMetadata,
     pub(crate) item_id: String,
     pub(crate) operation: ChangeType,
     pub(crate) seq: i64,
@@ -111,6 +115,8 @@ pub(crate) struct SyncSharedPushRequest {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SyncPushChange {
+    #[serde(flatten)]
+    pub(crate) metadata: zann_core::ItemMetadata,
     pub(crate) item_id: Uuid,
     pub(crate) operation: ChangeType,
     pub(crate) payload_enc: Option<Vec<u8>>,
@@ -124,6 +130,8 @@ pub(crate) struct SyncPushChange {
 
 #[derive(Deserialize, JsonSchema)]
 pub(crate) struct SyncSharedPushChange {
+    #[serde(flatten)]
+    pub(crate) metadata: zann_core::ItemMetadata,
     pub(crate) item_id: Uuid,
     pub(crate) operation: ChangeType,
     #[serde(default)]

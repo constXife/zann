@@ -59,3 +59,11 @@ The remote-only `zann-client::server` capability and the decomposed
 Server-replica cutover: `crates/zann-db/migrations/0004_server_replicas.sql`
 and `crates/zann-db/tests/server_replicas_migration.rs` preserve legacy data
 on refusal and retain server ciphertext and pending changes during upgrade.
+
+
+Server backup restoration additionally covers `zann-core/src/item_metadata.rs`,
+`zann-db/src/services/create_item.rs` and migration `0005_item_metadata.sql`.
+Item attributes participate in the same sync CAS proof as ciphertext; legacy
+unknown attributes are refused rather than synthesized. The backup import
+session, file preflight and transactional publication remain under the existing
+application/sync/SQLite owners.

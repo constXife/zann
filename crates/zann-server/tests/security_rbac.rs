@@ -255,6 +255,7 @@ async fn readonly_member_cannot_push_sync() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": Uuid::now_v7(),
+            "tags": null, "favorite": false,
             "operation": ChangeType::Update.as_i32(),
             "base_seq": 1,
         }],

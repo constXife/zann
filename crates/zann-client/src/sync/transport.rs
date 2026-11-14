@@ -537,6 +537,7 @@ mod tests {
                 })
                 .collect();
             changes.push(PersonalPullChangeWire {
+                metadata: Default::default(),
                 item_id: item_id.to_string(),
                 operation: ChangeType::Update.as_i32(),
                 seq: i64::try_from(index).expect("page index fits i64") + 1,
@@ -568,3 +569,6 @@ mod tests {
         assert_eq!(CATALOG_PATH, "v1/vaults?limit=200&offset=0&sort=asc");
     }
 }
+
+#[cfg(feature = "app")]
+mod backup;

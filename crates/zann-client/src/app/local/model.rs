@@ -128,8 +128,8 @@ impl std::fmt::Debug for ItemHistoryDetail {
 
 #[derive(Debug, Clone)]
 pub struct BackupImportOptions {
-    /// Explicit server storage to import into, including a disconnected replica.
-    /// A missing target is rejected; import never creates a standalone storage.
+    /// Explicit destination server storage. A missing target is rejected;
+    /// backup never selects another account or creates standalone storage.
     pub target_storage_id: Option<String>,
 }
 

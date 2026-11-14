@@ -352,9 +352,10 @@ fn map_counts(counts: DomainItemCounts) -> ItemCountsView {
 /// flattening everything into one string, so the UI can still translate.
 impl From<crate::maintenance::BackupError> for LocalError {
     fn from(err: crate::maintenance::BackupError) -> Self {
-        match err.kind.as_str() {
-            "backup_failed" => LocalError::Service(err.message),
-            _ => LocalError::Service(format!("{}: {}", err.kind, err.message)),
+        LocalError::Backup {
+            kind: err.kind.clone(),
+            message: err.message.clone(),
+            source: Box::new(err),
         }
     }
 }

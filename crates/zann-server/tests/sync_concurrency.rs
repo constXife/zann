@@ -218,6 +218,7 @@ async fn sync_push_is_atomic_on_error() {
         "changes": [
             {
                 "item_id": Uuid::now_v7(),
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [1, 2, 3],
                 "checksum": payload_checksum(&[1_u8, 2, 3]),
@@ -227,6 +228,7 @@ async fn sync_push_is_atomic_on_error() {
             },
             {
                 "item_id": Uuid::now_v7(),
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [4, 5, 6],
                 "path": "dup/path",
@@ -266,6 +268,7 @@ async fn sync_push_conflict_is_atomic() {
         "changes": [
             {
                 "item_id": Uuid::now_v7(),
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [1, 2, 3],
                 "checksum": payload_checksum(&[1_u8, 2, 3]),
@@ -274,6 +277,7 @@ async fn sync_push_conflict_is_atomic() {
             },
             {
                 "item_id": Uuid::now_v7(),
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [4, 5, 6],
                 "checksum": payload_checksum(&[4_u8, 5, 6]),
@@ -314,6 +318,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": item_id,
+            "tags": null, "favorite": false,
             "operation": ChangeType::Create.as_i32(),
             "payload_enc": [9, 9, 9],
             "checksum": payload_checksum(&[9_u8, 9, 9]),
@@ -334,6 +339,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": item_id,
+            "tags": null, "favorite": false,
             "operation": ChangeType::Update.as_i32(),
             "payload_enc": [8],
             "checksum": payload_checksum(&[8_u8]),
@@ -352,6 +358,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": item_id,
+            "tags": null, "favorite": false,
             "operation": ChangeType::Update.as_i32(),
             "payload_enc": [1],
             "checksum": payload_checksum(&[1_u8]),
@@ -362,6 +369,7 @@ async fn concurrent_updates_resolve_with_single_conflict() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": item_id,
+            "tags": null, "favorite": false,
             "operation": ChangeType::Update.as_i32(),
             "payload_enc": [2],
             "checksum": payload_checksum(&[2_u8]),
@@ -428,6 +436,7 @@ async fn concurrent_creates_for_one_path_resolve_without_a_server_error() {
             "vault_id": vault_id,
             "changes": [{
                 "item_id": item_id,
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Create.as_i32(),
                 "payload_enc": [byte],
                 "checksum": payload_checksum(&[byte]),

@@ -121,6 +121,8 @@ fn reads_metadata_and_streams_items() {
         }],
         items: vec![
             PlainBackupItem {
+                tags: None,
+                favorite: false,
                 id: Some(Uuid::now_v7().to_string()),
                 storage_id: Uuid::from_u128(1).to_string(),
                 vault_id: Uuid::now_v7().to_string(),
@@ -133,6 +135,8 @@ fn reads_metadata_and_streams_items() {
                 deleted_at: None,
             },
             PlainBackupItem {
+                tags: None,
+                favorite: false,
                 id: Some(Uuid::now_v7().to_string()),
                 storage_id: Uuid::from_u128(1).to_string(),
                 vault_id: Uuid::now_v7().to_string(),
@@ -176,6 +180,8 @@ fn streams_items_async() {
         vaults: vec![],
         items: vec![
             PlainBackupItem {
+                tags: None,
+                favorite: false,
                 id: Some(Uuid::now_v7().to_string()),
                 storage_id: Uuid::from_u128(1).to_string(),
                 vault_id: Uuid::now_v7().to_string(),
@@ -188,6 +194,8 @@ fn streams_items_async() {
                 deleted_at: None,
             },
             PlainBackupItem {
+                tags: None,
+                favorite: false,
                 id: Some(Uuid::now_v7().to_string()),
                 storage_id: Uuid::from_u128(1).to_string(),
                 vault_id: Uuid::now_v7().to_string(),
@@ -250,6 +258,8 @@ fn writes_backup_streaming() {
     }];
     let items = VecDeque::from(vec![
         PlainBackupItem {
+            tags: None,
+            favorite: false,
             id: Some(Uuid::now_v7().to_string()),
             storage_id: Uuid::from_u128(1).to_string(),
             vault_id: Uuid::now_v7().to_string(),
@@ -262,6 +272,8 @@ fn writes_backup_streaming() {
             deleted_at: None,
         },
         PlainBackupItem {
+            tags: None,
+            favorite: false,
             id: Some(Uuid::now_v7().to_string()),
             storage_id: Uuid::from_u128(1).to_string(),
             vault_id: Uuid::now_v7().to_string(),

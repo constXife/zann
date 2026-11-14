@@ -199,3 +199,28 @@ fn sync_error_kind(error: &SyncError) -> &'static str {
         _ => "sync_internal",
     }
 }
+
+pub async fn import_backup(
+    root: &Path,
+    ctx: &zann_client_sqlite::maintenance::backup::BackupCtx,
+    path: std::path::PathBuf,
+    target: Option<String>,
+) -> Result<
+    zann_client_sqlite::maintenance::backup::ImportReport,
+    zann_client_sqlite::maintenance::backup::BackupError,
+> {
+    use zann_client_sqlite::maintenance::backup::BackupError;
+    let target = target
+        .ok_or_else(|| BackupError::new("import_target_required", "select a server storage"))?;
+    let client =
+        app_client(root).map_err(|error| BackupError::new("backup_configuration", error))?;
+    let operation = SessionOperation::new(Instant::now() + Duration::from_secs(10 * 60)).0;
+    let session = client
+        .backup_import_session(
+            &target,
+            SecretKey::from_bytes(*ctx.master_key.as_bytes()),
+            operation,
+        )
+        .map_err(BackupError::source)?;
+    zann_client_sqlite::maintenance::backup::plain_import(ctx, path, &session).await
+}

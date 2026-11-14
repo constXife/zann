@@ -51,6 +51,14 @@ impl<'a> ExportItemStreamer<'a> {
     pub(super) async fn next_item(&mut self) -> Result<Option<PlainBackupItem>, anyhow::Error> {
         loop {
             if let Some(item) = self.buffer.pop_front() {
+                // Confirmed remote tombstones carry no recoverable payload.
+                if item.deleted_at.is_some() && item.payload_enc.is_empty() {
+                    continue;
+                }
+                let metadata = item
+                    .metadata
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("metadata refresh required"))?;
                 let payload = self
                     .services
                     .decrypt_payload_for_item(
@@ -60,8 +68,10 @@ impl<'a> ExportItemStreamer<'a> {
                         &item.payload_enc,
                     )
                     .await
-                    .map_err(|err| anyhow::anyhow!(err.message))?;
+                    .map_err(|err| anyhow::anyhow!(err))?;
                 let backup_item = PlainBackupItem {
+                    tags: metadata.tags.clone(),
+                    favorite: metadata.favorite,
                     id: Some(item.id.to_string()),
                     storage_id: item.storage_id.to_string(),
                     vault_id: item.vault_id.to_string(),
@@ -327,10 +337,13 @@ where
     Ok(())
 }
 
-pub async fn stream_backup_items_async<F, Fut>(path: &Path, mut handler: F) -> Result<(), String>
+pub async fn stream_backup_items_async<F, Fut>(
+    path: &Path,
+    mut handler: F,
+) -> Result<(), BackupError>
 where
     F: FnMut(PlainBackupItem, usize) -> Fut,
-    Fut: std::future::Future<Output = Result<(), String>>,
+    Fut: std::future::Future<Output = Result<(), BackupError>>,
 {
     let (tx, mut rx) = mpsc::channel(32);
     let path = path.to_path_buf();
@@ -340,7 +353,7 @@ where
                 .map_err(|_| "channel_closed".to_string())
         });
         if let Err(err) = parse_result {
-            let _ = tx.blocking_send(Err(err.to_string()));
+            let _ = tx.blocking_send(Err(BackupError::source(err)));
         }
     });
 
@@ -356,6 +369,6 @@ where
         }
     }
 
-    handle.await.map_err(|err| err.to_string())?;
+    handle.await.map_err(BackupError::source)?;
     Ok(())
 }

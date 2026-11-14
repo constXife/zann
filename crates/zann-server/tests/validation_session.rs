@@ -222,6 +222,7 @@ async fn payload_too_large_is_rejected() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": Uuid::now_v7(),
+            "tags": null, "favorite": false,
             "operation": ChangeType::Create.as_i32(),
             "payload_enc": payload_enc,
             "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3]),
@@ -259,6 +260,7 @@ async fn invalid_item_is_rejected() {
         "vault_id": vault_id,
         "changes": [{
             "item_id": Uuid::now_v7(),
+            "tags": null, "favorite": false,
             "operation": ChangeType::Create.as_i32(),
             "payload_enc": [1, 2, 3],
             "checksum": zann_crypto::payload_checksum(&[1_u8, 2, 3]),

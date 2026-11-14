@@ -14,7 +14,7 @@ pub enum FieldKind {
     Note,
 }
 
-#[derive(Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct FieldMeta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -53,7 +53,7 @@ impl Drop for FieldMeta {
 
 impl ZeroizeOnDrop for FieldMeta {}
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FieldValue {
     pub kind: FieldKind,
@@ -88,7 +88,7 @@ impl Drop for FieldValue {
 
 impl ZeroizeOnDrop for FieldValue {}
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct EncryptedPayload {
     pub v: u32,

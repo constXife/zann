@@ -8,7 +8,9 @@
 pub mod api;
 pub mod auth;
 pub mod constants;
+pub mod item_metadata;
 pub mod item_subtitle;
+pub use item_metadata::ItemMetadata;
 pub mod models;
 pub mod security_profile;
 pub mod services;

@@ -103,6 +103,7 @@ impl LocalVault {
 
 #[derive(Clone)]
 pub struct LocalItem {
+    pub metadata: Option<zann_core::ItemMetadata>,
     pub id: Uuid,
     pub storage_id: Uuid,
     pub vault_id: Uuid,
@@ -137,6 +138,7 @@ pub struct LocalSyncCheckpoint {
 
 #[derive(Clone)]
 pub struct LocalPendingChange {
+    pub metadata: Option<zann_core::ItemMetadata>,
     pub id: Uuid,
     pub storage_id: Uuid,
     pub vault_id: Uuid,
@@ -383,6 +385,9 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalItem {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
         let sync_status: i32 = row.try_get("sync_status")?;
         Ok(Self {
+            metadata: row
+                .try_get::<Option<sqlx_core::types::Json<zann_core::ItemMetadata>>, _>("metadata")?
+                .map(|j| j.0),
             id: parse_uuid(row, "id")?,
             storage_id: parse_uuid(row, "storage_id")?,
             vault_id: parse_uuid(row, "vault_id")?,
@@ -428,6 +433,9 @@ impl sqlx_core::from_row::FromRow<'_, SqliteRow> for LocalPendingChange {
     fn from_row(row: &SqliteRow) -> Result<Self, sqlx_core::Error> {
         let operation: i32 = row.try_get("operation")?;
         Ok(Self {
+            metadata: row
+                .try_get::<Option<sqlx_core::types::Json<zann_core::ItemMetadata>>, _>("metadata")?
+                .map(|j| j.0),
             id: parse_uuid(row, "id")?,
             storage_id: parse_uuid(row, "storage_id")?,
             vault_id: parse_uuid(row, "vault_id")?,

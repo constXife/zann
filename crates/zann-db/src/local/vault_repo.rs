@@ -942,17 +942,17 @@ async fn bind_cache_key_fingerprints_leased_in(
         LocalGenerationBindingState::Exact | LocalGenerationBindingState::Older => {
             if fingerprint_states
                 .iter()
-                .any(|state| state.fingerprint != 1)
+                .any(|state| state.fingerprint == 0 && state.legacy)
             {
                 return Err(LocalVaultKeyBindError::GenerationChanged);
             }
             ensure_bound_generation_and_advance(tx, expected_storage.storage_id(), generation)
                 .await
                 .map_err(map_storage_proof_key_error)?;
-            Ok(CacheKeyFingerprintBatchBind {
-                bound: 0,
-                already_bound: bindings.len(),
-            })
+            // A newly discovered vault has no fingerprint yet. Reuse the
+            // canonical empty-projection proof and CAS under this same lease;
+            // existing bindings remain exact and legacy adoption stays excluded.
+            bind_cache_key_fingerprints_in(tx, bindings).await
         }
     }
 }

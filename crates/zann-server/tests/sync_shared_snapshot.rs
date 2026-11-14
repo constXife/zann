@@ -106,6 +106,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Create.as_i32(),
                     "payload_enc": payload,
                     "checksum": checksum,
@@ -129,6 +130,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq,
                     "payload_enc": [5, 6, 7],
@@ -141,6 +143,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq,
                     "checksum": core_crypto::payload_checksum(&[5_u8, 6, 7]),
@@ -153,6 +156,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq,
                     "payload_enc": [5, 6, 7],
@@ -174,6 +178,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
             "vault_id": vault_id,
             "changes": [{
                 "item_id": item_id,
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Update.as_i32(),
                 "payload_enc": [5, 6, 7],
                 "checksum": core_crypto::payload_checksum(&[5_u8, 6, 7]),
@@ -183,6 +188,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
             "vault_id": vault_id,
             "changes": [{
                 "item_id": item_id,
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Update.as_i32(),
                 "base_seq": 0,
                 "payload_enc": [5, 6, 7],
@@ -193,6 +199,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
             "vault_id": vault_id,
             "changes": [{
                 "item_id": item_id,
+                "tags": null, "favorite": false,
                 "operation": ChangeType::Update.as_i32(),
                 "base_seq": -1,
                 "payload_enc": [5, 6, 7],
@@ -216,6 +223,7 @@ async fn personal_push_verifies_payload_pairs_and_never_advances_pull_cursor() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq + 100,
                     "payload_enc": [5, 6, 7],
@@ -261,6 +269,7 @@ async fn personal_push_rolls_back_on_a_conflicting_history_generation() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Create.as_i32(),
                     "payload_enc": original_payload,
                     "checksum": original_checksum,
@@ -310,6 +319,7 @@ async fn personal_push_rolls_back_on_a_conflicting_history_generation() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq,
                     "payload_enc": replacement_payload,
@@ -391,6 +401,7 @@ async fn sync_update_accepts_the_authoritative_snapshot_from_an_ordinary_create(
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq,
                     "payload_enc": replacement,
@@ -425,6 +436,7 @@ async fn shared_push_rejects_type_changes_without_mutating_item_history_or_chang
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Create.as_i32(),
                     "path": "immutable-type",
                     "name": "immutable-type",
@@ -467,6 +479,7 @@ async fn shared_push_rejects_type_changes_without_mutating_item_history_or_chang
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq,
                     "path": "immutable-type",
@@ -544,6 +557,7 @@ async fn item_type_retype_authorization_is_transaction_local_and_exactly_scoped(
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Create.as_i32(),
                     "path": "scoped-retype",
                     "name": "scoped-retype",
@@ -644,6 +658,7 @@ async fn shared_push_rejects_wrong_typed_version_and_outer_type_before_mutation(
                     "vault_id": vault_id,
                     "changes": [{
                         "item_id": Uuid::now_v7(),
+                        "tags": null, "favorite": false,
                         "operation": ChangeType::Create.as_i32(),
                         "path": format!("invalid-typed-{index}"),
                         "name": format!("invalid-typed-{index}"),
@@ -691,6 +706,7 @@ async fn shared_push_treats_a_wrong_vault_item_as_missing_without_mutation() {
                 "vault_id": second_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Create.as_i32(),
                     "path": "wrong-vault-item",
                     "name": "wrong-vault-item",
@@ -722,6 +738,7 @@ async fn shared_push_treats_a_wrong_vault_item_as_missing_without_mutation() {
                 "vault_id": first_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq,
                     "path": "wrong-vault-item",
@@ -1100,6 +1117,7 @@ async fn shared_initial_pull_honors_page_limit_and_advances_cursor() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": restored_item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Restore.as_i32(),
                     "base_seq": restore_base_seq,
                     "payload": login_payload("restored"),
@@ -1227,6 +1245,7 @@ async fn shared_push_reports_a_generation_collision_as_a_conflict() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Create.as_i32(),
                     "path": "collision-item",
                     "name": "collision-item",
@@ -1288,6 +1307,7 @@ async fn shared_push_reports_a_generation_collision_as_a_conflict() {
                 "vault_id": vault_id,
                 "changes": [{
                     "item_id": item_id,
+                    "tags": null, "favorite": false,
                     "operation": ChangeType::Update.as_i32(),
                     "base_seq": base_seq,
                     "payload": login_payload("after"),

@@ -34,7 +34,7 @@ pub(super) async fn ensure_item_expectation(
                   AND version = ?10
                   AND deleted_at IS ?11
                   AND updated_at = ?12
-                  AND sync_status = ?13
+                  AND sync_status = ?13 AND metadata = ?14
                 "#,
                 proof.id,
                 scope.storage_id,
@@ -48,7 +48,8 @@ pub(super) async fn ensure_item_expectation(
                 proof.version,
                 proof.deleted_at,
                 proof.updated_at,
-                proof.sync_status.as_i32()
+                proof.sync_status.as_i32(),
+                proof.metadata.as_ref().map(sqlx_core::types::Json)
             )
             .fetch_optional(&mut **tx)
             .await
@@ -82,7 +83,8 @@ pub(super) async fn ensure_item_projection_bounded(
                 THEN octet_length(name) BETWEEN 1 AND ?3 ELSE 0 END
             AND CASE WHEN typeof(type_id) = 'text'
                 THEN octet_length(type_id) BETWEEN 1 AND ?4 ELSE 0 END
-            AND CASE WHEN typeof(payload_enc) = 'blob'
+            AND (metadata IS NULL OR (typeof(metadata) = 'text' AND octet_length(metadata) <= 65536))
+                AND CASE WHEN typeof(payload_enc) = 'blob'
                 THEN length(payload_enc) <= ?5 ELSE 0 END
             AND CASE WHEN typeof(checksum) = 'text'
                 THEN octet_length(checksum) BETWEEN 1 AND ?6 ELSE 0 END
@@ -205,7 +207,7 @@ pub(super) async fn ensure_pending_proof(
           AND name IS ?9
           AND type_id IS ?10
           AND base_seq IS ?11
-          AND created_at = ?12
+          AND created_at = ?12 AND metadata = ?13
         "#,
         proof.id,
         scope.storage_id,
@@ -218,7 +220,8 @@ pub(super) async fn ensure_pending_proof(
         proof.name.as_deref(),
         proof.type_id.as_deref(),
         proof.base_seq,
-        proof.created_at
+        proof.created_at,
+        proof.metadata.as_ref().map(sqlx_core::types::Json)
     )
     .fetch_optional(&mut **tx)
     .await
@@ -248,7 +251,8 @@ pub(super) async fn ensure_pending_projection_bounded(
                 THEN octet_length(item_id) IN (16, 36) ELSE 0 END
             AND CASE WHEN typeof(operation) = 'integer'
                 THEN operation IN (1, 2, 3, 4) ELSE 0 END
-            AND (payload_enc IS NULL OR CASE WHEN typeof(payload_enc) = 'blob'
+            AND (metadata IS NULL OR (typeof(metadata) = 'text' AND octet_length(metadata) <= 65536))
+                AND (payload_enc IS NULL OR CASE WHEN typeof(payload_enc) = 'blob'
                 THEN length(payload_enc) <= ?2 ELSE 0 END)
             AND (checksum IS NULL OR CASE WHEN typeof(checksum) = 'text'
                 THEN octet_length(checksum) BETWEEN 1 AND ?3 ELSE 0 END)
@@ -307,9 +311,9 @@ pub(super) async fn apply_item_projection(
                 r#"
                 INSERT INTO items_cache (
                     id, storage_id, vault_id, path, name, type_id, payload_enc, checksum,
-                    cache_key_fp, version, deleted_at, updated_at, sync_status
+                    cache_key_fp, version, deleted_at, updated_at, sync_status, metadata
                 )
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                 "#,
                 item.id,
                 item.storage_id,
@@ -323,7 +327,8 @@ pub(super) async fn apply_item_projection(
                 item.version,
                 item.deleted_at,
                 item.updated_at,
-                item.sync_status.as_i32()
+                item.sync_status.as_i32(),
+                item.metadata.as_ref().map(sqlx_core::types::Json)
             )
             .execute(&mut **tx)
             .await;
@@ -344,7 +349,7 @@ pub(super) async fn apply_item_projection(
                     version = ?20,
                     deleted_at = ?21,
                     updated_at = ?22,
-                    sync_status = ?23
+                    sync_status = ?23, metadata = ?25
                 WHERE id = ?1
                   AND storage_id = ?2
                   AND vault_id = ?3
@@ -357,7 +362,7 @@ pub(super) async fn apply_item_projection(
                   AND version = ?10
                   AND deleted_at IS ?11
                   AND updated_at = ?12
-                  AND sync_status = ?13
+                  AND sync_status = ?13 AND metadata = ?24
                 "#,
                 proof.id,
                 scope.storage_id,
@@ -381,7 +386,9 @@ pub(super) async fn apply_item_projection(
                 item.version,
                 item.deleted_at,
                 item.updated_at,
-                item.sync_status.as_i32()
+                item.sync_status.as_i32(),
+                proof.metadata.as_ref().map(sqlx_core::types::Json),
+                item.metadata.as_ref().map(sqlx_core::types::Json)
             )
             .execute(&mut **tx)
             .await
@@ -415,7 +422,7 @@ pub(super) async fn delete_pending_exact(
           AND name IS ?9
           AND type_id IS ?10
           AND base_seq IS ?11
-          AND created_at = ?12
+          AND created_at = ?12 AND metadata = ?13
         "#,
         proof.id,
         scope.storage_id,
@@ -428,7 +435,8 @@ pub(super) async fn delete_pending_exact(
         proof.name.as_deref(),
         proof.type_id.as_deref(),
         proof.base_seq,
-        proof.created_at
+        proof.created_at,
+        proof.metadata.as_ref().map(sqlx_core::types::Json)
     )
     .execute(&mut **tx)
     .await

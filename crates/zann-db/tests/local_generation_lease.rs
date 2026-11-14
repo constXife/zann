@@ -484,3 +484,94 @@ async fn stored_generation_is_released(pool: &SqlitePool, storage_id: Uuid) -> b
     .try_get::<bool, _>("released")
     .expect("decode claim")
 }
+
+#[tokio::test]
+async fn a_bound_generation_admits_only_empty_new_vaults() {
+    for populated in [false, true] {
+        let fixture = fixture(1).await;
+        let repo = LocalVaultRepo::new(&fixture.pool);
+        let claim = generation(1, 0x33);
+        let storage = proof(&fixture.storage);
+        repo.bind_cache_key_fingerprints_leased(&storage, &claim, &[binding(&fixture.vault)])
+            .await
+            .expect("first claim");
+        let mut shared = fixture.vault.clone();
+        shared.id = Uuid::now_v7();
+        shared.slug = "shared".into();
+        shared.name = "Shared".into();
+        shared.kind = VaultKind::Shared;
+        shared.key_wrap_type = KeyWrapType::RemoteServer;
+        repo.create(&shared).await.expect("new shared vault");
+        if populated {
+            sqlx_core::query::query::<Sqlite>("INSERT INTO sync_cursors (storage_id,vault_id,cursor,last_seq,last_sync_at) VALUES (?1,?2,'cursor',1,?3)")
+                .bind(shared.storage_id).bind(shared.id).bind(Utc::now()).execute(&fixture.pool).await.expect("populated unbound scope");
+        }
+        let result = repo
+            .bind_cache_key_fingerprints_leased(
+                &storage,
+                &claim,
+                &[binding(&fixture.vault), binding(&shared)],
+            )
+            .await;
+        if populated {
+            assert!(matches!(
+                result,
+                Err(LocalVaultKeyBindError::ProjectionNotEmpty)
+            ));
+        } else {
+            assert_eq!(result.expect("empty new vault admitted").bound(), 1);
+        }
+        assert_eq!(
+            repo.get_by_id(shared.storage_id, shared.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .cache_key_fp,
+            (!populated).then(|| CACHE_FP.to_owned())
+        );
+    }
+}
+
+#[tokio::test]
+async fn item_creation_rolls_back_item_and_history_when_pending_publication_fails() {
+    let fixture = fixture(1).await;
+    let master = zann_crypto::SecretKey::generate();
+    let mut vault = fixture.vault.clone();
+    vault.key_wrap_type = KeyWrapType::RemoteServer;
+    vault.kind = VaultKind::Shared;
+    let vaults = LocalVaultRepo::new(&fixture.pool);
+    vaults
+        .delete_by_storage_vault(vault.storage_id, vault.id)
+        .await
+        .unwrap();
+    vaults.create(&vault).await.expect("shared cache key");
+    let services = zann_db::services::LocalServices::new(&fixture.pool, &master);
+    sqlx_core::raw_sql::raw_sql("CREATE TRIGGER reject_pending BEFORE INSERT ON pending_changes BEGIN SELECT RAISE(ABORT,'injected pending failure'); END;")
+        .execute(&fixture.pool).await.unwrap();
+    let result = services
+        .put_item_with_metadata(
+            fixture.storage.id,
+            vault.id,
+            "atomic/item".into(),
+            "note".into(),
+            zann_core::EncryptedPayload::new("note"),
+            Default::default(),
+        )
+        .await;
+    let error = result.unwrap_err();
+    assert!(
+        error.to_string().contains("injected pending failure"),
+        "the injected pending write must be reached: {error}"
+    );
+    for table in ["items_cache", "item_history", "pending_changes"] {
+        let count: (i64,) =
+            sqlx_core::query_as::query_as::<Sqlite, _>(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&fixture.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            count.0, 0,
+            "{table} must roll back with the failed pending insert"
+        );
+    }
+}

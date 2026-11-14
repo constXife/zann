@@ -46,6 +46,7 @@ pub(super) fn validate_pull_change(
             && change.item.path == proof.path
             && change.item.name == proof.name
             && change.item.type_id == proof.type_id
+            && change.item.metadata == proof.metadata
             && change.item.checksum == proof.checksum
             && change.item.deleted_at.is_some() == proof.deleted_at.is_some();
         if change.item.version < proof.version || (change.item.version == proof.version && !echoes)
@@ -252,6 +253,13 @@ pub(super) fn validate_pending(
     proof: &LocalPendingProof,
     scope: LocalSyncScope,
 ) -> Result<(), LocalSyncError> {
+    if !proof
+        .metadata
+        .as_ref()
+        .is_some_and(zann_core::ItemMetadata::validate)
+    {
+        return invalid("invalid pending metadata");
+    }
     if proof.storage_id != scope.storage_id || proof.vault_id != scope.vault_id {
         return invalid("pending proof ids do not match the sync scope");
     }
@@ -271,6 +279,13 @@ pub(super) fn validate_pending(
 }
 
 pub(super) fn validate_pending_change(change: &LocalPendingChange) -> Result<(), LocalSyncError> {
+    if !change
+        .metadata
+        .as_ref()
+        .is_some_and(zann_core::ItemMetadata::validate)
+    {
+        return invalid("invalid pending metadata");
+    }
     validate_scope(LocalSyncScope {
         storage_id: change.storage_id,
         vault_id: change.vault_id,
@@ -418,6 +433,13 @@ pub(super) fn validate_expectation(
 }
 
 pub(super) fn validate_item(item: &LocalItem, scope: LocalSyncScope) -> Result<(), LocalSyncError> {
+    if !item
+        .metadata
+        .as_ref()
+        .is_some_and(zann_core::ItemMetadata::validate)
+    {
+        return invalid("invalid item metadata");
+    }
     if item.id.is_nil() || item.storage_id != scope.storage_id || item.vault_id != scope.vault_id {
         return invalid("item ids do not match the sync scope");
     }
@@ -461,6 +483,9 @@ pub(super) fn validate_applied_binding(
     proof: &LocalItemProof,
     item: &LocalItem,
 ) -> Result<(), LocalSyncError> {
+    if item.metadata != proof.metadata || item.metadata != pending.metadata {
+        return invalid("pending metadata does not match the item revision");
+    }
     if pending.created_at != proof.updated_at {
         return invalid("pending creation time does not match the local item revision");
     }
@@ -486,6 +511,7 @@ pub(super) fn validate_applied_binding(
             if item.path.as_str() != proof.path.as_str()
                 || item.name.as_str() != proof.name.as_str()
                 || item.type_id.as_str() != proof.type_id.as_str()
+                || item.metadata != proof.metadata
                 || item.payload_enc.as_slice() != proof.payload_enc.as_slice()
                 || item.checksum.as_str() != proof.checksum.as_str()
                 || item.cache_key_fp.as_deref() != proof.cache_key_fp.as_deref()
@@ -526,6 +552,8 @@ pub(super) fn validate_applied_binding(
             if item.path.as_str() != proof.path.as_str()
                 || item.name.as_str() != name.as_str()
                 || item.type_id.as_str() != type_id.as_str()
+                || item.metadata != pending.metadata
+                || proof.metadata != pending.metadata
                 || item.payload_enc.as_slice() != payload.as_slice()
                 || item.checksum.as_str() != checksum.as_str()
                 || item.cache_key_fp.as_deref() != proof.cache_key_fp.as_deref()

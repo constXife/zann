@@ -43,6 +43,7 @@ const SYNC_VAULT_KEY_MAX_BYTES: i64 = 64 * 1_024;
 const SYNC_VAULT_TAGS_MAX_BYTES: i64 = 64 * 1_024;
 
 struct SyncPageRow {
+    metadata: zann_core::ItemMetadata,
     seq: i64,
     op: i32,
     item_id: uuid::Uuid,
@@ -59,6 +60,12 @@ struct SyncPageRow {
 impl FromRow<'_, PgRow> for SyncPageRow {
     fn from_row(row: &PgRow) -> Result<Self, sqlx_core::Error> {
         Ok(Self {
+            metadata: zann_core::ItemMetadata {
+                tags: row
+                    .try_get::<Option<sqlx_core::types::Json<Vec<String>>>, _>("tags")?
+                    .map(|j| j.0),
+                favorite: row.try_get("favorite")?,
+            },
             seq: row.try_get("seq")?,
             op: i32::from(row.try_get::<i16, _>("op")?),
             item_id: row.try_get("item_id")?,
@@ -201,6 +208,7 @@ async fn fetch_sync_page(
                     AND octet_length(i.path)::BIGINT <= $5
                     AND octet_length(i.name)::BIGINT BETWEEN 1 AND $6
                     AND i.name = canonical_item_basename(i.path)
+                    AND (i.tags IS NULL OR octet_length(i.tags::text)::BIGINT <= 65536)
                     AND is_canonical_item_type(i.type_id)
                     AND octet_length(i.type_id)::BIGINT <= $7
                     AND octet_length(i.checksum)::BIGINT = $8
@@ -233,6 +241,8 @@ async fn fetch_sync_page(
             CASE WHEN page.within_bounds THEN item.path END AS "path",
             CASE WHEN page.within_bounds THEN item.name END AS "name",
             CASE WHEN page.within_bounds THEN item.type_id END AS "type_id",
+            CASE WHEN page.within_bounds THEN item.tags END AS "tags",
+            item.favorite AS "favorite",
             CASE
                 WHEN page.within_bounds AND page.op <> 3 THEN item.payload_enc
             END AS "payload_enc",
@@ -570,6 +580,7 @@ pub(crate) async fn sync_pull(
             ChangeOp::Delete => ChangeType::Delete,
         };
         changes.push(SyncPullChange {
+            metadata: row.metadata,
             item_id: row.item_id.to_string(),
             operation,
             seq,
@@ -725,6 +736,7 @@ pub(crate) async fn sync_shared_pull(
             ChangeOp::Delete => ChangeType::Delete,
         };
         changes.push(SyncSharedPullChange {
+            metadata: row.metadata,
             item_id: row.item_id.to_string(),
             operation,
             seq,
@@ -927,6 +939,7 @@ pub(crate) async fn sync_shared_push(
     for change in changes {
         if change.operation == ChangeType::Delete {
             payload_changes.push(SyncPushChange {
+                metadata: change.metadata,
                 item_id: change.item_id,
                 operation: change.operation,
                 payload_enc: None,
@@ -964,6 +977,7 @@ pub(crate) async fn sync_shared_push(
         let checksum = core_crypto::payload_checksum(&payload_enc);
 
         payload_changes.push(SyncPushChange {
+            metadata: change.metadata,
             item_id: change.item_id,
             operation: change.operation,
             payload_enc: Some(payload_enc),

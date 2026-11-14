@@ -185,3 +185,9 @@ Local vault port and maintenance ownership: `crates/zann-client/src/app/local/**
 `crates/zann-client-sqlite/src/local_vault/**`, and SQLite maintenance/row decoding
 under `crates/zann-db/src/{domain_row.rs,local/maintenance.rs,local/sync_repo/**}`
 are included in the sensitive review surface.
+
+
+Cross-layer backup regression (requires a disposable PostgreSQL database):
+`TEST_DATABASE_URL=... cargo test -p zann-integration-tests --features postgres-tests`.
+The test-only package composes the real HTTP server and canonical native client;
+production crates retain their existing dependency direction.

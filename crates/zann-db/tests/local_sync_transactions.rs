@@ -134,6 +134,7 @@ fn item(
     status: SyncStatus,
 ) -> LocalItem {
     LocalItem {
+        metadata: Some(Default::default()),
         id,
         storage_id: scope.storage_id,
         vault_id: scope.vault_id,
@@ -185,6 +186,7 @@ fn pending(scope: LocalSyncScope, item: &LocalItem, operation: ChangeType) -> Lo
         ChangeType::Delete => (None, None, Some(item.version.saturating_sub(1))),
     };
     LocalPendingChange {
+        metadata: Some(Default::default()),
         id: Uuid::now_v7(),
         storage_id: scope.storage_id,
         vault_id: scope.vault_id,

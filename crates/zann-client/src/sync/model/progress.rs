@@ -35,6 +35,7 @@ pub enum SyncErrorKind {
     Protocol,
     BodyTooLarge,
     Crypto,
+    MetadataRefreshRequired,
     Local,
     ConcurrentLocalChange,
     ConcurrentRemoteChange,

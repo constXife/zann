@@ -6,6 +6,16 @@ pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport
     let storage_repo = LocalStorageRepo::new(&ctx.pool);
     let vault_repo = LocalVaultRepo::new(&ctx.pool);
     let item_repo = LocalItemRepo::new(&ctx.pool);
+    if item_repo
+        .has_unknown_metadata()
+        .await
+        .map_err(BackupError::source)?
+    {
+        return Err(BackupError::new(
+            "backup_metadata_refresh_required",
+            "legacy replica metadata must be refreshed from the server before export",
+        ));
+    }
 
     let storages = storage_repo.list().await.map_err(|err| err.to_string())?;
 

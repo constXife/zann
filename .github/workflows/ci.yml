@@ -54,6 +54,7 @@ jobs:
               - 'apps/desktop/src-tauri/**'
             server:
               - 'crates/zann-server/**'
+              - 'crates/zann-integration-tests/**'
               - 'config/*.yaml'
               - 'compose.yaml'
               - 'compose.e2e.yaml'
@@ -70,6 +71,9 @@ jobs:
               - 'crates/zann-crypto/**'
               - 'tests/fixtures/crypto/**'
               - 'crates/zann-core/src/auth.rs'
+              - 'crates/zann-core/src/item_metadata.rs'
+              - 'crates/zann-db/src/services/create_item.rs'
+              - 'crates/zann-db/migrations/0005_item_metadata.sql'
               - 'crates/zann-core/src/api/auth.rs'
               - 'crates/zann-client/src/config.rs'
               - 'crates/zann-client/src/config/locking.rs'
@@ -613,7 +617,7 @@ jobs:
       - name: Tests (zann-server Postgres)
         env:
           RUST_TEST_THREADS: "1"
-        run: cargo test -p zann-server --features postgres-tests -- --test-threads=1
+        run: cargo test -p zann-server -p zann-integration-tests --features postgres-tests -- --test-threads=1
       - name: Tests (zann-db Postgres)
         run: cargo test -p zann-db --features postgres
       - name: sccache stats

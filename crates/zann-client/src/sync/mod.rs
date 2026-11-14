@@ -8,7 +8,11 @@ mod account_key;
 mod engine;
 mod model;
 mod schedule;
-mod transport;
+pub(crate) mod transport;
+#[cfg(feature = "app")]
+pub(crate) use engine::{await_remote, map_session_error};
+#[cfg(feature = "app")]
+pub(crate) use model::MAX_CATALOG_VAULTS;
 mod wire;
 
 #[cfg(feature = "app")]

@@ -785,6 +785,7 @@ impl SqliteSyncStore {
         for change in commit.changes() {
             let pending = change.pending();
             let local_pending = LocalPendingChange {
+                metadata: Some(pending.metadata().clone()),
                 id: pending.pending_id(),
                 storage_id: pending.scope().storage_id(),
                 vault_id: pending.scope().vault_id(),
@@ -1658,6 +1659,10 @@ fn ensure_same_storage(
 }
 
 fn item_proof(scope: SyncScope, item: &LocalItem) -> Result<ItemProof, SyncStoreError> {
+    let metadata = item
+        .metadata
+        .clone()
+        .ok_or_else(|| store_error(SyncStoreErrorKind::MetadataRefreshRequired))?;
     let projection = ItemProjection::new(
         scope,
         item.id,
@@ -1673,6 +1678,7 @@ fn item_proof(scope: SyncScope, item: &LocalItem) -> Result<ItemProof, SyncStore
         item.updated_at,
         item.deleted_at,
     )
+    .and_then(|p| p.with_metadata(metadata))
     .map_err(map_model_error)?;
     Ok(ItemProof::new(projection, item.sync_status))
 }
@@ -1681,6 +1687,10 @@ fn pending_proof(
     scope: SyncScope,
     pending: &LocalPendingChange,
 ) -> Result<PendingProof, SyncStoreError> {
+    let metadata = pending
+        .metadata
+        .clone()
+        .ok_or_else(|| store_error(SyncStoreErrorKind::MetadataRefreshRequired))?;
     if pending.storage_id != scope.storage_id() || pending.vault_id != scope.vault_id() {
         return Err(store_error(SyncStoreErrorKind::InvalidData));
     }
@@ -1708,6 +1718,7 @@ fn pending_proof(
         base_seq,
         pending.created_at,
     )
+    .and_then(|p| p.with_metadata(metadata))
     .map_err(map_model_error)
 }
 
@@ -1716,6 +1727,7 @@ fn local_item_from_projection(
     sync_status: SyncStatus,
 ) -> Result<LocalItem, SyncStoreError> {
     Ok(LocalItem {
+        metadata: Some(projection.metadata().clone()),
         id: projection.item_id(),
         storage_id: projection.scope().storage_id(),
         vault_id: projection.scope().vault_id(),
@@ -2747,6 +2759,7 @@ mod tests {
         let item_id = Uuid::now_v7();
         let payload = vec![7_u8, 8, 9];
         let pulled_item = LocalItem {
+            metadata: Some(Default::default()),
             id: item_id,
             storage_id: storage.id,
             vault_id,
@@ -3311,6 +3324,7 @@ mod tests {
             let item_id = Uuid::now_v7();
             LocalItemRepo::new(&pool)
                 .create(&LocalItem {
+                    metadata: Some(Default::default()),
                     id: item_id,
                     storage_id: storage.id,
                     vault_id,
@@ -3382,6 +3396,7 @@ mod tests {
             let vault_id = seed_reset_projection(&pool, &storage).await;
             PendingChangeRepo::new(&pool)
                 .create(&LocalPendingChange {
+                    metadata: Some(Default::default()),
                     id: Uuid::now_v7(),
                     storage_id: storage.id,
                     vault_id,
@@ -3607,6 +3622,7 @@ mod tests {
             let name = format!("pending-{index}");
             PendingChangeRepo::new(&pool)
                 .create(&LocalPendingChange {
+                    metadata: Some(Default::default()),
                     id: Uuid::now_v7(),
                     storage_id: storage.id,
                     vault_id,

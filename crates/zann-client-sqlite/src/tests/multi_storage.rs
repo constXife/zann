@@ -122,6 +122,7 @@ async fn sync_shared_vault(
     };
     let fingerprint = zann_crypto::cache_key_fingerprint(master_key);
     let item = LocalItem {
+        metadata: Some(Default::default()),
         id: item_id,
         storage_id: storage.id,
         vault_id,
@@ -192,6 +193,7 @@ async fn seed_disconnected_replica(
         .expect("insert local vault");
     LocalItemRepo::new(pool)
         .create(&LocalItem {
+            metadata: Some(Default::default()),
             id: item_id,
             storage_id,
             vault_id,

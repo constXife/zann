@@ -8,32 +8,47 @@ impl LocalVault {
         path: String,
         options: BackupImportOptions,
     ) -> LocalResult<BackupImportReport> {
-        let ctx = self.backup_ctx()?;
         let path = path.trim();
         if path.is_empty() {
             return Err(LocalError::InvalidArgument(
                 "backup path is empty".to_string(),
             ));
         }
-        let outcome = self
+        let (operation, cancel) = SessionOperation::new(
+            std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
+        );
+        let _in_flight = self.syncs.register(operation.operation_id(), cancel);
+        let ctx = self.backup_ctx()?;
+        let (selection_before, generation) = {
+            let _context = self.context_gate.read().expect("lock poisoned");
+            (
+                *self.storage_id.lock().expect("lock poisoned"),
+                self.context_generation.load(Ordering::SeqCst),
+            )
+        };
+        let target = options.target_storage_id.ok_or_else(|| {
+            LocalError::InvalidArgument("select a server storage to import into".into())
+        })?;
+        let session = self.app_client()?.backup_import_session(
+            &target,
+            SecretKey::from_bytes(*ctx.master_key.as_bytes()),
+            operation,
+        )?;
+        let report = self
             .runtime
             .block_on(crate::maintenance::backup::plain_import(
                 &ctx,
                 PathBuf::from(path),
-                options.target_storage_id,
+                &session,
             ))?;
-        match outcome {
-            crate::maintenance::ImportOutcome::Done(report) => Ok(BackupImportReport {
-                imported_items: report.imported_items as u64,
-                skipped_existing: report.skipped_existing as u64,
-                skipped_missing_storage: report.skipped_missing_storage as u64,
-                skipped_missing_vault: report.skipped_missing_vault as u64,
-                skipped_deleted: report.skipped_deleted as u64,
-            }),
-            crate::maintenance::ImportOutcome::NeedsRemote(_) => Err(LocalError::Unimplemented(
-                "backup import into a remote storage".to_string(),
-            )),
-        }
+        self.select_synced_catalog(Some(target), selection_before, &ctx.master_key, generation)?;
+        Ok(BackupImportReport {
+            imported_items: report.imported_items as u64,
+            skipped_existing: report.skipped_existing as u64,
+            skipped_missing_storage: report.skipped_missing_storage as u64,
+            skipped_missing_vault: report.skipped_missing_vault as u64,
+            skipped_deleted: report.skipped_deleted as u64,
+        })
     }
 
     /// Inspect an Apple Passwords CSV before the UI asks for confirmation.

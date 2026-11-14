@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SyncStoreErrorKind {
+    MetadataRefreshRequired,
     NotFound,
     Busy,
     StaleCheckpoint,
@@ -42,6 +43,7 @@ impl std::error::Error for SyncStoreError {}
 
 pub(super) const fn sync_store_error_code(kind: SyncStoreErrorKind) -> &'static str {
     match kind {
+        SyncStoreErrorKind::MetadataRefreshRequired => "metadata_refresh_required",
         SyncStoreErrorKind::NotFound => "not_found",
         SyncStoreErrorKind::Busy => "busy",
         SyncStoreErrorKind::StaleCheckpoint => "stale_checkpoint",

@@ -48,3 +48,6 @@
 /crates/zann-client/src/config/v2/ @constXife
 /crates/zann-client/src/server.rs @constXife
 /crates/zann-client/src/server/ @constXife
+/crates/zann-core/src/item_metadata.rs @constXife
+/crates/zann-db/src/services/create_item.rs @constXife
+/crates/zann-db/migrations/0005_item_metadata.sql @constXife
