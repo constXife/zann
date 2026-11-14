@@ -1,0 +1,27 @@
+{
+  "expected_account_base64": "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=",
+  "expected_root_base64": "Twh8F+Pdz/f3lxmuu7o6ijYGSsdFXQON6Bvx16EaXlQ=",
+  "keyring": {
+    "accounts": {
+      "10000000-0000-4000-8000-000000000001": {
+        "account_subject": "20000000-0000-4000-8000-000000000001",
+        "ciphertext": "WkFOAQAAAAABAUgAAAAYAAAAyOY+vSsa97uMF8OK3A8TDBdDLN/TyFRl6e9VbcSvOh1vM8Fe4hwRrfItjcA5pbg0+McGddayq0aQeD8T7OKbLiLOUf1CZVlX8d4AP+x919y2dj1ibqYkfiTZjXlHyjv4SKRsvehWiRVJcicq5830HnQbpXcqqpVZNy2qRHt55Sc+CFM3OIxiCOHSesu84aNg",
+        "server_id": "synthetic-fixture-server"
+      }
+    },
+    "device_id": "01a1d9df-9f58-7d52-96d8-8dfc081437e5",
+    "identity": {
+      "kdf_params": {
+        "algorithm": "argon2id",
+        "iterations": 3,
+        "memory_kb": 65536,
+        "parallelism": 1
+      },
+      "kdf_salt": "o0KCOlU0rWsN30Jneyr/m0FHpENyUgcXYPOa9wfVW2Q="
+    },
+    "root_check": "WkFOAQAAAAABAUgAAAAYAAAAXBNuFbiDnaCVW+dTyG53UdgtnBbJNPLNj+gse7NJXAWFY0xelE+I449rBe2CHk2ls1cJ1QpaJNutB0YB/lYoyIkn58/Sf0aAt8N3Q+uV8Utd3lS6WIEBHuxsnpws4u+cMD44eY0pHEbLFcFWCo8xiO4NPOgtXtyIYCa3k5yKo5cwbROYsltr",
+    "wrapped_root": "WkFOAQAAAAABAUgAAAAYAAAAWf/EwMUIs+uDnb4gdojtYs7DOWlTXAJalFtwV2lO1SpG+Pw3pY/hUeJGYs9YUFdRbaAJLYg9smRWzg1ITFjqb65t8CtlR2Cy0LvT1YLhraq0GZxnO1gMoRbcHNPZg2jaIqAtrEPk/lVViUYxLsslnpwME1Mr/Z1/6swqt7F9acJuVjQmHpAc3umcYa5Fhopw"
+  },
+  "password": "synthetic device unlock password",
+  "synthetic_only": true
+}

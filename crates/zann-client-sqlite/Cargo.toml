@@ -14,6 +14,8 @@ zann-core = { path = "../zann-core", default-features = false }
 zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"] }
 
+zeroize = "1"
+
 anyhow = { version = "1", optional = true }
 base64 = { version = "0.22", optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }

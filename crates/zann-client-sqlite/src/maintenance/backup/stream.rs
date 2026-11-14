@@ -9,7 +9,7 @@ pub(super) fn default_backup_path(root: &Path) -> PathBuf {
 }
 
 pub(super) struct ExportItemStreamer<'a> {
-    services: LocalServices<'a>,
+    ctx: &'a BackupCtx,
     item_repo: LocalItemRepo<'a>,
     vaults: VecDeque<(Uuid, Uuid)>,
     current_vault: Option<(Uuid, Uuid)>,
@@ -34,12 +34,12 @@ impl<'a> BackupItemSource for ExportItemStreamer<'a> {
 
 impl<'a> ExportItemStreamer<'a> {
     pub(super) fn new(
-        services: LocalServices<'a>,
+        ctx: &'a BackupCtx,
         item_repo: LocalItemRepo<'a>,
         vaults: VecDeque<(Uuid, Uuid)>,
     ) -> Self {
         Self {
-            services,
+            ctx,
             item_repo,
             vaults,
             current_vault: None,
@@ -59,8 +59,8 @@ impl<'a> ExportItemStreamer<'a> {
                     .metadata
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("metadata refresh required"))?;
-                let payload = self
-                    .services
+                let services = LocalServices::new(&self.ctx.pool, self.ctx.key(item.storage_id)?);
+                let payload = services
                     .decrypt_payload_for_item(
                         item.storage_id,
                         item.vault_id,

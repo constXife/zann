@@ -17,6 +17,8 @@ final class AppModel: ObservableObject {
     enum MasterMode {
         case create
         case unlock
+        case accountCreate
+        case accountUnlock
     }
 
     @Published private(set) var screen: Screen
@@ -38,6 +40,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var connect: ConnectModel?
     /// Where leaving the connect screen goes: the welcome screen for a new
     /// device, the unlock screen after forgetting a server.
+    private var connectedAccountHasKeys = false
     private var connectReturn = Screen.welcome
     /// A fresh sign-in explains that the first catalog arrives after unlock.
     /// The cached vault UI opens as soon as the master key is verified.
@@ -123,12 +126,17 @@ final class AppModel: ObservableObject {
     func unlockWithTouchID() async {
         guard let core, !busy, touchIDArmed else { return }
         startupTouchIDPending = false
-        let contents = await perform {
+        let needsEnrollment = syncAfterUnlock
+        let result = await perform { () -> VaultModel.Contents? in
             _ = try core.unlockRemembered()
+            if needsEnrollment {
+                if try !core.activateConnectedAccount() { return nil }
+            }
             return try VaultModel.load(core)
         }
-        if let contents {
-            open(core: core, contents: contents)
+        if let result {
+            if let contents = result { open(core: core, contents: contents) }
+            else { screen = .master(connectedAccountHasKeys ? .accountUnlock : .accountCreate) }
         } else if case .Unlock("keystore_cancelled", _)? = lastFailure as? CoreError {
             error = nil
         }
@@ -273,21 +281,34 @@ final class AppModel: ObservableObject {
         guard screen == .connect else { return }
         connect = nil
         syncAfterUnlock = true
-        screen = .master(outcome.hasPersonalKeys ? .unlock : .create)
+        connectedAccountHasKeys = outcome.hasPersonalKeys
+        guard let core else { return }
+        do {
+            screen = .master(try core.appStatus().initialized ? .unlock : .create)
+        } catch { self.error = message(for: error) }
     }
 
     func submit(password: String, mode: MasterMode) async {
         guard let core, !busy, !password.isEmpty else { return }
         startupTouchIDPending = false
-        let contents = await perform {
+        let needsEnrollment = syncAfterUnlock
+        let result = await perform { () -> VaultModel.Contents? in
             switch mode {
             case .create: _ = try core.initializeMasterPassword(password: password)
             case .unlock: _ = try core.unlock(password: password)
+            case .accountCreate, .accountUnlock: _ = try core.enrollAccountKey(password: password)
+            }
+            if needsEnrollment && (mode == .create || mode == .unlock) {
+                if try !core.activateConnectedAccount() { return nil }
             }
             return try VaultModel.load(core)
         }
-        guard let contents else { return }
-        open(core: core, contents: contents)
+        guard let result else { return }
+        if let contents = result {
+            open(core: core, contents: contents)
+        } else {
+            screen = .master(connectedAccountHasKeys ? .accountUnlock : .accountCreate)
+        }
     }
 
     /// Open cached content immediately; even the first server sync runs behind

@@ -15,10 +15,14 @@ use zann_client::app::local::RememberedUnlock;
 pub enum Mode {
     Create,
     Unlock,
+    AccountCreate,
+    AccountUnlock,
 }
 
 pub struct State {
     mode: Mode,
+    account_mode: Option<Mode>,
+    confirmation: String,
     /// Whether this device can open the vault without the master password, and
     /// with what. Absent until the shell has asked the facade.
     remembered: Option<RememberedUnlock>,
@@ -35,6 +39,15 @@ pub struct State {
 }
 
 #[derive(Clone)]
+pub enum OpenResult {
+    AccountKeyRequired,
+    Vault {
+        page: ItemsPage,
+        synced: Option<Result<(), String>>,
+    },
+}
+
+#[derive(Clone)]
 pub enum Message {
     /// What this device remembers, answered by the shell on the way in.
     Remembered(RememberedUnlock),
@@ -42,11 +55,12 @@ pub enum Message {
     /// touch when that source is a hardware key.
     UseRemembered,
     PasswordInput(String),
+    ConfirmationInput(String),
     ToggleVisibility,
     Submit,
     /// The vault contents, plus the outcome of the sync that ran on the way
     /// in, if one did; a failed one did not stop the vault opening.
-    Opened(Result<(ItemsPage, Option<Result<(), String>>), String>),
+    Opened(Result<OpenResult, String>),
 }
 
 impl std::fmt::Debug for Message {
@@ -68,6 +82,8 @@ impl State {
     pub fn new(mode: Mode, sync_after: Option<String>) -> Self {
         Self {
             mode,
+            account_mode: None,
+            confirmation: String::new(),
             remembered: None,
             password: String::new(),
             hidden: true,
@@ -76,6 +92,19 @@ impl State {
             notice: None,
             sync_after,
         }
+    }
+
+    pub fn with_account(mut self, has_keys: bool) -> Self {
+        self.account_mode = Some(if has_keys {
+            Mode::AccountUnlock
+        } else {
+            Mode::AccountCreate
+        });
+        self
+    }
+
+    fn creating(&self) -> bool {
+        matches!(self.mode, Mode::Create | Mode::AccountCreate)
     }
 
     /// Carry a message onto the unlock screen from whatever sent the user back
@@ -99,15 +128,20 @@ impl State {
             Message::UseRemembered => return self.unlock_remembered(session),
 
             Message::PasswordInput(value) => self.password = value,
+            Message::ConfirmationInput(value) => self.confirmation = value,
 
             Message::ToggleVisibility => self.hidden = !self.hidden,
 
             Message::Submit => {
-                if self.busy || self.password.is_empty() {
+                if self.busy
+                    || self.password.is_empty()
+                    || (self.creating() && self.password != self.confirmation)
+                {
                     return Outcome::None;
                 }
                 let facade = session.facade();
                 let password = std::mem::take(&mut self.password);
+                self.confirmation.clear();
                 let storage = self.sync_after.clone();
                 let mode = self.mode;
                 self.busy = true;
@@ -120,23 +154,44 @@ impl State {
                                     local::initialize_master_password(&facade, password)?
                                 }
                                 Mode::Unlock => local::unlock(&facade, password)?,
+                                Mode::AccountCreate | Mode::AccountUnlock => {
+                                    facade
+                                        .enroll_account_key(password)
+                                        .map_err(|e| e.to_string())?;
+                                }
+                            }
+                            if storage.is_some()
+                                && matches!(mode, Mode::Create | Mode::Unlock)
+                                && !facade
+                                    .activate_connected_account()
+                                    .map_err(|e| e.to_string())?
+                            {
+                                return Ok(OpenResult::AccountKeyRequired);
                             }
                             // A vault that came from a server starts empty, so
                             // pull it first. A failed sync is worth reporting
                             // but must not keep the vault shut.
                             let synced =
                                 storage.map(|storage| local::sync_new_server(&facade, storage));
-                            local::items(&facade, None, None).map(|page| (page, synced))
+                            local::items(&facade, None, None)
+                                .map(|page| OpenResult::Vault { page, synced })
                         })
                         .await,
                     )
                 }));
             }
 
-            Message::Opened(Ok((page, synced))) => {
+            Message::Opened(Ok(OpenResult::Vault { page, synced })) => {
                 self.busy = false;
                 self.sync_after = None;
                 return Outcome::Opened { page, synced };
+            }
+
+            Message::Opened(Ok(OpenResult::AccountKeyRequired)) => {
+                self.busy = false;
+                if let Some(mode) = self.account_mode {
+                    self.mode = mode;
+                }
             }
 
             Message::Opened(Err(err)) => {
@@ -162,8 +217,15 @@ impl State {
             Message::Opened(
                 off_thread(move || {
                     local::unlock_remembered(&facade)?;
+                    if storage.is_some()
+                        && !facade
+                            .activate_connected_account()
+                            .map_err(|e| e.to_string())?
+                    {
+                        return Ok(OpenResult::AccountKeyRequired);
+                    }
                     let synced = storage.map(|storage| local::sync_new_server(&facade, storage));
-                    local::items(&facade, None, None).map(|page| (page, synced))
+                    local::items(&facade, None, None).map(|page| OpenResult::Vault { page, synced })
                 })
                 .await,
             )
@@ -173,7 +235,9 @@ impl State {
     pub fn view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let (title, action) = match self.mode {
-            Mode::Create => ("wizard.passwordTitle", "wizard.create"),
+            Mode::Create => ("unlock.createTitle", "wizard.create"),
+            Mode::AccountCreate => ("unlock.accountCreateTitle", "wizard.create"),
+            Mode::AccountUnlock => ("unlock.accountTitle", "common.unlock"),
             Mode::Unlock => ("unlock.title", "common.unlock"),
         };
 
@@ -183,7 +247,10 @@ impl State {
             action
         }))
         .width(Length::Fill);
-        if !self.busy && !self.password.is_empty() {
+        if !self.busy
+            && !self.password.is_empty()
+            && (!self.creating() || self.password == self.confirmation)
+        {
             submit = submit.on_press(Message::Submit);
         }
 
@@ -191,7 +258,13 @@ impl State {
             .push(widget::text::title3(t(title)))
             .push(
                 widget::text_input::secure_input(
-                    t("wizard.passwordPlaceholder"),
+                    t(
+                        if matches!(self.mode, Mode::AccountCreate | Mode::AccountUnlock) {
+                            "unlock.accountPlaceholder"
+                        } else {
+                            "unlock.passwordPlaceholder"
+                        },
+                    ),
                     &self.password,
                     Some(Message::ToggleVisibility),
                     self.hidden,
@@ -202,9 +275,25 @@ impl State {
             .spacing(spacing.space_s)
             .width(Length::Fixed(360.0));
 
-        if self.mode == Mode::Create {
-            form = form.push(widget::text::caption(t("wizard.passwordSubtitle")));
+        if self.creating() {
+            form = form.push(
+                widget::text_input::secure_input(
+                    t("unlock.confirmPassword"),
+                    &self.confirmation,
+                    None::<Message>,
+                    true,
+                )
+                .on_input(Message::ConfirmationInput)
+                .on_submit(|_| Message::Submit),
+            );
         }
+        form = form.push(widget::text::caption(t(
+            if matches!(self.mode, Mode::AccountCreate | Mode::AccountUnlock) {
+                "unlock.accountHelp"
+            } else {
+                "unlock.deviceHelp"
+            },
+        )));
 
         if self.sync_after.is_some() {
             form = form.push(widget::text::caption(t("wizard.syncAfterUnlock")));

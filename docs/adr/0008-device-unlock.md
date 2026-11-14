@@ -29,6 +29,11 @@ only by the token's DWK. Resolve that key-availability question before
 implementation, without persisting the plaintext slot key or weakening the
 hardware factor.
 
+[ADR 0010](0010-device-unlock-account-keys.md) changes remembered key material
+from the account master key to a stable device root. The lifetime and UV/PIN
+proposal below remains proposed; its historical references to a global master
+key do not define the current account-key model.
+
 ## Context
 
 [#147](https://github.com/constXife/zann/issues/147) and

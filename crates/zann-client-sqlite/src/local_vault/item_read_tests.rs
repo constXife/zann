@@ -33,7 +33,7 @@ fn waiting_read_cancels_and_releases_key_without_waiting_for_sqlite() {
             .debug_create_kv_item("Example".into(), "key".into(), "fixture value".into())
             .expect("item");
         let pool = core.pool();
-        let key = core.master_key().expect("key");
+        let key = core.account_key().expect("key");
         // Exhaust the adapter's five connections so item reading cannot finish.
         let _entered = core.runtime.enter();
         let permits = core.runtime.block_on(async {

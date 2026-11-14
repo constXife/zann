@@ -64,10 +64,10 @@ impl LocalVault {
         generation: u64,
     ) -> LocalResult<()> {
         let _context = self.context_gate.write().expect("lock poisoned");
-        let key = self.master_key.lock().expect("lock poisoned");
+        let key = self.account_keys.lock().expect("lock poisoned");
         if !key
-            .as_ref()
-            .is_some_and(|current| Arc::ptr_eq(current, operation_key))
+            .values()
+            .any(|current| Arc::ptr_eq(current, operation_key))
         {
             return Err(LocalError::Locked);
         }
@@ -126,7 +126,7 @@ mod tests {
         .expect("open");
         core.seed_offline_fixture("fixture master password".into())
             .expect("fixture");
-        let key = core.master_key().expect("key");
+        let key = core.account_key().expect("key");
         let storage = Some(core.storage_id().expect("storage"));
         core.lock().expect("lock");
         assert!(matches!(

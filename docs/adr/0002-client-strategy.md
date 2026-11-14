@@ -137,10 +137,11 @@ contract rather than debugging sync and domain matching across three languages.
 
 ### Server-anchored offline replicas (#241)
 
-Native clients require server login or registration before setting a master
-password. Config v2's account identity is the single KDF source; SQLite starts
-without a storage or vault. The first sync supplies the server catalog and
-personal key. There is no standalone serverless vault mode.
+Native clients require server authentication before enrolling an account key.
+The device unlock password has an independent local KDF and random root; account
+KDF identities are scoped per connection/profile in Config v2 ([ADR 0010](0010-device-unlock-account-keys.md)).
+SQLite starts without a storage or vault. The first sync supplies the server
+catalog and personal key. There is no standalone serverless vault mode.
 
 Once synced, cached vaults remain usable offline, including unlock, reading,
 search, editing with pending changes, backup export, snapshots and verify.

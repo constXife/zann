@@ -38,6 +38,16 @@ final class ConnectTests: XCTestCase {
         openBrowser: { _ in })
     }
 
+    private func enrollFreshDevice(_ model: AppModel, accountPassword: String, existing: Bool) async {
+        XCTAssertEqual(model.screen, .master(.create))
+        await model.submit(password: accountPassword + "-device", mode: .create)
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.screen, .master(existing ? .accountUnlock : .accountCreate))
+        await model.submit(password: accountPassword, mode: existing ? .accountUnlock : .accountCreate)
+        XCTAssertNil(model.error)
+        XCTAssertEqual(model.screen, .vault)
+    }
+
     func testAnUnreachableServerStaysOnTheServerStep() async throws {
         let closed = try closedPort()
         let model = makeDevice("offline")
@@ -107,7 +117,7 @@ final class ConnectTests: XCTestCase {
         try await signIn(deviceA, url: url, email: email, password: account)
         XCTAssertEqual(deviceA.screen, .master(.create))
         XCTAssertTrue(deviceA.syncAfterUnlock)
-        await deviceA.submit(password: master, mode: .create)
+        await enrollFreshDevice(deviceA, accountPassword: master, existing: false)
         XCTAssertNil(deviceA.error)
         let vaultA = try XCTUnwrap(deviceA.vault)
         await vaultA.sync()
@@ -125,12 +135,14 @@ final class ConnectTests: XCTestCase {
 
         let deviceB = makeDevice("b")
         try await signIn(deviceB, url: url, email: email, password: account)
-        XCTAssertEqual(deviceB.screen, .master(.unlock))
+        XCTAssertEqual(deviceB.screen, .master(.create))
+        await deviceB.submit(password: master + "-device", mode: .create)
+        XCTAssertEqual(deviceB.screen, .master(.accountUnlock))
         // A typo is refused against the account's key and binds nothing.
-        await deviceB.submit(password: master + "x", mode: .unlock)
+        await deviceB.submit(password: master + "x", mode: .accountUnlock)
         XCTAssertNotNil(deviceB.error)
-        XCTAssertEqual(deviceB.screen, .master(.unlock))
-        await deviceB.submit(password: master, mode: .unlock)
+        XCTAssertEqual(deviceB.screen, .master(.accountUnlock))
+        await deviceB.submit(password: master, mode: .accountUnlock)
         XCTAssertNil(deviceB.error)
         let vaultB = try XCTUnwrap(deviceB.vault)
         await vaultB.sync()
@@ -139,7 +151,7 @@ final class ConnectTests: XCTestCase {
 
         // A later unlock opens at once and still knows its server.
         await deviceB.lock()
-        await deviceB.submit(password: master, mode: .unlock)
+        await deviceB.submit(password: master + "-device", mode: .unlock)
         let reopened = try XCTUnwrap(deviceB.vault)
         await reopened.sync()
         XCTAssertTrue(reopened.canSync)
@@ -160,12 +172,12 @@ final class ConnectTests: XCTestCase {
 
         let deviceA = makeDevice("a")
         try await signIn(deviceA, url: url, email: email, password: account)
-        await deviceA.submit(password: master, mode: .create)
+        await enrollFreshDevice(deviceA, accountPassword: master, existing: false)
         let vaultA = try XCTUnwrap(deviceA.vault)
         await vaultA.sync()
         let deviceB = makeDevice("b")
         try await signIn(deviceB, url: url, email: email, password: account)
-        await deviceB.submit(password: master, mode: .unlock)
+        await enrollFreshDevice(deviceB, accountPassword: master, existing: true)
         let vaultB = try XCTUnwrap(deviceB.vault)
         await vaultB.sync()
         XCTAssertTrue(vaultB.visibleItems.isEmpty)
@@ -203,7 +215,7 @@ final class ConnectTests: XCTestCase {
         let device = makeDevice("forget")
         try await signIn(device, url: url, email: email, password: account)
         let master = "master-password-\(suffix)"
-        await device.submit(password: master, mode: .create)
+        await enrollFreshDevice(device, accountPassword: master, existing: false)
         let vault = try XCTUnwrap(device.vault)
         await vault.sync()
         XCTAssertTrue(vault.canSync)
@@ -249,7 +261,7 @@ final class ConnectTests: XCTestCase {
         device.leaveConnecting()
 
         try await signIn(device, url: url, email: email, password: account)
-        await device.submit(password: master, mode: .unlock)
+        await device.submit(password: master + "-device", mode: .unlock)
         let reconnected = try XCTUnwrap(device.vault)
         await reconnected.sync()
         XCTAssertNil(reconnected.syncError)
@@ -259,7 +271,7 @@ final class ConnectTests: XCTestCase {
 
         let witness = makeDevice("witness")
         try await signIn(witness, url: url, email: email, password: account)
-        await witness.submit(password: master, mode: .unlock)
+        await enrollFreshDevice(witness, accountPassword: master, existing: true)
         let witnessed = try XCTUnwrap(witness.vault)
         await witnessed.sync()
         XCTAssertEqual(
@@ -283,7 +295,7 @@ final class ConnectTests: XCTestCase {
 
         let device = makeDevice("vaults")
         try await signIn(device, url: url, email: email, password: account)
-        await device.submit(password: "master-password-\(suffix)", mode: .create)
+        await enrollFreshDevice(device, accountPassword: "master-password-\(suffix)", existing: false)
         let vault = try XCTUnwrap(device.vault)
         await vault.sync()
         vault.startCreating(typeID: "note")

@@ -26,7 +26,7 @@ impl LocalVault {
     ) -> LocalResult<()> {
         let (_, frame) = context.checked().map_err(policy)?;
         let _lease = self.context_gate.read().expect("lock poisoned");
-        let key = self.master_key()?;
+        let key = self.account_key()?;
         let scope = BrowserScope {
             storage_id: self.storage_id()?.to_string(),
             vault_id: self.vault_id()?.to_string(),
@@ -105,7 +105,7 @@ impl LocalVault {
         let (top, frame): (SiteUrl, SiteUrl) = context.checked().map_err(policy)?;
         let id = Uuid::parse_str(&item_id).map_err(policy)?;
         let _lease = self.context_gate.read().expect("lock poisoned");
-        let key = self.master_key()?;
+        let key = self.account_key()?;
         let pool = self.pool();
         let storage = self.storage_id()?;
         let vault = self.vault_id()?;

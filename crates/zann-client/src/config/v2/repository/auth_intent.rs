@@ -123,6 +123,8 @@ impl ConfigRepository {
         let mut identity_candidate = config.clone();
         apply_identity_commit(
             &mut identity_candidate,
+            &anchor.connection_id,
+            &anchor.profile_name,
             &IdentityCommit::InitializeOrMatch(identity.clone()),
         )?;
         let source_profile = source_anchor.profile.as_ref();

@@ -54,7 +54,7 @@ private final class NavigationCore: UXDelayedCore {
         let database = directory.appendingPathComponent("local.sqlite")
         let real = try createCore(dbPath: database.path, keystore: MemoryKeystore(), secretStore: MemorySecretStore())
         _ = try real.seedOfflineFixture(password: "fixture master password")
-        remote = try seedStorageContext(database: database, sourceStorageID: try XCTUnwrap(real.currentStorageId()))
+        remote = try seedStorageContext(core: real)
         core = NavigationCore(unsafeFromRawPointer: real.uniffiClonePointer())
         _ = try core.itemCreate(create: .init(title: "Local note", path: "Local note", typeId: "note",
             payloadJson: #"{"v":1,"typeId":"note","fields":{"text":{"kind":"text","value":"fixture"}}}"#))

@@ -19,6 +19,19 @@ async fn seeded(root: &Path) -> (SqlitePool, Arc<SecretKey>) {
     (pool, master_key)
 }
 
+async fn keys(
+    pool: &SqlitePool,
+    key: Arc<SecretKey>,
+) -> std::collections::BTreeMap<String, Arc<SecretKey>> {
+    LocalStorageRepo::new(pool)
+        .list()
+        .await
+        .expect("storages")
+        .into_iter()
+        .map(|s| (s.id.to_string(), key.clone()))
+        .collect()
+}
+
 /// Create a local vault with one item, the same way the app would.
 async fn seed_item(pool: &SqlitePool, master_key: &SecretKey, value: &str) -> (Uuid, Uuid) {
     let services = LocalServices::new(pool, master_key);
@@ -83,7 +96,9 @@ async fn a_healthy_vault_verifies_clean() {
     let (pool, master_key) = seeded(&root).await;
     seed_item(&pool, master_key.as_ref(), "hello").await;
 
-    let report = run(&pool, master_key).await.expect("verify");
+    let report = run(&pool, keys(&pool, master_key).await)
+        .await
+        .expect("verify");
 
     assert!(report.database_ok, "integrity_check reported a fault");
     assert_eq!(report.items_checked, 1);
@@ -102,7 +117,9 @@ async fn an_empty_vault_verifies_clean() {
     let root = temp_root();
     let (pool, master_key) = seeded(&root).await;
 
-    let report = run(&pool, master_key).await.expect("verify");
+    let report = run(&pool, keys(&pool, master_key).await)
+        .await
+        .expect("verify");
 
     assert!(report.is_clean());
     assert_eq!(report.items_checked, 0);
@@ -137,7 +154,9 @@ async fn a_corrupted_payload_is_caught_as_a_checksum_mismatch() {
     let affected = repo.update(&item).await.expect("corrupt the payload");
     assert_eq!(affected, 1, "the test did not actually corrupt anything");
 
-    let report = run(&pool, master_key).await.expect("verify");
+    let report = run(&pool, keys(&pool, master_key).await)
+        .await
+        .expect("verify");
 
     assert!(!report.is_clean(), "corruption went unnoticed");
     assert_eq!(report.items_ok, 0);
@@ -180,7 +199,9 @@ async fn undecryptable_bytes_with_a_matching_checksum_are_caught_too() {
     let affected = repo.update(&item).await.expect("replace the payload");
     assert_eq!(affected, 1, "the test did not actually replace anything");
 
-    let report = run(&pool, master_key).await.expect("verify");
+    let report = run(&pool, keys(&pool, master_key).await)
+        .await
+        .expect("verify");
 
     assert!(!report.is_clean());
     assert_eq!(report.problems.len(), 1);
@@ -197,7 +218,9 @@ async fn a_vault_belonging_to_another_key_is_skipped_not_failed() {
     seed_item(&pool, master_key.as_ref(), "hello").await;
 
     let stranger = Arc::new(SecretKey::generate());
-    let report = run(&pool, stranger).await.expect("verify");
+    let report = run(&pool, keys(&pool, stranger).await)
+        .await
+        .expect("verify");
 
     assert_eq!(report.vaults_checked, 0);
     assert_eq!(report.vaults_skipped, 1);

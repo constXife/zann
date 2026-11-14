@@ -161,8 +161,7 @@ private final class ProgressiveCore: UXDelayedCore {
     }
 
     func testFirstCacheReadinessSurvivesReopenAndDoesNotFollowAnotherServer() async throws {
-        let other = try seedStorageContext(database: directory.appendingPathComponent("local.sqlite"),
-            sourceStorageID: try XCTUnwrap(core.fixtureStorageID))
+        let other = try seedStorageContext(core: core)
         let model = VaultModel(core: core, contents: try VaultModel.load(core), strings: Strings(language: "en"))
         let sync = Task { await model.sync() }
         defer { core.release() }

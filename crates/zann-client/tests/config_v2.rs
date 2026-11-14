@@ -12,11 +12,11 @@ use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 use zann_client::config::v2::{ClientNamespace, ConnectionMetadata, DesktopBackupSettings};
 use zann_client::config::{
-    ActiveCredentialAfterRemoval, ClientId, ClientPaths, ConfigError, ConfigIdentity,
-    ConfigKdfParams, ConfigRepository, ConfigV2, ConnectionId, CredentialActivation,
-    CredentialBundle, CredentialId, CredentialKind, CredentialPortError, CredentialSecret,
-    CredentialStore, CredentialTransactionWarning, LegacyCredentialAccountSemantics,
-    LegacyCredentialLocator, LegacyCredentialSource, MasterKeyFingerprintBindingOutcome,
+    ActiveCredentialAfterRemoval, ClientId, ClientPaths, ConfigError, ConfigRepository, ConfigV2,
+    ConnectionId, CredentialActivation, CredentialBundle, CredentialId, CredentialKind,
+    CredentialPortError, CredentialSecret, CredentialStore, CredentialTransactionWarning,
+    LegacyCredentialAccountSemantics, LegacyCredentialLocator, LegacyCredentialSource,
+    MasterKeyFingerprintBindingOutcome,
 };
 
 const EMPTY_V1: &str = include_str!("../../../tests/fixtures/client-config/v1/empty.json");
@@ -791,44 +791,6 @@ fn prepared_restore() -> PreparedRestore {
     }
 }
 
-fn kdf_identity(salt: &str) -> ConfigIdentity {
-    ConfigIdentity {
-        kdf_salt: salt.to_string(),
-        kdf_params: ConfigKdfParams {
-            algorithm: "argon2id".to_string(),
-            iterations: 3,
-            memory_kb: 65536,
-            parallelism: 4,
-        },
-        salt_fingerprint: None,
-        first_seen_at: None,
-        email: None,
-    }
-}
-
-#[test]
-fn identity_replacement_is_compare_and_swap() {
-    let temp = TempDir::new().expect("tempdir");
-    let repo = repository(&temp);
-    initialize_empty(&repo);
-
-    let local = kdf_identity("local");
-    repo.replace_identity_if_matches(None, local.clone())
-        .expect("first identity on an empty config");
-
-    // A writer that read before the commit must not overwrite it.
-    let stale = repo
-        .replace_identity_if_matches(None, kdf_identity("late"))
-        .expect_err("stale expectation");
-    assert!(matches!(stale, ConfigError::IdentityChanged));
-
-    let restored = kdf_identity("restored");
-    let snapshot = repo
-        .replace_identity_if_matches(Some(&local), restored.clone())
-        .expect("replace the identity that was read");
-    assert_eq!(snapshot.config().identity, Some(restored));
-}
-
 #[test]
 fn creates_an_empty_v2_without_implicit_paths() {
     let temp = TempDir::new().expect("tempdir");
@@ -912,9 +874,10 @@ fn migrates_nullable_identity_and_keeps_legacy_bytes_unchanged() {
         )
         .expect("migrate");
 
-    let identity = snapshot.config().identity.as_ref().expect("identity");
-    assert_eq!(identity.email, None);
-    assert_eq!(identity.salt_fingerprint, None);
+    assert!(
+        snapshot.config().account_identities.is_empty(),
+        "an unbound legacy identity cannot invent an account"
+    );
     assert_eq!(
         fs::read(repo.paths().legacy_config()).expect("read legacy"),
         original
@@ -1934,7 +1897,8 @@ fn canonical_v2_rejects_unknown_fields_at_every_registered_boundary() {
     let mut kdf: serde_json::Value =
         serde_json::from_slice(&fs::read(repo.paths().config()).expect("read primary"))
             .expect("parse primary");
-    kdf["identity"]["kdf_params"]
+    kdf["account_identities"] = json!({ "synthetic/account": { "kdf_salt": "synthetic", "kdf_params": { "algorithm": "argon2id", "iterations": 3, "memory_kb": 65536, "parallelism": 1 } } });
+    kdf["account_identities"]["synthetic/account"]["kdf_params"]
         .as_object_mut()
         .expect("KDF object")
         .insert("future_field".to_string(), json!(1));

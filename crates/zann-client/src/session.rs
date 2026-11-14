@@ -5359,16 +5359,21 @@ mod tests {
 
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
-            let anchor = harness
-                .repository
-                .resolve_credential_profile_anchor(
-                    harness.target.connection_id(),
-                    harness.target.profile_name(),
-                )
-                .expect("profile remains after successful detached refresh");
-            let access_id = &anchor.credentials()[&CredentialKind::Access];
-            if harness.store.value(access_id).as_deref() == Some("detached-access") {
-                break;
+            // A read while the detached writer owns its journal is explicitly
+            // unavailable; observe terminal credential publication instead.
+            let anchor = match harness.repository.resolve_credential_profile_anchor(
+                harness.target.connection_id(),
+                harness.target.profile_name(),
+            ) {
+                Ok(anchor) => Some(anchor),
+                Err(ConfigError::CredentialRecoveryRequired { .. }) => None,
+                Err(error) => panic!("unexpected detached refresh state: {error:?}"),
+            };
+            if let Some(anchor) = anchor {
+                let access_id = &anchor.credentials()[&CredentialKind::Access];
+                if harness.store.value(access_id).as_deref() == Some("detached-access") {
+                    break;
+                }
             }
             assert!(Instant::now() < deadline, "detached refresh did not commit");
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -5921,7 +5926,12 @@ mod tests {
             .config()
             .clone();
         config.revision = config.revision.checked_add(1).expect("revision advance");
-        config.identity = Some(
+        config.account_identities.insert(
+            format!(
+                "{}/{}",
+                harness.target.connection_id(),
+                harness.target.profile_name()
+            ),
             password_login_identity_from_prelogin(prelogin.clone(), None)
                 .expect("valid test identity"),
         );
@@ -5951,8 +5961,12 @@ mod tests {
                 .snapshot()
                 .expect("published config")
                 .config()
-                .identity
-                .as_ref()
+                .account_identities
+                .get(&format!(
+                    "{}/{}",
+                    harness.target.connection_id(),
+                    harness.target.profile_name()
+                ))
                 .and_then(|identity| identity.email.as_deref()),
             Some("person@example.test")
         );

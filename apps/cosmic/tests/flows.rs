@@ -468,7 +468,10 @@ fn master_hands_the_open_vault_to_the_shell() {
     assert!(matches!(failed, master::Outcome::None));
 
     let opened = state.update(
-        master::Message::Opened(Ok((page, Some(Err("offline".to_string()))))),
+        master::Message::Opened(Ok(master::OpenResult::Vault {
+            page,
+            synced: Some(Err("offline".to_string())),
+        })),
         &session,
     );
     match opened {
@@ -1189,6 +1192,7 @@ fn backend_classifies_the_identity_change_and_forgets_idempotently() {
         local::SyncFailure::from(zann_client::app::local::LocalError::Sync {
             kind: "server_identity_changed".to_string(),
             message: "refused".to_string(),
+            source: None,
         }),
         local::SyncFailure::IdentityChanged
     );

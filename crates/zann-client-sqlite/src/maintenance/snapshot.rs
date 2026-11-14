@@ -11,29 +11,14 @@
 //! transaction and writes a defragmented copy. It is safe against a live,
 //! WAL-mode database, which is why nothing here stops the world first.
 //!
-//! ## The database alone is not enough
-//!
-//! The master key is derived from the password and the KDF salt, and that salt
-//! lives in the Config v2 `identity`, not in the database. A copy of
-//! `local.sqlite` whose salt has been lost cannot be opened by any password. So
-//! each snapshot is paired with an `.identity.json` holding just that identity.
-//!
-//! Only that block: the client config also names credentials, and duplicating
-//! anything session-related into a directory of long-lived copies would trade
-//! one recovery problem for a worse disclosure one. The salt is not a secret —
-//! it is useless without the password.
-//!
-//! This module only moves files. Reading the identity from Config v2 and
-//! committing a restored one back is the caller's job, so the config keeps a
-//! single writer.
-//!
-//! See docs/adr/0002-client-strategy.md on why being able to recover ranks
-//! above features.
+//! The encrypted device keyring lives in the same SQLite database as the cache.
+//! VACUUM INTO captures keys and ciphertext in one consistent read transaction.
+//! Restoring the file restores its unlock password and account keys together.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use zann_client::app::ConfigIdentity;
+use zann_client::app::unlock::DeviceUnlock;
 use zann_db::SqlitePool;
 
 /// Snapshot filenames are `local-YYYYMMDD-HHMMSS.sqlite`. The timestamp is part
@@ -41,14 +26,15 @@ use zann_db::SqlitePool;
 /// directory still sorts correctly.
 const PREFIX: &str = "local-";
 const SUFFIX: &str = ".sqlite";
-const IDENTITY_SUFFIX: &str = ".identity.json";
 const STAMP: &str = "%Y%m%d-%H%M%S";
 
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct SnapshotError {
     pub kind: String,
     pub message: String,
+    #[source]
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
 impl SnapshotError {
@@ -56,6 +42,14 @@ impl SnapshotError {
         Self {
             kind: kind.to_string(),
             message: message.into(),
+            source: None,
+        }
+    }
+    fn source(kind: &str, error: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self {
+            kind: kind.into(),
+            message: kind.into(),
+            source: Some(Box::new(error)),
         }
     }
 }
@@ -83,11 +77,6 @@ impl Default for RetentionPolicy {
 #[derive(Debug, Clone)]
 pub struct Snapshot {
     pub path: PathBuf,
-    /// The KDF salt this copy needs to be opened. `None` only when no identity
-    /// was committed yet, which means the vault was never initialized and there
-    /// is nothing to recover.
-    pub identity_path: Option<PathBuf>,
-    /// From the filename, as RFC 3339.
     pub created_at: String,
     pub size_bytes: u64,
 }
@@ -110,26 +99,28 @@ pub fn list(root: &Path) -> Result<Vec<Snapshot>, SnapshotError> {
         Ok(entries) => entries,
         // Nothing taken yet is not a failure.
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(err) => return Err(SnapshotError::new("snapshot_list_failed", err.to_string())),
+        Err(err) => return Err(SnapshotError::source("snapshot_list_failed", err)),
     };
 
     let mut found = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = entry.map_err(|err| SnapshotError::source("snapshot_list_failed", err))?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else { continue };
         let Some(created) = parse_stamp(name) else {
             continue;
         };
-        let size_bytes = entry.metadata().map(|meta| meta.len()).unwrap_or(0);
-        let identity_path = dir.join(format!(
-            "{PREFIX}{}{IDENTITY_SUFFIX}",
-            created.format(STAMP)
-        ));
+        let metadata = entry
+            .metadata()
+            .map_err(|err| SnapshotError::source("snapshot_list_failed", err))?;
+        let size_bytes = metadata.len();
+        if !metadata.is_file() || size_bytes == 0 {
+            continue;
+        }
         found.push((
             created,
             Snapshot {
                 path: entry.path(),
-                identity_path: identity_path.exists().then_some(identity_path),
                 created_at: created.to_rfc3339(),
                 size_bytes,
             },
@@ -159,13 +150,22 @@ pub fn prune(root: &Path, policy: &RetentionPolicy) -> Result<Vec<PathBuf>, Snap
                 .unwrap_or(false)
         });
         if (too_many || too_old) && std::fs::remove_file(&snapshot.path).is_ok() {
-            if let Some(identity) = snapshot.identity_path.as_ref() {
-                let _ = std::fs::remove_file(identity);
-            }
             removed.push(snapshot.path.clone());
         }
     }
     Ok(removed)
+}
+
+struct SnapshotCandidate {
+    path: PathBuf,
+    complete: bool,
+}
+impl Drop for SnapshotCandidate {
+    fn drop(&mut self) {
+        if !self.complete {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
 }
 
 /// Take a snapshot, then apply the retention policy.
@@ -178,12 +178,11 @@ pub fn prune(root: &Path, policy: &RetentionPolicy) -> Result<Vec<PathBuf>, Snap
 pub async fn create(
     pool: &SqlitePool,
     root: &Path,
-    identity: Option<&ConfigIdentity>,
     policy: &RetentionPolicy,
 ) -> Result<Snapshot, SnapshotError> {
     let dir = snapshots_dir(root);
-    std::fs::create_dir_all(&dir)
-        .map_err(|err| SnapshotError::new("snapshot_dir_failed", err.to_string()))?;
+    crate::maintenance::secure_file::ensure_private_dir(&dir)
+        .map_err(|err| SnapshotError::source("snapshot_dir_failed", err))?;
 
     let mut created = chrono::Utc::now();
     let mut path = dir.join(format!("{PREFIX}{}{SUFFIX}", created.format(STAMP)));
@@ -203,44 +202,38 @@ pub async fn create(
         ));
     }
 
-    // Save the salt first: a database copy without it cannot be opened, so
-    // failing here has to stop the snapshot rather than produce a useless one.
-    let identity_path = identity
-        .map(|identity| save_identity(identity, &dir, &created.format(STAMP).to_string()))
-        .transpose()?;
-
+    let output = crate::maintenance::secure_file::create_new_private_file(&path)
+        .map_err(|err| SnapshotError::source("snapshot_failed", err))?;
+    drop(output);
+    let mut candidate = SnapshotCandidate {
+        path: path.clone(),
+        complete: false,
+    };
     // `VACUUM INTO` takes an expression, so the destination binds as a normal
     // parameter — no quoting of a user-supplied path into SQL.
     zann_db::local::maintenance::snapshot_into(pool, &path)
         .await
-        .map_err(|err| SnapshotError::new("snapshot_failed", err.to_string()))?;
+        .map_err(|err| SnapshotError::source("snapshot_failed", err))?;
+
+    std::fs::File::open(&path)
+        .and_then(|file| file.sync_all())
+        .map_err(|err| SnapshotError::source("snapshot_failed", err))?;
+    std::fs::File::open(&dir)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|err| SnapshotError::source("snapshot_failed", err))?;
 
     let size_bytes = std::fs::metadata(&path)
-        .map_err(|err| SnapshotError::new("snapshot_failed", err.to_string()))?
+        .map_err(|err| SnapshotError::source("snapshot_failed", err))?
         .len();
 
     let _ = prune(root, policy);
 
+    candidate.complete = true;
     Ok(Snapshot {
         path,
-        identity_path,
         created_at: created.to_rfc3339(),
         size_bytes,
     })
-}
-
-/// Save the KDF identity next to a snapshot.
-fn save_identity(
-    identity: &ConfigIdentity,
-    dir: &Path,
-    stamp: &str,
-) -> Result<PathBuf, SnapshotError> {
-    let path = dir.join(format!("{PREFIX}{stamp}{IDENTITY_SUFFIX}"));
-    let body = serde_json::to_string_pretty(identity)
-        .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))?;
-    std::fs::write(&path, body)
-        .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))?;
-    Ok(path)
 }
 
 /// Whether the newest snapshot is older than `max_age`, i.e. whether one is due.
@@ -268,14 +261,13 @@ pub fn is_due(root: &Path, max_age: Duration) -> bool {
 pub async fn create_if_due(
     pool: &SqlitePool,
     root: &Path,
-    identity: Option<&ConfigIdentity>,
     max_age: Duration,
     policy: &RetentionPolicy,
 ) -> Result<Option<Snapshot>, SnapshotError> {
     if !is_due(root, max_age) {
         return Ok(None);
     }
-    create(pool, root, identity, policy).await.map(Some)
+    create(pool, root, policy).await.map(Some)
 }
 
 /// Where a snapshot has to be copied to put it back.
@@ -294,10 +286,6 @@ pub struct RestoreOutcome {
     /// The database that was in place beforehand, kept as a snapshot of its
     /// own. A restore is reversible by restoring this.
     pub replaced_saved_to: PathBuf,
-    /// The KDF identity saved beside the snapshot, for the caller to commit
-    /// to Config v2. The password that opens the restored database is the one
-    /// in use under this identity when the snapshot was taken.
-    pub identity: Option<ConfigIdentity>,
 }
 
 /// Put a snapshot back in place of the live database.
@@ -305,9 +293,6 @@ pub struct RestoreOutcome {
 /// **The caller must not use `pool` afterwards.** This closes it, because the
 /// one thing that reliably turns a working vault into a corrupt one is swapping
 /// the file under an open connection. A client calls this, then reconnects.
-///
-/// `identity` is the one committed now, saved beside the copy of the database
-/// being replaced.
 ///
 /// The order is chosen so that no step can lose data on its own:
 ///
@@ -322,7 +307,6 @@ pub struct RestoreOutcome {
 pub async fn restore(
     pool: SqlitePool,
     root: &Path,
-    identity: Option<&ConfigIdentity>,
     snapshot_path: &Path,
 ) -> Result<RestoreOutcome, SnapshotError> {
     if !snapshot_path.is_file() {
@@ -339,17 +323,12 @@ pub async fn restore(
         ));
     }
     check_readable(snapshot_path).await?;
-    // Read and parse the salt now, while a failure still costs nothing. The
-    // caller commits it only after the database has moved.
-    let restored_identity = read_identity(snapshot_path)?;
-
     // Keep what is about to be replaced. Retention is off for this one: the
     // pruning that follows a normal snapshot could delete the file we are in
     // the middle of restoring from.
     let replaced = create(
         &pool,
         root,
-        identity,
         &RetentionPolicy {
             max_count: None,
             max_age_days: None,
@@ -362,10 +341,10 @@ pub async fn restore(
     let staged = target.with_extension("sqlite.restoring");
     let _ = std::fs::remove_file(&staged);
     std::fs::copy(snapshot_path, &staged)
-        .map_err(|err| SnapshotError::new("snapshot_restore_failed", err.to_string()))?;
+        .map_err(|err| SnapshotError::source("snapshot_restore_failed", err))?;
     std::fs::rename(&staged, &target).map_err(|err| {
         let _ = std::fs::remove_file(&staged);
-        SnapshotError::new("snapshot_restore_failed", err.to_string())
+        SnapshotError::source("snapshot_restore_failed", err)
     })?;
 
     // A write-ahead log left from the database that was just replaced would be
@@ -377,7 +356,6 @@ pub async fn restore(
     Ok(RestoreOutcome {
         restored_from: snapshot_path.to_path_buf(),
         replaced_saved_to: replaced.path,
-        identity: restored_identity,
     })
 }
 
@@ -386,15 +364,16 @@ pub async fn restore(
 /// the schema is checked too — restoring some other application's database over
 /// the vault would be a spectacular way to lose everything.
 async fn check_readable(path: &Path) -> Result<(), SnapshotError> {
-    let url = format!("sqlite://{}", path.display());
-    let pool = zann_db::connect_sqlite_with_max(&url, 1)
+    let location = zann_db::SqliteFileLocation::from_path(path)
+        .map_err(|err| SnapshotError::source("snapshot_unreadable", err))?;
+    let pool = zann_db::connect_sqlite_file_with_max(&location, 1)
         .await
-        .map_err(|err| SnapshotError::new("snapshot_unreadable", err.to_string()))?;
+        .map_err(|err| SnapshotError::source("snapshot_unreadable", err))?;
 
     let result = async {
         let (verdict, tables) = zann_db::local::maintenance::inspect_snapshot(&pool)
             .await
-            .map_err(|err| SnapshotError::new("snapshot_unreadable", err.to_string()))?;
+            .map_err(|err| SnapshotError::source("snapshot_unreadable", err))?;
         if verdict != "ok" {
             return Err(SnapshotError::new(
                 "snapshot_corrupt",
@@ -406,6 +385,35 @@ async fn check_readable(path: &Path) -> Result<(), SnapshotError> {
                 "snapshot_not_a_vault",
                 "that database is not a Zann vault",
             ));
+        }
+        let raw = zann_db::local::MetadataRepo::new(&pool)
+            .get_value_bounded("device_keyring", 1024 * 1024)
+            .await
+            .map_err(|err| SnapshotError::source("snapshot_keyring_failed", err))?;
+        let keyring = raw
+            .as_deref()
+            .map(DeviceUnlock::decode)
+            .transpose()
+            .map_err(|err| SnapshotError::source("snapshot_keyring_failed", err))?;
+        let storages = zann_db::local::LocalStorageRepo::new(&pool)
+            .list()
+            .await
+            .map_err(|err| SnapshotError::source("snapshot_keyring_failed", err))?;
+        for storage in storages {
+            let vaults = zann_db::local::LocalVaultRepo::new(&pool)
+                .list_by_storage(storage.id)
+                .await
+                .map_err(|err| SnapshotError::source("snapshot_keyring_failed", err))?;
+            if !vaults.is_empty()
+                && !keyring
+                    .as_ref()
+                    .is_some_and(|bag| bag.accounts.contains_key(&storage.id.to_string()))
+            {
+                return Err(SnapshotError::new(
+                    "snapshot_keyring_missing",
+                    "the snapshot has encrypted data without its account keyring",
+                ));
+            }
         }
         Ok(())
     }
@@ -419,22 +427,6 @@ async fn check_readable(path: &Path) -> Result<(), SnapshotError> {
         let _ = std::fs::remove_file(path.with_extension(sidecar));
     }
     result
-}
-
-/// The `identity` block saved beside a snapshot, if there is one.
-///
-/// A snapshot with no identity beside it is not an error: the salt in place may
-/// well be the one it was taken under, and refusing the restore would help
-/// nobody. A file that is there but unreadable *is* an error, and this runs
-/// before anything has been replaced so it can still be reported as one.
-fn read_identity(snapshot_path: &Path) -> Result<Option<ConfigIdentity>, SnapshotError> {
-    let identity_path = snapshot_path.with_extension("identity.json");
-    let Ok(contents) = std::fs::read_to_string(&identity_path) else {
-        return Ok(None);
-    };
-    serde_json::from_str(&contents)
-        .map(Some)
-        .map_err(|err| SnapshotError::new("snapshot_identity_failed", err.to_string()))
 }
 
 #[cfg(test)]

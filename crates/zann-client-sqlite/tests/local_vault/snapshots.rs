@@ -15,6 +15,8 @@ use std::path::PathBuf;
 use uuid::Uuid;
 use zann_client::app::local::{ItemsFilter, Page, Retention};
 
+static RESTORE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn db_url(root: &std::path::Path) -> String {
     format!("sqlite://{}", root.join("local.sqlite").display())
 }
@@ -34,6 +36,9 @@ fn all_items() -> (ItemsFilter, Page) {
 
 #[test]
 fn a_snapshot_is_a_working_copy_that_still_holds_the_data() {
+    let _restore = RESTORE_TESTS
+        .lock()
+        .expect("serialize process-wide maintenance admission");
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
@@ -47,18 +52,11 @@ fn a_snapshot_is_a_working_copy_that_still_holds_the_data() {
     assert!(snapshot.size_bytes > 0);
 
     // The point of a snapshot: put it somewhere fresh and find the data again.
-    // The salt travels with it — without that the copy is unopenable, which is
-    // the whole reason `identity_path` exists.
-    assert!(
-        snapshot.identity_path.is_some(),
-        "a snapshot of an initialised vault must carry its salt"
-    );
     let restored_root = CanonicalTempDir::new();
-    let restored = create_core(db_url(&restored_root)).expect("open a fresh vault");
-    let outcome = restored
+    let restored = create_core(db_url(&restored_root)).expect("fresh device");
+    let _outcome = restored
         .snapshot_restore(snapshot.path.clone())
         .expect("restore into the fresh vault");
-    assert!(outcome.identity_replaced, "the salt did not come along");
     restored
         .unlock(password)
         .expect("unlock the restored vault");
@@ -172,6 +170,9 @@ fn the_restore_target_is_the_live_database() {
 /// the moment a user is least able to follow instructions.
 #[test]
 fn restoring_brings_back_the_snapshotted_items_without_reopening() {
+    let _restore = RESTORE_TESTS
+        .lock()
+        .expect("serialize process-wide maintenance admission");
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
@@ -214,6 +215,9 @@ fn restoring_brings_back_the_snapshotted_items_without_reopening() {
 /// Undoing a restore is a restore of what it displaced.
 #[test]
 fn a_restore_can_itself_be_undone() {
+    let _restore = RESTORE_TESTS
+        .lock()
+        .expect("serialize process-wide maintenance admission");
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
@@ -246,6 +250,9 @@ fn a_restore_can_itself_be_undone() {
 /// the vault would be a database whose password nobody knows.
 #[test]
 fn a_damaged_salt_beside_a_snapshot_stops_the_restore() {
+    let _restore = RESTORE_TESTS
+        .lock()
+        .expect("serialize process-wide maintenance admission");
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());
@@ -255,11 +262,17 @@ fn a_damaged_salt_beside_a_snapshot_stops_the_restore() {
         .expect("create item");
 
     let snapshot = core.snapshot_create(None).expect("snapshot");
-    let identity_path = snapshot
-        .identity_path
-        .as_ref()
-        .expect("a snapshot of an initialised vault carries its salt");
-    fs::write(identity_path, b"{ this is not json").expect("damage the salt");
+    let runtime = tokio::runtime::Runtime::new().expect("runtime");
+    runtime.block_on(async {
+        let pool = zann_db::connect_sqlite_with_max(&format!("sqlite://{}", snapshot.path), 1)
+            .await
+            .expect("snapshot");
+        zann_db::local::MetadataRepo::new(&pool)
+            .set_value("device_keyring", "{invalid JSON")
+            .await
+            .expect("corrupt keyring");
+        pool.close().await;
+    });
 
     core.snapshot_restore(snapshot.path)
         .expect_err("a snapshot whose salt cannot be read must be refused");
@@ -278,6 +291,9 @@ fn a_damaged_salt_beside_a_snapshot_stops_the_restore() {
 /// replaced, and the vault must be usable afterwards.
 #[test]
 fn restoring_something_that_is_not_a_vault_is_refused() {
+    let _restore = RESTORE_TESTS
+        .lock()
+        .expect("serialize process-wide maintenance admission");
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
     let password = format!("pw-{}", Uuid::now_v7());

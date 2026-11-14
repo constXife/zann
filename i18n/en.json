@@ -296,7 +296,22 @@
     "savedUnlock": "Use saved unlock",
     "hardwareKeyPrompt": "Insert your hardware key",
     "hardwareKeyTouch": "Touch the key…",
-    "hardwareKeyRetry": "Try again"
+    "hardwareKeyRetry": "Try again",
+    "createTitle": "Create a Zann unlock password",
+    "accountCreateTitle": "Create an account encryption password",
+    "accountTitle": "Unlock this account",
+    "accountPlaceholder": "Account encryption password",
+    "passwordPlaceholder": "Zann unlock password",
+    "confirmPassword": "Repeat new password",
+    "accountHelp": "Needed once when adding this account on a device. Zann stores its key encrypted locally. Use a different password from server sign-in.",
+    "deviceHelp": "One password unlocks all accounts on this device.",
+    "passwordTitle": "Zann unlock password",
+    "currentPassword": "Current password",
+    "newPassword": "New password",
+    "changePassword": "Change password",
+    "changeHelp": "Changes the local unlock password. Account keys and server passwords stay the same.",
+    "passwordMismatch": "The passwords do not match.",
+    "passwordChanged": "Zann unlock password changed."
   },
   "auth": {
     "serverUrl": "Server URL",

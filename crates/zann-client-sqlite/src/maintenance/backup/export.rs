@@ -1,8 +1,6 @@
 use super::*;
 
 pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport, BackupError> {
-    let master_key = ctx.master_key.clone();
-    let services = LocalServices::new(&ctx.pool, master_key.as_ref());
     let storage_repo = LocalStorageRepo::new(&ctx.pool);
     let vault_repo = LocalVaultRepo::new(&ctx.pool);
     let item_repo = LocalItemRepo::new(&ctx.pool);
@@ -41,6 +39,9 @@ pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport
             .list_by_storage(storage_id)
             .await
             .map_err(|err| err.to_string())?;
+        if !vaults.is_empty() {
+            ctx.key(storage_id)?;
+        }
         for vault in vaults {
             backup_vaults.push(PlainBackupVault {
                 id: vault.id.to_string(),
@@ -62,7 +63,7 @@ pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport
         .map_err(|err| err.to_string())?;
     let mut writer = BufWriter::new(file);
     let exported_at = Utc::now().to_rfc3339();
-    let mut streamer = ExportItemStreamer::new(services, item_repo, vault_queue);
+    let mut streamer = ExportItemStreamer::new(ctx, item_repo, vault_queue);
     let items_count = match write_backup_streaming(
         &mut writer,
         BACKUP_VERSION,

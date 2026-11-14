@@ -1,24 +1,51 @@
-//! The single KDF identity personal-vault master keys derive from.
-
-use super::AppClient;
+//! Account identities belong to the authenticated connection/profile, never the device password.
+use super::{AppClient, SessionTarget};
 use crate::config::{ConfigError, ConfigIdentity};
 
 impl AppClient {
-    /// The account KDF identity committed by authentication or snapshot restore.
-    /// `None` until an identity has been committed.
-    pub fn kdf_identity(&self) -> Result<Option<ConfigIdentity>, ConfigError> {
-        Ok(self.repository.snapshot()?.config().identity.clone())
+    pub fn account_identity(&self, target: &SessionTarget) -> Result<ConfigIdentity, ConfigError> {
+        let snapshot = self.repository.snapshot()?;
+        snapshot
+            .config()
+            .account_identities
+            .get(&format!(
+                "{}/{}",
+                target.connection_id(),
+                target.profile_name()
+            ))
+            .cloned()
+            .ok_or(ConfigError::IdentityChanged)
     }
+}
 
-    /// Commit a restored identity or an explicit test fixture, provided the stored
-    /// one is still `expected`.
-    pub fn replace_kdf_identity_if_matches(
+impl AppClient {
+    /// An exact binding from the authenticated profile; never inferred from email or active UI selection.
+    pub fn account_key_binding(
         &self,
-        expected: Option<&ConfigIdentity>,
-        replacement: ConfigIdentity,
-    ) -> Result<(), ConfigError> {
-        self.repository
-            .replace_identity_if_matches(expected, replacement)
-            .map(|_| ())
+        target: &SessionTarget,
+    ) -> Result<(String, String, String), ConfigError> {
+        let snapshot = self.repository.snapshot()?;
+        let connection = snapshot
+            .config()
+            .connections
+            .get(target.connection_id())
+            .ok_or(ConfigError::IdentityChanged)?;
+        let metadata = connection.metadata();
+        let subject = connection
+            .credential_profiles()
+            .get(target.profile_name())
+            .and_then(|p| p.account_subject())
+            .ok_or(ConfigError::IdentityChanged)?;
+        Ok((
+            metadata
+                .storage_id
+                .clone()
+                .ok_or(ConfigError::IdentityChanged)?,
+            metadata
+                .server_id
+                .clone()
+                .ok_or(ConfigError::IdentityChanged)?,
+            subject.to_owned(),
+        ))
     }
 }

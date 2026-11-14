@@ -90,17 +90,19 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
     let status = session.personal_vault_status(access).expect("status");
     assert!(!status.personal_key_envelopes_present);
     let storage_id = connection.storage_id();
-    core.initialize_master_password(master_password.clone())
-        .expect("device A creates the vault");
+    let device_a_password = "device A unlock password";
+    core.initialize_master_password(device_a_password.into())
+        .expect("device A initializes its unlock password");
+    core.enroll_account_key(master_password.clone())
+        .expect("device A enrolls the account key");
     core.remote_sync(None, None)
         .expect("device A publishes the personal vault");
     assert_in_personal_vault(&core, &storage_id);
 
-    // Every storage is still empty; a restart keeps the server's vault
-    // rather than the local one creating the master password made.
+    // A restart keeps the selected server vault and its enrolled account key.
     drop(core);
     let core = support::open_with_secrets(&database_a, Arc::default(), secrets_a);
-    core.unlock(master_password.clone())
+    core.unlock(device_a_password.into())
         .expect("device A unlocks again");
     assert_in_personal_vault(&core, &storage_id);
     let item_id = core
@@ -128,8 +130,11 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
     assert!(status.personal_key_envelopes_present);
     assert!(core.app_status().expect("status").server_connected);
     let storage_id = connection.storage_id();
-    core.unlock(master_password.clone())
-        .expect("device B derives the account's master key");
+    let device_b_password = "device B unlock password";
+    core.initialize_master_password(device_b_password.into())
+        .expect("device B initializes its own unlock password");
+    core.enroll_account_key(master_password)
+        .expect("device B enrolls the account key");
     core.remote_sync(None, None).expect("device B pulls");
     assert_in_personal_vault(&core, &storage_id);
     let item = core
@@ -140,7 +145,7 @@ fn a_second_device_opens_the_vault_the_first_one_published() {
     // A restart lands in the same vault before any sync.
     drop(core);
     let core = support::open(&database_b);
-    core.unlock(master_password)
+    core.unlock(device_b_password.into())
         .expect("device B unlocks again");
     assert_in_personal_vault(&core, &storage_id);
     core.item_get(item_id).expect("the item is still there");
@@ -178,8 +183,10 @@ fn publish_account(url: &str) -> Account {
             operation(),
         )
         .expect("register");
-    core.initialize_master_password(account.master_password.clone())
-        .expect("create the vault");
+    core.initialize_master_password("publisher device unlock password".into())
+        .expect("initialize device unlock");
+    core.enroll_account_key(account.master_password.clone())
+        .expect("enroll the account key");
     core.remote_sync(None, None).expect("publish the vault");
     let item_id = core
         .debug_create_kv_item("pushed".into(), "key".into(), "value".into())
@@ -188,12 +195,12 @@ fn publish_account(url: &str) -> Account {
     Account { item_id, ..account }
 }
 
-/// A mistyped master password on a fresh device must bind nothing: the right
-/// password still opens the account's vault afterwards, and the typo never
-/// opens anything.
+/// A mistyped account encryption password must not enroll a key. The device
+/// keeps its independent unlock password, and the correct account password
+/// still enrolls after a restart.
 #[test]
 #[ignore]
-fn a_mistyped_master_password_never_binds_a_new_device() {
+fn a_mistyped_account_password_never_enrolls_a_key() {
     let Some(url) = server_url() else {
         eprintln!("skipping: ZANN_REMOTE_URL not set");
         return;
@@ -219,18 +226,25 @@ fn a_mistyped_master_password_never_binds_a_new_device() {
         )
         .expect("log in");
 
-    // The key is checked against the account's vault key before anything
-    // is stored under it, so the device stays as fresh as before.
-    core.unlock(typo.clone())
-        .expect_err("the typo opens nothing on a new device");
-    assert!(!core.app_status().expect("status").initialized);
+    let device_password = "independent device unlock password";
+    core.initialize_master_password(device_password.into())
+        .expect("initialize device unlock");
+    core.enroll_account_key(typo.clone())
+        .expect_err("the typo must not enroll a key");
+    assert!(core.app_status().expect("status").initialized);
+    assert!(!core.activate_connected_account().expect("not enrolled"));
 
     drop(core);
     let core = support::open_with_secrets(&database, Arc::default(), secrets);
-    core.unlock(typo)
-        .expect_err("the typo opens nothing after a restart either");
-    core.unlock(account.master_password.clone())
-        .expect("the right password still opens the device");
+    core.unlock(device_password.into())
+        .expect("the device password still unlocks after a restart");
+    core.enroll_account_key(typo)
+        .expect_err("the typo must not enroll after a restart either");
+    assert!(!core
+        .activate_connected_account()
+        .expect("still not enrolled"));
+    core.enroll_account_key(account.master_password.clone())
+        .expect("the right account password enrolls its key");
     core.remote_sync(None, None)
         .expect("and syncs the account's vault");
     let item = core

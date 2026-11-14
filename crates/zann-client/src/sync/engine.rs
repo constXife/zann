@@ -937,7 +937,9 @@ pub(crate) fn map_session_error(error: SessionError) -> SyncError {
         SessionErrorKind::Protocol => SyncErrorKind::Protocol,
         _ => SyncErrorKind::Session,
     };
-    SyncError::new(error.operation_id(), kind, SyncStage::Authorization).with_status(error.status())
+    SyncError::new(error.operation_id(), kind, SyncStage::Authorization)
+        .with_status(error.status())
+        .with_source(error)
 }
 
 fn map_remote_error(

@@ -51,6 +51,7 @@ pub struct SyncError {
     pub(super) kind: SyncErrorKind,
     pub(super) stage: SyncStage,
     pub(super) status: Option<u16>,
+    source: Option<Box<dyn std::error::Error + Send + Sync>>,
 }
 
 impl SyncError {
@@ -64,11 +65,20 @@ impl SyncError {
             kind,
             stage,
             status: None,
+            source: None,
         }
     }
 
     pub(crate) const fn with_status(mut self, status: Option<u16>) -> Self {
         self.status = status;
+        self
+    }
+
+    pub(crate) fn with_source(
+        mut self,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        self.source = Some(Box::new(source));
         self
     }
 
@@ -115,7 +125,13 @@ impl fmt::Display for SyncError {
     }
 }
 
-impl std::error::Error for SyncError {}
+impl std::error::Error for SyncError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn std::error::Error + 'static))
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SyncOutcomeStatus {

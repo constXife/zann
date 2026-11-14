@@ -151,8 +151,12 @@ impl State {
             )),
         );
 
-        let mut sections: Vec<Element<'_, Message>> =
-            vec![auto_lock.into(), clipboard.into(), reveal.into()];
+        let mut sections: Vec<Element<'_, Message>> = vec![
+            auto_lock.into(),
+            clipboard.into(),
+            reveal.into(),
+            self.password.view().map(Message::Password),
+        ];
         if let Some(unlock) = self.unlock_section() {
             sections.push(unlock);
         }
@@ -523,7 +527,7 @@ impl State {
                 );
             }
             column = column.push(widget::text::caption(format!(
-                "With Zann closed everywhere, a snapshot and its .identity.json can also be copied over {}",
+                "With Zann closed everywhere, a self-contained SQLite snapshot can also be copied over {}",
                 self.restore_target
             )));
         }

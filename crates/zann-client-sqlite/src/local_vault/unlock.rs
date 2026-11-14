@@ -6,12 +6,11 @@ impl LocalVault {
     }
 
     pub fn unlock(&self, password: String) -> LocalResult<VaultStatus> {
+        let password = zeroize::Zeroizing::new(password);
         let generation = self.context_generation.load(Ordering::SeqCst);
-        let identity = self
-            .kdf_identity()?
-            .ok_or_else(|| LocalError::InvalidArgument("vault is not initialized".to_string()))?;
-        let master_key = Arc::new(derive_master_key(&password, &identity)?);
-        self.finish_unlock(master_key, generation)
+        let keyring = self.device_unlock()?;
+        let root = keyring.open(&password).map_err(keyring_error)?;
+        self.finish_unlock(root, generation)
     }
 
     pub fn remembered_unlock(&self) -> LocalResult<RememberedUnlock> {
@@ -67,11 +66,18 @@ impl LocalVault {
 
     /// Remember the unlock in the OS credential store instead.
     pub fn remember_with_keystore(&self) -> LocalResult<()> {
-        let master_key = self.master_key()?;
+        let master_key = {
+            let _context = self.context_gate.read().expect("lock poisoned");
+            self.root_key()?
+        };
         let mut remembered = self.load_remembered()?;
         remembered
             .remember_with_keystore(self.keystore.as_ref(), master_key.as_bytes())
             .map_err(unlock_error)?;
+        let _context = self.context_gate.write().expect("lock poisoned");
+        if !Arc::ptr_eq(&self.root_key()?, &master_key) {
+            return Err(LocalError::Locked);
+        }
         self.save_remembered(&remembered)
     }
 
@@ -88,9 +94,17 @@ impl LocalVault {
     /// Drops the master key and cancels pending item reads and syncs, so their
     /// copies do not remain alive while waiting for SQLite or the server.
     pub fn lock(&self) -> LocalResult<VaultStatus> {
-        let _context = self.context_gate.write().expect("lock poisoned");
+        let context = self.context_gate.write().expect("lock poisoned");
+        self.lock_in_context(&context)
+    }
+
+    pub(super) fn lock_in_context(
+        &self,
+        _context: &std::sync::RwLockWriteGuard<'_, ()>,
+    ) -> LocalResult<VaultStatus> {
         self.context_generation.fetch_add(1, Ordering::SeqCst);
-        *self.master_key.lock().expect("lock poisoned") = None;
+        *self.device_key.lock().expect("lock poisoned") = None;
+        self.account_keys.lock().expect("lock poisoned").clear();
         *self.vault_id.lock().expect("lock poisoned") = None;
         self.syncs.cancel_all();
         self.item_reads.cancel_all();
@@ -98,31 +112,78 @@ impl LocalVault {
     }
 
     pub fn vault_status(&self) -> LocalResult<VaultStatus> {
-        let unlocked = self.master_key.lock().expect("lock poisoned").is_some();
+        let unlocked = self.device_key.lock().expect("lock poisoned").is_some();
         Ok(VaultStatus { unlocked })
     }
 
     pub fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus> {
-        if password.len() < 8 {
+        let password = zeroize::Zeroizing::new(password);
+        let _context = self.context_gate.write().expect("lock poisoned");
+        if self.device_unlock_optional()?.is_some() {
             return Err(LocalError::InvalidArgument(
-                "password must be at least 8 characters".to_string(),
+                "Zann unlock password is already set".into(),
             ));
         }
+        let (keyring, root) =
+            zann_client::app::unlock::DeviceUnlock::create(&password).map_err(keyring_error)?;
+        self.commit_device_unlock(None, &keyring)?;
+        *self.device_key.lock().expect("lock poisoned") = Some(root);
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
+        Ok(VaultStatus { unlocked: true })
+    }
 
-        // Check if already initialized
-        let status = self.app_status()?;
-        if status.initialized {
-            return Err(LocalError::InvalidArgument(
-                "vault already initialized".to_string(),
-            ));
-        }
+    pub fn change_unlock_password(&self, current: String, replacement: String) -> LocalResult<()> {
+        let current = zeroize::Zeroizing::new(current);
+        let replacement = zeroize::Zeroizing::new(replacement);
+        let generation = self.context_generation.load(Ordering::SeqCst);
+        let root = self.root_key()?;
+        let keyring = self.device_unlock()?;
+        keyring.check_root(&root).map_err(keyring_error)?;
+        let candidate = keyring
+            .rewrap(&current, &replacement)
+            .map_err(keyring_error)?;
+        let _context = self.context_gate.write().expect("lock poisoned");
+        self.check_context_generation(generation)?;
+        self.commit_device_unlock(Some(&keyring), &candidate)
+    }
 
-        // Only authentication commits the account KDF identity.
-        self.kdf_identity()?.ok_or_else(|| {
-            LocalError::InvalidArgument(
-                "sign in to a server before setting the master password".to_string(),
-            )
-        })?;
-        self.unlock(password)
+    pub(super) fn finish_unlock(
+        &self,
+        root: Arc<SecretKey>,
+        generation: u64,
+    ) -> LocalResult<VaultStatus> {
+        let keyring = self.device_unlock()?;
+        let keys = keyring.account_keys(&root).map_err(keyring_error)?;
+        let pool = self.pool();
+        let storage = *self.storage_id.lock().expect("lock poisoned");
+        let storage = storage
+            .filter(|id| keys.contains_key(&id.to_string()))
+            .or_else(|| keys.keys().find_map(|id| Uuid::parse_str(id).ok()));
+        let vault = if let Some(storage) = storage {
+            let vaults = self
+                .runtime
+                .block_on(LocalVaultRepo::new(&pool).list_by_storage(storage))
+                .map_err(|err| LocalError::Service(err.to_string()))?;
+            self.verify_storage_keys(&keys[&storage.to_string()], &vaults)?;
+            preferred_vault(&self.runtime, &pool, storage, &vaults)?
+        } else {
+            None
+        };
+        let _context = self.context_gate.write().expect("lock poisoned");
+        self.check_context_generation(generation)?;
+        *self.device_key.lock().expect("lock poisoned") = Some(root);
+        *self.account_keys.lock().expect("lock poisoned") = keys;
+        *self.storage_id.lock().expect("lock poisoned") = storage;
+        *self.vault_id.lock().expect("lock poisoned") = vault;
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
+        Ok(VaultStatus { unlocked: true })
+    }
+}
+
+pub(super) fn keyring_error<E: std::error::Error + Send + Sync + 'static>(source: E) -> LocalError {
+    LocalError::Unlock {
+        kind: "device_unlock".into(),
+        message: source.to_string(),
+        source: Box::new(source),
     }
 }

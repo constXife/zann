@@ -88,7 +88,7 @@ async fn check_database(pool: &SqlitePool) -> Result<Vec<String>, VerifyError> {
 /// unreadable item there is just as much a fault.
 pub async fn run(
     pool: &SqlitePool,
-    master_key: Arc<SecretKey>,
+    account_keys: std::collections::BTreeMap<String, Arc<SecretKey>>,
 ) -> Result<VerifyReport, VerifyError> {
     let mut report = VerifyReport::default();
 
@@ -105,7 +105,6 @@ pub async fn run(
         });
     }
 
-    let services = LocalServices::new(pool, master_key.as_ref());
     let storage_repo = LocalStorageRepo::new(pool);
     let vault_repo = LocalVaultRepo::new(pool);
     let item_repo = LocalItemRepo::new(pool);
@@ -120,6 +119,16 @@ pub async fn run(
             .list_by_storage(storage.id)
             .await
             .map_err(|err| VerifyError::new("verify_failed", err.to_string()))?;
+        if vaults.is_empty() {
+            continue;
+        }
+        let key = account_keys.get(&storage.id.to_string()).ok_or_else(|| {
+            VerifyError::new(
+                "account_key_missing",
+                "enroll the account encryption key before verification",
+            )
+        })?;
+        let services = LocalServices::new(pool, key.as_ref());
 
         for vault in vaults {
             let vault_key = match services.decrypt_vault_key(&vault) {

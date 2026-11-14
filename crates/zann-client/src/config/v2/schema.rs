@@ -151,3 +151,7 @@ impl ConnectionMetadata {
         }
     }
 }
+
+pub(crate) fn identity_slot(connection: &ConnectionId, profile: &str) -> String {
+    format!("{connection}/{profile}")
+}

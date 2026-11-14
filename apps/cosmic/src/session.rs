@@ -35,11 +35,8 @@ impl Session {
     {
         let location = location.try_into().map_err(|err| err.to_string())?;
         let (facade, status) = local::open_at(&location)?;
-        let daemon = zann_daemon::Daemon::start(
-            location.client_root(),
-            facade.clone(),
-        )
-        .map_err(|error| error.to_string())?;
+        let daemon = zann_daemon::Daemon::start(location.client_root(), facade.clone())
+            .map_err(|error| error.to_string())?;
         let active_database = activate_database(location.clone());
         Ok((
             Self {

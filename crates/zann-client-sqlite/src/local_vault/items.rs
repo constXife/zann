@@ -3,11 +3,12 @@ use super::*;
 impl LocalVault {
     pub fn items_list(&self, filter: ItemsFilter, page: Page) -> LocalResult<ItemPage> {
         let _context = self.context_gate.read().expect("lock poisoned");
-        let master_key = self.master_key()?;
+        let _root = self.root_key()?;
         let pool = self.pool();
         let Some(storage_id) = *self.storage_id.lock().expect("lock poisoned") else {
             return Ok(empty_page());
         };
+        let master_key = self.account_key_for_storage(storage_id)?;
         let selected = *self.vault_id.lock().expect("lock poisoned");
         let vault_id = match selected {
             Some(id) => id,
@@ -52,7 +53,7 @@ impl LocalVault {
 
     pub fn item_get(&self, id: String) -> LocalResult<ItemDetail> {
         let _context = self.context_gate.read().expect("lock poisoned");
-        let master_key = self.master_key()?;
+        let master_key = self.account_key()?;
         let _vault_id = self.vault_id()?;
         let pool = self.pool();
         let services = LocalServices::new(&pool, master_key.as_ref());
@@ -81,7 +82,7 @@ impl LocalVault {
 
     pub fn item_create(&self, create: ItemCreate) -> LocalResult<ItemDetail> {
         let _context = self.context_gate.read().expect("lock poisoned");
-        let master_key = self.master_key()?;
+        let master_key = self.account_key()?;
         let vault_id = self.vault_id()?;
         let pool = self.pool();
         let services = LocalServices::new(&pool, master_key.as_ref());
@@ -104,7 +105,7 @@ impl LocalVault {
 
     pub fn item_update(&self, id: String, update: ItemUpdate) -> LocalResult<ItemDetail> {
         let _context = self.context_gate.read().expect("lock poisoned");
-        let master_key = self.master_key()?;
+        let master_key = self.account_key()?;
         let _vault_id = self.vault_id()?;
         let pool = self.pool();
         let services = LocalServices::new(&pool, master_key.as_ref());
@@ -132,7 +133,7 @@ impl LocalVault {
         limit: u32,
     ) -> LocalResult<Vec<ItemHistorySummary>> {
         let _context = self.context_gate.read().expect("lock poisoned");
-        let _master_key = self.master_key()?;
+        let _master_key = self.account_key()?;
         let vault_id = self.vault_id()?;
         let item_id = Uuid::parse_str(&id)
             .map_err(|_| LocalError::InvalidArgument("invalid item id".to_string()))?;
@@ -172,7 +173,7 @@ impl LocalVault {
 
     pub fn item_history_get(&self, id: String, version: i64) -> LocalResult<ItemHistoryDetail> {
         let _context = self.context_gate.read().expect("lock poisoned");
-        let master_key = self.master_key()?;
+        let master_key = self.account_key()?;
         let vault_id = self.vault_id()?;
         let item_id = Uuid::parse_str(&id)
             .map_err(|_| LocalError::InvalidArgument("invalid item id".to_string()))?;
@@ -208,7 +209,7 @@ impl LocalVault {
 
     pub fn item_history_restore(&self, id: String, version: i64) -> LocalResult<ItemDetail> {
         let _context = self.context_gate.read().expect("lock poisoned");
-        let master_key = self.master_key()?;
+        let master_key = self.account_key()?;
         let vault_id = self.vault_id()?;
         let item_id = Uuid::parse_str(&id)
             .map_err(|_| LocalError::InvalidArgument("invalid item id".to_string()))?;

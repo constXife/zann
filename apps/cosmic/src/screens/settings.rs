@@ -26,6 +26,7 @@ const DOCS_URL: &str = "https://docs.zann.app";
 const SOURCE_URL: &str = "https://github.com/constxife/zann";
 
 pub struct State {
+    password: password::State,
     browser_pairings: Option<zann_daemon::PairingSettings>,
     browser_code: Option<zann_daemon::PairingCode>,
     section: SettingsSection,
@@ -100,6 +101,7 @@ pub struct Loaded {
 #[derive(Clone, Debug)]
 pub enum Message {
     Browser(browser::Message),
+    Password(password::Message),
     Select(SettingsSection),
     Set(Change),
     Loaded(Result<Loaded, String>),
@@ -164,6 +166,7 @@ pub enum Outcome {
 impl State {
     pub fn new(preferences: DevicePreferences, close_to_tray: bool, data_root: PathBuf) -> Self {
         Self {
+            password: password::State::default(),
             browser_pairings: None,
             browser_code: None,
             section: SettingsSection::General,
@@ -236,6 +239,13 @@ impl State {
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
+            Message::Password(message) => {
+                return Outcome::Task(
+                    self.password
+                        .update(message, session)
+                        .map(Message::Password),
+                )
+            }
             Message::Browser(message) => return self.update_browser(message, session),
             Message::Select(section) => self.section = section,
             Message::Set(change) => return Outcome::Changed(change),
@@ -500,18 +510,13 @@ impl State {
                 }));
             }
 
-            Message::Restored(Ok(outcome)) => {
+            Message::Restored(Ok(_outcome)) => {
                 self.busy = false;
                 // The vault is locked and everything on screen behind this is
                 // stale, so the shell takes over rather than this screen trying
                 // to refresh itself.
-                let notice = if outcome.identity_replaced {
-                    "Restored. Unlock with the master password that was in use when \
-                     that snapshot was taken."
-                        .to_string()
-                } else {
-                    "Restored. Unlock to continue.".to_string()
-                };
+                let notice =
+                    "Restored. Unlock with the Zann password saved in that snapshot.".to_string();
                 return Outcome::Restored { notice };
             }
 
@@ -705,4 +710,5 @@ impl State {
 }
 
 mod browser;
+mod password;
 mod view;

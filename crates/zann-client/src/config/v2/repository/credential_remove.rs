@@ -53,7 +53,7 @@ impl ConfigRepository {
             Some(write),
             credential_store,
             |config, credential_ids| {
-                apply_identity_commit(config, &identity)?;
+                apply_identity_commit(config, &connection_id, &profile_name, &identity)?;
                 apply_authenticated_connection_target(
                     config,
                     &connection_id,

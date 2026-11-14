@@ -162,10 +162,6 @@ pub struct ApplePasswordsImportReportFfi {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct SnapshotFfi {
     pub path: String,
-    /// The KDF salt this copy needs to be opened. A database copy without it
-    /// cannot be unlocked by any password, so a client offering to restore must
-    /// keep the two together.
-    pub identity_path: Option<String>,
     /// RFC 3339.
     pub created_at: String,
     pub size_bytes: u64,
@@ -178,10 +174,6 @@ pub struct SnapshotFfi {
 pub struct SnapshotRestoreFfi {
     pub restored_from: String,
     pub replaced_saved_to: String,
-    /// The snapshot brought its own KDF salt. The vault now opens with the
-    /// password that was in use when it was taken, and any remembered unlock has
-    /// been dropped.
-    pub identity_replaced: bool,
 }
 
 /// One fault found by [`CoreFacade::verify`].

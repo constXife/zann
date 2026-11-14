@@ -5,7 +5,8 @@
 //! engine, so shells cannot extract bearer material or bypass target policy.
 
 use std::fmt;
-use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use uuid::Uuid;
 pub use zann_core::AuthMethod;
@@ -55,7 +56,9 @@ use spi::{
     SyncStoreError, SyncStoreErrorKind, SyncStoreFuture,
 };
 
-static APP_SYNC_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
+mod admission;
+pub use admission::AppMaintenanceLease;
+use admission::AppSyncPermit;
 
 /// Creates one operation-scoped local sync store for an explicit target.
 ///
@@ -563,7 +566,6 @@ impl AppClient {
         if let Some(kind) = operation.pre_dispatch_error() {
             return ready_sync_error(operation_id, map_operation_error(kind));
         }
-        let master_key_fingerprint = zann_crypto::cache_key_fingerprint(&master_key);
         let permit = match AppSyncPermit::try_acquire() {
             Ok(permit) => Arc::new(permit),
             Err(()) => {
@@ -572,71 +574,18 @@ impl AppClient {
         };
 
         let master_key = Arc::new(master_key);
-        let paths = self.paths.clone();
-        let factory = Arc::clone(&self.sync_store_factory);
-        let repository = self.repository.clone();
-        let session = self.session.clone();
-        let progress = self.sync_progress.clone();
-        let engine = move |local: Arc<dyn SyncLocalStore>| {
-            let engine = SyncEngine::new(session.clone(), local);
-            match &progress {
-                Some(progress) => engine.with_progress(Arc::clone(progress)),
-                None => engine,
-            }
-        };
+        let client = self.clone();
         Box::pin(async move {
             ensure_operation_dispatchable(&operation)?;
-            if tokio::runtime::Handle::try_current().is_err() {
-                return Err(SyncError::new(
-                    operation_id,
-                    SyncErrorKind::Local,
-                    SyncStage::ResolveTarget,
-                ));
-            }
-            let open = || {
-                open_operation_store(
-                    Arc::clone(&factory),
-                    paths.clone(),
-                    target.clone(),
-                    Arc::clone(&master_key),
-                    Arc::clone(&permit),
-                    &operation,
-                )
+            let local = client
+                .proven_sync_store(&target, &master_key, permit, &operation)
+                .await?;
+            let engine = SyncEngine::new(client.session.clone(), local);
+            let engine = match &client.sync_progress {
+                Some(progress) => engine.with_progress(Arc::clone(progress)),
+                None => engine,
             };
-
-            let local = open().await?;
-            let anchor = repository
-                .resolve_credential_profile_anchor(target.connection_id(), target.profile_name())
-                .map_err(|_| {
-                    SyncError::new(operation_id, SyncErrorKind::Local, SyncStage::ResolveTarget)
-                })?;
-            let crypto_error = || {
-                SyncError::new(
-                    operation_id,
-                    SyncErrorKind::Crypto,
-                    SyncStage::ResolveTarget,
-                )
-            };
-            let local = match anchor.expected_master_key_fp() {
-                Some(bound) if bound == master_key_fingerprint => local,
-                Some(_) => return Err(crypto_error()),
-                None => {
-                    engine(local)
-                        .prove_and_bind_master_key(&target, &master_key, &operation, |access| {
-                            bind_proven_master_key(
-                                &repository,
-                                &target,
-                                access,
-                                &master_key_fingerprint,
-                            )
-                        })
-                        .await?;
-                    // The proof's lease resolved the unbound generation, which
-                    // the bind has just superseded.
-                    open().await?
-                }
-            };
-            engine(local).pull(&target, operation).await
+            engine.pull(&target, operation).await
         })
     }
 
@@ -685,25 +634,6 @@ impl AppClient {
 impl fmt::Debug for AppClient {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.debug_struct("AppClient").finish_non_exhaustive()
-    }
-}
-
-struct AppSyncPermit {
-    _private: (),
-}
-
-impl AppSyncPermit {
-    fn try_acquire() -> Result<Self, ()> {
-        APP_SYNC_IN_FLIGHT
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .map_err(|_| ())?;
-        Ok(Self { _private: () })
-    }
-}
-
-impl Drop for AppSyncPermit {
-    fn drop(&mut self) {
-        APP_SYNC_IN_FLIGHT.store(false, Ordering::Release);
     }
 }
 
@@ -1826,9 +1756,12 @@ mod tests {
 
 mod connection_removal;
 pub use connection_removal::ConnectionRemoval;
+mod account_keys;
 /// Local vault services, independent of SQLite and native adapters.
 mod kdf_identity;
+pub use account_keys::AccountKeyEnrollment;
 pub mod local;
+pub mod unlock;
 
 mod backup;
 pub use backup::{BackupImportSession, BackupVaultSpec, BACKUP_MAX_VAULTS};

@@ -14,6 +14,7 @@ use zann_core::{ItemCounts as DomainItemCounts, ItemListParams, ItemsService};
 use zann_crypto::crypto::SecretKey;
 #[cfg(debug_assertions)]
 use zann_crypto::secrets::{FieldKind, FieldValue};
+#[cfg(any(test, feature = "test-support"))]
 use zann_crypto::vault_crypto;
 use zann_crypto::EncryptedPayload;
 use zann_db::local::{
@@ -43,7 +44,8 @@ pub struct LocalVault {
     context_generation: AtomicU64,
     storage_id: Mutex<Option<Uuid>>,
     vault_id: Mutex<Option<Uuid>>,
-    master_key: Mutex<Option<Arc<SecretKey>>>,
+    device_key: Mutex<Option<Arc<SecretKey>>>,
+    account_keys: Mutex<std::collections::BTreeMap<String, Arc<SecretKey>>>,
     /// Cancelled on lock, so no sync keeps the master key past it.
     syncs: in_flight::InFlightOperations,
     /// Read operations never retain a key after cancellation has completed.
@@ -79,7 +81,7 @@ impl LocalVault {
 
     /// Connect again after the database file was replaced, and re-read what was
     /// read from it at start-up.
-    fn reopen_pool(&self) -> LocalResult<()> {
+    fn reopen_pool(&self, _context: &std::sync::RwLockWriteGuard<'_, ()>) -> LocalResult<()> {
         let location = SqliteFileLocation::from_path(&self.database_path)
             .map_err(|err| LocalError::Service(err.to_string()))?;
         let pool = self
@@ -90,25 +92,56 @@ impl LocalVault {
             .block_on(migrate_local(&pool))
             .map_err(|err| LocalError::Service(err.to_string()))?;
         let storage_id = resolve_storage_id(&self.runtime, &pool)?;
-        let _context = self.context_gate.write().expect("lock poisoned");
         *self.pool.lock().expect("lock poisoned") = pool;
         *self.storage_id.lock().expect("lock poisoned") = storage_id;
         self.context_generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
-    fn master_key(&self) -> LocalResult<Arc<SecretKey>> {
-        self.master_key
+    fn root_key(&self) -> LocalResult<Arc<SecretKey>> {
+        self.device_key
             .lock()
             .expect("lock poisoned")
             .clone()
             .ok_or(LocalError::Locked)
     }
 
+    fn account_key(&self) -> LocalResult<Arc<SecretKey>> {
+        let _root = self.root_key()?;
+        self.account_key_for_storage(self.storage_id()?)
+    }
+
+    fn account_key_for_storage(&self, storage: Uuid) -> LocalResult<Arc<SecretKey>> {
+        let _root = self.root_key()?;
+        self.account_keys
+            .lock()
+            .expect("lock poisoned")
+            .get(&storage.to_string())
+            .cloned()
+            .ok_or_else(|| {
+                LocalError::InvalidArgument(
+                    "connect this account to enroll its encryption key".into(),
+                )
+            })
+    }
+
     fn backup_ctx(&self) -> LocalResult<crate::maintenance::BackupCtx> {
+        let _root = self.root_key()?;
         Ok(crate::maintenance::BackupCtx::new(
             self.pool(),
-            self.master_key()?,
+            self.account_keys
+                .lock()
+                .expect("lock poisoned")
+                .iter()
+                .map(|(id, key)| {
+                    Ok((
+                        Uuid::parse_str(id).map_err(|_| {
+                            LocalError::InvalidArgument("invalid storage id".into())
+                        })?,
+                        key.clone(),
+                    ))
+                })
+                .collect::<LocalResult<_>>()?,
             self.root.clone(),
         ))
     }
@@ -136,52 +169,6 @@ impl LocalVault {
             .map_err(|err| LocalError::Service(err.to_string()))
     }
 
-    /// Everything an unlock does once the master key exists, whatever produced
-    /// it. Note the vault-key decryption below doubles as the check that the key
-    /// is the right one, so a key recovered from a stale wrapped copy fails here
-    /// exactly like a wrong password.
-    fn finish_unlock(
-        &self,
-        master_key: Arc<SecretKey>,
-        generation: u64,
-    ) -> LocalResult<VaultStatus> {
-        let pool = self.pool();
-        let repo = LocalVaultRepo::new(&pool);
-        let list = |storage_id| {
-            self.runtime
-                .block_on(repo.list_by_storage(storage_id))
-                .map_err(|err| LocalError::Service(err.to_string()))
-        };
-        let storage_id = match *self.storage_id.lock().expect("lock poisoned") {
-            Some(id) => Some(id),
-            None => resolve_storage_id(&self.runtime, &pool)?,
-        };
-        let vaults = match storage_id {
-            Some(id) => list(id)?,
-            None => Vec::new(),
-        };
-        let vault_id = if let Some(verify) = vaults.first() {
-            vault_crypto::decrypt_vault_key(master_key.as_ref(), verify.id, &verify.vault_key_enc)
-                .map_err(|_| LocalError::InvalidArgument("invalid password".to_string()))?;
-            preferred_vault(
-                &self.runtime,
-                &pool,
-                storage_id.expect("storage with vaults"),
-                &vaults,
-            )?
-        } else {
-            self.check_key_for_new_device(&master_key)?;
-            None
-        };
-        let _context = self.context_gate.write().expect("lock poisoned");
-        self.check_context_generation(generation)?;
-        *self.storage_id.lock().expect("lock poisoned") = storage_id;
-        *self.master_key.lock().expect("lock poisoned") = Some(master_key);
-        *self.vault_id.lock().expect("lock poisoned") = vault_id;
-        self.context_generation.fetch_add(1, Ordering::SeqCst);
-        Ok(VaultStatus { unlocked: true })
-    }
-
     #[cfg(debug_assertions)]
     pub fn debug_create_kv_item(
         &self,
@@ -190,7 +177,7 @@ impl LocalVault {
         value: String,
     ) -> LocalResult<String> {
         let _context = self.context_gate.read().expect("lock poisoned");
-        let master_key = self.master_key()?;
+        let master_key = self.account_key()?;
         let vault_id = self.vault_id()?;
         let pool = self.pool();
         let services = LocalServices::new(&pool, master_key.as_ref());
@@ -239,13 +226,6 @@ impl LocalVault {
             .initialize(self.legacy_credentials.as_ref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
         Ok(client)
-    }
-
-    /// The KDF identity in Config v2, the only place it is kept.
-    fn kdf_identity(&self) -> LocalResult<Option<ConfigIdentity>> {
-        self.app_client()?
-            .kdf_identity()
-            .map_err(|error| LocalError::Service(error.to_string()))
     }
 }
 impl LocalVault {
@@ -307,7 +287,8 @@ impl LocalVault {
             context_generation: AtomicU64::new(0),
             storage_id: Mutex::new(storage_id),
             vault_id: Mutex::new(None),
-            master_key: Mutex::new(None),
+            device_key: Mutex::new(None),
+            account_keys: Mutex::new(std::collections::BTreeMap::new()),
             syncs: in_flight::InFlightOperations::default(),
             item_reads: in_flight::InFlightOperations::default(),
             root,
@@ -370,9 +351,6 @@ impl From<crate::maintenance::Snapshot> for Snapshot {
     fn from(snapshot: crate::maintenance::Snapshot) -> Self {
         Self {
             path: snapshot.path.display().to_string(),
-            identity_path: snapshot
-                .identity_path
-                .map(|path| path.display().to_string()),
             created_at: snapshot.created_at,
             size_bytes: snapshot.size_bytes,
         }
@@ -429,7 +407,9 @@ mod items;
 
 mod maintenance;
 
+mod account_keys;
 mod identity;
+mod keyring;
 use identity::*;
 
 mod browser;
@@ -477,6 +457,15 @@ impl LocalVaultService for LocalVault {
 
     fn core_info(&self) -> String {
         LocalVault::core_info(self)
+    }
+    fn change_unlock_password(&self, current: String, replacement: String) -> LocalResult<()> {
+        LocalVault::change_unlock_password(self, current, replacement)
+    }
+    fn activate_connected_account(&self) -> LocalResult<bool> {
+        LocalVault::activate_connected_account(self)
+    }
+    fn enroll_account_key(&self, password: String) -> LocalResult<VaultStatus> {
+        LocalVault::enroll_account_key(self, password)
     }
     fn unlock(&self, password: String) -> LocalResult<VaultStatus> {
         LocalVault::unlock(self, password)
@@ -847,3 +836,7 @@ mod item_read_tests;
 
 #[cfg(feature = "test-support")]
 mod test_support;
+
+#[cfg(test)]
+#[path = "local_vault/transition_tests.rs"]
+mod transition_tests;
