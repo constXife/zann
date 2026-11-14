@@ -19,10 +19,10 @@ is coupled to an exact-source transaction; shared-server mutations admit the
 locked source payload. See the [corpus](../../tests/fixtures/crypto/README.md)
 and [breaking cutover notes](../migrations/crypto-v1-nfc.md).
 
-The NFC candidate depends on #244 / PR #264 landing first, so operators can
-export current server item data with the old password derivation before the
-cutover. Its streaming restore round-trip is now implemented and tested in the
-parent change. Canonical client backup import is implemented (#243).
+The NFC candidate builds on the merged #244 / PR #264 recovery path. Operators
+can build that pre-NFC revision and export current server item data with the old
+password derivation before upgrading. Its streaming restore round-trip is
+implemented and tested. Canonical client backup import is implemented (#243).
 `LocalVault::open` still invokes `migrate_local`
 without an automatic pre-migration snapshot; that separate hardening remains
 outstanding.
@@ -31,7 +31,7 @@ An intentional format cutover must wait for the lossless export/import path
 and its round-trip tests; this documentation change does not authorize a
 cutover or change any persisted bytes.
 
-The #244 implementation candidate adds paged shared-server export and symmetric
+The merged #244 implementation adds paged shared-server export and symmetric
 atomic import, with a PostgreSQL round-trip of 132 current typed items under a
 new SMK and destination UUID. Its exact preservation scope and excluded server
 state are documented in [Shared server vault backups](../Server-Backups.md).

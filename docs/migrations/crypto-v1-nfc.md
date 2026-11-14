@@ -13,10 +13,11 @@ The original ASCII `v1_local_vault.json` remains unchanged.
 
 ## Release prerequisite
 
-This candidate depends on [#264](https://github.com/constXife/zann/pull/264),
-which implements #244 and verifies the shared-server recovery path with a
-132-item PostgreSQL round-trip. Land and build that recovery change **before**
-the NFC change, as required by [ADR 0009](../adr/0009-crypto-format-lifecycle.md).
+The recovery prerequisite [#264](https://github.com/constXife/zann/pull/264) is
+merged as `11d4f447`. It implements #244 and verifies the shared-server recovery
+path with a 132-item PostgreSQL round-trip. Build that pre-NFC revision and export
+**before upgrading** to the NFC change, as required by
+[ADR 0009](../adr/0009-crypto-format-lifecycle.md).
 The export binary must contain #244 while retaining the old, raw UTF-8 password
 derivation. Canonical client backup import (#243) supplies the personal-data
 path. Exact shared-backup commands and preservation scope are documented in
