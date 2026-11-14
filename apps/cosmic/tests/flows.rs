@@ -10,6 +10,13 @@ use zann_cosmic::screens::{connect, master, settings, vault};
 use zann_cosmic::session::Session;
 use zann_ui_core::{DevicePreferences, ItemCounts};
 
+#[path = "flows/card_effects.rs"]
+mod card_effects;
+#[path = "flows/card_selection.rs"]
+mod card_selection;
+#[path = "flows/list_states.rs"]
+mod list_states;
+
 static DB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 struct DbUrlOverride(Option<std::ffi::OsString>);
@@ -464,6 +471,17 @@ fn vault_filters_the_list_and_forwards_copies() {
     state.update(vault::Message::ClearQuery, &session);
     assert_eq!(state.visible().len(), 2);
 
+    let id = state.visible()[0].id.clone();
+    let detail = Detail::parse(local::item_get(&session.facade(), id.clone()).unwrap()).unwrap();
+    state.update(vault::Message::Select(id), &session);
+    state.update(
+        vault::Message::Loaded {
+            request: state.detail_request_id(),
+            result: Ok(detail),
+        },
+        &session,
+    );
+
     // The clipboard belongs to the shell, so the detail column's copy travels up.
     let outcome = state.update(
         vault::Message::Detail(zann_cosmic::screens::detail::Message::Copy {
@@ -565,8 +583,12 @@ fn closed_history_requests_cannot_populate_a_new_history_view() {
     let page = local::items(&session.facade(), None, None).unwrap();
     let first = local::item_get(&session.facade(), page.items[0].id.clone()).unwrap();
     let mut vault = vault::State::new(page, None);
+    vault.update(vault::Message::Select(first.id.clone()), &session);
     vault.update(
-        vault::Message::Loaded(Ok(Detail::parse(first).unwrap())),
+        vault::Message::Loaded {
+            request: vault.detail_request_id(),
+            result: Ok(Detail::parse(first).unwrap()),
+        },
         &session,
     );
     vault.update(vault::Message::OpenHistory, &session);

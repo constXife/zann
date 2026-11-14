@@ -121,6 +121,7 @@ impl State {
                 };
                 self.list_generation = self.list_generation.wrapping_add(1);
                 self.apply_page(page, true);
+                self.reconcile_selection();
                 self.rebuild_nav();
                 return Outcome::Task(Task::batch([
                     arm,
@@ -136,18 +137,6 @@ impl State {
                 }
             }
 
-            Message::DetailRefreshed(Ok(detail)) => {
-                let shown = self
-                    .detail
-                    .as_ref()
-                    .is_some_and(|shown| shown.id == detail.id);
-                if shown && self.editor.is_none() && self.history.is_none() {
-                    self.detail = Some(detail);
-                }
-            }
-
-            Message::DetailRefreshed(Err(err)) => self.error = Some(err),
-
             _ => unreachable!("only auto-sync messages reach this handler"),
         }
         Outcome::None
@@ -162,18 +151,13 @@ impl State {
 
     /// The item on screen may have changed on the server. An open editor or
     /// history keeps what it shows.
-    fn refresh_detail(&self, session: &Session) -> Task<Message> {
-        let Some(id) = self.detail.as_ref().map(|detail| detail.id.clone()) else {
+    fn refresh_detail(&mut self, session: &Session) -> Task<Message> {
+        let Some(id) = self.selected_item_id().map(str::to_owned) else {
             return Task::none();
         };
         if self.editor.is_some() || self.history.is_some() {
             return Task::none();
         }
-        let facade = session.facade();
-        cosmic::task::future(async move {
-            Message::DetailRefreshed(
-                off_thread(move || local::item_get(&facade, id).and_then(Detail::parse)).await,
-            )
-        })
+        self.load_detail(id, session)
     }
 }

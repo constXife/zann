@@ -22,6 +22,7 @@ impl State {
                 }
                 match editor::State::create(self.preferred_create_type()) {
                     Ok(editor) => {
+                        self.clear_selection();
                         self.editor = Some(editor);
                         self.editing_generation = crate::backend::next_view_request();
                     }
@@ -31,6 +32,9 @@ impl State {
 
             Message::OpenEdit => {
                 if self.busy || self.searching || self.editor.is_some() || self.history.is_some() {
+                    return Outcome::None;
+                }
+                if !self.detail_ready() {
                     return Outcome::None;
                 }
                 if let Some(detail) = self.detail.as_ref() {
@@ -46,6 +50,9 @@ impl State {
 
             Message::OpenHistory => {
                 if self.busy || self.searching || self.editor.is_some() || self.history.is_some() {
+                    return Outcome::None;
+                }
+                if !self.detail_ready() {
                     return Outcome::None;
                 }
                 let Some(detail) = self.detail.as_ref() else {
@@ -163,7 +170,7 @@ impl State {
                     }
                     history::Outcome::Restored(detail) => {
                         self.history = None;
-                        self.detail = Some(detail);
+                        self.install_detail(detail);
                         self.query.clear();
                         self.applied_query.clear();
                         self.list_generation = self.list_generation.wrapping_add(1);
@@ -196,7 +203,7 @@ impl State {
 
             Message::Saved(_, Ok(detail)) => {
                 self.editor = None;
-                self.detail = Some(detail);
+                self.install_detail(detail);
                 self.query.clear();
                 self.applied_query.clear();
                 self.list_generation = self.list_generation.wrapping_add(1);

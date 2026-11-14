@@ -66,19 +66,8 @@ impl std::fmt::Debug for Detail {
 impl Detail {
     pub fn parse(detail: ItemDetail) -> Result<Self, String> {
         let payload_json = detail.payload_json.clone();
-        let fields = project_item_fields(&payload_json)
-            .map_err(|err| err.to_string())?
-            .into_iter()
-            .map(|field| Field {
-                label: field_label(&field.label_key),
-                key: field.key,
-                value: field.value,
-                masked: field.masked,
-                multiline: field.multiline,
-                totp: field.totp,
-                revealed: false,
-            })
-            .collect();
+        let fields =
+            Self::fields(project_item_fields(&payload_json).map_err(|err| err.to_string())?);
 
         Ok(Self {
             id: detail.id,
@@ -89,6 +78,45 @@ impl Detail {
             payload_json,
             copied_field: None,
         })
+    }
+
+    pub fn from_item(item: zann_core::ItemDetail) -> Result<Self, String> {
+        // The editor still consumes the canonical JSON draft API. Card fields
+        // are projected directly from the typed payload, without reparsing it.
+        let payload_json = serde_json::to_string(&item.payload).map_err(|err| err.to_string())?;
+        Ok(Self {
+            id: item.id.to_string(),
+            title: item.name,
+            path: item.path,
+            type_id: item.type_id,
+            payload_json,
+            copied_field: None,
+            fields: Self::fields(zann_ui_core::item_detail::project_payload_fields(
+                item.payload,
+            )),
+        })
+    }
+
+    fn fields(fields: Vec<zann_ui_core::ItemDetailField>) -> Vec<Field> {
+        fields
+            .into_iter()
+            .map(|field| Field {
+                label: field_label(&field.label_key),
+                key: field.key,
+                value: field.value,
+                masked: field.masked,
+                multiline: field.multiline,
+                totp: field.totp,
+                revealed: false,
+            })
+            .collect()
+    }
+
+    pub fn reset_interactions(&mut self) {
+        self.copied_field = None;
+        for field in &mut self.fields {
+            field.revealed = false;
+        }
     }
 
     pub fn payload_json(&self) -> &str {
@@ -123,6 +151,10 @@ impl Detail {
     }
 
     pub fn view(&self, reveal_all: bool) -> Element<'_, Message> {
+        self.view_with_interactions(reveal_all, true)
+    }
+
+    pub fn view_with_interactions(&self, reveal_all: bool, active: bool) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let mut column = widget::column::with_capacity(self.fields.len() + 2)
             .push(widget::text::caption(format!(
@@ -140,7 +172,8 @@ impl Detail {
             column = column.push(field_view(
                 index,
                 field,
-                reveal_all,
+                reveal_all && active,
+                active,
                 self.copied_field == Some(index),
                 spacing.space_xxs,
             ));
@@ -166,6 +199,7 @@ fn field_view(
     index: usize,
     field: &Field,
     reveal_all: bool,
+    active: bool,
     copied: bool,
     gap: u16,
 ) -> Element<'_, Message> {
@@ -174,10 +208,14 @@ fn field_view(
         .spacing(gap);
 
     if let Some(params) = field.totp.as_ref() {
-        return rows.push(totp_view(index, params, copied)).into();
+        return rows.push(totp_view(index, params, copied, active)).into();
     }
 
-    let shown = field.display_value(reveal_all);
+    let shown = if !active && (field.masked || field.totp.is_some()) {
+        MASKED_VALUE.to_string()
+    } else {
+        field.display_value(reveal_all)
+    };
     let shown_revealed = field.revealed || reveal_all;
 
     let value: Element<'_, Message> = if field.multiline {
@@ -199,10 +237,10 @@ fn field_view(
         .class(copy_block_class(copied))
         .padding([8, 10])
         .width(Length::Fill)
-        .on_press(Message::Copy {
+        .on_press_maybe(active.then(|| Message::Copy {
             index,
             value: field.value.clone(),
-        });
+        }));
 
     let mut controls = widget::row::with_capacity(2)
         .push(copy_block)
@@ -216,25 +254,30 @@ fn field_view(
             } else {
                 "document-properties-symbolic"
             }))
-            .on_press(Message::ToggleReveal(index)),
+            .on_press_maybe(active.then_some(Message::ToggleReveal(index))),
         );
     }
 
     rows.push(controls).into()
 }
 
-fn totp_view(index: usize, params: &TotpParams, copied: bool) -> Element<'_, Message> {
+fn totp_view(
+    index: usize,
+    params: &TotpParams,
+    copied: bool,
+    active: bool,
+) -> Element<'_, Message> {
     let spacing = theme::spacing();
     match generate_totp(params) {
         Ok(code) => {
             let split = code.code.len() / 2;
             let content = widget::row::with_capacity(3)
                 .push(
-                    widget::container(widget::text::title3(format!(
-                        "{} {}",
-                        &code.code[..split],
-                        &code.code[split..]
-                    )))
+                    widget::container(widget::text::title3(if active {
+                        format!("{} {}", &code.code[..split], &code.code[split..])
+                    } else {
+                        MASKED_VALUE.to_string()
+                    }))
                     .width(Length::Fill),
                 )
                 .push(widget::text::caption(format!(
@@ -252,10 +295,10 @@ fn totp_view(index: usize, params: &TotpParams, copied: bool) -> Element<'_, Mes
                 .class(copy_block_class(copied))
                 .padding([8, 10])
                 .width(Length::Fill)
-                .on_press(Message::Copy {
+                .on_press_maybe(active.then_some(Message::Copy {
                     index,
                     value: code.code,
-                })
+                }))
                 .into()
         }
         Err(err) => widget::text::caption(format!("invalid one-time code: {err}")).into(),
