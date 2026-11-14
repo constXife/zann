@@ -226,6 +226,85 @@ final class AppModelTests: XCTestCase {
         XCTAssertNil(model.error)
     }
 
+    func testStartupTouchIDUnlocksOnceAndManualLockKeepsTheButtonAvailable() async {
+        let keystore = MemoryKeystore()
+        let first = makeModel(keystore: keystore)
+        await first.submit(password: "correct horse battery", mode: .unlock)
+        await first.setTouchID(true)
+        let model = makeModel(keystore: keystore)
+        let loads = keystore.loadCalls
+
+        async let startup: Void = model.unlockWithTouchIDAtStartup()
+        async let reactivation: Void = model.unlockWithTouchIDAtStartup()
+        _ = await (startup, reactivation)
+        XCTAssertEqual(model.screen, .vault)
+        XCTAssertEqual(keystore.loadCalls, loads + 1)
+
+        await model.lock()
+        await model.unlockWithTouchIDAtStartup()
+        XCTAssertEqual(model.screen, .master(.unlock))
+        XCTAssertEqual(keystore.loadCalls, loads + 1)
+
+        await model.unlockWithTouchID()
+        XCTAssertEqual(model.screen, .vault)
+        XCTAssertEqual(keystore.loadCalls, loads + 2)
+    }
+
+    func testCancelledStartupTouchIDDoesNotPromptAgainAndPasswordStillWorks() async {
+        let keystore = MemoryKeystore()
+        let first = makeModel(keystore: keystore)
+        await first.submit(password: "correct horse battery", mode: .unlock)
+        await first.setTouchID(true)
+        keystore.cancelLoads = true
+        let model = makeModel(keystore: keystore)
+        let loads = keystore.loadCalls
+
+        await model.unlockWithTouchIDAtStartup()
+        await model.unlockWithTouchIDAtStartup()
+        XCTAssertEqual(keystore.loadCalls, loads + 1)
+        XCTAssertEqual(model.screen, .master(.unlock))
+        XCTAssertNil(model.error)
+        XCTAssertFalse(model.busy)
+
+        await model.submit(password: "correct horse battery", mode: .unlock)
+        XCTAssertEqual(model.screen, .vault)
+    }
+
+    func testUnavailableStartupTouchIDDoesNotRetryOnReactivation() async {
+        let keystore = MemoryKeystore()
+        let first = makeModel(keystore: keystore)
+        await first.submit(password: "correct horse battery", mode: .unlock)
+        await first.setTouchID(true)
+        let model = makeModel(keystore: keystore)
+        let loads = keystore.loadCalls
+        keystore.biometricsAvailable = false
+
+        await model.unlockWithTouchIDAtStartup()
+        keystore.biometricsAvailable = true
+        await model.unlockWithTouchIDAtStartup()
+        XCTAssertEqual(keystore.loadCalls, loads)
+        XCTAssertEqual(model.screen, .master(.unlock))
+        XCTAssertNil(model.error)
+
+        await model.unlockWithTouchID()
+        XCTAssertEqual(model.screen, .vault)
+    }
+
+    func testPasswordAttemptPreventsADelayedStartupTouchIDPrompt() async {
+        let keystore = MemoryKeystore()
+        let first = makeModel(keystore: keystore)
+        await first.submit(password: "correct horse battery", mode: .unlock)
+        await first.setTouchID(true)
+        let model = makeModel(keystore: keystore)
+        let loads = keystore.loadCalls
+
+        await model.submit(password: "wrong password", mode: .unlock)
+        await model.unlockWithTouchIDAtStartup()
+        XCTAssertEqual(keystore.loadCalls, loads)
+        XCTAssertEqual(model.screen, .master(.unlock))
+        XCTAssertNotNil(model.error)
+    }
+
     func testUnopenableDatabaseShowsFailure() {
         let preferences = directory.appendingPathComponent("preferences.json")
         let model = AppModel(opening: {
@@ -249,6 +328,7 @@ final class MemoryKeystore: DeviceKeystore {
     private(set) var promptReason = ""
     var cancelLoads = false
     var biometricsAvailable = true
+    private(set) var loadCalls = 0
 
     var holdsKey: Bool { dwk != nil }
 
@@ -263,6 +343,7 @@ final class MemoryKeystore: DeviceKeystore {
     func storeDwk(dwk: Data) throws { self.dwk = dwk }
 
     func loadDwk() throws -> Data? {
+        loadCalls += 1
         if cancelLoads { throw PlatformStoreError.Cancelled }
         return dwk
     }

@@ -4,6 +4,7 @@ import SwiftUI
 /// live in the core; this form only checks that both entries match.
 struct MasterPasswordView: View {
     @EnvironmentObject private var model: AppModel
+    @Environment(\.scenePhase) private var scenePhase
     let mode: AppModel.MasterMode
 
     @State private var password = ""
@@ -45,7 +46,10 @@ struct MasterPasswordView: View {
             HStack {
                 if mode == .unlock && model.touchIDArmed {
                     Button {
-                        Task { await model.unlockWithTouchID() }
+                        Task {
+                            await model.unlockWithTouchID()
+                            focused = true
+                        }
                     } label: {
                         Label(model.strings("unlock.touchId"), systemImage: "touchid")
                     }
@@ -65,6 +69,11 @@ struct MasterPasswordView: View {
         .frame(maxWidth: 420)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { focused = true }
+        .task(id: scenePhase) {
+            guard mode == .unlock, scenePhase == .active else { return }
+            await model.unlockWithTouchIDAtStartup()
+            focused = true
+        }
         .onChange(of: model.screen) { _ in
             password = ""
             confirmation = ""
