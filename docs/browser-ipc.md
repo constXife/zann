@@ -5,7 +5,7 @@ The Chromium UI is implemented by [#25](chromium-extension.md); Firefox packagin
 
 ## Composition and custody
 
-`Daemon::start(ClientPaths, Arc<dyn LocalVaultService>)` accepts an existing
+`Daemon::start(&Path, Arc<dyn LocalVaultService>)` accepts an existing
 session. COSMIC `Session` and the macOS production composition embed the service over
 their one local vault. FFI `create_core` opens storage only; the production
 composition explicitly calls `start_browser_service()` on that same facade.

@@ -2,7 +2,6 @@ mod support;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use support::*;
-use zann_client::app::ClientPaths;
 use zann_daemon::Daemon;
 
 #[test]
@@ -24,7 +23,7 @@ fn socket_state_and_singleton_lock_are_private_and_a_second_owner_cannot_replace
             mode
         );
     }
-    assert!(Daemon::start(ClientPaths::new(&fixture.root), fixture.vault.clone()).is_err());
+    assert!(Daemon::start(&fixture.root, fixture.vault.clone()).is_err());
     let mut client = Client::connect(&fixture, &daemon, 10);
     client.pair(&daemon);
     daemon.shutdown().unwrap();
@@ -55,7 +54,7 @@ fn unsafe_identity_state_fails_closed_without_replacing_the_original() {
             _ => unreachable!(),
         }
         assert!(
-            Daemon::start(ClientPaths::new(&fixture.root), fixture.vault.clone()).is_err(),
+            Daemon::start(&fixture.root, fixture.vault.clone()).is_err(),
             "{case}"
         );
     }

@@ -36,7 +36,7 @@ impl Session {
         let location = location.try_into().map_err(|err| err.to_string())?;
         let (facade, status) = local::open_at(&location)?;
         let daemon = zann_daemon::Daemon::start(
-            zann_client::app::ClientPaths::new(location.client_root()),
+            location.client_root(),
             facade.clone(),
         )
         .map_err(|error| error.to_string())?;

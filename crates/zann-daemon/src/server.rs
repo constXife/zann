@@ -8,7 +8,7 @@ use std::sync::{
     Arc,
 };
 use std::thread::{self, JoinHandle};
-use zann_client::app::{local::LocalVaultService, ClientPaths};
+use zann_client::app::local::LocalVaultService;
 use zann_client::browser_ipc::{Hello, SignedRequest};
 use zann_crypto::ipc_signatures::random_nonce;
 
@@ -20,8 +20,8 @@ pub struct Daemon {
 }
 
 impl Daemon {
-    pub fn start(paths: ClientPaths, vault: Arc<dyn LocalVaultService>) -> Result<Self> {
-        let directory = Directory::open(paths.root())?;
+    pub fn start(root: &std::path::Path, vault: Arc<dyn LocalVaultService>) -> Result<Self> {
+        let directory = Directory::open(root)?;
         match fs::symlink_metadata(&directory.socket) {
             Ok(meta) => {
                 if !meta.file_type().is_socket() || meta.uid() != super::filesystem::uid() {

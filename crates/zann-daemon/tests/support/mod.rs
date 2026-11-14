@@ -2,10 +2,7 @@
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::Arc;
-use zann_client::app::{
-    local::{BrowserContext, ItemCreate},
-    ClientPaths,
-};
+use zann_client::app::local::{BrowserContext, ItemCreate};
 use zann_client::browser_ipc::{decode_array, Hello, Reply, Request, SignedReply, SignedRequest};
 use zann_client::browser_ipc::{EncryptedFrame, NoiseHandshakePacket};
 use zann_client::native_messaging::{read_frame, write_frame};
@@ -34,7 +31,7 @@ impl Fixture {
         Self { dir, root, vault }
     }
     pub fn daemon(&self) -> Daemon {
-        Daemon::start(ClientPaths::new(&self.root), self.vault.clone()).unwrap()
+        Daemon::start(&self.root, self.vault.clone()).unwrap()
     }
     pub fn login(&self, name: &str, url: &str) -> String {
         self.login_as(name, url, "alice")

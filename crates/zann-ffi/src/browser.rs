@@ -83,7 +83,7 @@ impl CoreFacade {
                 return daemon.control().settings().map(|_| ()).map_err(Into::into);
             }
             *owner = Some(zann_daemon::Daemon::start(
-                self.inner.client_paths(),
+                self.inner.client_paths().root(),
                 self.inner.clone(),
             )?);
             Ok(())

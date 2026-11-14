@@ -126,7 +126,6 @@ impl Engine {
 mod tests {
     use super::*;
     use std::os::unix::net::UnixStream;
-    use zann_client::app::ClientPaths;
     use zann_client::browser_ipc::BrowserPairingClient;
     use zann_client::native_messaging::{read_frame, write_frame};
     use zann_client_sqlite::local_vault::{open_vault_at_path, LocalVaultPorts};
@@ -140,7 +139,7 @@ mod tests {
             LocalVaultPorts::system_default(),
         )
         .unwrap();
-        let daemon = crate::Daemon::start(ClientPaths::new(&root), vault).unwrap();
+        let daemon = crate::Daemon::start(&root, vault).unwrap();
         let control = daemon.control();
         for expire_before_start in [true, false] {
             let code = control.begin_pairing().unwrap();

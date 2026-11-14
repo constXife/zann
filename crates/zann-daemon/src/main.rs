@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("unexpected daemon argument".into());
     }
     let vault = open_vault_at_path(&database, LocalVaultPorts::system_default())?;
-    let daemon = Daemon::start(vault.client_paths(), vault.clone())?;
+    let daemon = Daemon::start(vault.client_paths().root(), vault.clone())?;
     let control = daemon.control();
     println!("Zann local daemon. Server key: {}", daemon.server_key());
     println!(
