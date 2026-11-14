@@ -3,6 +3,7 @@ use super::*;
 
 impl LocalVault {
     pub(super) fn check_context_generation(&self, expected: u64) -> LocalResult<()> {
+        self.verify_database()?;
         if self.context_generation.load(Ordering::SeqCst) != expected {
             return Err(LocalError::Sync {
                 kind: "context_changed".into(),

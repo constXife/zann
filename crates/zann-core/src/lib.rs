@@ -14,6 +14,7 @@ pub use item_metadata::ItemMetadata;
 pub mod models;
 pub mod security_profile;
 pub mod services;
+pub mod unlock;
 
 pub use crate::api::*;
 pub use crate::auth::*;

@@ -878,6 +878,7 @@ fn map_reset_store_error(error: SyncStoreError) -> SyncErrorKind {
 
 #[cfg(test)]
 mod tests {
+    mod recovery_plan;
     use std::future::pending;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1755,7 +1756,7 @@ mod tests {
 }
 
 mod connection_removal;
-pub use connection_removal::ConnectionRemoval;
+pub use connection_removal::{ConnectionRemoval, ConnectionRemovalPlan};
 mod account_keys;
 /// Local vault services, independent of SQLite and native adapters.
 mod kdf_identity;

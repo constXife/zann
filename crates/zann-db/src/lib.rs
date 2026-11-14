@@ -486,6 +486,15 @@ pub async fn connect_sqlite_path(path: &Path) -> Result<SqlitePool, sqlx_core::E
 /// same SQLite connection except after an explicit driver reconnect.
 #[cfg(feature = "sqlite")]
 pub async fn open_existing_sqlite(path: &Path) -> Result<ExistingSqliteDatabase, sqlx_core::Error> {
+    open_existing_sqlite_with_max(path, 1).await
+}
+
+/// Native services use the same pinned identity with a bounded multi-connection pool.
+#[cfg(feature = "sqlite")]
+pub async fn open_existing_sqlite_with_max(
+    path: &Path,
+    maximum: u32,
+) -> Result<ExistingSqliteDatabase, sqlx_core::Error> {
     let location = SqliteFileLocation::from_existing_path(path)?;
     let file_identity = FileIdentity::from_path(location.path())?;
     verify_file_identity(&location, &file_identity)?;
@@ -503,8 +512,9 @@ pub async fn open_existing_sqlite(path: &Path) -> Result<ExistingSqliteDatabase,
     verify_file_identity(&location, &file_identity)?;
 
     let pool = PoolOptions::new()
-        .max_connections(1)
+        .max_connections(maximum)
         .min_connections(1)
+        .after_connect(move |connection, _| Box::pin(sqlite_pin::install(connection, instance_id)))
         .connect_with(sqlite_existing_connect_options(location.options.clone()))
         .await?;
     let actual = read_database_instance_id(&pool).await?;
@@ -651,3 +661,6 @@ pub async fn migrate_local(pool: &SqlitePool) -> Result<(), sqlx_core::migrate::
         .run(pool)
         .await
 }
+
+#[cfg(feature = "sqlite")]
+mod sqlite_pin;

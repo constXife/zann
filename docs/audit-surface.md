@@ -163,3 +163,30 @@ window projection, transient query lifetime, keyboard/IME guards, revision check
 on detached rows and shared DOM rendering; no filter may grant native access.
 The WASM dependency on toolkit-neutral presentation must retain the existing
 no-DB/no-HTTP/no-keystore feature boundary.
+
+## Native unlock and scoped recovery (#270)
+
+Review `zann-core::unlock`, `zann-ui-core::password`, `zann-flows::unlock`,
+`zann-client::app::{unlock,connection_removal,local::recovery}`,
+`zann-client-sqlite::local_vault::recovery`, `zann-db::{sqlite_pin,local::recovery}`
+and the thin FFI/Apple/COSMIC adapters together. Password feedback exposes only
+translation keys, never estimator patterns or typed secret values. Existing
+credentials are passed unchanged; new-password rules share one owner.
+
+A recovery confirmation is scoped to one exact preview token, local generation,
+data version and keyring value. Snapshot failure, cancellation, stale data or an
+unconfirmed unsent-data warning must preserve local records. SQLite writer
+reservation and source validation precede Config connection removal/remembered
+unlock disarm; local deletion and instance UUID rotation commit atomically.
+Ordinary pool TEMP triggers reject writes from stale database instances, even on
+reconnected pool connections. Recovery is native-only and sends nothing remotely.
+Account removal uses the existing credential journal, never a second credential
+store. Device reset retains server sign-ins; neither operation claims to recover
+forgotten encryption passwords.
+
+Verify cross-account key isolation, encrypted snapshot restoration, stale preview
+rejection (including same-cardinality edits), snapshot failure, post-reset stale
+handles, and late unlock result rejection. Shared idle/focus policy applies while
+account/recovery screens hold an unlocked root. Trusted OS authentication sheets
+must not cancel their own unlock, and startup remembered-unlock must not repeat
+on every lock.

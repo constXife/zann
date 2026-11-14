@@ -8,10 +8,9 @@ impl AppClient {
         snapshot
             .config()
             .account_identities
-            .get(&format!(
-                "{}/{}",
+            .get(&crate::config::v2::identity_slot(
                 target.connection_id(),
-                target.profile_name()
+                target.profile_name(),
             ))
             .cloned()
             .ok_or(ConfigError::IdentityChanged)
@@ -47,5 +46,47 @@ impl AppClient {
                 .ok_or(ConfigError::IdentityChanged)?,
             subject.to_owned(),
         ))
+    }
+}
+
+impl AppClient {
+    /// Configured account locations survive a reset of local keys/cache.
+    pub fn account_locations(&self) -> Result<Vec<super::local::AccountLocation>, ConfigError> {
+        let snapshot = self.repository.snapshot()?;
+        let mut accounts = Vec::new();
+        for (id, connection) in &snapshot.config().connections {
+            if let Some(storage_id) = &connection.metadata().storage_id {
+                let account_name = connection
+                    .active_credential()
+                    .and_then(|profile| {
+                        snapshot
+                            .config()
+                            .account_identities
+                            .get(&crate::config::v2::identity_slot(id, profile))
+                    })
+                    .and_then(|identity| identity.email.clone());
+                let key_binding = connection
+                    .active_credential()
+                    .and_then(|name| connection.credential_profiles().get(name))
+                    .and_then(|profile| profile.account_subject())
+                    .map(|subject| {
+                        connection
+                            .metadata()
+                            .server_id
+                            .clone()
+                            .map(|server| (server, subject.to_owned()))
+                            .ok_or(ConfigError::IdentityChanged)
+                    })
+                    .transpose()?;
+                accounts.push(super::local::AccountLocation {
+                    storage_id: storage_id.clone(),
+                    name: connection.metadata().name.clone(),
+                    server_url: connection.metadata().address.clone(),
+                    account_name,
+                    key_binding,
+                });
+            }
+        }
+        Ok(accounts)
     }
 }

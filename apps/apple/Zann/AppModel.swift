@@ -10,16 +10,12 @@ final class AppModel: ObservableObject {
         case failed(String)
         case welcome
         case connect
+        case accounts
         case master(MasterMode)
         case vault
     }
 
-    enum MasterMode {
-        case create
-        case unlock
-        case accountCreate
-        case accountUnlock
-    }
+    typealias MasterMode = UnlockPhaseFfi
 
     @Published private(set) var screen: Screen
     /// Present only while unlocked; locking drops it with every secret it holds.
@@ -40,7 +36,12 @@ final class AppModel: ObservableObject {
     @Published private(set) var connect: ConnectModel?
     /// Where leaving the connect screen goes: the welcome screen for a new
     /// device, the unlock screen after forgetting a server.
-    private var connectedAccountHasKeys = false
+    private var connectedAccountHasKeys: Bool?
+    private var pendingStorage: String?
+    @Published private(set) var recovery: RecoveryModel?
+    @Published private(set) var enrollmentAccount: SetupAccountFfi?
+    @Published private(set) var deviceUnlocked = false
+    private let unlockOperations = UnlockOperationsFfi()
     private var connectReturn = Screen.welcome
     /// A fresh sign-in explains that the first catalog arrives after unlock.
     /// The cached vault UI opens as soon as the master key is verified.
@@ -56,9 +57,12 @@ final class AppModel: ObservableObject {
     private let openBrowser: (URL) -> Void
     /// One prompt for the launch unlock screen, never for a later lock.
     private var startupTouchIDPending = false
+    private var platformUnlockPending = false
+    private var pendingConnection: ConnectModel.Connected?
     /// The last input the app received while unlocked; the idle lock counts
     /// from here, as COSMIC's does.
     private var lastActivity = Date()
+    private var idleCheckPending = false
 
     /// The composition root: the app passes `openDefaultCore`,
     /// `defaultPreferencesFile` and the system browser, tests a core over a
@@ -101,7 +105,7 @@ final class AppModel: ObservableObject {
         core = opened?.core
         keystore = opened?.keystore
         touchIDArmed = armed
-        startupTouchIDPending = armed && screen == .master(.unlock)
+        startupTouchIDPending = unlockAttemptRememberedAtStartup(startup: true, armed: armed, phase: .unlock) && screen == .master(.unlock)
         keystore?.setPromptReason(strings("unlock.touchIdReason"))
         if let rememberedError {
             error = message(for: rememberedError)
@@ -126,17 +130,24 @@ final class AppModel: ObservableObject {
     func unlockWithTouchID() async {
         guard let core, !busy, touchIDArmed else { return }
         startupTouchIDPending = false
+        platformUnlockPending = true
+        defer { platformUnlockPending = false }
         let needsEnrollment = syncAfterUnlock
+        let selected = pendingStorage
         let result = await perform { () -> VaultModel.Contents? in
             _ = try core.unlockRemembered()
+            if let selected { try core.setCurrentStorage(id: selected) }
             if needsEnrollment {
                 if try !core.activateConnectedAccount() { return nil }
+            }
+            if core.currentStorageId() == nil {
+                guard try core.setupAccounts().contains(where: { $0.enrolled }) else { return nil }
             }
             return try VaultModel.load(core)
         }
         if let result {
             if let contents = result { open(core: core, contents: contents) }
-            else { screen = .master(connectedAccountHasKeys ? .accountUnlock : .accountCreate) }
+            else { applyUnlockRoute(unlockRouteAfterDevice(enrolled: false, connectedHasKeys: connectedAccountHasKeys), contents: nil) }
         } else if case .Unlock("keystore_cancelled", _)? = lastFailure as? CoreError {
             error = nil
         }
@@ -197,7 +208,7 @@ final class AppModel: ObservableObject {
     }
 
     var isUnlocked: Bool {
-        screen == .vault
+        deviceUnlocked
     }
 
     /// `serverURL` prefills the address, as after forgetting a server.
@@ -220,7 +231,7 @@ final class AppModel: ObservableObject {
                 Clipboard.copy(value, clearAfter: self.preferences.clipboardClearSeconds,
                                onlyIfUnchanged: self.preferences.clipboardClearIfUnchanged)
             },
-            connected: { [weak self] in self?.connected($0) }
+            connected: { [weak self] outcome in Task { await self?.connected(outcome) } }
         )
         if let serverURL {
             connect?.url = serverURL
@@ -275,31 +286,77 @@ final class AppModel: ObservableObject {
         startConnecting(serverURL: serverURL, returnTo: .master(.unlock))
     }
 
-    /// The account's existing personal vault opens with its master password;
-    /// a new account creates one.
-    func connected(_ outcome: ConnectModel.Connected) {
-        guard screen == .connect else { return }
+    /// Shared routing distinguishes an unlocked device from one needing a password.
+    func connected(_ outcome: ConnectModel.Connected) async {
+        guard screen == .connect, let core else { return }
+        if busy { pendingConnection = outcome; return }
         connect = nil
         syncAfterUnlock = true
         connectedAccountHasKeys = outcome.hasPersonalKeys
-        guard let core else { return }
-        do {
-            screen = .master(try core.appStatus().initialized ? .unlock : .create)
-        } catch { self.error = message(for: error) }
+        let prepared = await perform { () -> (UnlockRouteFfi, VaultModel.Contents?, SetupAccountFfi?) in
+            let status = try core.appStatus()
+            let enrolled = status.initialized && !status.locked ? try core.activateConnectedAccount() : false
+            let route = unlockRouteAfterConnection(initialized: status.initialized, unlocked: !status.locked, enrolled: enrolled, hasKeys: outcome.hasPersonalKeys)
+            let account = try core.setupAccounts().first { $0.storageId == outcome.storageID }
+            if case .open = route { return (route, try VaultModel.load(core), account) }
+            return (route, nil, account)
+        }
+        guard let (route, contents, account) = prepared else { showAccountRecovery(); return }
+        enrollmentAccount = account
+        applyUnlockRoute(route, contents: contents)
+    }
+
+    func showAccountRecovery() {
+        guard let core, !busy else { return }
+        connect?.cancel(); connect = nil
+        vault?.stopAutoSync(); vault = nil
+        syncAfterUnlock = false; connectedAccountHasKeys = nil; pendingStorage = nil
+        recovery = RecoveryModel(core: core, strings: strings, stateChanged: { [weak self] in self?.refreshUnlockState() }) { [weak self] result in
+            if result.deviceReset { self?.touchIDArmed = false; self?.startupTouchIDPending = false }
+        }
+        screen = .accounts
+    }
+
+    func chooseSetupAccount(_ account: SetupAccountFfi) async {
+        guard let core, !busy else { return }
+        let prepared = await perform { () -> (UnlockRouteFfi, VaultModel.Contents?) in
+            let status = try core.appStatus()
+            let route = unlockRouteForAccount(enrolled: account.enrolled, unlocked: !status.locked)
+            if case .open = route { try core.setCurrentStorage(id: account.storageId); return (route, try VaultModel.load(core)) }
+            return (route, nil)
+        }
+        guard let (route, contents) = prepared else { return }
+        if case .connect = route { startConnecting(serverURL: account.serverUrl, returnTo: .accounts) }
+        else { pendingStorage = account.storageId; applyUnlockRoute(route, contents: contents) }
+    }
+
+    private func applyUnlockRoute(_ route: UnlockRouteFfi, contents: VaultModel.Contents?) {
+        switch route {
+        case .password(let phase): screen = .master(phase)
+        case .chooseAccount: showAccountRecovery()
+        case .connect: showAccountRecovery()
+        case .open:
+            if let core, let contents { pendingStorage = nil; open(core: core, contents: contents) }
+        }
     }
 
     func submit(password: String, mode: MasterMode) async {
         guard let core, !busy, !password.isEmpty else { return }
         startupTouchIDPending = false
         let needsEnrollment = syncAfterUnlock
+        let selected = pendingStorage
         let result = await perform { () -> VaultModel.Contents? in
             switch mode {
             case .create: _ = try core.initializeMasterPassword(password: password)
             case .unlock: _ = try core.unlock(password: password)
             case .accountCreate, .accountUnlock: _ = try core.enrollAccountKey(password: password)
             }
+            if let selected { try core.setCurrentStorage(id: selected) }
             if needsEnrollment && (mode == .create || mode == .unlock) {
                 if try !core.activateConnectedAccount() { return nil }
+            }
+            if core.currentStorageId() == nil {
+                guard try core.setupAccounts().contains(where: { $0.enrolled }) else { return nil }
             }
             return try VaultModel.load(core)
         }
@@ -307,7 +364,7 @@ final class AppModel: ObservableObject {
         if let contents = result {
             open(core: core, contents: contents)
         } else {
-            screen = .master(connectedAccountHasKeys ? .accountUnlock : .accountCreate)
+            applyUnlockRoute(unlockRouteAfterDevice(enrolled: false, connectedHasKeys: connectedAccountHasKeys), contents: nil)
         }
     }
 
@@ -329,14 +386,21 @@ final class AppModel: ObservableObject {
     /// Locks once `auto_lock_minutes` pass without input; `0` disables it.
     func checkIdle(at now: Date = Date()) async {
         let minutes = preferences.autoLockMinutes
-        guard isUnlocked, minutes > 0,
-              now.timeIntervalSince(lastActivity) >= TimeInterval(minutes) * 60
-        else { return }
-        await lock()
+        guard !idleCheckPending, unlockIdleLockDue(unlocked: isUnlocked, timeoutMinutes: minutes, idleMillis: Int64(now.timeIntervalSince(lastActivity) * 1000)), let core else { return }
+        idleCheckPending = true
+        defer { idleCheckPending = false }
+        do {
+            let present = try await Task.detached { try core.idleUnlockKeyPresent() }.value
+            guard unlockIdleLockDue(unlocked: isUnlocked, timeoutMinutes: minutes, idleMillis: Int64(now.timeIntervalSince(lastActivity) * 1000)) else { return }
+            if present { lastActivity = now } else { await lock() }
+        } catch {
+            await lock()
+            self.error = message(for: error)
+        }
     }
 
     func appResignedActive() async {
-        if preferences.lockOnFocusLoss {
+        if preferences.lockOnFocusLoss && unlockFocusLockRequired(unlocked: isUnlocked, workPending: busy, platformPrompt: platformUnlockPending || touchIDBusy) {
             await lock()
         }
     }
@@ -349,16 +413,31 @@ final class AppModel: ObservableObject {
     }
 
     func lock() async {
-        guard let core, isUnlocked, !busy else { return }
-        // Stopped first, so no tick admits a sync while the core locks; the
-        // core's lock cancels one already running.
+        guard let core, isUnlocked || busy else { return }
+        let keepConnecting = screen == .connect && connect != nil
+        unlockOperations.cancel()
+        // Clear visible secrets before awaiting any fallible core operation.
         vault?.stopAutoSync()
-        guard await perform({ _ = try core.lock() }) != nil else { return }
+        if !keepConnecting { vault = nil; screen = .master(.unlock) }
+        // The core cancels work already running.
+        guard let status = await perform({ _ = try core.lock(); return try core.appStatus() }) else { return }
         vault = nil
         if preferences.clipboardClearOnLock {
             Clipboard.clearOwned()
         }
-        screen = .master(.unlock)
+        if keepConnecting {
+            if let outcome = pendingConnection { pendingConnection = nil; await connected(outcome) }
+        } else { screen = .master(status.initialized ? .unlock : .create) }
+    }
+
+    private func refreshUnlockState() {
+        guard let core else { return }
+        do {
+            let unlocked = try core.vaultStatus().unlocked
+            if unlocked && !deviceUnlocked { lastActivity = Date() }
+            deviceUnlocked = unlocked
+        }
+        catch { self.error = message(for: error) }
     }
 
     /// The failure behind the last `nil` from `perform`.
@@ -366,13 +445,16 @@ final class AppModel: ObservableObject {
 
     /// Runs `work` off the main actor; a failure lands in `error` as `nil`.
     private func perform<T>(_ work: @escaping () throws -> T) async -> T? {
+        guard let operation = unlockOperations.begin() else { return nil }
         busy = true
         error = nil
         lastFailure = nil
-        defer { busy = false }
         let result = await Task.detached(priority: .userInitiated) {
             Result(catching: work)
         }.value
+        guard unlockOperations.finish(operation: operation) else { return nil }
+        busy = false
+        refreshUnlockState()
         switch result {
         case .success(let value):
             return value
@@ -392,39 +474,7 @@ final class AppModel: ObservableObject {
         return remembered.armed && remembered.source == "keystore"
     }
 
-    /// The database lives under Application Support in a directory named after
-    /// the bundle, isolated from other native client containers. The Touch ID reason is
-    /// set by `AppModel` once it knows the language.
-    static func openDefaultCore() throws -> (core: CoreFacade, keystore: DeviceKeystore) {
-        let keystore = KeychainKeystore(service: try Self.bundleID(), promptReason: "")
-        let core = try createCore(
-            dbPath: try Self.dataDirectory().appendingPathComponent("local.sqlite").path,
-            keystore: keystore,
-            secretStore: KeychainSecretStore()
-        )
-        try core.startBrowserService()
-        return (core, keystore)
-    }
 
-    /// Beside the database, so one directory holds all of this app's state.
-    static func defaultPreferencesFile() throws -> PreferencesFile {
-        PreferencesFile(url: try dataDirectory().appendingPathComponent("preferences.json"))
-    }
-
-    private static func dataDirectory() throws -> URL {
-        let support = try FileManager.default.url(
-            for: .applicationSupportDirectory, in: .userDomainMask,
-            appropriateFor: nil, create: true
-        )
-        return support.appendingPathComponent(try bundleID(), isDirectory: true)
-    }
-
-    private static func bundleID() throws -> String {
-        guard let bundleID = Bundle.main.bundleIdentifier else {
-            throw CoreError.InvalidArgument("the app bundle has no identifier")
-        }
-        return bundleID
-    }
 }
 
 /// The core's own message for an error, without the enum wrapping.

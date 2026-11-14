@@ -47,7 +47,7 @@ impl ConnectFlowFfi {
 
     /// Adapters check before installing opaque prepared/browser capabilities.
     /// Their UI actor serializes this check, installation and completion.
-    pub fn accepts(&self, id: ConnectOperationFfi, step: ConnectStepFfi) -> bool {
+    pub fn accepts(&self, id: FlowOperationFfi, step: ConnectStepFfi) -> bool {
         self.0
             .lock()
             .expect("Connect flow lock poisoned")

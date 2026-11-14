@@ -3,6 +3,7 @@
 //! knows about [`Screen`] or about its siblings, so the routing lives in one
 //! place (`main.rs`) instead of being spread across the screens.
 
+pub mod accounts;
 pub mod connect;
 pub mod detail;
 pub mod editor;
@@ -27,6 +28,7 @@ pub enum Screen {
         return_to: Option<Box<Screen>>,
     },
     Master(Box<master::State>),
+    Accounts(Box<accounts::State>),
     Vault(Box<vault::State>),
     /// Reached from the vault and always returns to it, so the vault it came
     /// from is parked here rather than rebuilt from the database.

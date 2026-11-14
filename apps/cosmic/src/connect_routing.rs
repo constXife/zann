@@ -34,22 +34,44 @@ impl App {
                         screen, session, ..
                     } = &mut self.shell
                     {
-                        let initialized = match session.facade().app_status() {
-                            Ok(status) => status.initialized,
+                        let status = match session.facade().app_status() {
+                            Ok(status) => status,
                             Err(error) => {
                                 self.shell = Shell::Blocked(error.to_string());
                                 return Task::none();
                             }
                         };
-                        let mode = if initialized {
-                            master::Mode::Unlock
-                        } else {
-                            master::Mode::Create
-                        };
-                        *screen = Screen::Master(Box::new(
-                            master::State::new(mode, Some(storage_id))
-                                .with_account(has_personal_keys),
-                        ));
+                        let mode = zann_flows::unlock::device_phase(status.initialized);
+                        let mut master = master::State::new(mode, Some(storage_id.clone()))
+                            .with_account(has_personal_keys);
+                        match session.facade().setup_accounts() {
+                            Ok(accounts) => {
+                                if let Some(account) = accounts
+                                    .into_iter()
+                                    .find(|account| account.location.storage_id == storage_id)
+                                {
+                                    let label = match account.location.account_name {
+                                        Some(name) => {
+                                            format!("{} · {}", name, account.location.server_url)
+                                        }
+                                        None => account.location.server_url,
+                                    };
+                                    master = master.with_account_label(label);
+                                }
+                            }
+                            Err(error) => {
+                                self.shell = Shell::Blocked(error.to_string());
+                                return Task::none();
+                            }
+                        }
+                        if status.initialized && !status.locked {
+                            if let master::Outcome::Task(task) =
+                                master.update(master::Message::UseUnlocked, session)
+                            {
+                                tasks.push(lift(task, Message::Master));
+                            }
+                        }
+                        *screen = Screen::Master(Box::new(master));
                     }
                 }
             }

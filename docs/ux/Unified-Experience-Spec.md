@@ -44,7 +44,8 @@
 
 - First run -> server sign-in -> create Zann unlock password -> enroll account encryption key -> enable biometric/PIN -> import -> first item -> first autofill.
 - Daily use: search -> copy -> autofill -> generate password -> save/update.
-- Recovery: explain unavailable password recovery; recovery key/contacts if implemented; change the Zann unlock password in Settings with current-password verification.
+- Recovery: offer account navigation from every password phase. Clearly distinguish forgetting one local account (including its connection sign-ins/trust pin) from resetting all local unlock keys/cache (retaining sign-ins/preferences). Both require an encrypted snapshot and explicit consent for unsent data. Server sign-in cannot recover forgotten encryption passwords. Change the Zann unlock password in Settings with current-password verification.
+- New passwords: shared strength feedback, at least eight NFC characters, no leading/trailing Unicode whitespace. Internal spaces remain significant. Existing credentials are never trimmed.
 - Device change: sign in on the new device, set its Zann unlock password, then enter the account encryption password once.
 - Incident: suspected compromise, password changes, audit.
 

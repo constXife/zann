@@ -133,3 +133,49 @@ pub(super) fn storage_connection(
     }
     Ok(selected)
 }
+
+/// An exact Config source for explicitly forgetting one local connection.
+/// The native recovery snapshot is saved before this plan is committed.
+pub struct ConnectionRemovalPlan {
+    root: std::path::PathBuf,
+    snapshot: crate::config::ConfigSnapshot,
+    connection: Option<ConnectionId>,
+}
+impl ConnectionRemovalPlan {
+    pub fn is_configured(&self) -> bool {
+        self.connection.is_some()
+    }
+}
+impl AppClient {
+    pub fn prepare_storage_connection_removal(
+        &self,
+        storage: &str,
+    ) -> Result<ConnectionRemovalPlan, ConfigError> {
+        let snapshot = self.repository.snapshot()?;
+        let connection = storage_connection(snapshot.config(), storage)
+            .map_err(|_| ConfigError::IdentityChanged)?;
+        Ok(ConnectionRemovalPlan {
+            root: self.paths.root().to_path_buf(),
+            snapshot,
+            connection,
+        })
+    }
+    pub fn commit_storage_connection_removal(
+        &self,
+        plan: ConnectionRemovalPlan,
+    ) -> Result<(), ConfigError> {
+        if plan.root != self.paths.root() {
+            return Err(ConfigError::IdentityChanged);
+        }
+        if let Some(connection) = plan.connection {
+            self.repository.remove_connection(
+                plan.snapshot.revision(),
+                &connection,
+                self.credential_store.as_ref(),
+            )?;
+        } else if self.repository.snapshot()?.revision() != plan.snapshot.revision() {
+            return Err(ConfigError::IdentityChanged);
+        }
+        Ok(())
+    }
+}

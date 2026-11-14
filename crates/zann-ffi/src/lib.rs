@@ -28,7 +28,11 @@ mod generator;
 pub use generator::*;
 mod platform;
 mod unlock;
+mod unlock_flow;
+pub use unlock_flow::*;
+mod recovery;
 pub use platform::*;
+pub use recovery::*;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {

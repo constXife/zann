@@ -46,7 +46,7 @@ CLI / COSMIC
   |       |---> zann-protocol (planned)
   |       `---> zann-keystore (os-credentials feature only)
   |---> zann-client-sqlite ---> zann-db
-  |---> zann-flows (Connect active) ---> zann-ui-core / pure domain types
+  |---> zann-flows (Connect and unlock policy active) ---> zann-ui-core / pure domain types
   `---> zann-ui-core -----------> zann-core
 
 non-Rust consumer ---> zann-ffi ---> zann-client / zann-flows / zann-ui-core
@@ -73,7 +73,12 @@ trust sequencing, Back/Cancel, operation admission and stale-result rejection.
 Shells execute typed effects through canonical application APIs and keep opaque
 prepared/trust/browser handles local. They validate instance, operation and phase
 before installing results. No runtime, transport or platform IO enters the flow.
-Startup, unlock/remembered unlock and idle slices remain planned.
+`zann-flows::unlock` owns the four password phases, post-connect/restart routing,
+operation admission and stale-result rejection, startup remembered-unlock admission,
+focus-loss policy and idle deadlines. Shells own widgets, clocks and native IO;
+the local service owns hardware presence and key custody. Idle locking covers the
+whole unlocked session, including account selection and recovery. Remaining startup
+orchestration and vault flows stay tracked by MIG-006 / #258.
 `zann-protocol` remains planned; its interim canonical owner is in the capability map.
 
 Local vault commands and read models are defined by

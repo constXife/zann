@@ -139,7 +139,7 @@ final class ConnectFlowAdapterTests: XCTestCase {
 
     func testSwiftDiagnosticsRedactForeignEnumPayloads() {
         let secret = "swift-debug-secret-sentinel"
-        let id = ConnectOperationFfi(instance: 1, sequence: 1)
+        let id = FlowOperationFfi(instance: 1, sequence: 1)
         let action = ConnectActionFfi.submitPassword(email: "person@example.test", password: secret, fullName: nil)
         let effect = ConnectEffectFfi.password(id: id, email: "person@example.test", password: secret,
                                              fullName: nil, register: false, timeoutMs: 1)

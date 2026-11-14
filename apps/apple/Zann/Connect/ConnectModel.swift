@@ -6,7 +6,7 @@ import ZannCoreKit
 @MainActor
 final class ConnectModel: ObservableObject {
     typealias Stage = ConnectStageFfi
-    struct Connected: Equatable { let hasPersonalKeys: Bool }
+    struct Connected: Equatable { let storageID: String; let hasPersonalKeys: Bool }
 
     @Published var url = ""
     @Published var email = ""
@@ -28,7 +28,7 @@ final class ConnectModel: ObservableObject {
     private var connection: PreparedConnectionFfi?
     private var challenge: ConnectionTrustChallengeFfi?
     private var browser: OidcLoginFfi?
-    private var operation: (ConnectOperationFfi, SessionOperationFfi)?
+    private var operation: (FlowOperationFfi, SessionOperationFfi)?
 
     init(session: RemoteSession, strings: Strings, openBrowser: @escaping (URL) -> Void,
          copyBrowserUrl: @escaping (String) -> Void, connected: @escaping (Connected) -> Void) {
@@ -89,8 +89,8 @@ final class ConnectModel: ObservableObject {
                 }
             case .copyBrowserUrl(_, let value):
                 copyBrowserUrl(value)
-            case .connected(_, let hasKeys):
-                connected(Connected(hasPersonalKeys: hasKeys))
+            case .connected(let storageID, let hasKeys):
+                connected(Connected(storageID: storageID, hasPersonalKeys: hasKeys))
             case .closed:
                 break // The shell's Back action observes the terminal snapshot.
             case .probe, .trustFingerprint, .password, .beginOidc, .finishOidc:
@@ -162,7 +162,7 @@ final class ConnectModel: ObservableObject {
         }
     }
 
-    private func newOperation(_ id: ConnectOperationFfi, _ step: ConnectStepFfi, _ timeout: UInt64) async -> SessionOperationFfi? {
+    private func newOperation(_ id: FlowOperationFfi, _ step: ConnectStepFfi, _ timeout: UInt64) async -> SessionOperationFfi? {
         do {
             let operation = try SessionOperationFfi(timeoutMs: timeout)
             self.operation = (id, operation)
@@ -172,7 +172,7 @@ final class ConnectModel: ObservableObject {
 
     /// Actor serialization makes the ID check, capability install and reducer
     /// completion atomic relative to Back/Cancel and subsequent user actions.
-    private func run<T>(_ id: ConnectOperationFfi, _ step: ConnectStepFfi,
+    private func run<T>(_ id: FlowOperationFfi, _ step: ConnectStepFfi,
                         _ work: @escaping () throws -> T,
                         _ complete: (T) -> ConnectCompletionFfi) async {
         guard flow.accepts(id: id, step: step) else { return }
@@ -184,7 +184,7 @@ final class ConnectModel: ObservableObject {
         }
     }
 
-    private func fail(_ id: ConnectOperationFfi, _ step: ConnectStepFfi, _ error: Error) async {
+    private func fail(_ id: FlowOperationFfi, _ step: ConnectStepFfi, _ error: Error) async {
         let message: String?
         switch error {
         case CoreError.Session(.cancelled, _), CoreError.Oidc(.cancelled, _): message = nil

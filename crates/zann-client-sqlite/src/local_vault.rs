@@ -37,7 +37,9 @@ pub struct LocalVault {
     /// Behind a lock because a snapshot restore replaces the database under it.
     /// `SqlitePool` is a handle, so reads take a clone rather than hold the lock
     /// across a query.
-    pool: Mutex<SqlitePool>,
+    pool: Mutex<zann_db::ExistingSqliteDatabase>,
+    recovery: Mutex<Option<recovery::PreparedRecovery>>,
+    identity_probe: Mutex<zann_db::ExistingSqliteDatabase>,
     /// Kept as an exact native path so the pool can be opened again after a restore.
     database_path: PathBuf,
     context_gate: RwLock<()>,
@@ -64,19 +66,36 @@ impl Drop for LocalVault {
     /// is safe inside one too.
     fn drop(&mut self) {
         let pool = match self.pool.get_mut() {
-            Ok(pool) => pool.clone(),
-            Err(poisoned) => poisoned.into_inner().clone(),
+            Ok(database) => database.pool().clone(),
+            Err(poisoned) => poisoned.into_inner().pool().clone(),
         };
+        let identity = self
+            .identity_probe
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .pool()
+            .clone();
         let runtime = &self.runtime;
         std::thread::scope(|scope| {
-            scope.spawn(|| runtime.block_on(pool.close()));
+            let pending = self
+                .recovery
+                .get_mut()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            scope.spawn(move || {
+                runtime.block_on(async {
+                    drop(pending);
+                    pool.close().await;
+                    identity.close().await
+                })
+            });
         });
     }
 }
 
 impl LocalVault {
     fn pool(&self) -> SqlitePool {
-        self.pool.lock().expect("lock poisoned").clone()
+        self.pool.lock().expect("lock poisoned").pool().clone()
     }
 
     /// Connect again after the database file was replaced, and re-read what was
@@ -91,14 +110,38 @@ impl LocalVault {
         self.runtime
             .block_on(migrate_local(&pool))
             .map_err(|err| LocalError::Service(err.to_string()))?;
-        let storage_id = resolve_storage_id(&self.runtime, &pool)?;
-        *self.pool.lock().expect("lock poisoned") = pool;
+        self.runtime.block_on(pool.close());
+        let database = self
+            .runtime
+            .block_on(zann_db::open_existing_sqlite_with_max(
+                &self.database_path,
+                5,
+            ))
+            .map_err(unlock::keyring_error)?;
+        let storage_id = resolve_storage_id(&self.runtime, database.pool())?;
+        let probe = self
+            .runtime
+            .block_on(zann_db::open_existing_sqlite(&self.database_path))
+            .map_err(unlock::keyring_error)?;
+        if probe.instance_id() != database.instance_id() {
+            return Err(recovery::failure("recovery_changed"));
+        }
+        *self.pool.lock().expect("lock poisoned") = database;
+        *self.identity_probe.lock().expect("identity lock") = probe;
         *self.storage_id.lock().expect("lock poisoned") = storage_id;
         self.context_generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
+    fn verify_database(&self) -> LocalResult<()> {
+        let database = self.identity_probe.lock().expect("identity lock poisoned");
+        self.runtime
+            .block_on(database.verify_identity())
+            .map_err(unlock::keyring_error)
+    }
+
     fn root_key(&self) -> LocalResult<Arc<SecretKey>> {
+        self.verify_database()?;
         self.device_key
             .lock()
             .expect("lock poisoned")
@@ -274,14 +317,26 @@ impl LocalVault {
         runtime
             .block_on(migrate_local(&pool))
             .map_err(|err| LocalError::Service(err.to_string()))?;
-        let storage_id = resolve_storage_id(&runtime, &pool)?;
+        runtime.block_on(pool.close());
+        let database = runtime
+            .block_on(zann_db::open_existing_sqlite_with_max(location.path(), 5))
+            .map_err(unlock::keyring_error)?;
+        let probe = runtime
+            .block_on(zann_db::open_existing_sqlite(location.path()))
+            .map_err(unlock::keyring_error)?;
+        if probe.instance_id() != database.instance_id() {
+            return Err(recovery::failure("recovery_changed"));
+        }
+        let storage_id = resolve_storage_id(&runtime, database.pool())?;
         Ok(Arc::new(LocalVault {
             keystore,
             authenticator,
             credentials,
             legacy_credentials,
             runtime,
-            pool: Mutex::new(pool),
+            pool: Mutex::new(database),
+            recovery: Mutex::new(None),
+            identity_probe: Mutex::new(probe),
             database_path,
             context_gate: RwLock::new(()),
             context_generation: AtomicU64::new(0),
@@ -410,6 +465,7 @@ mod maintenance;
 mod account_keys;
 mod identity;
 mod keyring;
+mod recovery;
 use identity::*;
 
 mod browser;
@@ -475,6 +531,9 @@ impl LocalVaultService for LocalVault {
     }
     fn unlock_remembered(&self) -> LocalResult<VaultStatus> {
         LocalVault::unlock_remembered(self)
+    }
+    fn idle_unlock_key_present(&self) -> LocalResult<bool> {
+        LocalVault::idle_unlock_key_present(self)
     }
     fn hardware_key_present(&self) -> LocalResult<bool> {
         LocalVault::hardware_key_present(self)
@@ -590,6 +649,22 @@ impl LocalVaultService for LocalVault {
 
     fn current_storage_id(&self) -> Option<String> {
         LocalVault::current_storage_id(self)
+    }
+    fn setup_accounts(&self) -> LocalResult<Vec<SetupAccount>> {
+        LocalVault::setup_accounts(self)
+    }
+    fn prepare_local_recovery(&self, scope: RecoveryScope) -> LocalResult<RecoveryPreview> {
+        LocalVault::prepare_local_recovery(self, scope)
+    }
+    fn cancel_local_recovery(&self, id: String) -> LocalResult<()> {
+        LocalVault::cancel_local_recovery(self, id)
+    }
+    fn confirm_local_recovery(
+        &self,
+        id: String,
+        discard_unsent: bool,
+    ) -> LocalResult<RecoveryOutcome> {
+        LocalVault::confirm_local_recovery(self, id, discard_unsent)
     }
     fn app_status(&self) -> LocalResult<AppStatus> {
         LocalVault::app_status(self)
@@ -840,3 +915,6 @@ mod test_support;
 #[cfg(test)]
 #[path = "local_vault/transition_tests.rs"]
 mod transition_tests;
+
+#[cfg(test)]
+static MAINTENANCE_TEST_LOCK: Mutex<()> = Mutex::new(());

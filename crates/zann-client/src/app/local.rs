@@ -5,9 +5,11 @@ mod error;
 pub use browser::*;
 mod model;
 mod port;
+mod recovery;
 pub use error::*;
 pub use model::*;
 pub use port::*;
+pub use recovery::*;
 
 /// Cancellation/deadline controls accepted by the local item-read port.
 pub use crate::session::{SessionCancellationHandle, SessionOperation};

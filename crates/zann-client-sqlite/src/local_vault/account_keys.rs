@@ -74,9 +74,14 @@ impl LocalVault {
                     .map_err(keyring_error)?
             }
             AccountKeyCheck::Mismatch => {
-                return Err(LocalError::InvalidArgument(
-                    "incorrect account encryption password".into(),
-                ))
+                let source = zann_client::app::unlock::DeviceUnlockError::Invalid(
+                    "incorrect account encryption password",
+                );
+                return Err(LocalError::Unlock {
+                    kind: "account_encryption_password".into(),
+                    message: source.to_string(),
+                    source: Box::new(source),
+                });
             }
         }
         let (operation, cancel) =

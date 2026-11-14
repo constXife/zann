@@ -4,13 +4,7 @@ pub const LOGIN_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 pub const CONNECTION_NAME: &str = "Remote";
 pub const PROFILE_NAME: &str = "default";
 
-/// The composition root supplies a unique instance ID. Sequence numbers are
-/// allocated by the reducer, so replaying an input trace is deterministic.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct OperationId {
-    pub instance: u64,
-    pub sequence: u64,
-}
+pub use crate::OperationId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Step {

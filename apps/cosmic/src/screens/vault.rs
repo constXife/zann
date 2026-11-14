@@ -63,7 +63,6 @@ fn item_icon(type_id: &str) -> &'static str {
 
 /// How often that is checked. Coarse on purpose: the timeout is minutes, and
 /// each check can cost a query to the authenticator.
-const IDLE_TICK: Duration = Duration::from_secs(30);
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(180);
 const COPY_FEEDBACK: Duration = Duration::from_millis(480);
 /// Item summaries are small, but the rendered widget tree is not. Five
@@ -105,10 +104,7 @@ pub struct State {
     /// Only a failed list read can replace the list's empty-state actions.
     list_error: Option<String>,
     error: Option<String>,
-    last_activity: Instant,
-    /// `0` disables idle locking. The shell keeps this aligned with the shared
     /// device preferences.
-    auto_lock_minutes: u32,
     reveal_seconds: u32,
     reveal_generation: u64,
     copy_generation: u64,
@@ -174,10 +170,7 @@ pub enum Message {
     RefreshedAfterSave(u64, u64, Result<ItemsPage, String>),
     ClearCopied(u64),
     HideRevealed(u64),
-    /// The idle timer expired; whether that locks depends on the answer below.
-    IdleCheck,
     /// Whether an enrolled authenticator is still plugged in.
-    KeyPresent(bool),
     Tick,
     ResizeStart,
     ResizeMove(f32),
@@ -252,8 +245,6 @@ impl State {
             switching_context: false,
             list_error: None,
             error: None,
-            last_activity: Instant::now(),
-            auto_lock_minutes: 10,
             reveal_seconds: 20,
             reveal_generation: 0,
             copy_generation: 0,
@@ -281,11 +272,6 @@ impl State {
         self.content_width = width;
     }
 
-    pub fn set_auto_lock_minutes(&mut self, minutes: u32) {
-        self.auto_lock_minutes = minutes;
-        self.last_activity = Instant::now();
-    }
-
     pub fn set_reveal_seconds(&mut self, seconds: u32) {
         self.reveal_seconds = seconds;
         if seconds == 0 {
@@ -301,10 +287,6 @@ impl State {
         if let Some(editor) = self.editor.as_mut() {
             editor.hide_revealed();
         }
-    }
-
-    pub fn record_activity(&mut self) {
-        self.last_activity = Instant::now();
     }
 
     pub fn refresh_translations(&mut self) {
@@ -373,9 +355,6 @@ impl State {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = Vec::with_capacity(4);
-        if self.auto_lock_minutes > 0 {
-            subscriptions.push(cosmic::iced::time::every(IDLE_TICK).map(|_| Message::IdleCheck));
-        }
 
         // One-time codes roll over every period, so a shown one redraws each
         // second while the detail column is populated.
@@ -416,38 +395,6 @@ impl State {
     }
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
-        // Anything the user did counts as activity; the timer's own messages do
-        // not, or the vault would never idle out.
-        if !matches!(
-            message,
-            Message::VaultsLoaded { .. }
-                | Message::SearchReady(_)
-                | Message::SearchLoaded { .. }
-                | Message::MoreLoaded { .. }
-                | Message::RefreshedAfterSave(..)
-                | Message::HistoryResponse(..)
-                | Message::History(
-                    history::Message::EntriesLoaded(_)
-                        | history::Message::VersionLoaded { .. }
-                        | history::Message::Restored(_),
-                )
-                | Message::ListScrolled { .. }
-                | Message::IdleCheck
-                | Message::KeyPresent(_)
-                | Message::Tick
-                | Message::ClearCopied(_)
-                | Message::HideRevealed(_)
-                | Message::SyncDue(_)
-                | Message::AutoSynced { .. }
-                | Message::SyncStateLoaded { .. }
-                | Message::ContextSwitched { .. }
-                | Message::SyncedWorkspaceLoaded { .. }
-                | Message::Loaded { .. }
-                | Message::DetailLoading(_)
-        ) {
-            self.last_activity = Instant::now();
-        }
-
         if matches!(message, Message::Detail(_)) && !self.detail_ready() {
             return Outcome::None;
         }
@@ -553,37 +500,6 @@ impl State {
                     history.hide_revealed();
                 }
                 self.hide_editor_revealed();
-            }
-
-            Message::IdleCheck => {
-                if self.auto_lock_minutes == 0
-                    || self.last_activity.elapsed()
-                        < Duration::from_secs(u64::from(self.auto_lock_minutes) * 60)
-                {
-                    return Outcome::None;
-                }
-                // An inserted key counts as presence: locking every ten minutes
-                // while it sits in the port only teaches people to turn the
-                // timeout off. Pulling the key is what locks.
-                let facade = session.facade();
-                return Outcome::Task(cosmic::task::future(async move {
-                    let present = off_thread(move || {
-                        let remembered = local::remembered_unlock(&facade)?;
-                        if remembered.source != "hardware_key" {
-                            return Ok(false);
-                        }
-                        local::hardware_key_present(&facade)
-                    })
-                    .await;
-                    Message::KeyPresent(present.unwrap_or(false))
-                }));
-            }
-
-            Message::KeyPresent(true) => self.last_activity = Instant::now(),
-
-            Message::KeyPresent(false) => {
-                session.lock();
-                return Outcome::Locked;
             }
 
             Message::Tick => {}

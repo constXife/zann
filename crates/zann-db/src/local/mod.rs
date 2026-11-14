@@ -23,6 +23,7 @@ mod item_repo;
 mod metadata_repo;
 mod models;
 mod pending_change_repo;
+pub mod recovery;
 mod storage_repo;
 mod sync_cursor_repo;
 mod sync_repo;

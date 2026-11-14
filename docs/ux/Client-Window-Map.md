@@ -28,10 +28,10 @@ Entry:
 Primary actions:
 - Unlock all enrolled accounts with the device-local Zann password.
 - Show failed attempt error.
-- Access "forgot password" guidance (no recovery of encrypted data).
+- Open account selection/recovery without entering a password; choose another account or reconnect. Existing remembered unlock methods remain available.
 
 Exit:
-- Successful unlock -> Vault Home.
+- Successful unlock -> Vault Home for an enrolled account, otherwise account selection or the known one-time enrollment phase.
 
 ### 2) Welcome / First Run
 
@@ -65,7 +65,11 @@ Primary actions:
 
 Exit:
 - Success -> First Sync -> Onboarding.
-- Cancel -> Welcome / First Run.
+- All four phases (create/unlock Zann, create/unlock account encryption) offer account/recovery navigation and clear password drafts on departure.
+- Account selection identifies the server and authenticated account, opens already enrolled accounts without another password, and reconnects unenrolled accounts to obtain authoritative enrollment status.
+- Forget one account: confirm the exact server/account and any unsent changes; save an encrypted snapshot, then remove its local replica/key and selected connection's saved sign-ins/trust pin. Other local accounts and the Zann password stay intact.
+- Reset local unlock and cached data: separate whole-device confirmation; snapshot first, remove all local keys/cache and remembered-unlock state. Server sign-ins and preferences remain configured. Sign in/reconnect and enter each account encryption password again to enroll.
+- Server sign-in cannot recover a forgotten encryption password. Remote records are not deleted by local recovery.
 
 ### 4) OIDC Authorization (server connect)
 
@@ -146,7 +150,7 @@ Entry:
 - From Vault Home.
 
 Primary actions:
-- Change master password.
+- Change the device-local Zann unlock password after current-password verification; account encryption passwords remain independent.
 - Auto-lock settings.
 - Server connection management (OIDC connect/disconnect).
 - Export/backup.
