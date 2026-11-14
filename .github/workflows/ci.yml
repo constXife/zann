@@ -27,6 +27,7 @@ jobs:
       shared_clients: ${{ steps.filter.outputs.shared_clients }}
       apple: ${{ steps.filter.outputs.apple }}
       cosmic: ${{ steps.filter.outputs.cosmic }}
+      extension: ${{ steps.filter.outputs.extension }}
       nix_module: ${{ steps.filter.outputs.nix_module }}
       ci: ${{ steps.filter.outputs.ci }}
     steps:
@@ -59,6 +60,20 @@ jobs:
               - 'crates/zann-server/Dockerfile'
               - '.dockerignore'
               - 'compose.yaml'
+            extension:
+              - 'apps/extension/**'
+              - 'crates/zann-browser/**'
+              - 'crates/zann-client/**'
+              - 'crates/zann-client-sqlite/**'
+              - 'crates/zann-daemon/**'
+              - 'crates/zann-native-host/**'
+              - 'crates/zann-autofill/**'
+              - 'crates/zann-crypto/**'
+              - 'crates/zann-core/**'
+              - 'crates/zann-db/**'
+              - 'crates/zann-ui-core/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
             audit_surface:
               - 'crates/zann-flows/**'
               - 'crates/zann-ffi/src/connect_flow.rs'
@@ -67,6 +82,22 @@ jobs:
               - 'crates/zann-ui-core/src/generator/**'
               - 'crates/zann-ffi/src/generator.rs'
               - 'crates/zann-ffi/tests/generator.rs'
+              - 'apps/extension/**'
+              - 'crates/zann-browser/**'
+              - 'crates/zann-ui-core/src/filter.rs'
+              - 'crates/zann-ui-core/src/login_list.rs'
+              - 'crates/zann-client/src/browser_ipc.rs'
+              - 'crates/zann-client/src/browser_ipc/**'
+              - 'crates/zann-db/src/services/create_item.rs'
+              - 'crates/zann-db/src/local/item_history_repo.rs'
+              - 'crates/zann-client/src/native_messaging.rs'
+              - 'crates/zann-native-host/**'
+              - 'crates/zann-db/src/services/browser.rs'
+              - 'crates/zann-db/src/local/item_repo/browser.rs'
+              - 'crates/zann-db/migrations/0006_browser_login_index.sql'
+              - 'crates/zann-core/src/constants.rs'
+              - 'crates/zann-daemon/**'
+              - 'crates/zann-autofill/**'
               - 'crates/zann-crypto/**'
               - 'tests/fixtures/crypto/**'
               - 'crates/zann-core/src/auth.rs'
@@ -121,6 +152,7 @@ jobs:
             # client shell, a shared capability, or their dependency manifests
             # change so ownership rules cannot silently drift.
             client_architecture:
+              - 'crates/zann-native-host/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - 'crates/**/Cargo.toml'
@@ -128,6 +160,8 @@ jobs:
               - 'crates/zann-client-sqlite/**'
               - 'crates/zann-cli/**'
               - 'crates/zann-core/**'
+              - 'crates/zann-daemon/**'
+              - 'crates/zann-autofill/**'
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
               - 'crates/zann-ffi/**'
@@ -152,6 +186,8 @@ jobs:
               - 'crates/zann-client/**'
               - 'crates/zann-client-sqlite/**'
               - 'crates/zann-core/**'
+              - 'crates/zann-daemon/**'
+              - 'crates/zann-autofill/**'
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
               - 'crates/zann-ffi/**'
@@ -169,6 +205,8 @@ jobs:
               - 'crates/zann-client/**'
               - 'crates/zann-client-sqlite/**'
               - 'crates/zann-core/**'
+              - 'crates/zann-daemon/**'
+              - 'crates/zann-autofill/**'
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
               - 'crates/zann-ffi/**'
@@ -281,7 +319,7 @@ jobs:
       - name: Dependency guard
         run: scripts/check-audit-surface-deps.sh
       - name: Clippy (audit-surface)
-        run: cargo clippy -p zann-crypto -p zann-core -p zann-server -p zann-keystore --all-targets -- -D warnings
+        run: cargo clippy -p zann-autofill -p zann-crypto -p zann-core -p zann-server -p zann-keystore --all-targets -- -D warnings
       - name: Clippy (client security core)
         run: cargo clippy -p zann-client --no-default-features --features remote,os-credentials --all-targets --locked -- -D warnings
       - name: Clippy (native secret generator and FFI projection)
@@ -298,12 +336,64 @@ jobs:
         run: cargo clippy -p zann-client-sqlite --all-targets --locked -- -D warnings
       - name: Clippy (SQLite persistence seams)
         run: cargo clippy -p zann-db --no-default-features --features sqlite --all-targets --locked -- -D warnings
+      - name: Clippy (local IPC and native host)
+        run: cargo clippy -p zann-daemon -p zann-native-host -p zann-browser --all-features --all-targets --locked -- -D warnings
+      - name: Tests (local IPC and native host)
+        run: cargo test -p zann-daemon -p zann-native-host -p zann-crypto --all-features --locked
+      - name: Tests (native framing isolation)
+        run: cargo test -p zann-client --no-default-features --features native-messaging --test native_messaging --locked
       - name: Tests (audit-surface)
-        run: cargo test -p zann-crypto
+        run: cargo test -p zann-crypto -p zann-autofill
       - name: Tests (pull-only SQLite sync adapter)
         run: cargo test -p zann-client-sqlite --locked
       - name: Tests (SQLite sync and path seams)
-        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration
+        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration --test local_history
+
+  extension:
+    needs: changes
+    if: needs.changes.outputs.extension == 'true' || needs.changes.outputs.ci == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: System dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - uses: dtolnay/rust-toolchain@1.92.0
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: ./.github/actions/rust-cache
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.13
+      - name: Install extension test dependencies
+        working-directory: apps/extension
+        run: bun install --frozen-lockfile
+      - name: Install pinned WASM packaging tool
+        run: cargo install wasm-bindgen-cli --version 0.2.106 --locked
+      - name: Build extension and native bridge
+        run: |
+          node apps/extension/build.mjs
+          cargo build -p zann-native-host --locked
+          cargo test -p zann-daemon --test chromium_fixture --no-run --locked
+      - name: Shared complete-login search tests
+        run: cargo test -p zann-client --no-default-features --features browser-ipc --test browser_search --locked
+      - name: Shared login-list presentation tests
+        run: cargo test -p zann-ui-core --test login_list --locked
+      - name: Browser adapter boundary tests
+        working-directory: apps/extension
+        run: bun run test
+      - name: Install test Chromium
+        working-directory: apps/extension
+        run: node node_modules/playwright/cli.js install --with-deps chromium
+      - name: Chromium integration (WASM, native bridge, daemon)
+        working-directory: apps/extension
+        run: bun run test:browser
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zann-chromium-extension
+          path: apps/extension/dist
 
   client-architecture:
     needs: changes
@@ -764,6 +854,7 @@ jobs:
       - cosmic
       - audit-surface
       - client-architecture
+      - extension
       - client-locking-portability
       - apple
       - cosmic-rust-consumer

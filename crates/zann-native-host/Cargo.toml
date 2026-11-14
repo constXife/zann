@@ -1,0 +1,16 @@
+[package]
+name = "zann-native-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[features]
+default = []
+
+[dependencies]
+libc = "0.2"
+tempfile = "3"
+serde_json = "1"
+zeroize = "1"
+zann-client = { path = "../zann-client", default-features = false, features = ["native-messaging"] }

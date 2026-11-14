@@ -6,6 +6,11 @@
 #![allow(clippy::similar_names)]
 
 pub mod crypto;
+#[cfg(feature = "ipc-pairing")]
+pub mod ipc_pairing;
+pub mod ipc_signatures;
+#[cfg(feature = "ipc-transport")]
+pub mod ipc_transport;
 pub mod passwords;
 pub mod secrets;
 pub mod tokens;

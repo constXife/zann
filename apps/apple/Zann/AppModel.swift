@@ -44,6 +44,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var syncAfterUnlock = false
 
     private let core: CoreFacade?
+    var browserCore: CoreFacade? { core }
     /// The keystore the core was composed with; asked for its status only,
     /// which never prompts.
     private let keystore: DeviceKeystore?
@@ -366,6 +367,7 @@ final class AppModel: ObservableObject {
             keystore: keystore,
             secretStore: KeychainSecretStore()
         )
+        try core.startBrowserService()
         return (core, keystore)
     }
 
@@ -396,6 +398,8 @@ func describe(_ error: Error) -> String {
         return error.localizedDescription
     }
     switch error {
+    case .Browser(_, let message):
+        return message
     case .Locked:
         return "The vault is locked."
     case .Cancelled:

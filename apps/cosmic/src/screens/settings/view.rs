@@ -156,6 +156,7 @@ impl State {
         if let Some(unlock) = self.unlock_section() {
             sections.push(unlock);
         }
+        sections.push(self.browser_section());
         widget::settings::view_column(sections).into()
     }
 

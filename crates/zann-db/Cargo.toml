@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+thiserror = "1"
 chrono = "0.4"
 blake3 = "1.5"
 async-trait = "0.1"

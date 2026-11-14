@@ -9,6 +9,10 @@ pub enum LocalError {
         #[source]
         source: Box<dyn std::error::Error + Send + Sync>,
     },
+    #[error("browser policy rejected the request")]
+    BrowserPolicy(#[source] Box<dyn std::error::Error + Send + Sync>),
+    #[error("browser reply delivery failed")]
+    BrowserDelivery(#[source] Box<dyn std::error::Error + Send + Sync>),
     #[error("vault is locked")]
     Locked,
     #[error("operation cancelled")]

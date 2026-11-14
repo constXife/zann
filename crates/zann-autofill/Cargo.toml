@@ -1,0 +1,24 @@
+[package]
+name = "zann-autofill"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[features]
+default = []
+
+[dependencies]
+publicsuffix = "2.3"
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+url = "2"
+zann-core = { path = "../zann-core", default-features = false }
+
+[build-dependencies]
+sha2 = "0.10"
+
+[dev-dependencies]
+proptest = "1"

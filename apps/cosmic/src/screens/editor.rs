@@ -19,6 +19,9 @@ use zann_ui_core::item_editor::{field_schemas, DraftField, FieldKind, ItemDraft}
 use super::detail::Detail;
 use crate::i18n::{has, t};
 
+mod autofill;
+use zann_ui_core::item_editor::MatchMode;
+
 const FIELD_KINDS: &[FieldKind] = &[
     FieldKind::Text,
     FieldKind::Password,
@@ -46,6 +49,8 @@ pub struct State {
 
 #[derive(Clone)]
 pub enum Message {
+    MatchMode(MatchMode),
+    MatchPattern(String),
     Path(String),
     Type(String),
     FieldKey(usize, String),
@@ -66,6 +71,8 @@ pub enum Message {
 impl fmt::Debug for Message {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::MatchMode(mode) => formatter.debug_tuple("MatchMode").field(mode).finish(),
+            Self::MatchPattern(_) => formatter.write_str("MatchPattern(<redacted>)"),
             Self::Path(_) => formatter.write_str("Path(<redacted>)"),
             Self::Type(value) => formatter.debug_tuple("Type").field(value).finish(),
             Self::FieldKey(index, _) => formatter
@@ -167,6 +174,8 @@ impl State {
             return Outcome::None;
         }
         match message {
+            Message::MatchMode(mode) => self.update_match_rules(Some(mode), None),
+            Message::MatchPattern(pattern) => self.update_match_rules(None, Some(pattern)),
             Message::Path(value) => self.draft.path = value,
             Message::Type(value) => match self.draft.set_type(value) {
                 Ok(true) => {
@@ -327,6 +336,9 @@ impl State {
             .width(Length::Fill);
 
         for (index, field) in self.draft.fields.iter().enumerate() {
+            if self.is_match_rules_field(&field.key) {
+                continue;
+            }
             form = form.push(field_row(
                 index,
                 field,
@@ -336,6 +348,10 @@ impl State {
             if self.generator_field == Some(index) {
                 form = form.push(self.generator.view().map(Message::Generator));
             }
+        }
+
+        if let Some(controls) = self.match_rules_view() {
+            form = form.push(controls);
         }
 
         form =

@@ -26,6 +26,8 @@ const DOCS_URL: &str = "https://docs.zann.app";
 const SOURCE_URL: &str = "https://github.com/constxife/zann";
 
 pub struct State {
+    browser_pairings: Option<zann_daemon::PairingSettings>,
+    browser_code: Option<zann_daemon::PairingCode>,
     section: SettingsSection,
     preferences: DevicePreferences,
     close_to_tray: bool,
@@ -97,6 +99,7 @@ pub struct Loaded {
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    Browser(browser::Message),
     Select(SettingsSection),
     Set(Change),
     Loaded(Result<Loaded, String>),
@@ -161,6 +164,8 @@ pub enum Outcome {
 impl State {
     pub fn new(preferences: DevicePreferences, close_to_tray: bool, data_root: PathBuf) -> Self {
         Self {
+            browser_pairings: None,
+            browser_code: None,
             section: SettingsSection::General,
             preferences,
             close_to_tray,
@@ -202,6 +207,7 @@ impl State {
         let facade = session.facade();
         let snapshots = session.facade();
         Task::batch([
+            browser::load(session.browser_control()),
             cosmic::task::future(async move {
                 Message::Loaded(
                     off_thread(move || {
@@ -230,6 +236,7 @@ impl State {
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
+            Message::Browser(message) => return self.update_browser(message, session),
             Message::Select(section) => self.section = section,
             Message::Set(change) => return Outcome::Changed(change),
             Message::Loaded(Ok(loaded)) => {
@@ -697,4 +704,5 @@ impl State {
     }
 }
 
+mod browser;
 mod view;

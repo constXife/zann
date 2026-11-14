@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Zann — подсказки</title><link rel="stylesheet" href="inline.css"><link rel="stylesheet" href="login-list.css"></head>
+<body>
+<header><span class="brand" id="brand">Zann</span><span id="host"></span><span id="mode" hidden>Код 2FA</span><button id="close" aria-label="Закрыть подсказку" type="button">×</button></header>
+<main><p id="status" role="status">Поиск логинов…</p><div id="login-search" class="login-search" hidden><input id="login-filter" type="search" aria-label="Поиск логинов" placeholder="Имя или логин" autocomplete="off" spellcheck="false"><span id="login-count" class="login-count" role="status"></span></div><div id="items" aria-label="Подходящие логины"></div><p id="login-empty" class="login-empty" hidden></p><button id="retry" type="button" hidden>Повторить поиск</button><button id="generate" type="button" hidden>Создать пароль</button><button id="use-generated" type="button" hidden>Использовать пароль</button></main>
+<script src="inline.js" type="module"></script></body></html>

@@ -1,0 +1,14 @@
+.login-search { margin:8px 0; }
+.login-search input { width:100%; height:32px; padding:5px 10px; border:1px solid var(--line); border-radius:7px; background:var(--bg); color:var(--text); font:13px system-ui,sans-serif; }
+.login-count { display:block; margin:3px 2px 0; color:var(--muted); font-size:10px; line-height:14px; }
+.login-list { position:relative; overflow-y:auto; overscroll-behavior:contain; overflow-anchor:none; }
+.login-space { position:relative; }
+.login-window { position:absolute; top:0; left:0; right:0; }
+.login-list .match { display:flex; box-sizing:border-box; align-items:center; width:100%; height:var(--login-row-height); gap:8px; margin:0; padding:6px 8px; text-align:left; background:transparent; border:0; border-radius:6px; }
+.login-list .match:hover,.login-list .match[aria-selected=true] { background:var(--selected); }
+.login-list .avatar { width:26px; height:26px; display:grid; place-items:center; border-radius:7px; flex-shrink:0; background:var(--selected); color:var(--accent); font-size:11px; }
+.login-list .copy { min-width:0; flex:1; }
+.login-list .user,.login-list .name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.3; }
+.login-list .user { font-size:13px; font-weight:550; }
+.login-list .name { font-size:11px; color:var(--muted); }
+.login-empty { color:var(--muted); font-size:12px; padding:12px 8px; text-align:center; }

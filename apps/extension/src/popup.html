@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Zann</title><link rel="stylesheet" href="popup.css"><link rel="stylesheet" href="login-list.css"></head>
+<body>
+<header>
+  <div class="brand"><img src="icons/32.png" alt="" width="28" height="28"><strong>Zann</strong></div>
+  <div class="header-actions"><span id="connection" class="badge">Connecting…</span><button id="settings-toggle" class="icon-button" type="button" aria-label="Settings" aria-expanded="false" aria-controls="settings"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2.5" fill="var(--surface)"/><circle cx="15" cy="17" r="2.5" fill="var(--surface)"/></svg></button></div>
+</header>
+<main><fieldset id="controls">
+  <section id="settings" hidden aria-label="Settings">
+    <h1>Settings</h1>
+    <section id="site-settings">
+      <h2>Suggestions beside fields</h2><p id="site-host"></p><p id="site-status" role="status"></p>
+      <button id="site-toggle" type="button" disabled>Enable on this site</button>
+    </section>
+    <section id="connection-settings" hidden>
+      <h2>Browser connection</h2><button id="reconnect" type="button">Reconnect</button><button id="forget" class="danger" type="button">Forget this connection</button>
+      <small>To remove browser access, revoke it in Zann settings.</small>
+    </section>
+  </section>
+  <div id="content">
+    <section id="pairing" hidden aria-label="Connect Zann">
+      <div class="state-icon" aria-hidden="true">⌁</div><h1>Connect Zann</h1>
+      <p>In the Zann app, open <strong>Settings → Browser connections → Connect browser</strong>. Enter the one-time code here.</p>
+      <label for="pairing-code">One-time code</label><input id="pairing-code" type="password" inputmode="numeric" maxlength="6" spellcheck="false" autocomplete="off" placeholder="6 digits">
+      <button id="pair" class="primary wide" type="button">Connect</button>
+    </section>
+    <section id="connection-issue" class="state" hidden aria-live="polite">
+      <div class="state-icon" aria-hidden="true">⌁</div><h1 id="connection-title">Open Zann</h1><p id="connection-message"></p>
+      <button id="retry-connection" class="primary" type="button">Try again</button>
+      <button id="reset-connection" class="primary" type="button" hidden>Connect again</button>
+    </section>
+    <section id="page-issue" class="state" hidden aria-live="polite">
+      <div class="state-icon" aria-hidden="true">↗</div><h1 id="page-title">Open a sign-in page</h1><p id="page-message">Open a secure website to find and fill your logins.</p>
+      <button id="retry-page" type="button">Try again</button>
+    </section>
+    <section id="workspace" hidden>
+      <div class="row site-heading"><h1 id="site-title"></h1><button id="refresh" class="icon-button" type="button" aria-label="Refresh page"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M20 7v5h-5M19 12a7 7 0 1 1-2-5l3 3"/></svg></button></div>
+      <button id="tab-logins" class="text-button" type="button" hidden>← Back to logins</button>
+      <section id="logins" aria-label="Matching logins">
+        <div id="login-search" class="login-search" hidden><input id="login-filter" type="search" aria-label="Search logins" placeholder="Search name or username" autocomplete="off" spellcheck="false"><span id="login-count" class="login-count" role="status"></span></div>
+        <div id="matches" aria-label="Matching logins"></div><p id="login-empty" class="login-empty" hidden></p>
+        <label id="totp-choice" class="check" hidden><input id="totp" type="checkbox"> Also fill verification code</label>
+      </section>
+      <section id="save" hidden aria-label="Save login">
+        <h2>Save login</h2><p>Review the login before saving it to your selected vault.</p>
+        <button id="capture" type="button">Read login from this page</button>
+        <form id="save-login" autocomplete="off" hidden>
+          <label for="title">Login name</label><input id="title" required maxlength="200" autocomplete="off">
+          <label for="username">Username</label><input id="username" maxlength="256" autocomplete="off">
+          <label for="password">Password</label><input id="password" type="password" required maxlength="4096" autocomplete="new-password">
+          <button class="primary" type="submit">Save login</button><button id="cancel-save" type="button">Cancel</button>
+        </form>
+      </section>
+      <section id="generate" hidden aria-label="Generate password">
+        <h2>Create password</h2><label for="length">Length <output id="length-value">24</output></label><input id="length" type="range" min="16" max="128" value="24">
+        <label class="check"><input id="symbols" type="checkbox" checked> Include symbols</label>
+        <button id="generate-password" type="button">Generate password</button>
+        <label for="generated">Password</label><input id="generated" type="password" readonly autocomplete="off">
+        <button id="use-generated" class="primary" type="button" disabled>Use password</button>
+      </section>
+      <div id="secondary-actions" class="secondary-actions"><button id="tab-save" type="button">Save login</button><button id="tab-generate" type="button">Create password</button></div>
+    </section>
+    <details id="page-target" hidden>
+      <summary>Choose a different form</summary>
+      <div id="frame-choice"><label for="frame">Page section</label><select id="frame" disabled></select></div>
+      <div id="form-choice"><label for="form">Sign-in form</label><select id="form" disabled></select></div>
+    </details>
+  </div>
+  <p id="notice" role="status" aria-live="polite" hidden></p>
+</fieldset></main>
+<script type="module" src="popup.js"></script>
+</body></html>

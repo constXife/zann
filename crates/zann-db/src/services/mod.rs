@@ -650,7 +650,9 @@ impl<'a> LocalServices<'a> {
 }
 
 mod app;
+mod browser;
 mod items;
+pub use browser::BrowserReadError;
 mod storages;
 mod vaults;
 

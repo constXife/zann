@@ -16,6 +16,18 @@ a focused security review.
 
 The current surface covers:
 
+- website origin parsing, PSL/equivalent-domain matching, login rules and fill
+  admission in `crates/zann-autofill/**`, including the vendored data and pins;
+- local IPC authorization, replay protection, Noise/signature binding,
+  private identity/pairing persistence and lifecycle in `crates/zann-daemon/**`;
+- the stateless framing/registration bridge in `crates/zann-native-host/**`
+  and `crates/zann-client/src/native_messaging.rs`;
+- the browser port and delivery lease under `zann-client/src/app/local`, its
+  native adapter, and bounded login page reads in
+  `crates/zann-db/src/{services/browser.rs,local/item_repo/browser.rs}`;
+- the login page bound in `zann-core/src/constants.rs` and the supporting
+  `crates/zann-db/migrations/0006_browser_login_index.sql` index;
+
 - cryptographic primitives and their compatibility fixtures in `zann-crypto`;
 - core and server authentication and access-control policy;
 - OS secret storage in `zann-keystore`;
@@ -90,3 +102,56 @@ Compensating tests: `crates/zann-flows/src/connect/tests.rs`,
 forbids runtime/transport/platform dependencies in `zann-flows` and the retired
 shell Connect reducer shapes. Native executors do not abort canonical crash-safe
 credential commits or roll back a completed trust decision.
+## Chromium extension (#25)
+
+- `apps/extension/**`: packaged MV3 permissions/CSP, toolbar, per-host grants and
+  registrations, isolated DOM adapter, worker port/document binding and
+  extension-origin field chooser; identity storage and transient capture/fill lifecycle.
+- `crates/zann-browser/**`: WASM projection, browser entropy feature selection.
+- `crates/zann-client/src/browser_ipc{.rs,/**}`: canonical shared wire/signature and
+  single-flight client; no daemon-local protocol copy remains.
+- `crates/zann-client-sqlite/src/local_vault/browser_save.rs`: selection-bound
+  typed login creation under the native lease.
+- `crates/zann-db/src/services/create_item.rs`, `local/{item_repo,item_history_repo,pending_change_repo}.rs`:
+  one item/history/pending transaction used by browser and native creation.
+- `crates/zann-ui-core/src/generator/`: shared bounded OS-CSPRNG password generation.
+
+Browser pages have no window-message or external-runtime entry point. Only the
+packaged isolated adapter and extension iframe use internal runtime ports. The
+worker verifies the granted host, top document, stable runtime document IDs,
+read-only iframe ancestor origins and active tab before release. The paired extension is trusted to
+observe browser document identity and require an actual chooser gesture. Passwords,
+TOTP values, page URLs and query results never enter extension storage. The
+versioned client signing seed/server pin and bounded opaque successful-fill MRU
+persist in trusted-context-only local profile storage; browser profile/key compromise remains
+inside the existing approved-client threat limit.
+
+An extension-origin iframe protects its contents from page reads and CSS; it
+does not make an embedded chooser browser chrome or prevent page clickjacking.
+Closed shadow embedding is layout encapsulation, not an authorization boundary.
+This explicit tradeoff is recorded in ADR 0007's inline implementation contract.
+
+One-time-code enrollment additionally covers `zann-crypto/src/ipc_pairing.rs`,
+`zann-client/src/browser_ipc/pairing.rs`, `zann-daemon/src/engine/pairing.rs` and
+the WASM pairing projection. Review the five-attempt native window, monotonic
+expiry at start/commit, generation replacement, final Noise transcript/identity
+binding, directional confirmation, one-use proof/code state and durable
+publication before pin installation. No code or verifier may enter persistent
+extension storage, native identity snapshots or diagnostics.
+
+Successful-fill ordering adds the strict local schema/ranking owner at
+`zann-client/src/browser_ipc/usage.rs`, its WASM projection and `apps/extension/src/usage.js`.
+Review native-only `match_quality` production, stable complete-search sorting,
+server/storage/vault isolation, DOM-acknowledgement before recording, no query /
+release-only writes, identity-serialized update/reset and storage-failure outcome
+reporting. Only opaque IDs are retained; no credentials, URLs or timestamps.
+
+
+Virtual login lists add `zann-ui-core/src/login_list.rs`, the shared prepared
+text query in `filter.rs`, `zann-browser/src/login_list.rs`, and the packaged
+`apps/extension/src/login-list.{js,css}` adapter. Filtering sees only admitted
+public labels, preserves rank and maps back to original IDs. Review bounded
+window projection, transient query lifetime, keyboard/IME guards, revision checks
+on detached rows and shared DOM rendering; no filter may grant native access.
+The WASM dependency on toolkit-neutral presentation must retain the existing
+no-DB/no-HTTP/no-keystore feature boundary.

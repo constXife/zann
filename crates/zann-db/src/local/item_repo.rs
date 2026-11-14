@@ -18,6 +18,8 @@ pub struct LocalItemRepo<'a> {
     pool: &'a SqlitePool,
 }
 
+mod browser;
+
 impl<'a> LocalItemRepo<'a> {
     pub async fn has_unknown_metadata(&self) -> Result<bool, sqlx_core::Error> {
         Ok(query!("SELECT 1 FROM items_cache WHERE metadata IS NULL AND (deleted_at IS NULL OR length(payload_enc) > 0) LIMIT 1").fetch_optional(self.pool).await?.is_some())
