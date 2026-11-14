@@ -831,7 +831,7 @@ jobs:
         run: |
           ./scripts/dev-up.sh
           test "$(stat -c '%a' .env)" = 600
-          curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 http://localhost:8080/health
+          curl --fail --silent --show-error --max-time 5 --retry 30 --retry-all-errors --retry-max-time 60 --retry-delay 1 http://localhost:8080/health
       - name: Compose diagnostics
         if: failure() && steps.quickstart.outcome == 'failure'
         run: docker compose logs --no-color
