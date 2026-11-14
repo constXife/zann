@@ -4,7 +4,7 @@
 
 use zann_client::app::local::{ItemCreate, ItemSummary, ItemUpdate, VaultSummary};
 use zann_cosmic::backend::local;
-use zann_cosmic::backend::remote::{LoginOutcome, Method, Remote, ServerProbe};
+use zann_cosmic::backend::remote::Remote;
 use zann_cosmic::screens::detail::Detail;
 use zann_cosmic::screens::{connect, master, settings, vault};
 use zann_cosmic::session::Session;
@@ -542,76 +542,6 @@ fn the_splitter_stays_within_native_panel_limits() {
     state.update(vault::Message::ResizeEnd, &session);
     state.update(vault::Message::ResizeMove(200.0), &session);
     assert_eq!(state.list_width(), 460.0);
-}
-
-#[test]
-fn connect_walks_the_stages_a_server_dictates() {
-    let mut state = connect::State::default();
-    assert_eq!(state.stage(), &connect::Stage::Server);
-
-    // One method: skip the picker.
-    send_connect(
-        &mut state,
-        connect::Message::Probed(Ok(ServerProbe {
-            methods: vec![Method::Password],
-            register: true,
-            server_name: Some("Zann Mock".to_string()),
-            fingerprint_changed: None,
-        })),
-    );
-    assert_eq!(state.stage(), &connect::Stage::Password);
-
-    // Two methods: ask.
-    let mut state = connect::State::default();
-    send_connect(
-        &mut state,
-        connect::Message::Probed(Ok(ServerProbe {
-            methods: vec![Method::Password, Method::Oidc],
-            register: false,
-            server_name: None,
-            fingerprint_changed: None,
-        })),
-    );
-    assert_eq!(state.stage(), &connect::Stage::Method);
-
-    // A changed server key never logs in on its own.
-    send_connect(
-        &mut state,
-        connect::Message::Outcome(Ok(LoginOutcome::FingerprintChanged {
-            login_id: "login".to_string(),
-            old: "sha256:old".to_string(),
-            new: "sha256:new".to_string(),
-        })),
-    );
-    assert_eq!(
-        state.stage(),
-        &connect::Stage::Fingerprint {
-            old: "sha256:old".to_string(),
-            new: "sha256:new".to_string(),
-        }
-    );
-
-    let outcome = send_connect(
-        &mut state,
-        connect::Message::Outcome(Ok(LoginOutcome::Success {
-            storage_id: "storage".to_string(),
-            has_personal_keys: false,
-        })),
-    );
-    assert!(matches!(
-        outcome,
-        connect::Outcome::Connected { storage_id, has_personal_keys }
-            if storage_id == "storage" && !has_personal_keys
-    ));
-}
-
-#[test]
-fn cancelling_connect_returns_to_the_shell() {
-    let mut state = connect::State::default();
-    assert!(matches!(
-        send_connect(&mut state, connect::Message::Cancel),
-        connect::Outcome::Cancelled
-    ));
 }
 
 #[test]
@@ -1193,9 +1123,4 @@ fn backend_classifies_the_identity_change_and_forgets_idempotently() {
         local::forget_server(&facade, storage).expect("no server to forget"),
         None
     );
-}
-
-fn send_connect(state: &mut connect::State, message: connect::Message) -> connect::Outcome {
-    let event = state.event(message);
-    state.update(event)
 }

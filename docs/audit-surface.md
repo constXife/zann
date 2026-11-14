@@ -71,3 +71,22 @@ Item attributes participate in the same sync CAS proof as ciphertext; legacy
 unknown attributes are refused rather than synthesized. The backup import
 session, file preflight and transactional publication remain under the existing
 application/sync/SQLite owners.
+
+## Shared interactive Connect policy
+
+`crates/zann-flows/src/connect.rs` and its submodules own native Connect stage,
+registration, trust sequencing, operation admission and cancellation/result policy.
+`crates/zann-ffi/src/connect_flow.rs` and submodules project this reducer without
+transport or runtime policy. COSMIC consumes it directly; Apple executes the same
+typed effects through existing `RemoteSession` calls. Executors must capture
+opaque prepared/trust/browser capabilities before dispatch, register auth
+cancellation before awaiting, and check instance/operation/phase before installing
+results. Late successful, failed or browser-start results must have no UI or OS
+effect after Back, Cancel, replacement or terminal success.
+
+Compensating tests: `crates/zann-flows/src/connect/tests.rs`,
+`crates/zann-ffi/tests/connect_flow.rs`, COSMIC Connect/executor tests and Apple's
+`ConnectFlowAdapterTests` / `ConnectFlowBindingTests`. The architecture guard
+forbids runtime/transport/platform dependencies in `zann-flows` and the retired
+shell Connect reducer shapes. Native executors do not abort canonical crash-safe
+credential commits or roll back a completed trust decision.

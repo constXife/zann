@@ -12,6 +12,8 @@
 //! [`Session`], and the routing between screens. Each screen in [`screens`]
 //! owns its own state and messages and reports back through its `Outcome`.
 
+mod connect_routing;
+
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -568,39 +570,7 @@ impl cosmic::Application for App {
                 Task::none()
             }
 
-            Message::Connect(message) => {
-                let Screen::Connect { state, return_to } = &mut *screen else {
-                    return Task::none();
-                };
-                match state.update(message) {
-                    connect::Outcome::None => Task::none(),
-                    connect::Outcome::Task(task) => lift(task, Message::Connect),
-                    connect::Outcome::Copy(value) => self.copy(value),
-                    connect::Outcome::OpenUrl(url) => {
-                        if let Err(err) = open::that_detached(&url) {
-                            eprintln!("could not open Connect authorization URL: {err}");
-                        }
-                        Task::none()
-                    }
-                    connect::Outcome::Cancelled => {
-                        *screen = return_to.take().map_or(Screen::Welcome, |screen| *screen);
-                        Task::none()
-                    }
-                    connect::Outcome::Connected {
-                        storage_id,
-                        has_personal_keys,
-                    } => {
-                        let mode = if has_personal_keys {
-                            master::Mode::Unlock
-                        } else {
-                            master::Mode::Create
-                        };
-                        *screen =
-                            Screen::Master(Box::new(master::State::new(mode, Some(storage_id))));
-                        Task::none()
-                    }
-                }
-            }
+            Message::Connect(message) => self.update_connect(message),
 
             Message::Master(message) => {
                 let Screen::Master(state) = &mut *screen else {

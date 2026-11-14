@@ -1,0 +1,13 @@
+[package]
+name = "zann-flows"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[features]
+default = []
+
+[dependencies]
+zann-core = { path = "../zann-core" }
+zann-ui-core = { path = "../zann-ui-core" }

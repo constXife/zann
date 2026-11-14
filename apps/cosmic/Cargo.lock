@@ -8317,6 +8317,7 @@ dependencies = [
  "zann-client",
  "zann-client-sqlite",
  "zann-core",
+ "zann-flows",
  "zann-ui-core",
 ]
 
@@ -8358,6 +8359,14 @@ dependencies = [
  "zann-core",
  "zann-crypto",
  "zeroize",
+]
+
+[[package]]
+name = "zann-flows"
+version = "0.1.0"
+dependencies = [
+ "zann-core",
+ "zann-ui-core",
 ]
 
 [[package]]

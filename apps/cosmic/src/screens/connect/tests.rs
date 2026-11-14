@@ -1,174 +1,104 @@
-use cosmic::iced::futures::{executor::block_on, StreamExt};
-use cosmic::iced::runtime::{task::into_stream, Action};
-
 use super::*;
+use cosmic::iced::futures::{executor::block_on, StreamExt};
+use cosmic::iced::runtime::{task::into_stream, Action as RuntimeAction};
 
-fn send(state: &mut State, message: Message) -> Outcome {
+fn send(state: &mut State, message: Message) -> Vec<Outcome> {
     state.update(state.event(message))
 }
-
-fn queued(outcome: Outcome) -> Event {
-    let Outcome::Task(task) = outcome else {
-        panic!("expected a queued Connect event");
+fn result(outcomes: Vec<Outcome>) -> Event {
+    let Outcome::Task(task) = outcomes.into_iter().next().expect("task") else {
+        panic!("task expected")
     };
-    let mut stream = into_stream(task).expect("task stream");
-    match block_on(stream.next()).expect("queued event") {
-        Action::Output(event) => event,
-        _ => panic!("expected output, not an OS effect"),
+    let mut stream = into_stream(task).expect("stream");
+    match block_on(stream.next()).expect("output") {
+        RuntimeAction::Output(event) => event,
+        _ => panic!("only typed completions come back from Connect tasks"),
     }
 }
-
-fn probe(methods: Vec<Method>) -> ServerProbe {
-    ServerProbe {
-        methods,
-        register: false,
-        server_name: None,
-        fingerprint_changed: None,
-    }
-}
-
 #[test]
-fn old_screen_events_cannot_mutate_a_reopened_connect() {
+fn cancel_before_a_task_runs_suppresses_its_result_and_a_reopened_screen() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_session, _) =
+        crate::session::Session::open_at(dir.path().join("local.sqlite")).expect("session");
+    let mut old = State::with_server_url("https://must-not-be-contacted.invalid".into());
+    let pending = send(&mut old, Message::Probe);
+    assert!(old.flow.snapshot().busy);
+    assert!(matches!(
+        send(&mut old, Message::Cancel).as_slice(),
+        [Outcome::Cancelled]
+    ));
+    let completion = result(pending);
+    assert!(old.update(completion.clone()).is_empty());
+    let mut reopened = State::default();
+    assert!(reopened.update(completion).is_empty());
+    assert_eq!(reopened.stage(), &Stage::Server);
+    assert!(reopened.remote.is_none());
+}
+#[test]
+fn dropping_a_screen_cancels_work_already_captured_by_its_task() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (_session, _) =
+        crate::session::Session::open_at(dir.path().join("local.sqlite")).expect("session");
+    let mut old = State::with_server_url("https://must-not-be-contacted.invalid".into());
+    let pending = send(&mut old, Message::Probe);
+    drop(old);
+    let completion = result(pending);
+    let mut reopened = State::default();
+    assert!(reopened.update(completion).is_empty());
+}
+#[test]
+fn stale_inputs_cannot_dispatch_work_into_a_reopened_screen() {
     let mut old = State::default();
     let mut reopened = State::with_server_url("https://new.example".into());
     for message in [
-        Message::Probed(Ok(probe(vec![Method::Password]))),
-        Message::Probed(Err("old probe failure".into())),
-        Message::Outcome(Ok(LoginOutcome::Success {
-            storage_id: "old".into(),
-            has_personal_keys: true,
-        })),
-        Message::Outcome(Err("old login failure".into())),
-        Message::OidcStarted(Ok("https://old.example/authorize".into())),
-        Message::FingerprintTrusted(Ok(())),
-        Message::StartOidc,
         Message::Probe,
-        Message::Poll,
+        Message::StartOidc,
+        Message::TrustFingerprint,
         Message::Cancel,
         Message::UrlInput("https://old.example".into()),
+        Message::OpenAuthUrl,
     ] {
-        let late = old.event(message);
-        assert!(matches!(reopened.update(late.clone()), Outcome::None));
-        send(&mut old, Message::Cancel);
-        assert!(matches!(old.update(late), Outcome::None));
-        assert_eq!(reopened.stage, Stage::Server);
-        assert_eq!(reopened.url, "https://new.example");
-        assert!(!reopened.busy);
-        assert!(reopened.error.is_none());
-        assert!(reopened.remote.is_none());
-        assert!(reopened.authorization_url.is_none());
+        assert!(reopened.update(old.event(message)).is_empty());
     }
-    assert!(
-        matches!(send(&mut reopened, Message::Outcome(Ok(LoginOutcome::Success {
-        storage_id: "current".into(), has_personal_keys: false,
-    }))), Outcome::Connected { storage_id, .. } if storage_id == "current")
-    );
-}
-
-#[test]
-fn queued_continuations_keep_the_originating_screen() {
-    for completion in [
-        Message::Probed(Ok(probe(vec![Method::Oidc]))),
-        Message::FingerprintTrusted(Ok(())),
-        Message::OidcStarted(Ok("https://issuer.example/authorize?state=private".into())),
-    ] {
-        let mut old = State::default();
-        old.busy = true;
-        old.stage = match &completion {
-            Message::FingerprintTrusted(_) => Stage::Fingerprint {
-                old: "old".into(),
-                new: "new".into(),
-            },
-            Message::OidcStarted(_) => Stage::Oidc,
-            _ => Stage::Server,
-        };
-        let continuation = queued(send(&mut old, completion));
-        assert!(old.accepts(&continuation.message));
-        send(&mut old, Message::Cancel);
-        assert!(matches!(old.update(continuation.clone()), Outcome::None));
-        let mut reopened = State::default();
-        assert!(matches!(reopened.update(continuation), Outcome::None));
-        assert!(reopened.remote.is_none());
-    }
-}
-
-#[test]
-fn an_async_task_keeps_its_origin_after_the_screen_is_dropped() {
-    let old = State::default();
-    let (tx, rx) = cosmic::iced::futures::channel::oneshot::channel();
-    let task = old.task(Task::future(async move { rx.await.expect("completion") }));
-    drop(old);
-    tx.send(Message::Outcome(Ok(LoginOutcome::Success {
-        storage_id: "old".into(),
-        has_personal_keys: false,
-    })))
-    .expect("send completion");
-    let mut reopened = State::default();
-    assert!(matches!(reopened.update(queued(task)), Outcome::None));
-    assert_eq!(reopened.stage, Stage::Server);
-}
-
-#[test]
-fn current_oidc_completion_opens_only_after_a_scoped_continuation() {
-    let mut state = State::default();
-    let open = queued(send(
-        &mut state,
-        Message::OidcStarted(Ok("https://issuer.example/authorize".into())),
-    ));
-    assert!(
-        matches!(state.update(open), Outcome::OpenUrl(url) if url == "https://issuer.example/authorize")
-    );
-}
-
-#[test]
-fn busy_forms_do_not_admit_duplicate_submits_or_change_inputs() {
-    let mut state = State::default();
-    state.busy = true;
-    // An empty URL makes this safe even if the admission guard regresses:
-    // the duplicate must not replace the in-flight operation's error/state.
-    assert!(matches!(send(&mut state, Message::Probe), Outcome::None));
-    send(
-        &mut state,
-        Message::UrlInput("https://replacement.example".into()),
-    );
-    assert!(state.error.is_none());
-    assert!(state.url.is_empty());
-    assert!(state.busy);
-
-    state.stage = Stage::Password;
-    state.email = "person@example.test".into();
-    state.password = "synthetic-password".into();
-    assert!(!state.accepts(&Message::SubmitPassword));
-    send(&mut state, Message::PasswordInput("replacement".into()));
-    assert_eq!(state.password, "synthetic-password");
-    state.busy = false;
-    assert!(state.accepts(&Message::SubmitPassword));
-
-    state.stage = Stage::Oidc;
-    state.authorization_url = Some("https://issuer.example/authorize".into());
-    assert!(!state.accepts(&Message::StartOidc));
-    state.stage = Stage::Fingerprint {
-        old: "old".into(),
-        new: "new".into(),
-    };
-    state.busy = true;
-    assert!(!state.accepts(&Message::TrustFingerprint));
-}
-
-#[test]
-fn success_is_terminal_and_clears_sensitive_screen_state() {
-    let mut state = State::default();
-    state.password = "synthetic-password".into();
-    state.authorization_url = Some("https://issuer.example/authorize".into());
-    let success = state.event(Message::Outcome(Ok(LoginOutcome::Success {
-        storage_id: "current".into(),
-        has_personal_keys: true,
-    })));
+    assert_eq!(reopened.server_url(), "https://new.example");
+    assert!(reopened.remote.is_none());
     assert!(matches!(
-        state.update(success.clone()),
-        Outcome::Connected { .. }
+        send(&mut old, Message::Back).as_slice(),
+        [Outcome::Cancelled]
     ));
-    assert!(matches!(state.update(success), Outcome::None));
-    assert!(state.password.is_empty());
-    assert!(state.authorization_url.is_none());
+}
+
+#[test]
+fn duplicate_submit_preserves_the_password_draft_until_admitted() {
+    use zann_core::AuthMethod;
+    use zann_flows::connect::{Probe, ServerInfo};
+    let mut state = State::default();
+    let effects = state.flow.dispatch(Action::Probe {
+        url: "https://fixture.example".into(),
+    });
+    let id = effects
+        .iter()
+        .find_map(|effect| effect.operation().map(|(id, _)| id))
+        .expect("probe ID");
+    state.flow.complete(
+        id,
+        Completion::Probed(Ok(Probe::Ready(ServerInfo {
+            methods: vec![AuthMethod::Password],
+            registration_available: false,
+            server_name: None,
+        }))),
+    );
+    state.email = "person@example.test".into();
+    state.flow.dispatch(Action::SubmitPassword {
+        email: state.email.clone(),
+        password: "in-flight".into(),
+        full_name: None,
+    });
+    send(&mut state, Message::PasswordInput("retry-draft".into()));
+    assert!(send(&mut state, Message::SubmitPassword).is_empty());
+    assert_eq!(state.password, "retry-draft");
+    assert!(
+        state.remote.is_none(),
+        "rejected input must not initialize an executor"
+    );
 }

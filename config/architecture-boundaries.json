@@ -1,24 +1,26 @@
 {
   "schema_version": 1,
   "manifests": ["Cargo.toml", "apps/cosmic/Cargo.toml"],
-  "internal_packages": ["zann-cli", "zann-client", "zann-client-sqlite", "zann-core", "zann-cosmic", "zann-crypto", "zann-db", "zann-ffi", "zann-keystore", "zann-server", "zann-ui-core", "zann-integration-tests"],
+  "internal_packages": ["zann-cli", "zann-client", "zann-client-sqlite", "zann-core", "zann-cosmic", "zann-crypto", "zann-db", "zann-ffi", "zann-flows", "zann-keystore", "zann-server", "zann-ui-core", "zann-integration-tests"],
   "allowed_internal_dependencies": {
     "zann-integration-tests": ["zann-client", "zann-client-sqlite", "zann-core", "zann-crypto", "zann-db", "zann-keystore", "zann-server"],
     "zann-cli": ["zann-client", "zann-core", "zann-ui-core"],
     "zann-client": ["zann-core", "zann-crypto", "zann-keystore"],
     "zann-client-sqlite": ["tokio", "zann-client", "zann-core", "zann-crypto", "zann-db", "zann-keystore"],
     "zann-core": ["zann-crypto"],
-    "zann-cosmic": ["zann-client", "zann-client-sqlite", "zann-core", "zann-ui-core"],
+    "zann-cosmic": ["zann-client", "zann-client-sqlite", "zann-core", "zann-flows", "zann-ui-core"],
     "zann-crypto": [],
     "zann-db": ["zann-core", "zann-crypto"],
-    "zann-ffi": ["zann-client", "zann-client-sqlite", "zann-ui-core"],
+    "zann-ffi": ["zann-client", "zann-client-sqlite", "zann-flows", "zann-ui-core"],
+    "zann-flows": ["zann-core", "zann-ui-core"],
     "zann-keystore": ["zann-crypto"],
     "zann-server": ["zann-core", "zann-crypto", "zann-db"],
     "zann-ui-core": ["zann-core"]
   },
-  "shared_packages": ["zann-client", "zann-client-sqlite", "zann-core", "zann-crypto", "zann-db", "zann-keystore", "zann-ui-core"],
+  "shared_packages": ["zann-client", "zann-client-sqlite", "zann-core", "zann-crypto", "zann-db", "zann-flows", "zann-keystore", "zann-ui-core"],
   "forbidden_shared_dependencies": ["clap", "libcosmic", "tauri"],
   "forbidden_direct_dependencies": {
+    "zann-flows": ["clap", "dirs", "libcosmic", "reqwest", "sqlx", "sqlx-core", "sqlx-postgres", "sqlx-sqlite", "tokio", "uniffi", "zann-client", "zann-client-sqlite", "zann-db", "zann-ffi"],
     "zann-cli": ["argon2", "keyring", "reqwest", "zann-crypto", "zann-db", "zann-ffi"],
     "zann-client": ["argon2"],
     "zann-client-sqlite": ["argon2", "dirs", "keyring", "reqwest", "sqlx-core", "sqlx-postgres", "sqlx-sqlite"],
@@ -40,9 +42,10 @@
     },
     "MIG-006": {
       "owner": "@constXife",
-      "tracking": "ADR-0001 phase 6",
-      "grandfathered": true,
-      "review_on": "2026-11-16",
+      "tracking": "ADR-0001 phase 6 remaining native flows",
+      "grandfathered": false,
+      "issue": "#258",
+      "expires_on": "2026-11-16",
       "removal_condition": "All clients consume zann-flows and canonical zann-ui-core presentation policy"
     },
     "MIG-009": {
@@ -57,6 +60,13 @@
   "dependency_exceptions": [],
   "feature_exceptions": [],
   "feature_contracts": [
+    {
+      "package": "zann-flows",
+      "feature": "default",
+      "required_members": [],
+      "forbidden_members": [],
+      "forbidden_packages": ["clap", "dirs", "libcosmic", "reqwest", "sqlx", "sqlx-core", "sqlx-postgres", "sqlx-sqlite", "tokio", "uniffi", "zann-client", "zann-client-sqlite", "zann-db", "zann-ffi"]
+    },
     {
       "package": "zann-keystore",
       "feature": "fido",
@@ -129,6 +139,22 @@
     }
   ],
   "source_rules": [
+    {
+      "name": "flows-no-runtime-or-platform-io",
+      "exception_ids": [],
+      "pattern": "(std::(fs|net|thread)|tokio|reqwest|sqlx|libcosmic|uniffi|dirs)::|home_dir|current_dir",
+      "roots": ["crates/zann-flows/src"],
+      "max_matches": 0,
+      "allowed_files": []
+    },
+    {
+      "name": "native-connect-policy-owned-by-flows",
+      "exception_ids": [],
+      "pattern": "enum Stage|func offer[(]|fn apply_probe[(]|fn apply_outcome[(]|private var generation",
+      "roots": ["apps/cosmic/src/screens/connect", "apps/cosmic/src/screens/connect.rs", "apps/apple/Zann/Connect"],
+      "max_matches": 0,
+      "allowed_files": []
+    },
     {
       "name": "standalone-local-mode-removed",
       "exception_ids": [],

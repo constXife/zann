@@ -60,6 +60,10 @@ jobs:
               - '.dockerignore'
               - 'compose.yaml'
             audit_surface:
+              - 'crates/zann-flows/**'
+              - 'crates/zann-ffi/src/connect_flow.rs'
+              - 'crates/zann-ffi/src/connect_flow/**'
+              - 'crates/zann-ffi/tests/connect_flow.rs'
               - 'crates/zann-ui-core/src/generator/**'
               - 'crates/zann-ffi/src/generator.rs'
               - 'crates/zann-ffi/tests/generator.rs'
@@ -127,6 +131,7 @@ jobs:
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
               - 'crates/zann-ffi/**'
+              - 'crates/zann-flows/**'
               - 'crates/zann-keystore/**'
               - 'crates/zann-ui-core/**'
               - 'apps/cosmic/**'
@@ -150,6 +155,7 @@ jobs:
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
               - 'crates/zann-ffi/**'
+              - 'crates/zann-flows/**'
               - 'crates/zann-keystore/**'
               - 'crates/zann-ui-core/**'
               - 'schemas/**'
@@ -166,6 +172,7 @@ jobs:
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
               - 'crates/zann-ffi/**'
+              - 'crates/zann-flows/**'
               - 'crates/zann-keystore/**'
               - 'crates/zann-ui-core/**'
               - 'schemas/**'
@@ -280,7 +287,7 @@ jobs:
       - name: Clippy (native secret generator and FFI projection)
         run: cargo clippy -p zann-ui-core -p zann-ffi --all-targets --locked -- -D warnings
       - name: Tests (native secret generator and FFI projection)
-        run: cargo test -p zann-ui-core -p zann-ffi --locked
+        run: cargo test -p zann-flows -p zann-ui-core -p zann-ffi --locked
       - name: Clippy (authenticated session surface)
         run: cargo clippy -p zann-client --no-default-features --features session --all-targets --locked -- -D warnings
       - name: Clippy (DB-free sync surface)

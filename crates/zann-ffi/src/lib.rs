@@ -20,6 +20,8 @@ mod presentation;
 pub use presentation::*;
 mod catalogue;
 pub use catalogue::*;
+mod connect_flow;
+pub use connect_flow::*;
 mod generator;
 pub use generator::*;
 mod platform;

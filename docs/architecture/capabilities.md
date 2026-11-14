@@ -51,7 +51,8 @@ does not authorize another temporary implementation.
 | Authenticated application session | private `zann-client::session` owner, exposed only through `zann-client::app::AppClient` | COSMIC, FFI; future CLI adapter | `CredentialStore`, `ClientPaths`, clock, operation deadline and cancellation | constructing `AppSession` directly; password/OIDC login, trust, refresh, logout, token-selection and ambiguity policy in shells and FFI |
 | Authenticated application composition | `zann-client::app` **(active native facade)** | COSMIC and FFI | injected `AppSyncStoreFactory`, `CredentialStore`, explicit `ClientPaths`, operation-scoped master key, progress/cancellation | exposing `AppSession`/`SyncEngine`, bearer access, ambient paths, mutable target/key maps or local orchestration in shells |
 | Offline replica application use cases | `zann-client::app::local` (port), `zann-client-sqlite::local_vault` (native implementation) | COSMIC and FFI adapters | storage/credential ports, `ClientPaths`, clock and progress sink | local application orchestration in COSMIC screens, Apple views or `zann-ffi` |
-| Connect, startup, unlock and idle flows | `zann-flows` **(planned)** | COSMIC and Apple/FFI adapters; future clients | typed effect executor, operation IDs and cancellation | flow reducers in components/screens; toolkit, runtime, filesystem or transport in `zann-flows` |
+| Connect flow | `zann-flows::connect` **(active)** | COSMIC directly; Apple through the pure `zann-ffi::ConnectFlowFfi` projection | canonical auth/trust executors, opaque native capabilities, typed effects, instance/operation/phase IDs and cancellation | method/registration, Back/Cancel and result-admission policy in shells/FFI; toolkit, runtime, filesystem or transport in `zann-flows` |
+| Startup, unlock/remembered unlock and idle flows | `zann-flows` **(planned slices)** | native adapters; future clients | typed effect executor, operation IDs and cancellation | new flow reducers in components/screens |
 | Categories, folders, filters, list captions, item-detail projection and editor drafts | `zann-ui-core`; the list subtitle's payload fields are `zann-core::item_subtitle`, applied where `zann-db` decrypts a list page | COSMIC, Apple/FFI and future clients | canonical schema/catalogue data, translation and abstract-icon resolver | category, ordering, masking/copy/reveal, TOTP parsing or list-caption policy in components or screens; payload decryption for list rows outside `zann-db` |
 | Native password/passphrase generation | `zann-ui-core::generator` | COSMIC directly; Apple and future non-Rust shells through `zann-ffi` | explicit bounded options, shared defaults and separator catalogue; fallible OS entropy | alphabets, dictionaries, validation, RNG selection or default copies in shells/FFI; generated secrets in Debug/logs |
 | Streaming backup/import/export use cases | `zann-client::app::local` (port), `zann-client-sqlite::maintenance` (native implementation) | native clients | `Read`/`Write`, explicit paths, progress and cancellation ports | file dialogs in shared services; parsing/encryption policy in shells |
@@ -65,9 +66,9 @@ The planned crates identify accepted extraction boundaries. Until they exist:
   serde-only `zann-protocol` extraction; server handlers and
   the private `zann-client` transport MUST import those types directly, cover them with
   golden serialization fixtures and MUST NOT copy them into a shell;
-- new cross-client flow policy MUST introduce `zann-flows` first; a bug fix to
-  an existing duplicated flow stays within MIG-006, adds parity coverage and
-  MUST NOT expand either implementation;
+- new cross-client flow policy MUST live in `zann-flows`. Connect is active and
+  has no shell-local migration exception. Remaining legacy flow fixes stay
+  within MIG-006, add parity coverage and MUST NOT expand either implementation;
 - local vault operations are exposed through `zann-client::app::local` and
   implemented by `zann-client-sqlite/local-vault`; the former transitional
   package has been removed;
@@ -602,13 +603,15 @@ the current scope; they do not permit additional call sites or dependencies.
 | ID | Owner | Frozen legacy scope | Risk | Compensating control | Removal condition |
 |---|---|---|---|---|---|
 | MIG-005 | `@constXife` | COSMIC default-root resolver in `apps/cosmic/src/backend/mod.rs` (`ZANN_DB_URL`, home-directory lookup and current-directory fallback) | implicit root selection | explicit-path and active-database binding tests; no new root derivation below the composition boundary | an explicit client root replaces the legacy shell-local default-root fallback (ADR phase 2) |
-| MIG-006 | `@constXife` | `apps/cosmic/src/screens/{connect,vault}.rs` and their screen submodules | divergent UI behaviour and stale async results | native flow/UI and operation-ID tests; Connect cancel/reopen, scoped continuations and sticky auth-cancellation regressions (`apps/cosmic/tests/connect_lifecycle.rs`, `apps/cosmic/src/screens/connect/tests.rs`, `apps/cosmic/src/backend/remote/tests.rs`) | clients consume `zann-flows` and `zann-ui-core`; shell-local flow policy is deleted (ADR phase 6) |
+| MIG-006 | `@constXife` | remaining `apps/cosmic/src/screens/vault.rs` and its screen submodules; Connect is extracted and excluded | divergent UI behaviour and stale async results | native vault operation-ID tests; shared Connect reducer/FFI conformance and native cancellation tests prevent reintroducing extracted policy | remaining native flows consume `zann-flows` and `zann-ui-core`; shell-local flow policy is deleted (ADR phase 6); [#258](https://github.com/constXife/zann/issues/258), expires 2026-11-16 |
 | MIG-009 | `@constXife` | `zann-db` local vault key binding (`bind_cache_key_fingerprints_in`, the leased claim) the catalog slug check in `zann-client-sqlite::reconcile_catalog_rows`, and `SyncCursorRepo::adopt_legacy_last_seq` from the checkpoint load: a pre-`0002` remote vault with the internal `local::<id>` slug and no bound key, and its cursor without `last_seq` | a legacy projection claimed under a key it was not encrypted with | adoption only when every cached item carries the catalog-proven key fingerprint and every pending change has its item; a cursor's sequence is recorded only while `last_seq` is NULL and the cursor is unchanged; `crates/zann-db/tests/local_legacy_projection.rs` | no database predating migration `0002` remains (every legacy device has synced once); expires 2027-02-13 |
 
-Because these entries predate the exception policy, `@constXife` is their
-responsible owner and the stated ADR removal phase temporarily replaces the
-calendar removal expiry. The accepted ADR serves as their tracking reference.
-Every grandfathered entry still has a fail-closed `review_on` date; review may
+The entries that still predate the exception policy have `@constXife` as owner;
+their ADR removal phase temporarily replaces calendar expiry and the accepted
+ADR serves as their tracking reference.
+MIG-006 now has issue #258 and a calendar expiry because phase 6 has started;
+its previous review date is retained as the expiry without extending the debt.
+Every remaining grandfathered entry still has a fail-closed `review_on` date; review may
 narrow or remove its scope, but cannot silently extend it. Each entry MUST gain
 an issue and calendar expiry when work on its phase starts. Any scope increase
 requires a normal, issue-linked, time-bounded exception immediately.
@@ -658,8 +661,9 @@ callable legacy policy is not complete.
 ### Tauri retirement (#249)
 
 `apps/desktop` and its build/test/WebDriver jobs are removed. MIG-001, MIG-003
-and MIG-004 are retired with their implementations; MIG-005 and MIG-006 retain
-only the COSMIC debt listed above. MIG-009 is unrelated and remains unchanged.
+and MIG-004 are retired with their implementations. MIG-005 retains its
+grandfathered review date; MIG-006 uses issue-linked calendar expiry. The
+remaining exceptions retain only the COSMIC debt listed above. MIG-009 is unrelated and remains unchanged.
 Native applications use the canonical server backup importer (#243) and shared
 password/passphrase generator. Product icons live in `assets/icons`, outside
 client shells. The `desktop` Config v2 namespace, native preference files and

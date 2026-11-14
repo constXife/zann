@@ -2,13 +2,13 @@
 
 use cosmic::iced::Task;
 
-use super::{LoginOutcome, ServerProbe};
+use crate::backend::remote::Reply;
+use zann_flows::connect::{OperationId, Step};
 
 #[derive(Clone)]
 pub enum Message {
     UrlInput(String),
     Probe,
-    Probed(Result<ServerProbe, String>),
     ChoosePassword,
     EmailInput(String),
     FullNameInput(String),
@@ -16,13 +16,16 @@ pub enum Message {
     TogglePassword,
     SubmitPassword,
     StartOidc,
-    OidcStarted(Result<String, String>),
     OpenAuthUrl,
     CopyAuthUrl,
     TrustFingerprint,
-    FingerprintTrusted(Result<(), String>),
-    Outcome(Result<LoginOutcome, String>),
-    Poll,
+    Completed {
+        id: OperationId,
+        step: Step,
+        result: Result<Reply, String>,
+    },
+    SetRegistering(bool),
+    Back,
     Cancel,
 }
 
@@ -40,7 +43,6 @@ pub struct Event {
 }
 
 pub enum Outcome {
-    None,
     Task(Task<Event>),
     Copy(String),
     OpenUrl(String),
