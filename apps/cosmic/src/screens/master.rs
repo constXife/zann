@@ -34,7 +34,7 @@ pub struct State {
     sync_after: Option<String>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Message {
     /// What this device remembers, answered by the shell on the way in.
     Remembered(RememberedUnlock),
@@ -47,6 +47,12 @@ pub enum Message {
     /// The vault contents, plus the outcome of the sync that ran on the way
     /// in, if one did; a failed one did not stop the vault opening.
     Opened(Result<(ItemsPage, Option<Result<(), String>>), String>),
+}
+
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("MasterMessage(<redacted>)")
+    }
 }
 
 pub enum Outcome {

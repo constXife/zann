@@ -71,8 +71,7 @@ pub struct Remote {
     client: Arc<AppClient>,
     prepared: Mutex<Option<PreparedConnection>>,
     trust: Mutex<Option<ConnectionTrustChallenge>>,
-    oidc_rx: Mutex<Option<Receiver<OidcStatus>>>,
-    oidc_cancel: Mutex<Option<SessionCancellationHandle>>,
+    login: Mutex<LoginState>,
 }
 
 impl Remote {
@@ -110,8 +109,7 @@ impl Remote {
             client,
             prepared: Mutex::new(None),
             trust: Mutex::new(None),
-            oidc_rx: Mutex::new(None),
-            oidc_cancel: Mutex::new(None),
+            login: Mutex::new(LoginState::default()),
         })
     }
 
@@ -178,7 +176,7 @@ impl Remote {
             .clone()
             .ok_or_else(|| "server connection has not been prepared".to_string())?;
         let password = LoginPassword::new(password).map_err(|error| error.to_string())?;
-        let (operation, _) = SessionOperation::new(Instant::now() + LOGIN_DEADLINE);
+        let operation = self.login.lock().expect("lock poisoned").start()?;
         let access = if register {
             let request = PasswordRegistrationRequest::new(
                 prepared.target().clone(),
@@ -213,7 +211,7 @@ impl Remote {
             .expect("lock poisoned")
             .clone()
             .ok_or_else(|| "server connection has not been prepared".to_string())?;
-        let (operation, cancellation) = SessionOperation::new(Instant::now() + LOGIN_DEADLINE);
+        let operation = self.login.lock().expect("lock poisoned").start()?;
         let login = self
             .runtime
             .block_on(
@@ -223,6 +221,10 @@ impl Remote {
             .map_err(|error| error.to_string())?;
         let authorization_url = login.authorization_url().to_string();
         let (tx, rx) = std::sync::mpsc::channel();
+        self.login
+            .lock()
+            .expect("lock poisoned")
+            .install_receiver(rx)?;
         let client = Arc::clone(&self.client);
         let storage_id = prepared.storage_id().to_string();
         self.runtime.handle().spawn(async move {
@@ -244,8 +246,6 @@ impl Remote {
             };
             let _ = tx.send(status);
         });
-        *self.oidc_rx.lock().expect("lock poisoned") = Some(rx);
-        *self.oidc_cancel.lock().expect("lock poisoned") = Some(cancellation);
         Ok(authorization_url)
     }
 
@@ -265,8 +265,8 @@ impl Remote {
     }
 
     pub fn poll_oidc(&self) -> Vec<OidcStatus> {
-        let guard = self.oidc_rx.lock().expect("lock poisoned");
-        let Some(rx) = guard.as_ref() else {
+        let guard = self.login.lock().expect("lock poisoned");
+        let Some(rx) = guard.receiver.as_ref() else {
             return Vec::new();
         };
         let mut out = Vec::new();
@@ -276,10 +276,54 @@ impl Remote {
         out
     }
 
-    pub fn forget_oidc(&self) {
-        if let Some(cancellation) = self.oidc_cancel.lock().expect("lock poisoned").take() {
-            cancellation.cancel();
-        }
-        *self.oidc_rx.lock().expect("lock poisoned") = None;
+    /// Closes this screen's backend permanently, including work not started yet.
+    pub fn cancel(&self) {
+        self.login.lock().expect("lock poisoned").cancel();
     }
 }
+
+/// Registration and cancellation share one lock: cancelling before a worker
+/// starts, or while OIDC discovery is awaited, cannot miss a later handle.
+#[derive(Default)]
+struct LoginState {
+    cancelled: bool,
+    cancellation: Option<SessionCancellationHandle>,
+    receiver: Option<Receiver<OidcStatus>>,
+}
+
+impl LoginState {
+    fn start(&mut self) -> Result<SessionOperation, String> {
+        self.ensure_open()?;
+        if let Some(previous) = self.cancellation.take() {
+            previous.cancel();
+        }
+        let (operation, cancellation) = SessionOperation::new(Instant::now() + LOGIN_DEADLINE);
+        self.cancellation = Some(cancellation);
+        Ok(operation)
+    }
+
+    fn install_receiver(&mut self, receiver: Receiver<OidcStatus>) -> Result<(), String> {
+        self.ensure_open()?;
+        self.receiver = Some(receiver);
+        Ok(())
+    }
+
+    fn ensure_open(&self) -> Result<(), String> {
+        if self.cancelled {
+            Err("connection flow was cancelled".to_string())
+        } else {
+            Ok(())
+        }
+    }
+
+    fn cancel(&mut self) {
+        self.cancelled = true;
+        if let Some(cancellation) = self.cancellation.take() {
+            cancellation.cancel();
+        }
+        self.receiver = None;
+    }
+}
+
+#[cfg(test)]
+mod tests;

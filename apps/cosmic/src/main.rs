@@ -83,7 +83,7 @@ struct App {
 #[derive(Clone)]
 enum Message {
     Welcome(welcome::Message),
-    Connect(connect::Message),
+    Connect(connect::Event),
     Master(master::Message),
     Settings(settings::Message),
     /// A sync started from Settings ended; the ticket goes back to the
@@ -575,8 +575,13 @@ impl cosmic::Application for App {
                 match state.update(message) {
                     connect::Outcome::None => Task::none(),
                     connect::Outcome::Task(task) => lift(task, Message::Connect),
-                    connect::Outcome::Copy(value) => cosmic::task::message(Message::Copy(value)),
-                    connect::Outcome::OpenUrl(url) => cosmic::task::message(Message::OpenUrl(url)),
+                    connect::Outcome::Copy(value) => self.copy(value),
+                    connect::Outcome::OpenUrl(url) => {
+                        if let Err(err) = open::that_detached(&url) {
+                            eprintln!("could not open Connect authorization URL: {err}");
+                        }
+                        Task::none()
+                    }
                     connect::Outcome::Cancelled => {
                         *screen = return_to.take().map_or(Screen::Welcome, |screen| *screen);
                         Task::none()
