@@ -101,7 +101,7 @@ pub struct State {
     history: Option<history::State>,
     editing_generation: u64,
     busy: bool,
-    switching_vault: bool,
+    switching_context: bool,
     /// Only a failed list read can replace the list's empty-state actions.
     list_error: Option<String>,
     error: Option<String>,
@@ -123,25 +123,21 @@ pub struct State {
     drag: Option<Drag>,
     /// Only the latest armed auto-sync timer counts.
     sync_timer: u64,
-    /// The banner a failed sync left, cleared by the next one that succeeds.
-    sync_error: Option<String>,
-    /// The storage whose last scheduled sync only Settings can recover (its
-    /// server changed its identity, or no connection syncs it any more), with
-    /// that refusal; the banner then leads there.
-    stale_server: Option<(String, local::SyncFailure)>,
-    /// What the sync indicator knows about the open storage.
-    sync_state: Option<local::StorageSyncState>,
-    /// A sync this vault started is running.
-    syncing: bool,
+    sync: sync_status::SyncView,
+    workspace: context::Workspace,
 }
 
 #[derive(Clone, Debug)]
 pub enum Message {
-    VaultsLoaded(Result<local::VaultContext, String>),
+    VaultsLoaded {
+        request: u64,
+        result: Result<local::VaultContext, String>,
+    },
     SelectVault(usize),
-    VaultSwitched {
-        vault_id: String,
-        result: Result<ItemsPage, String>,
+    SelectStorage(usize),
+    ContextSwitched {
+        request: u64,
+        change: local::ContextChange,
     },
     QueryInput(String),
     ClearQuery,
@@ -188,21 +184,33 @@ pub enum Message {
     ResizeEnd,
     /// The auto-sync timer armed with this ID fired.
     SyncDue(u64),
-    /// A scheduled sync ended: the first page again when it changed
-    /// something, for the list generation it started under.
+    /// Network completion for an explicit source storage and list revision.
     AutoSynced {
         ticket: AutoSyncTicket,
         storage_id: String,
         list_generation: u64,
-        result: Result<Option<ItemsPage>, local::SyncFailure>,
+        result: Result<zann_client::app::local::LocalSyncOutcome, local::SyncFailure>,
     },
     /// Open the recovery for the server that changed its identity.
     ReviewStaleServer,
     /// Copy the error on screen, which the label itself cannot select.
     CopyError,
     /// The open storage's sync state, read again.
-    SyncStateLoaded(Result<local::StorageSyncState, String>),
-    /// The sync indicator was pressed: sync now, or lead to reconnecting.
+    SyncStateLoaded {
+        storage_id: String,
+        request: u64,
+        result: Result<local::StorageSyncState, String>,
+    },
+    SyncedWorkspaceLoaded {
+        storage_id: String,
+        list_generation: u64,
+        result: Result<(local::VaultContext, ItemsPage), String>,
+    },
+    SyncNow,
+    CloseSyncDetails,
+    RefreshSyncDetails,
+    CopySyncError,
+    /// Toggle details; starting a sync requires the explicit popover action.
     SyncIndicatorPressed,
 }
 
@@ -222,7 +230,6 @@ pub enum Outcome {
 
 impl State {
     pub fn new(page: ItemsPage, sync_error: Option<String>) -> Self {
-        let sync_error = sync_error.map(|err| t_args("items.syncFailed", &[("error", &err)]));
         let mut state = Self {
             vaults: Vec::new(),
             selected_vault_id: None,
@@ -242,9 +249,9 @@ impl State {
             history: None,
             editing_generation: 0,
             busy: false,
-            switching_vault: false,
+            switching_context: false,
             list_error: None,
-            error: sync_error.clone(),
+            error: None,
             last_activity: Instant::now(),
             auto_lock_minutes: 10,
             reveal_seconds: 20,
@@ -256,65 +263,16 @@ impl State {
             content_width: layout::LIST_DEFAULT + layout::HANDLE + layout::DETAIL_MIN,
             drag: None,
             sync_timer: 0,
-            sync_error,
-            stale_server: None,
-            sync_state: None,
-            syncing: false,
+            sync: sync_status::SyncView::new(sync_error),
+            workspace: context::Workspace::new(),
         };
         state.apply_page(page, true);
         state.rebuild_nav();
         state
     }
 
-    pub fn load_vaults(session: &Session) -> Task<Message> {
-        let facade = session.facade();
-        cosmic::task::future(async move {
-            Message::VaultsLoaded(off_thread(move || local::vault_context(&facade)).await)
-        })
-    }
-
     pub fn nav_model(&self) -> &nav_bar::Model {
         &self.nav
-    }
-
-    /// A picker only when there is more than one vault to choose from.
-    pub fn offers_vault_picker(&self) -> bool {
-        self.vaults.len() > 1
-    }
-
-    /// Storage/vault context belongs to the navigation column, above the
-    /// category tree: the vault on screen, a picker when there are several,
-    /// and the sync status of the storage it belongs to. The shell embeds
-    /// this in its custom libcosmic nav bar.
-    pub fn nav_header(&self) -> Element<'_, Message> {
-        let spacing = theme::spacing();
-        let mut title = widget::row::with_capacity(2)
-            .push(widget::text::caption(t("nav.vaults")).width(Length::Fill))
-            .align_y(Alignment::Center);
-        if let Some(indicator) = self.sync_indicator() {
-            title = title.push(indicator);
-        }
-        let selected = self
-            .selected_vault_id
-            .as_deref()
-            .and_then(|id| self.vaults.iter().position(|vault| vault.id == id));
-        let vault: Element<'_, Message> = if self.offers_vault_picker() {
-            let labels: Vec<String> = self.vaults.iter().map(vault_label).collect();
-            widget::dropdown(labels, selected, Message::SelectVault).into()
-        } else {
-            let label = selected
-                .and_then(|index| self.vaults.get(index))
-                .map(vault_label)
-                .unwrap_or_default();
-            widget::text::body(label).into()
-        };
-        widget::column::with_capacity(2)
-            .push(title)
-            .push(vault)
-            .spacing(spacing.space_xxs)
-            .padding(spacing.space_s)
-            .width(Length::Fill)
-            .into()
     }
 
     /// The shell owns the window and knows how much room its navigation column
@@ -401,9 +359,10 @@ impl State {
     }
 
     pub fn activate_nav(&mut self, id: nav_bar::Id) {
-        if self.editor.is_some() || self.history.is_some() || self.switching_vault {
+        if self.editor.is_some() || self.history.is_some() || self.switching_context {
             return;
         }
+        self.sync.showing_details = false;
         self.nav.activate(id);
         self.reconcile_selection();
     }
@@ -427,7 +386,10 @@ impl State {
                 .push(cosmic::iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick));
         }
 
-        if !self.query.is_empty() && self.editor.is_none() && self.history.is_none() {
+        let details_open = self.sync.showing_details;
+        if details_open
+            || (!self.query.is_empty() && self.editor.is_none() && self.history.is_none())
+        {
             subscriptions.push(event::listen_with(|event, _, _| match event {
                 Event::Keyboard(keyboard::Event::KeyPressed {
                     key: keyboard::Key::Named(keyboard::key::Named::Escape),
@@ -458,7 +420,7 @@ impl State {
         // not, or the vault would never idle out.
         if !matches!(
             message,
-            Message::VaultsLoaded(_)
+            Message::VaultsLoaded { .. }
                 | Message::SearchReady(_)
                 | Message::SearchLoaded { .. }
                 | Message::MoreLoaded { .. }
@@ -477,7 +439,9 @@ impl State {
                 | Message::HideRevealed(_)
                 | Message::SyncDue(_)
                 | Message::AutoSynced { .. }
-                | Message::SyncStateLoaded(_)
+                | Message::SyncStateLoaded { .. }
+                | Message::ContextSwitched { .. }
+                | Message::SyncedWorkspaceLoaded { .. }
                 | Message::Loaded { .. }
                 | Message::DetailLoading(_)
         ) {
@@ -488,51 +452,11 @@ impl State {
             return Outcome::None;
         }
         match message {
-            Message::VaultsLoaded(Ok(context)) => {
-                self.vaults = context.vaults;
-                self.selected_vault_id = context.current_vault_id;
-                self.rebuild_nav();
-                // The open storage may have changed with the vault.
-                return Outcome::Task(Self::load_sync_state(session));
-            }
-
-            Message::VaultsLoaded(Err(err)) => self.error = Some(err),
-
-            Message::SelectVault(index) => {
-                if self.busy || self.searching || self.editor.is_some() || self.history.is_some() {
-                    return Outcome::None;
-                }
-                let Some(vault) = self.vaults.get(index) else {
-                    return Outcome::None;
-                };
-                if self.selected_vault_id.as_deref() == Some(vault.id.as_str()) {
-                    return Outcome::None;
-                }
-                let vault_id = vault.id.clone();
-                let worker_id = vault_id.clone();
-                let facade = session.facade();
-                self.clear_selection();
-                self.switching_vault = true;
-                self.busy = true;
-                self.error = None;
-                return Outcome::Task(cosmic::task::future(async move {
-                    Message::VaultSwitched {
-                        vault_id,
-                        result: off_thread(move || local::switch_vault(&facade, worker_id)).await,
-                    }
-                }));
-            }
-
-            Message::VaultSwitched { vault_id, result } => {
-                self.switching_vault = false;
-                self.busy = false;
-                match result {
-                    Ok(page) => {
-                        self.selected_vault_id = Some(vault_id);
-                        self.replace_page(page);
-                    }
-                    Err(err) => self.error = Some(err),
-                }
+            message @ (Message::VaultsLoaded { .. }
+            | Message::SelectVault(_)
+            | Message::SelectStorage(_)
+            | Message::ContextSwitched { .. }) => {
+                return self.update_context(message, session);
             }
 
             message @ (Message::QueryInput(_)
@@ -545,7 +469,7 @@ impl State {
             | Message::MoreLoaded { .. }) => return self.update_search(message, session),
 
             Message::Select(id) => {
-                if !self.switching_vault
+                if !self.switching_context
                     && self.editor.is_none()
                     && self.history.is_none()
                     && self.visible().iter().any(|item| item.id == id)
@@ -693,11 +617,17 @@ impl State {
 
             message @ (Message::SyncDue(_)
             | Message::AutoSynced { .. }
-            | Message::ReviewStaleServer) => return self.update_auto_sync(message, session),
-
-            message @ (Message::SyncStateLoaded(_) | Message::SyncIndicatorPressed) => {
-                return self.update_sync_status(message, session)
+            | Message::SyncedWorkspaceLoaded { .. }) => {
+                return self.update_auto_sync(message, session)
             }
+
+            message @ (Message::SyncStateLoaded { .. }
+            | Message::SyncIndicatorPressed
+            | Message::SyncNow
+            | Message::CloseSyncDetails
+            | Message::RefreshSyncDetails
+            | Message::CopySyncError
+            | Message::ReviewStaleServer) => return self.update_sync_status(message, session),
         }
         Outcome::None
     }
@@ -812,3 +742,5 @@ mod sync_status;
 
 mod search;
 mod selection;
+
+mod context;

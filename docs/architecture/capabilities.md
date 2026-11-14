@@ -94,6 +94,16 @@ replaced by one operation-correlated card adapter; superseding a card or droppin
 its screen cancels the core operation. This narrows MIG-006's legacy read path
 without introducing another flow owner.
 
+COSMIC sync feedback uses `zann-ui-core::sync_status` for state and action
+policy and `app::local` for explicit storage selection, metadata and sync.
+The shell keeps a bounded cache for the configured storages and renders a native
+nonmodal popover beside the server selector. The former combined sync/list
+worker and workspace sync-error banner are removed: network completion updates
+only its source storage, and a separate list read must match the current
+storage, vault and list revision. Native context switches remain available
+during network work. This narrows MIG-006's uncorrelated sync completion path;
+no shell sync, credential or recovery policy is added.
+
 Category projections also supply empty-state creation actions (target type and
 translation key); Trash supplies none. Shells render these actions and open the
 shared editor draft rather than maintaining their own category-to-type tables.

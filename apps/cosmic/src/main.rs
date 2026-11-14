@@ -580,12 +580,12 @@ impl cosmic::Application for App {
                     master::Outcome::None => Task::none(),
                     master::Outcome::Task(task) => lift(task, Message::Master),
                     master::Outcome::Opened { page, synced } => {
-                        let load_vaults = vault::State::load_vaults(session);
                         session
                             .auto_sync()
                             .unlocked(std::time::Instant::now(), synced.is_some());
                         let sync_error = synced.and_then(Result::err);
                         let mut vault = vault::State::new(page, sync_error);
+                        let load_vaults = vault.load_vaults(session);
                         vault.set_content_width(content_width);
                         vault.set_auto_lock_minutes(auto_lock_minutes);
                         vault.set_reveal_seconds(reveal_seconds);
@@ -751,7 +751,7 @@ impl App {
                 cosmic::task::future(async move {
                     let target = storage_id.clone();
                     let result = zann_cosmic::backend::off_thread(move || {
-                        Ok(zann_cosmic::backend::local::sync(&facade, Some(target)))
+                        Ok(zann_cosmic::backend::local::sync(&facade, Some(target)).map(|_| ()))
                     })
                     .await
                     .unwrap_or_else(|err| Err(SyncFailure::Other(err)));
@@ -762,15 +762,16 @@ impl App {
                 let Shell::Ready { session, screen } = &mut self.shell else {
                     return Task::none();
                 };
-                let load_vaults = vault::State::load_vaults(session);
                 let parked = std::mem::replace(screen, Screen::Welcome);
                 if let Screen::Settings { mut vault, .. } = parked {
                     if let Some(page) = page {
                         vault.replace_page(page);
                     }
+                    let load_vaults = vault.load_vaults(session);
                     *screen = Screen::Vault(vault);
+                    return lift(load_vaults, Message::Vault);
                 }
-                lift(load_vaults, Message::Vault)
+                Task::none()
             }
             settings::Outcome::AddServer => self.connect_from_settings(connect::State::default()),
             settings::Outcome::Reconnect { server_url } => self.connect_from_settings(

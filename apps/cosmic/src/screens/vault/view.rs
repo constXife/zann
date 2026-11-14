@@ -250,12 +250,6 @@ impl State {
                     .spacing(spacing.space_xs)
                     .align_y(Alignment::Center),
             );
-            if self.list_error.is_none() && self.stale_server_banner().is_some() {
-                content = content.push(
-                    widget::button::standard(t("items.reviewStaleServer"))
-                        .on_press(Message::ReviewStaleServer),
-                );
-            }
         }
 
         content

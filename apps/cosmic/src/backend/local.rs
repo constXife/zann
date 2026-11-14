@@ -9,8 +9,9 @@ pub use zann_client::app::local::StorageSyncState;
 use zann_client::app::local::{
     AppStatus, ApplePasswordsImportReport, ApplePasswordsPreflight, BackupExportReport,
     BackupImportOptions, HardwareKey, ItemCreate, ItemDetail, ItemHistoryDetail,
-    ItemHistorySummary, ItemSummary, ItemUpdate, ItemsFilter, LocalError, Page, RememberedUnlock,
-    Snapshot, SnapshotRestore, StorageLink, StorageSummary, VaultSummary, VerifyReport,
+    ItemHistorySummary, ItemSummary, ItemUpdate, ItemsFilter, LocalError, LocalSyncOutcome, Page,
+    RememberedUnlock, Snapshot, SnapshotRestore, StorageLink, StorageSummary, VaultSummary,
+    VerifyReport,
 };
 use zann_ui_core::ItemCounts;
 
@@ -32,13 +33,6 @@ pub struct ItemsPage {
     pub next_cursor: Option<String>,
     pub total: u64,
     pub counts: ItemCounts,
-}
-
-/// Vault choices for the current storage and the facade's active selection.
-#[derive(Debug, Clone)]
-pub struct VaultContext {
-    pub vaults: Vec<VaultSummary>,
-    pub current_vault_id: Option<String>,
 }
 
 /// Opens an explicitly resolved database and reports what the app should show first.
@@ -147,36 +141,13 @@ pub fn sync_state(facade: &Facade, storage_id: String) -> Result<StorageSyncStat
         .map_err(|err| err.to_string())
 }
 
-pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<(), SyncFailure> {
+pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<LocalSyncOutcome, SyncFailure> {
     if let Some(storage_id) = storage_id.clone() {
         syncs(facade, storage_id)?;
     }
     facade
         .remote_sync(storage_id, None)
-        .map(|_| ())
         .map_err(SyncFailure::from)
-}
-
-/// A scheduled sync of the open storage, the one "Sync now" in Settings runs
-/// for it, so a refusal names the storage its recovery acts on. `None` for a
-/// sync that changed nothing; otherwise the first page
-/// again, for `query`. A server storage whose connection is gone is refused
-/// as [`SyncFailure::Disconnected`].
-pub fn sync_and_reload(
-    facade: &Facade,
-    storage_id: String,
-    query: Option<String>,
-) -> Result<Option<ItemsPage>, SyncFailure> {
-    if !syncs(facade, storage_id.clone())? {
-        return Ok(None);
-    }
-    let outcome = facade.remote_sync(Some(storage_id), None)?;
-    if outcome.changes_committed == 0 {
-        return Ok(None);
-    }
-    items(facade, None, query)
-        .map(Some)
-        .map_err(SyncFailure::Other)
 }
 
 /// The first sync of a newly connected server; the core then moves the
@@ -248,32 +219,6 @@ pub fn items(
         next_cursor: page.next_cursor,
         total: page.total_count,
     })
-}
-
-pub fn vault_context(facade: &Facade) -> Result<VaultContext, String> {
-    Ok(VaultContext {
-        vaults: facade.list_vaults().map_err(|err| err.to_string())?,
-        current_vault_id: facade.current_vault_id(),
-    })
-}
-
-/// Change the facade selection and load the first page as one UI operation.
-/// If loading fails, restore the old selection so the selector and list cannot
-/// silently point at different vaults.
-pub fn switch_vault(facade: &Facade, vault_id: String) -> Result<ItemsPage, String> {
-    let previous = facade.current_vault_id();
-    facade
-        .set_current_vault(vault_id)
-        .map_err(|err| err.to_string())?;
-    match items(facade, None, None) {
-        Ok(page) => Ok(page),
-        Err(err) => {
-            if let Some(previous) = previous {
-                let _ = facade.set_current_vault(previous);
-            }
-            Err(err)
-        }
-    }
 }
 
 pub fn item_get(facade: &Facade, id: String) -> Result<ItemDetail, String> {
@@ -422,3 +367,6 @@ pub fn restore_snapshot(facade: &Facade, path: String) -> Result<SnapshotRestore
 pub fn verify(facade: &Facade) -> Result<VerifyReport, String> {
     facade.verify().map_err(|err| err.to_string())
 }
+
+mod context;
+pub use context::{switch_context, vault_context, ContextChange, ContextTarget, VaultContext};

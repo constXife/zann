@@ -16,6 +16,26 @@ mod card_effects;
 mod card_selection;
 #[path = "flows/list_states.rs"]
 mod list_states;
+#[path = "flows/sync_navigation.rs"]
+mod sync_navigation;
+
+fn load_vault_context(state: &mut vault::State, session: &Session) {
+    state.update(
+        vault::Message::VaultsLoaded {
+            request: state.context_request_id(),
+            result: Ok(local::vault_context(&session.facade()).unwrap()),
+        },
+        session,
+    );
+}
+fn sync_outcome(changed: bool) -> zann_client::app::local::LocalSyncOutcome {
+    zann_client::app::local::LocalSyncOutcome {
+        status: "complete".into(),
+        vaults_reconciled: 0,
+        pages_committed: 0,
+        changes_committed: u32::from(changed),
+    }
+}
 
 static DB_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
@@ -300,8 +320,12 @@ fn vault_context_exposes_the_active_personal_vault() {
     );
     assert_eq!(context.vaults[0].item_count, 2);
 
-    let page =
-        local::switch_vault(&facade, context.vaults[0].id.clone()).expect("switch current vault");
+    let change = local::switch_context(
+        &facade,
+        local::ContextTarget::Vault(context.vaults[0].id.clone()),
+    );
+    let (_, page) = change.result.expect("switch current vault");
+    let page = page.expect("read selected vault");
     assert_eq!(page.total, 2);
 }
 
@@ -375,6 +399,7 @@ fn infinite_scroll_prefetches_and_caps_the_summary_cache() {
     };
 
     let mut state = vault::State::new(make_page(0), None);
+    load_vault_context(&mut state, &session);
     let prefetch = state.update(
         vault::Message::ListScrolled {
             remaining: 100.0,
@@ -460,6 +485,7 @@ fn vault_filters_the_list_and_forwards_copies() {
     let (_dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
 
     assert_eq!(state.visible().len(), 2);
 
@@ -501,28 +527,34 @@ fn the_nav_header_offers_a_vault_picker_only_for_multiple_vaults() {
     let (_dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
     assert!(!state.offers_vault_picker());
 
     state.update(
-        vault::Message::VaultsLoaded(Ok(local::VaultContext {
-            current_vault_id: Some("personal".to_string()),
-            vaults: vec![
-                VaultSummary {
-                    id: "personal".to_string(),
-                    name: "Personal".to_string(),
-                    kind: zann_core::VaultKind::Personal,
-                    is_default: false,
-                    item_count: 399,
-                },
-                VaultSummary {
-                    id: "shared".to_string(),
-                    name: "infra".to_string(),
-                    kind: zann_core::VaultKind::Shared,
-                    is_default: false,
-                    item_count: 15,
-                },
-            ],
-        })),
+        vault::Message::VaultsLoaded {
+            request: state.context_request_id(),
+            result: Ok(local::VaultContext {
+                storages: local::storages(&session.facade()).unwrap(),
+                current_storage_id: session.facade().current_storage_id(),
+                current_vault_id: Some("personal".to_string()),
+                vaults: vec![
+                    VaultSummary {
+                        id: "personal".to_string(),
+                        name: "Personal".to_string(),
+                        kind: zann_core::VaultKind::Personal,
+                        is_default: false,
+                        item_count: 399,
+                    },
+                    VaultSummary {
+                        id: "shared".to_string(),
+                        name: "infra".to_string(),
+                        kind: zann_core::VaultKind::Shared,
+                        is_default: false,
+                        item_count: 15,
+                    },
+                ],
+            }),
+        },
         &session,
     );
 
@@ -534,6 +566,7 @@ fn the_splitter_stays_within_native_panel_limits() {
     let (_dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).expect("items");
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
     state.set_content_width(1200.0);
     assert_eq!(state.list_width(), 400.0);
 
@@ -583,6 +616,7 @@ fn closed_history_requests_cannot_populate_a_new_history_view() {
     let page = local::items(&session.facade(), None, None).unwrap();
     let first = local::item_get(&session.facade(), page.items[0].id.clone()).unwrap();
     let mut vault = vault::State::new(page, None);
+    load_vault_context(&mut vault, &session);
     vault.update(vault::Message::Select(first.id.clone()), &session);
     vault.update(
         vault::Message::Loaded {
@@ -627,9 +661,11 @@ fn saved_item_from_a_destroyed_screen_cannot_replace_the_new_screen_detail() {
         Detail::parse(local::item_get(&session.facade(), page.items[0].id.clone()).unwrap())
             .unwrap();
     let mut old = vault::State::new(page.clone(), None);
+    load_vault_context(&mut old, &session);
     old.update(vault::Message::OpenCreate, &session);
     let old_request = old.editing_request_id();
     let mut current = vault::State::new(page, None);
+    load_vault_context(&mut current, &session);
     current.update(vault::Message::OpenCreate, &session);
     let current_request = current.editing_request_id();
     assert_ne!(old_request, current_request);
@@ -655,6 +691,7 @@ fn a_save_schedules_a_push_and_a_lock_drops_it() {
     // Opening ran a sync, so the next one waits the full interval.
     session.auto_sync().unlocked(Instant::now(), true);
     let mut vault = vault::State::new(page, None);
+    load_vault_context(&mut vault, &session);
     vault.update(vault::Message::OpenCreate, &session);
     let request = vault.editing_request_id();
     let before = Instant::now();
@@ -687,12 +724,13 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
 
     session.auto_sync().unlocked(now, false);
     let mut vault = vault::State::new(page, None);
+    load_vault_context(&mut vault, &session);
     let ignored = vault.update(
         vault::Message::AutoSynced {
             ticket: stale,
             storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
             list_generation: 0,
-            result: Ok(Some(empty.clone())),
+            result: Ok(sync_outcome(true)),
         },
         &session,
     );
@@ -706,7 +744,15 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
             ticket: current,
             storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
             list_generation: 0,
-            result: Ok(Some(empty)),
+            result: Ok(sync_outcome(true)),
+        },
+        &session,
+    );
+    vault.update(
+        vault::Message::SyncedWorkspaceLoaded {
+            storage_id: local::current_storage_id(&session.facade()).unwrap(),
+            list_generation: 0,
+            result: Ok((local::vault_context(&session.facade()).unwrap(), empty)),
         },
         &session,
     );
@@ -720,16 +766,11 @@ fn a_sync_started_under_an_older_search_keeps_the_newer_list() {
 
     let (_dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).unwrap();
-    let empty = local::ItemsPage {
-        items: Vec::new(),
-        next_cursor: None,
-        total: 0,
-        counts: ItemCounts::default(),
-    };
     let now = Instant::now();
     session.auto_sync().unlocked(now, false);
     let ticket = session.auto_sync().take_due(now).expect("due on unlock");
     let mut vault = vault::State::new(page, None);
+    load_vault_context(&mut vault, &session);
     vault.update(vault::Message::QueryInput("mail".to_string()), &session);
 
     vault.update(
@@ -737,7 +778,7 @@ fn a_sync_started_under_an_older_search_keeps_the_newer_list() {
             ticket,
             storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
             list_generation: 0,
-            result: Ok(Some(empty)),
+            result: Ok(sync_outcome(true)),
         },
         &session,
     );
@@ -756,15 +797,15 @@ fn settings_for(dir: &tempfile::TempDir) -> settings::State {
 fn a_changed_server_identity_offers_to_forget_it_after_counting_local_changes() {
     let (dir, session) = vault_with_items();
     let mut state = settings_for(&dir);
-    const STORAGE: &str = "remote-storage";
+    let storage = local::current_storage_id(&session.facade()).unwrap();
 
     assert!(matches!(
-        state.update(settings::Message::SyncNow(STORAGE.to_string()), &session),
-        settings::Outcome::Sync(storage) if storage == STORAGE
+        state.update(settings::Message::SyncNow(storage.to_string()), &session),
+        settings::Outcome::Sync(id) if id == storage
     ));
     let refused = state.update(
         settings::Message::Synced(
-            STORAGE.to_string(),
+            storage.to_string(),
             Err(local::SyncFailure::IdentityChanged),
         ),
         &session,
@@ -775,7 +816,7 @@ fn a_changed_server_identity_offers_to_forget_it_after_counting_local_changes() 
     );
     assert_eq!(state.error(), None, "the account row carries the error");
     let stale = state.stale_server().expect("stale server");
-    assert_eq!(stale.storage_id, STORAGE);
+    assert_eq!(stale.storage_id, storage);
     assert_eq!(stale.pending_changes, None);
 
     // Nothing is forgotten before the user can see what stays behind.
@@ -790,7 +831,7 @@ fn a_changed_server_identity_offers_to_forget_it_after_counting_local_changes() 
         None
     );
     state.update(
-        settings::Message::PendingCounted(STORAGE.to_string(), Ok(2)),
+        settings::Message::PendingCounted(storage.to_string(), Ok(2)),
         &session,
     );
     assert_eq!(
@@ -877,10 +918,11 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
 
     let (dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).unwrap();
-    const STORAGE: &str = "remote-storage";
+    let storage = local::current_storage_id(&session.facade()).unwrap();
     let now = Instant::now();
     session.auto_sync().unlocked(now, false);
     let mut vault = vault::State::new(page, None);
+    load_vault_context(&mut vault, &session);
 
     // Nothing to review before a refusal.
     assert!(matches!(
@@ -892,7 +934,7 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
     vault.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: STORAGE.to_string(),
+            storage_id: storage.to_string(),
             list_generation: 0,
             result: Err(local::SyncFailure::IdentityChanged),
         },
@@ -903,7 +945,7 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
     else {
         panic!("the refusal leads to the recovery");
     };
-    assert_eq!(storage_id, STORAGE);
+    assert_eq!(storage_id, storage);
     assert_eq!(failure, local::SyncFailure::IdentityChanged);
 
     // Settings takes it as the refusal its own sync would have met.
@@ -917,19 +959,19 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
     ));
     assert_eq!(
         state.stale_server().expect("stale server").storage_id,
-        STORAGE
+        storage
     );
 
     // A plain failure or a sync that goes through withdraws the offer.
     for result in [
         Err(local::SyncFailure::Other("offline".to_string())),
-        Ok(None),
+        Ok(sync_outcome(false)),
     ] {
         let ticket = session.auto_sync().take_now().expect("idle schedule");
         vault.update(
             vault::Message::AutoSynced {
                 ticket,
-                storage_id: STORAGE.to_string(),
+                storage_id: storage.to_string(),
                 list_generation: 0,
                 result,
             },
@@ -943,7 +985,7 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
 }
 
 #[test]
-fn the_sync_indicator_shows_the_most_urgent_state_and_acts_on_it() {
+fn the_sync_indicator_opens_details_and_only_the_explicit_action_starts_sync() {
     use std::time::Instant;
     use zann_client::app::local::{StorageLink, StorageSyncState};
     use zann_ui_core::SyncIndicator;
@@ -953,6 +995,7 @@ fn the_sync_indicator_shows_the_most_urgent_state_and_acts_on_it() {
     let now = Instant::now();
     session.auto_sync().unlocked(now, true);
     let mut vault = vault::State::new(page, None);
+    load_vault_context(&mut vault, &session);
     assert!(
         vault.sync_indicator_state().is_none(),
         "nothing shows before the state is read"
@@ -965,7 +1008,13 @@ fn the_sync_indicator_shows_the_most_urgent_state_and_acts_on_it() {
         last_synced_at: Some("2026-11-13T07:15:34+00:00".to_string()),
     };
     vault.update(
-        vault::Message::SyncStateLoaded(Ok(state(StorageLink::Connected, 3))),
+        vault::Message::SyncStateLoaded {
+            storage_id: local::current_storage_id(&session.facade()).unwrap(),
+            request: vault
+                .sync_state_request_id(&local::current_storage_id(&session.facade()).unwrap())
+                .unwrap(),
+            result: Ok(state(StorageLink::Connected, 3)),
+        },
         &session,
     );
     assert!(matches!(
@@ -977,23 +1026,38 @@ fn the_sync_indicator_shows_the_most_urgent_state_and_acts_on_it() {
     ));
     assert!(vault.sync_indicator().is_some());
 
-    // Pressing it syncs now, and the indicator shows the sync running.
-    assert!(matches!(
-        vault.update(vault::Message::SyncIndicatorPressed, &session),
-        vault::Outcome::Task(_)
-    ));
+    // Opening details does not take the scheduler's sync slot.
+    vault.update(vault::Message::SyncIndicatorPressed, &session);
+    assert!(vault.sync_details_open());
+    assert!(!vault.syncing());
+    // Only the explicit action starts the network operation.
+    let started = vault.update(vault::Message::SyncNow, &session);
+    assert!(matches!(started, vault::Outcome::Task(_)));
     assert!(matches!(
         vault.sync_indicator_state(),
         Some(SyncIndicator::Syncing { .. })
     ));
 
+    assert!(matches!(
+        vault.update(vault::Message::SyncNow, &session),
+        vault::Outcome::None
+    ));
+    let completed =
+        sync_navigation::completion(started, |m| matches!(m, vault::Message::AutoSynced { .. }));
+    vault.update(completed, &session);
+
     // A storage whose connection is gone leads to connecting it again.
     vault.update(
-        vault::Message::SyncStateLoaded(Ok(state(StorageLink::Disconnected, 3))),
+        vault::Message::SyncStateLoaded {
+            storage_id: local::current_storage_id(&session.facade()).unwrap(),
+            request: vault
+                .sync_state_request_id(&local::current_storage_id(&session.facade()).unwrap())
+                .unwrap(),
+            result: Ok(state(StorageLink::Disconnected, 3)),
+        },
         &session,
     );
-    let vault::Outcome::StaleServer(_, failure) =
-        vault.update(vault::Message::SyncIndicatorPressed, &session)
+    let vault::Outcome::StaleServer(_, failure) = vault.update(vault::Message::SyncNow, &session)
     else {
         panic!("the indicator leads to the reconnect");
     };
@@ -1015,8 +1079,9 @@ fn the_sync_error_on_screen_can_be_copied() {
     let now = Instant::now();
     session.auto_sync().unlocked(now, false);
     let mut vault = vault::State::new(page, None);
+    load_vault_context(&mut vault, &session);
     assert!(matches!(
-        vault.update(vault::Message::CopyError, &session),
+        vault.update(vault::Message::CopySyncError, &session),
         vault::Outcome::None
     ));
 
@@ -1024,13 +1089,13 @@ fn the_sync_error_on_screen_can_be_copied() {
     vault.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: "remote-storage".to_string(),
+            storage_id: local::current_storage_id(&session.facade()).unwrap(),
             list_generation: 0,
             result: Err(local::SyncFailure::Other("sync db_error".to_string())),
         },
         &session,
     );
-    let vault::Outcome::Copy { value, .. } = vault.update(vault::Message::CopyError, &session)
+    let vault::Outcome::Copy { value, .. } = vault.update(vault::Message::CopySyncError, &session)
     else {
         panic!("the error goes to the clipboard");
     };
@@ -1043,7 +1108,7 @@ fn a_storage_without_its_connection_leads_to_connecting_its_server_again() {
 
     let (dir, session) = vault_with_items();
     let page = local::items(&session.facade(), None, None).unwrap();
-    const STORAGE: &str = "remote-storage";
+    let storage = local::current_storage_id(&session.facade()).unwrap();
     let gone = local::SyncFailure::Disconnected {
         server_url: Some("https://zann.example.test".to_string()),
         pending_changes: 399,
@@ -1056,11 +1121,12 @@ fn a_storage_without_its_connection_leads_to_connecting_its_server_again() {
     let now = Instant::now();
     session.auto_sync().unlocked(now, false);
     let mut vault = vault::State::new(page, None);
+    load_vault_context(&mut vault, &session);
     let ticket = session.auto_sync().take_due(now).expect("due on unlock");
     vault.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: STORAGE.to_string(),
+            storage_id: storage.to_string(),
             list_generation: 0,
             result: Err(gone.clone()),
         },
@@ -1086,7 +1152,7 @@ fn a_storage_without_its_connection_leads_to_connecting_its_server_again() {
     assert_eq!(
         state.disconnected(),
         Some(&settings::Disconnected {
-            storage_id: STORAGE.to_string(),
+            storage_id: storage.to_string(),
             server_url: Some("https://zann.example.test".to_string()),
             pending_changes: 399,
         })
@@ -1104,11 +1170,11 @@ fn a_storage_without_its_connection_leads_to_connecting_its_server_again() {
 
     // A later sync of that storage replaces the row's state.
     state.update(
-        settings::Message::Synced(STORAGE.to_string(), Err(gone)),
+        settings::Message::Synced(storage.to_string(), Err(gone)),
         &session,
     );
     state.update(
-        settings::Message::Synced(STORAGE.to_string(), Ok(())),
+        settings::Message::Synced(storage.to_string(), Ok(())),
         &session,
     );
     assert!(state.disconnected().is_none());
@@ -1134,7 +1200,7 @@ fn backend_classifies_the_identity_change_and_forgets_idempotently() {
     let storage = local::current_storage_id(&facade).expect("selected storage");
     // A disconnected cache reports why pending changes cannot be sent.
     assert!(matches!(
-        local::sync_and_reload(&facade, storage.clone(), None),
+        local::sync(&facade, Some(storage.clone())),
         Err(local::SyncFailure::Disconnected { .. })
     ));
     assert_eq!(

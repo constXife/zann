@@ -9,6 +9,10 @@ impl State {
             Message::ClearQuery => return self.schedule_search(String::new()),
 
             Message::EscapeClearQuery => {
+                if self.sync.showing_details {
+                    self.sync.showing_details = false;
+                    return Outcome::None;
+                }
                 let search = self.schedule_search(String::new());
                 let focus = widget::text_input::focus(self.search_id.clone());
                 return match search {
@@ -94,7 +98,7 @@ impl State {
     }
 
     fn schedule_search(&mut self, value: String) -> Outcome {
-        if self.switching_vault
+        if self.switching_context
             || self.editor.is_some()
             || self.history.is_some()
             || value == self.query

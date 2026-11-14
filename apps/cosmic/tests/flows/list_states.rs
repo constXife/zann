@@ -15,7 +15,7 @@ fn activate(state: &mut vault::State, category: &str) {
     state.activate_nav(id);
 }
 
-fn empty_page() -> local::ItemsPage {
+pub(super) fn empty_page() -> local::ItemsPage {
     local::ItemsPage {
         items: vec![],
         next_cursor: None,
@@ -28,6 +28,7 @@ fn empty_page() -> local::ItemsPage {
 fn empty_search_waits_for_completion_and_offers_clear_instead_of_creation() {
     let (_dir, session) = vault_with_items();
     let mut state = vault::State::new(empty_page(), None);
+    load_vault_context(&mut state, &session);
     state.update(vault::Message::QueryInput("missing".into()), &session);
     assert_eq!(state.empty_state(), Some(ListEmptyState::Loading));
     state.update(
@@ -70,8 +71,12 @@ fn empty_search_waits_for_completion_and_offers_clear_instead_of_creation() {
 fn categories_use_shared_creation_actions_and_trash_has_none() {
     let (_dir, session) = vault_with_items();
     let mut state = vault::State::new(empty_page(), None);
+    load_vault_context(&mut state, &session);
     state.update(
-        vault::Message::VaultsLoaded(Ok(local::vault_context(&session.facade()).unwrap())),
+        vault::Message::VaultsLoaded {
+            request: state.context_request_id(),
+            result: Ok(local::vault_context(&session.facade()).unwrap()),
+        },
         &session,
     );
     for category in ["all", "note", "trash"] {
@@ -111,8 +116,12 @@ fn category_changes_discard_pending_card_reads() {
         .id
         .clone();
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
     state.update(
-        vault::Message::VaultsLoaded(Ok(local::vault_context(&session.facade()).unwrap())),
+        vault::Message::VaultsLoaded {
+            request: state.context_request_id(),
+            result: Ok(local::vault_context(&session.facade()).unwrap()),
+        },
         &session,
     );
     let _pending = state.update(vault::Message::Select(id.clone()), &session);
@@ -136,6 +145,7 @@ fn search_supersedes_pagination_without_waiting_for_the_old_page() {
     let mut page = local::items(&session.facade(), None, None).unwrap();
     page.next_cursor = Some("next".into());
     let mut state = vault::State::new(page.clone(), None);
+    load_vault_context(&mut state, &session);
     let _pagination = state.update(vault::Message::LoadMore, &session);
     assert!(matches!(
         state.update(vault::Message::QueryInput("missing".into()), &session),
@@ -165,6 +175,7 @@ fn search_supersedes_pagination_without_waiting_for_the_old_page() {
 fn failed_reads_and_pending_category_pages_are_not_empty_categories() {
     let (_dir, session) = vault_with_items();
     let mut state = vault::State::new(empty_page(), Some("offline".into()));
+    load_vault_context(&mut state, &session);
     assert_eq!(state.empty_state(), Some(ListEmptyState::EmptyCategory));
     let mut page = empty_page();
     page.next_cursor = Some("next".into());
@@ -187,6 +198,7 @@ fn background_sync_failure_preserves_empty_state_actions_and_list_errors_keep_th
     use std::time::Instant;
     let (_dir, session) = vault_with_items();
     let mut state = vault::State::new(empty_page(), None);
+    load_vault_context(&mut state, &session);
     state.update(vault::Message::QueryInput("missing".into()), &session);
     state.update(
         vault::Message::SearchLoaded {
@@ -202,7 +214,7 @@ fn background_sync_failure_preserves_empty_state_actions_and_list_errors_keep_th
     state.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: "remote-storage".into(),
+            storage_id: local::current_storage_id(&session.facade()).unwrap(),
             list_generation: 1,
             result: Err(local::SyncFailure::Other("offline".into())),
         },
@@ -220,8 +232,10 @@ fn background_sync_failure_preserves_empty_state_actions_and_list_errors_keep_th
         &session,
     );
     assert_eq!(state.empty_state(), Some(ListEmptyState::EmptyCategory));
-    assert!(matches!(state.update(vault::Message::CopyError, &session),
-        vault::Outcome::Copy { value, .. } if value.contains("offline")));
+    assert!(
+        matches!(state.update(vault::Message::CopySyncError, &session),
+        vault::Outcome::Copy { value, .. } if value.contains("offline"))
+    );
     state.update(vault::Message::QueryInput("retry".into()), &session);
     state.update(
         vault::Message::SearchLoaded {

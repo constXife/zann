@@ -40,6 +40,7 @@ fn replacement_cancels_the_real_core_read_and_current_read_projects_typed_fields
         .id
         .clone();
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
     let old = state.update(vault::Message::Select(old_id), &session);
     let current = state.update(vault::Message::Select(current_id.clone()), &session);
     let cancelled = read_completion(old);
@@ -83,6 +84,7 @@ fn dropping_the_screen_cancels_a_worker_already_captured_by_its_task() {
     let page = local::items(&session.facade(), None, None).unwrap();
     let id = page.items[0].id.clone();
     let mut state = vault::State::new(page, None);
+    load_vault_context(&mut state, &session);
     let pending = state.update(vault::Message::Select(id), &session);
     drop(state);
     assert!(
