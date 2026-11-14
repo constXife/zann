@@ -39,6 +39,15 @@ pub struct State {
 }
 
 #[derive(Clone)]
+pub enum OpenResult {
+    AccountKeyRequired,
+    Vault {
+        page: ItemsPage,
+        synced: Option<Result<(), String>>,
+    },
+}
+
+#[derive(Clone)]
 pub enum Message {
     /// What this device remembers, answered by the shell on the way in.
     Remembered(RememberedUnlock),
@@ -51,7 +60,7 @@ pub enum Message {
     Submit,
     /// The vault contents, plus the outcome of the sync that ran on the way
     /// in, if one did; a failed one did not stop the vault opening.
-    Opened(Result<Option<(ItemsPage, Option<Result<(), String>>)>, String>),
+    Opened(Result<OpenResult, String>),
 }
 
 impl std::fmt::Debug for Message {
@@ -157,27 +166,28 @@ impl State {
                                     .activate_connected_account()
                                     .map_err(|e| e.to_string())?
                             {
-                                return Ok(None);
+                                return Ok(OpenResult::AccountKeyRequired);
                             }
                             // A vault that came from a server starts empty, so
                             // pull it first. A failed sync is worth reporting
                             // but must not keep the vault shut.
                             let synced =
                                 storage.map(|storage| local::sync_new_server(&facade, storage));
-                            local::items(&facade, None, None).map(|page| Some((page, synced)))
+                            local::items(&facade, None, None)
+                                .map(|page| OpenResult::Vault { page, synced })
                         })
                         .await,
                     )
                 }));
             }
 
-            Message::Opened(Ok(Some((page, synced)))) => {
+            Message::Opened(Ok(OpenResult::Vault { page, synced })) => {
                 self.busy = false;
                 self.sync_after = None;
                 return Outcome::Opened { page, synced };
             }
 
-            Message::Opened(Ok(None)) => {
+            Message::Opened(Ok(OpenResult::AccountKeyRequired)) => {
                 self.busy = false;
                 if let Some(mode) = self.account_mode {
                     self.mode = mode;
@@ -212,10 +222,10 @@ impl State {
                             .activate_connected_account()
                             .map_err(|e| e.to_string())?
                     {
-                        return Ok(None);
+                        return Ok(OpenResult::AccountKeyRequired);
                     }
                     let synced = storage.map(|storage| local::sync_new_server(&facade, storage));
-                    local::items(&facade, None, None).map(|page| Some((page, synced)))
+                    local::items(&facade, None, None).map(|page| OpenResult::Vault { page, synced })
                 })
                 .await,
             )

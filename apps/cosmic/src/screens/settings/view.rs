@@ -527,7 +527,7 @@ impl State {
                 );
             }
             column = column.push(widget::text::caption(format!(
-                "With Zann closed everywhere, a snapshot and its .identity.json can also be copied over {}",
+                "With Zann closed everywhere, a self-contained SQLite snapshot can also be copied over {}",
                 self.restore_target
             )));
         }

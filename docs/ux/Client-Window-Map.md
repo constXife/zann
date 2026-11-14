@@ -26,7 +26,7 @@ Entry:
 - Auto-lock (timeout or OS session lock).
 
 Primary actions:
-- Unlock with master password.
+- Unlock all enrolled accounts with the device-local Zann password.
 - Show failed attempt error.
 - Access "forgot password" guidance (no recovery of encrypted data).
 
@@ -46,9 +46,9 @@ Primary actions:
 - Sign in or register using the methods that server offers.
 
 Exit:
-- After authentication -> Master Password -> First Sync -> Vault Home.
+- After authentication -> create/unlock Zann -> one-time account key enrollment -> Vault Home with background first sync.
 
-### 3) Account Registration and Master Password
+### 3) Account Registration and Key Enrollment
 
 Purpose:
 - Create an account on the selected server, then unlock its local replica.
@@ -58,8 +58,10 @@ Entry:
 
 Primary actions:
 - Register with the server if needed.
-- Set or enter the master password using the account KDF identity.
-- Complete the first sync; no local-only vault is created.
+- Create or enter the device-local Zann unlock password.
+- For an account not enrolled on this device, enter its existing encryption password or create one for a new account; the shared core derives and verifies its independent account key.
+- Already-enrolled accounts require no additional password after Zann unlock.
+- Open cached content while the first sync runs; no local-only vault is created.
 
 Exit:
 - Success -> First Sync -> Onboarding.

@@ -42,10 +42,10 @@
 
 ## Core Journeys (End-to-End)
 
-- First run -> create vault -> enable biometric/PIN -> import -> first item -> first autofill.
+- First run -> server sign-in -> create Zann unlock password -> enroll account encryption key -> enable biometric/PIN -> import -> first item -> first autofill.
 - Daily use: search -> copy -> autofill -> generate password -> save/update.
-- Recovery: forgot master password (if impossible, explain); recovery key/contacts (if available); change master password.
-- Device change: sign in on new device, trusted/untrusted device flow.
+- Recovery: explain unavailable password recovery; recovery key/contacts if implemented; change the Zann unlock password in Settings with current-password verification.
+- Device change: sign in on the new device, set its Zann unlock password, then enter the account encryption password once.
 - Incident: suspected compromise, password changes, audit.
 
 ## Security UX Contracts (Core)
@@ -78,7 +78,7 @@
 
 ## Content and Terminology
 
-- Glossary: vault, master password, recovery key, device, session, autofill, extension.
+- Glossary: vault, Zann unlock password (device-local), account encryption password (one-time enrollment per device), recovery key, device, session, autofill, extension.
 - Tone: calm, no FUD; clarity over fear.
 
 ## Accessibility Baseline

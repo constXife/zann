@@ -107,6 +107,7 @@ impl LocalVault {
     }
 
     fn account_key(&self) -> LocalResult<Arc<SecretKey>> {
+        let _root = self.root_key()?;
         self.account_key_for_storage(self.storage_id()?)
     }
 
