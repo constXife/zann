@@ -52,7 +52,7 @@ Dependencies point strictly downward (`[SHELL]` → `[PRESENTATION]` → `[CORE]
 
 ### 2. `[PRESENTATION]` — Toolkit-Neutral View Models & Flows
 - `crates/zann-ui-core`: categories, item counts, client-side filtering, folder trees, field ordering/masking, TOTP generation, server URL normalization, and device preference schemas.
-- `zann-flows` (planned): headless state machines (`handle(State, Event) -> (State, Vec<Effect>)`) with operation IDs and cancellation.
+- `zann-flows`: shared Connect is active for COSMIC and Apple/FFI; remaining slices are planned. Headless state machines (`handle(State, Event) -> (State, Vec<Effect>)`) with operation IDs and cancellation.
 
 ### 3. `[SHELL]` — Native Interfaces & Edge Adapters
 - `apps/apple`: SwiftUI macOS client (`project.yml` for XcodeGen; iOS/iPadOS planned) over the `ZannCoreKit` package around `zann-ffi`. Owns views and Apple OS adapters (Keychain ports) only.

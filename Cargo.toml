@@ -6,6 +6,7 @@ members = [
   "crates/zann-core",
   "crates/zann-db",
   "crates/zann-ffi",
+  "crates/zann-flows",
   "crates/zann-keystore",
   "crates/zann-server",
   "crates/zann-cli",

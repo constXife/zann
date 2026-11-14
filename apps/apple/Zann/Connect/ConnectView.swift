@@ -85,9 +85,13 @@ struct ConnectView: View {
                 .buttonStyle(.link)
                 .disabled(connect.busy)
             }
+        case .complete, .closed:
+            EmptyView()
         case .browser:
             Text(app.strings("wizard.oidcHint"))
             Button(app.strings("wizard.oidcReopen")) { connect.reopenBrowser() }
+                .buttonStyle(.link)
+            Button(app.strings("auth.copyLink")) { connect.copyBrowserLink() }
                 .buttonStyle(.link)
         }
     }
@@ -106,8 +110,8 @@ struct ConnectView: View {
         case .password(let register):
             Button(app.strings(register ? "auth.signUp" : "auth.signIn"), action: submitPassword)
                 .keyboardShortcut(.defaultAction)
-                .disabled(connect.busy || connect.email.isEmpty || password.isEmpty)
-        case .methods, .browser:
+                .disabled(!connect.canSubmitPassword(password))
+        case .methods, .browser, .complete, .closed:
             EmptyView()
         }
     }
@@ -124,10 +128,9 @@ struct ConnectView: View {
     }
 
     private func submitPassword() {
-        let password = password
-        Task {
-            await connect.submitPassword(password)
-            self.password = ""
-        }
+        guard connect.canSubmitPassword(password) else { return }
+        let submitted = password
+        password = ""
+        Task { await connect.submitPassword(submitted) }
     }
 }

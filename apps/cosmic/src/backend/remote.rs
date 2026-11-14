@@ -1,77 +1,37 @@
-//! Logging in against a Zann server through the canonical application client.
-
-use std::sync::mpsc::Receiver;
+//! Executes shared Connect effects against canonical application capabilities.
+use super::active_database_location;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
 use tokio::runtime::Runtime;
 use zann_client::app::{
-    AppClient, ClientId, ConnectionTrustChallenge, LoginPassword, PasswordLoginRequest,
-    PasswordRegistrationRequest, PrepareConnectionOutcome, PreparedConnection,
-    SessionCancellationHandle, SessionClient, SessionErrorKind, SessionOperation,
+    AppClient, ClientId, ConnectionTrustChallenge, LoginPassword, PasswordLoginInputError,
+    PasswordLoginRequest, PasswordRegistrationRequest, PrepareConnectionOutcome,
+    PreparedConnection, SessionCancellationHandle, SessionClient, SessionError, SessionErrorKind,
+    SessionOperation,
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
-use zann_client::oidc::OidcBrowserErrorKind;
+use zann_client::oidc::{OidcBrowserErrorKind, OidcBrowserLogin};
 use zann_client_sqlite::local_vault::initialize_database;
 use zann_client_sqlite::SqliteSyncStoreFactory;
-use zann_core::AuthMethod;
-
-use super::active_database_location;
-use crate::i18n::t;
-
-const PROFILE: &str = "default";
-const CONNECTION_NAME: &str = "Remote";
-const LOGIN_DEADLINE: Duration = Duration::from_secs(10 * 60);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
-    Oidc,
-    Password,
-}
-
-#[derive(Debug, Clone)]
-pub struct ServerProbe {
-    pub methods: Vec<Method>,
-    pub register: bool,
-    pub server_name: Option<String>,
-    pub fingerprint_changed: Option<(String, String)>,
-}
-
-#[derive(Debug, Clone)]
-pub enum LoginOutcome {
-    Success {
-        storage_id: String,
-        has_personal_keys: bool,
-    },
-    FingerprintChanged {
-        login_id: String,
-        old: String,
-        new: String,
-    },
-    Pending,
-}
-
-#[derive(Debug, Clone)]
-pub enum OidcStatus {
-    Pending,
-    Success {
-        storage_id: String,
-        has_personal_keys: bool,
-    },
-    FingerprintChanged {
-        login_id: String,
-        old: String,
-        new: String,
-    },
-    Failed(String),
-}
+use zann_flows::connect::{
+    Completion, Connected, Effect, Failure, OperationId, Probe, ServerInfo, Step,
+};
+mod plan;
+pub use plan::{Plan, Reply};
 
 pub struct Remote {
     runtime: Runtime,
     client: Arc<AppClient>,
-    prepared: Mutex<Option<PreparedConnection>>,
-    trust: Mutex<Option<ConnectionTrustChallenge>>,
-    login: Mutex<LoginState>,
+    state: Mutex<ExecutionState>,
+}
+
+#[derive(Default)]
+struct ExecutionState {
+    closed: bool,
+    prepared: Option<PreparedConnection>,
+    challenge: Option<ConnectionTrustChallenge>,
+    browser: Option<OidcBrowserLogin>,
+    active: Option<(OperationId, SessionCancellationHandle)>,
 }
 
 impl Remote {
@@ -107,221 +67,95 @@ impl Remote {
         Ok(Self {
             runtime,
             client,
-            prepared: Mutex::new(None),
-            trust: Mutex::new(None),
-            login: Mutex::new(LoginState::default()),
+            state: Mutex::new(ExecutionState::default()),
         })
     }
 
-    pub fn probe(&self, server_url: String) -> Result<ServerProbe, String> {
-        let outcome = self
-            .runtime
-            .block_on(
-                self.client
-                    .prepare_connection(&server_url, CONNECTION_NAME, PROFILE),
-            )
-            .map_err(|error| match error.kind() {
-                SessionErrorKind::ServerIdentityChanged => t("errors.server_identity_changed"),
-                _ => error.to_string(),
-            })?;
-        let (prepared, fingerprint_changed) = match outcome {
-            PrepareConnectionOutcome::Ready(prepared) => {
-                *self.prepared.lock().expect("lock poisoned") = Some(prepared.clone());
-                *self.trust.lock().expect("lock poisoned") = None;
-                (prepared, None)
-            }
-            PrepareConnectionOutcome::FingerprintChanged(challenge) => {
-                let prepared = challenge.prepared().clone();
-                let changed = Some((
-                    challenge.old_fingerprint().to_string(),
-                    challenge.new_fingerprint().to_string(),
-                ));
-                *self.prepared.lock().expect("lock poisoned") = None;
-                *self.trust.lock().expect("lock poisoned") = Some(*challenge);
-                (prepared, changed)
-            }
-        };
-        let methods = prepared
-            .auth_methods()
-            .iter()
-            .filter_map(|method| match method {
-                AuthMethod::Oidc => Some(Method::Oidc),
-                AuthMethod::Password => Some(Method::Password),
-                _ => None,
-            })
-            .collect::<Vec<_>>();
-        if methods.is_empty() {
-            return Err("server offers no interactive auth methods".to_string());
+    /// Called on the UI composition thread before a task can be scheduled.
+    pub fn plan(self: &Arc<Self>, effect: Effect) -> Result<Plan, String> {
+        Plan::new(Arc::clone(self), effect)
+    }
+
+    /// The screen validates the shared operation ID before installing handles.
+    pub fn accept(&self, reply: Reply) -> Option<Completion> {
+        let result = reply.result.lock().expect("reply lock poisoned").take()?;
+        let mut state = self.state.lock().expect("Connect executor lock poisoned");
+        if state.closed {
+            return None;
         }
-        Ok(ServerProbe {
-            methods,
-            register: prepared.registration_available(),
-            server_name: prepared.server_name().map(str::to_string),
-            fingerprint_changed,
-        })
-    }
-
-    pub fn password_login(
-        &self,
-        _server_url: String,
-        email: String,
-        password: String,
-        full_name: Option<String>,
-        register: bool,
-    ) -> Result<LoginOutcome, String> {
-        let prepared = self
-            .prepared
-            .lock()
-            .expect("lock poisoned")
-            .clone()
-            .ok_or_else(|| "server connection has not been prepared".to_string())?;
-        let password = LoginPassword::new(password).map_err(|error| error.to_string())?;
-        let operation = self.login.lock().expect("lock poisoned").start()?;
-        let access = if register {
-            let request = PasswordRegistrationRequest::new(
-                prepared.target().clone(),
-                email,
-                password,
-                full_name,
-            )
-            .map_err(|error| error.to_string())?;
-            self.runtime
-                .block_on(self.client.password_register(request, operation))
-        } else {
-            let request = PasswordLoginRequest::new(prepared.target().clone(), email, password)
-                .map_err(|error| error.to_string())?;
-            self.runtime
-                .block_on(self.client.password_login(request, operation))
-        }
-        .map_err(|error| error.to_string())?;
-        let status = self
-            .runtime
-            .block_on(self.client.personal_vault_status(&access))
-            .map_err(|error| error.to_string())?;
-        Ok(LoginOutcome::Success {
-            storage_id: prepared.storage_id().to_string(),
-            has_personal_keys: status.personal_key_envelopes_present(),
-        })
-    }
-
-    pub fn oidc_begin(&self, _server_url: String) -> Result<String, String> {
-        let prepared = self
-            .prepared
-            .lock()
-            .expect("lock poisoned")
-            .clone()
-            .ok_or_else(|| "server connection has not been prepared".to_string())?;
-        let operation = self.login.lock().expect("lock poisoned").start()?;
-        let login = self
-            .runtime
-            .block_on(
-                self.client
-                    .begin_oidc_login(prepared.target().clone(), operation),
-            )
-            .map_err(|error| error.to_string())?;
-        let authorization_url = login.authorization_url().to_string();
-        let (tx, rx) = std::sync::mpsc::channel();
-        self.login
-            .lock()
-            .expect("lock poisoned")
-            .install_receiver(rx)?;
-        let client = Arc::clone(&self.client);
-        let storage_id = prepared.storage_id().to_string();
-        self.runtime.handle().spawn(async move {
-            let status = match login.finish(&client).await {
-                Ok(access) => match client.personal_vault_status(&access).await {
-                    Ok(status) => OidcStatus::Success {
-                        storage_id,
-                        has_personal_keys: status.personal_key_envelopes_present(),
-                    },
-                    Err(error) => OidcStatus::Failed(error.to_string()),
-                },
-                Err(error) => {
-                    let message = match error.kind() {
-                        OidcBrowserErrorKind::Cancelled => "OIDC login was cancelled".to_string(),
-                        _ => error.to_string(),
-                    };
-                    OidcStatus::Failed(message)
+        Some(match result {
+            Err(failure) => Completion::failed(reply.step, failure),
+            Ok(plan::ResultValue::Probed(outcome)) => match outcome {
+                PrepareConnectionOutcome::Ready(prepared) => {
+                    let info = server_info(&prepared);
+                    state.prepared = Some(prepared);
+                    Completion::Probed(Ok(Probe::Ready(info)))
                 }
-            };
-            let _ = tx.send(status);
-        });
-        Ok(authorization_url)
+                PrepareConnectionOutcome::FingerprintChanged(challenge) => {
+                    let probe = Probe::FingerprintChanged {
+                        old: challenge.old_fingerprint().to_string(),
+                        new: challenge.new_fingerprint().to_string(),
+                    };
+                    state.challenge = Some(*challenge);
+                    Completion::Probed(Ok(probe))
+                }
+            },
+            Ok(plan::ResultValue::Trusted(prepared)) => {
+                let info = server_info(&prepared);
+                state.prepared = Some(prepared);
+                Completion::Trusted(Ok(info))
+            }
+            Ok(plan::ResultValue::Browser(login)) => {
+                let url = login.authorization_url().to_string();
+                state.browser = Some(*login);
+                Completion::OidcStarted(Ok(url))
+            }
+            Ok(plan::ResultValue::Connected(connected)) => match reply.step {
+                Step::Password => Completion::Password(Ok(connected)),
+                Step::OidcFinish => Completion::OidcFinished(Ok(connected)),
+                _ => unreachable!("only authentication plans return Connected"),
+            },
+        })
     }
 
-    pub fn trust_fingerprint(&self, _login_id: String) -> Result<(), String> {
-        let challenge = self
-            .trust
-            .lock()
-            .expect("lock poisoned")
-            .take()
-            .ok_or_else(|| "fingerprint challenge is no longer current".to_string())?;
-        let prepared = self
-            .client
-            .trust_connection(challenge)
-            .map_err(|error| error.to_string())?;
-        *self.prepared.lock().expect("lock poisoned") = Some(prepared);
-        Ok(())
-    }
-
-    pub fn poll_oidc(&self) -> Vec<OidcStatus> {
-        let guard = self.login.lock().expect("lock poisoned");
-        let Some(rx) = guard.receiver.as_ref() else {
-            return Vec::new();
-        };
-        let mut out = Vec::new();
-        while let Ok(status) = rx.try_recv() {
-            out.push(status);
-        }
-        out
-    }
-
-    /// Closes this screen's backend permanently, including work not started yet.
-    pub fn cancel(&self) {
-        self.login.lock().expect("lock poisoned").cancel();
-    }
-}
-
-/// Registration and cancellation share one lock: cancelling before a worker
-/// starts, or while OIDC discovery is awaited, cannot miss a later handle.
-#[derive(Default)]
-struct LoginState {
-    cancelled: bool,
-    cancellation: Option<SessionCancellationHandle>,
-    receiver: Option<Receiver<OidcStatus>>,
-}
-
-impl LoginState {
-    fn start(&mut self) -> Result<SessionOperation, String> {
-        self.ensure_open()?;
-        if let Some(previous) = self.cancellation.take() {
-            previous.cancel();
-        }
-        let (operation, cancellation) = SessionOperation::new(Instant::now() + LOGIN_DEADLINE);
-        self.cancellation = Some(cancellation);
-        Ok(operation)
-    }
-
-    fn install_receiver(&mut self, receiver: Receiver<OidcStatus>) -> Result<(), String> {
-        self.ensure_open()?;
-        self.receiver = Some(receiver);
-        Ok(())
-    }
-
-    fn ensure_open(&self) -> Result<(), String> {
-        if self.cancelled {
-            Err("connection flow was cancelled".to_string())
-        } else {
-            Ok(())
+    pub fn cancel(&self, id: OperationId) {
+        let mut state = self.state.lock().expect("Connect executor lock poisoned");
+        if state
+            .active
+            .as_ref()
+            .is_some_and(|(current, _)| *current == id)
+        {
+            if let Some((_, cancellation)) = state.active.take() {
+                cancellation.cancel();
+            }
+            state.browser = None;
         }
     }
 
-    fn cancel(&mut self) {
-        self.cancelled = true;
-        if let Some(cancellation) = self.cancellation.take() {
+    pub fn reset(&self) {
+        let mut state = self.state.lock().expect("Connect executor lock poisoned");
+        state.prepared = None;
+        state.challenge = None;
+        state.browser = None;
+    }
+
+    pub fn close(&self) {
+        let mut state = self.state.lock().expect("Connect executor lock poisoned");
+        state.closed = true;
+        if let Some((_, cancellation)) = state.active.take() {
             cancellation.cancel();
         }
-        self.receiver = None;
+        state.prepared = None;
+        state.challenge = None;
+        state.browser = None;
+    }
+}
+
+fn server_info(prepared: &PreparedConnection) -> ServerInfo {
+    ServerInfo {
+        methods: prepared.auth_methods().to_vec(),
+        registration_available: prepared.registration_available(),
+        server_name: prepared.server_name().map(str::to_string),
     }
 }
 

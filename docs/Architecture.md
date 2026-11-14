@@ -44,10 +44,10 @@ CLI / COSMIC
   |       |---> zann-protocol (planned)
   |       `---> zann-keystore (os-credentials feature only)
   |---> zann-client-sqlite ---> zann-db
-  |---> zann-flows (planned) ---> pure domain/application types
+  |---> zann-flows (Connect active) ---> zann-ui-core / pure domain types
   `---> zann-ui-core -----------> zann-core
 
-non-Rust consumer ---> zann-ffi ---> zann-client / zann-ui-core
+non-Rust consumer ---> zann-ffi ---> zann-client / zann-flows / zann-ui-core
 ```
 
 zann-ffi is an edge adapter over the application and presentation APIs. It is
@@ -65,9 +65,14 @@ implementations of `PlatformKeystore` and `PlatformSecretStore` to
 `create_core`. The `apple` CI job builds the package, runs its binding tests on
 macOS, links them for both iOS slices, then builds and tests the app.
 
-`zann-protocol` and `zann-flows` name the accepted target boundaries. Until
-those crates are introduced, their code must remain in the canonical owner
-listed in the capability map; it must not be copied into a shell.
+`zann-flows::connect` is active: COSMIC consumes its reducer directly and Apple
+uses its pure UniFFI projection. The reducer owns method/registration selection,
+trust sequencing, Back/Cancel, operation admission and stale-result rejection.
+Shells execute typed effects through canonical application APIs and keep opaque
+prepared/trust/browser handles local. They validate instance, operation and phase
+before installing results. No runtime, transport or platform IO enters the flow.
+Startup, unlock/remembered unlock and idle slices remain planned.
+`zann-protocol` remains planned; its interim canonical owner is in the capability map.
 
 Local vault commands and read models are defined by
 `zann-client::app::local::LocalVaultService`. The `zann-client-sqlite/local-vault`

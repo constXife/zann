@@ -40,6 +40,7 @@
 /crates/zann-client/ @constXife
 /crates/zann-client-sqlite/ @constXife
 /crates/zann-ffi/ @constXife
+/crates/zann-flows/ @constXife
 /crates/zann-ui-core/ @constXife
 /tests/fixtures/client-config/ @constXife
 /docs/architecture/ @constXife

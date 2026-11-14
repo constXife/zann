@@ -3,42 +3,44 @@
 use cosmic::iced::Length;
 use cosmic::{theme, widget, Element};
 
-use super::{Event, Message, Method, Stage, State};
+use super::{Event, Message, Stage, State};
 use crate::i18n::t;
 use crate::screens::centered;
+use zann_core::AuthMethod;
 
 impl State {
     pub fn view(&self) -> Element<'_, Event> {
         let spacing = theme::spacing();
 
-        let body = match &self.stage {
+        let body = match &self.flow.snapshot().stage {
             Stage::Server => self.server_form(),
-            Stage::Method => self.method_picker(),
-            Stage::Password => self.password_form(),
-            Stage::Oidc => self.oidc_wait(),
+            Stage::Methods => self.method_picker(),
+            Stage::Password { .. } => self.password_form(),
+            Stage::Browser { .. } => self.oidc_wait(),
+            Stage::Complete | Stage::Closed => widget::text::body("").into(),
             Stage::Fingerprint { old, new } => self.fingerprint_prompt(old, new),
         };
 
         let mut column = widget::column::with_capacity(5)
-            .push(widget::text::title3(t(match &self.stage {
+            .push(widget::text::title3(t(match &self.flow.snapshot().stage {
                 Stage::Fingerprint { .. } => "wizard.fingerprintChanged",
                 _ => "wizard.connectTitle",
             })))
             .spacing(spacing.space_s)
             .width(Length::Fixed(420.0));
 
-        if let Some(name) = self.server_name.as_ref() {
+        if let Some(name) = self.flow.snapshot().server_name.as_ref() {
             column = column.push(widget::text::caption(name.clone()));
         }
 
         column = column.push(body);
 
-        if let Some(error) = self.error.as_ref() {
+        if let Some(error) = self.flow.snapshot().error.as_ref() {
             column = column.push(widget::text::caption(error.clone()));
         }
 
         let generation = self.generation;
-        centered(column.push(widget::button::text(t("wizard.back")).on_press(Message::Cancel))).map(
+        centered(column.push(widget::button::text(t("wizard.back")).on_press(Message::Back))).map(
             move |message| Event {
                 generation,
                 message,
@@ -48,13 +50,13 @@ impl State {
 
     fn server_form(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
-        let mut submit = widget::button::suggested(t(if self.busy {
+        let mut submit = widget::button::suggested(t(if self.flow.snapshot().busy {
             "wizard.checking"
         } else {
             "common.continue"
         }))
         .width(Length::Fill);
-        if !self.busy && !self.url.trim().is_empty() {
+        if !self.flow.snapshot().busy && !self.url.trim().is_empty() {
             submit = submit.on_press(Message::Probe);
         }
 
@@ -72,19 +74,21 @@ impl State {
 
     fn method_picker(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
-        let mut column = widget::column::with_capacity(self.methods.len() + 1)
+        let mut column = widget::column::with_capacity(self.flow.snapshot().methods.len() + 1)
             .push(widget::text::body(t("auth.selectMethod")))
             .spacing(spacing.space_s);
 
-        for method in &self.methods {
-            column = column.push(match method {
-                Method::Oidc => widget::button::standard(t("auth.oidc"))
+        for method in &self.flow.snapshot().methods {
+            let button = match method {
+                AuthMethod::Oidc => widget::button::standard(t("auth.oidc"))
                     .width(Length::Fill)
                     .on_press(Message::StartOidc),
-                Method::Password => widget::button::standard(t("auth.emailPassword"))
+                AuthMethod::Password => widget::button::standard(t("auth.emailPassword"))
                     .width(Length::Fill)
                     .on_press(Message::ChoosePassword),
-            });
+                AuthMethod::ServiceAccount => continue,
+            };
+            column = column.push(button);
         }
 
         column.into()
@@ -92,13 +96,14 @@ impl State {
 
     fn password_form(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
-        let ready = !self.busy && !self.email.trim().is_empty() && !self.password.is_empty();
-        let label = if self.register {
+        let ready = self.flow.can_submit_password(&self.email, &self.password);
+        let register = matches!(self.stage(), Stage::Password { register: true });
+        let label = if register {
             "auth.signUp"
         } else {
             "auth.signIn"
         };
-        let mut submit = widget::button::suggested(t(if self.busy {
+        let mut submit = widget::button::suggested(t(if self.flow.snapshot().busy {
             "wizard.processing"
         } else {
             label
@@ -116,7 +121,7 @@ impl State {
             )
             .spacing(spacing.space_s);
 
-        if self.register {
+        if register {
             column = column.push(
                 widget::text_input::text_input(t("auth.fullName"), &self.full_name)
                     .label(t("auth.fullName"))
@@ -124,7 +129,7 @@ impl State {
             );
         }
 
-        column
+        let mut column = column
             .push(
                 widget::text_input::secure_input(
                     t("auth.password"),
@@ -136,36 +141,28 @@ impl State {
                 .on_input(Message::PasswordInput)
                 .on_submit(|_| Message::SubmitPassword),
             )
-            .push(submit)
-            .into()
+            .push(submit);
+        if self.flow.snapshot().registration_available {
+            column = column.push(
+                widget::button::link(t(if register {
+                    "auth.haveAccount"
+                } else {
+                    "auth.noAccount"
+                }))
+                .on_press(Message::SetRegistering(!register)),
+            );
+        }
+        column.into()
     }
 
     fn oidc_wait(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
         let mut column = widget::column::with_capacity(3).spacing(spacing.space_s);
 
-        match self.authorization_url.as_ref() {
-            Some(_) => {
-                column = column
-                    .push(widget::text::body(t("wizard.oidcHint")))
-                    .push(
-                        widget::button::link(t("wizard.oidcReopen")).on_press(Message::OpenAuthUrl),
-                    )
-                    .push(widget::button::text(t("auth.copyLink")).on_press(Message::CopyAuthUrl));
-            }
-            None => {
-                let mut start = widget::button::suggested(t(if self.busy {
-                    "wizard.starting"
-                } else {
-                    "wizard.signInSso"
-                }))
-                .width(Length::Fill);
-                if !self.busy {
-                    start = start.on_press(Message::StartOidc);
-                }
-                column = column.push(start);
-            }
-        }
+        column = column
+            .push(widget::text::body(t("wizard.oidcHint")))
+            .push(widget::button::link(t("wizard.oidcReopen")).on_press(Message::OpenAuthUrl))
+            .push(widget::button::text(t("auth.copyLink")).on_press(Message::CopyAuthUrl));
 
         column.into()
     }
@@ -174,7 +171,7 @@ impl State {
         let spacing = theme::spacing();
         let mut trust =
             widget::button::destructive(t("wizard.trustFingerprint")).width(Length::Fill);
-        if !self.busy {
+        if !self.flow.snapshot().busy {
             trust = trust.on_press(Message::TrustFingerprint);
         }
 

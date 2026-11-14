@@ -189,8 +189,15 @@ final class AppModel: ObservableObject {
             self.error = message(for: error)
             return
         }
+        // Pending tasks retain the previous adapter; do not rely on deinit.
+        connect?.cancel()
         connect = ConnectModel(
             session: session, strings: strings, openBrowser: openBrowser,
+            copyBrowserUrl: { [weak self] value in
+                guard let self else { return }
+                Clipboard.copy(value, clearAfter: self.preferences.clipboardClearSeconds,
+                               onlyIfUnchanged: self.preferences.clipboardClearIfUnchanged)
+            },
             connected: { [weak self] in self?.connected($0) }
         )
         if let serverURL {

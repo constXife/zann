@@ -21,6 +21,7 @@ test-support = ["zann-client-sqlite/test-support"]
 bindgen = ["uniffi/cli"]
 
 [dependencies]
+zann-flows = { path = "../zann-flows" }
 thiserror = "1"
 tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "time"] }
 uniffi = "0.28"
