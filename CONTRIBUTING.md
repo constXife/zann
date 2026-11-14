@@ -27,8 +27,8 @@ Optional: enable local git hooks (pre-commit runs `cargo fmt`):
 
 Requirements:
 - Rust toolchain per `rust-toolchain.toml`
-- Nix with flakes for the COSMIC development shell
-- Xcode and XcodeGen for the Apple client (on macOS)
+- Linux: Nix with flakes, or the [native build dependencies](apps/cosmic/README.md#without-nix)
+- macOS: full Xcode, rustup, `jq` and XcodeGen ([Apple setup](apps/apple/README.md))
 - Bun for the documentation site in `docs/starlight`
 - `just` (optional)
 

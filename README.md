@@ -12,6 +12,14 @@ Self-hosted password manager for individuals and small teams.
 >
 > Use at your own risk for testing and learning.
 
+## Native clients
+
+COSMIC on Linux, showing the synthetic offline demo vault:
+
+![Zann COSMIC client with sidebar categories and synthetic login and key/value items](docs/screenshots/cosmic.png)
+
+Build guides: [Linux (COSMIC)](apps/cosmic/README.md) · [macOS (SwiftUI)](apps/apple/README.md).
+
 ## Features
 
 - **Client-side encryption** - personal vaults are encrypted on the client
@@ -36,34 +44,14 @@ for:
 ### Breaking changes (pre-policy phase)
 
 - May happen without migration steps
-- Will still be noted in [CHANGELOG](CHANGELOG.md) when possible
+- Are marked in pull request titles and descriptions
 
 ## Quick start
 
-### Connect a native client
+For a server-free Linux UI preview, use the [offline demo fixture](apps/cosmic/README.md#offline-ui-preview-no-server).
+For normal setup, start a server first:
 
-1. Build the native client for your platform: [COSMIC on Linux](apps/cosmic/README.md) or [SwiftUI on macOS](apps/apple/README.md)
-2. Connect to a Zann server and sign in or register
-3. Unlock with your master password and complete the first sync
-
-After that, unlock, read, search, edit, export, snapshot and verify work offline.
-Edits stay pending until the server confirms them. Forgetting a connection keeps
-its encrypted cache and unsent changes; reconnect to resume syncing.
-Standalone serverless vault creation is no longer supported. Before upgrading an
-old local-only vault, see [the cutover guide](docs/migrations/server-first-clients.md).
-
-On Linux with Nix, build the COSMIC package from the repository root:
-
-```bash
-nix build .#zann-cosmic
-```
-
-For macOS, follow the [Apple build guide](apps/apple/README.md).
-Windows GUI support is planned; the legacy Tauri client has been retired.
-
-Full install guide: `docs/INSTALL.md`.
-
-### Run a server via Docker Compose (development quickstart)
+### 1. Start a server
 
 The bundled `compose.yaml` is a local development quickstart, not a production
 setup. For real self-hosting start from `config/config.example.yaml` and supply
@@ -92,6 +80,36 @@ PostgreSQL lives in the `zann_pgdata` named volume. The shared-vault master key
 volumes and `.env`; see [backup instructions](docs/INSTALL.md#local-dev-backups).
 If upgrading an existing checkout using `./data`, copy its keys into `zann_data`
 before starting the new stack; existing bind-mount data is not moved automatically.
+
+### 2. Build and run a native client
+
+- [COSMIC on Linux](apps/cosmic/README.md): Nix package or a source build with
+  documented Ubuntu/Debian, Fedora and Arch dependencies.
+- [SwiftUI on macOS](apps/apple/README.md): Apple silicon, Xcode, Rust, `jq`
+  and XcodeGen. Local builds need only the macOS SDK; iOS packaging is opt-in.
+
+On Linux with Nix, from the repository root:
+
+```bash
+nix build .#zann-cosmic
+./result/bin/zann-cosmic
+```
+
+### 3. Connect and create your vault
+
+Connect to `http://localhost:8080` (or your existing server), sign in or register,
+then create/unlock your personal vault with its master password and complete the
+first sync.
+
+After that, unlock, read, search, edit, export, snapshot and verify work offline.
+Edits stay pending until the server confirms them. Forgetting a connection keeps
+its encrypted cache and unsent changes; reconnect to resume syncing.
+Standalone serverless vault creation is no longer supported. Before upgrading an
+old local-only vault, see [the cutover guide](docs/migrations/server-first-clients.md).
+
+Native clients are currently built from source; this repository does not yet
+publish GUI installers or a CLI binary release workflow. Windows GUI support is
+planned. Full setup instructions: [Install Guide](docs/INSTALL.md).
 
 ## System requirements (server)
 
@@ -166,7 +184,7 @@ zann config set-context ci \
 
 ### Server
 
-- Runs as the shared backend (Docker Compose or prebuilt image).
+- Runs as the shared backend (Docker Compose or a self-hosted source build).
 - Issues tokens and enforces access scope and IP restrictions.
 
 ## For DevOps and CI/CD

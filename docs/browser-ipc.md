@@ -1,3 +1,8 @@
+---
+title: Local browser session and native messaging
+description: Browser pairing, local IPC sessions and native host integration.
+---
+
 # Local browser session and native messaging (#199)
 
 The service implements phases 2–3 of [ADR 0007](adr/0007-browser-integration.md).

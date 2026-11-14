@@ -3,6 +3,21 @@ title: Install Guide
 description: Practical setup steps for desktop, CLI, and server.
 ---
 
+Zann is currently evaluated from source or the local Compose stack. There is
+no automated CLI binary release workflow or published native GUI installer.
+Clone the repository before following the build commands:
+
+```bash
+git clone https://github.com/constXife/zann
+cd zann
+```
+
+For normal native-client setup, [start the development server](#server-docker-compose-local-dev)
+first, or use an existing Zann server. After building a client, connect to
+`http://localhost:8080`, sign in or register, and create/unlock your personal
+vault with its master password. Complete the first sync to use cached content
+offline.
+
 ## Linux (COSMIC)
 
 Build the native Linux package with Nix from the repository root:
@@ -12,12 +27,42 @@ nix build .#zann-cosmic
 ./result/bin/zann-cosmic
 ```
 
-For development and local installation, see the
-[COSMIC guide](https://github.com/constXife/zann/tree/main/apps/cosmic).
+For a server-free UI preview, follow the
+[offline demo fixture](https://github.com/constXife/zann/tree/main/apps/cosmic#offline-ui-preview-no-server)
+using a throwaway database and a password you choose. It is a development/test
+fixture without an authenticated server session, not standalone vault creation.
+
+Without Nix, install rustup with current stable Rust, a C toolchain, Git,
+pkg-config, OpenSSL, Wayland, xkbcommon, libudev, D-Bus, Expat, Fontconfig,
+FreeType and OpenGL development packages, plus a Vulkan loader and your GPU's
+Vulkan driver. Run in a Wayland desktop session with D-Bus available.
+The [COSMIC prerequisites](https://github.com/constXife/zann/tree/main/apps/cosmic#without-nix)
+list exact Ubuntu/Debian, Fedora and Arch package commands. Then build from the
+app directory so its own stable toolchain is selected:
+
+```bash
+cd apps/cosmic
+rustup update stable
+cargo run --locked
+```
+
+See the [COSMIC guide](https://github.com/constXife/zann/tree/main/apps/cosmic)
+for development and local desktop installation.
 
 ## macOS (SwiftUI)
 
-Build the Rust framework and generated Swift bindings, then the native app:
+On Apple silicon, install full Xcode (Command Line Tools alone are insufficient)
+and Rust through rustup. Select Xcode with
+`sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer` and open
+it once to accept the license and finish setup. From the repository root:
+
+```bash
+brew install jq xcodegen
+rustup target add aarch64-apple-darwin
+```
+
+Build the macOS Rust framework and Swift bindings, then the native app. No iOS
+Rust targets or SDKs are needed for this local build:
 
 ```bash
 apps/apple/ZannCoreKit/build-xcframework.sh debug
@@ -26,14 +71,15 @@ xcodegen --spec project.yml
 xcodebuild -project Zann.xcodeproj -scheme Zann -destination 'platform=macOS,arch=arm64' build
 ```
 
-Requires Xcode and XcodeGen. See the
+Open `Zann.xcodeproj` and run the Zann scheme. See the
 [Apple guide](https://github.com/constXife/zann/tree/main/apps/apple)
-for signing, Touch ID and tests. iOS/iPadOS app targets and Windows GUI support
-are planned; the Tauri application has been retired.
+for signing, Touch ID, tests and optional `--all-platforms` packaging (which
+requires the iOS and simulator Rust targets and SDKs). iOS/iPadOS app targets
+and Windows GUI support are planned; the Tauri application has been retired.
 
 ## CLI
 
-Release binaries are on GitHub Releases. To build locally:
+Build the CLI from the repository root with the pinned Rust toolchain:
 
 ```bash
 cargo build -p zann-cli
@@ -44,8 +90,6 @@ The binary is at `target/debug/zann` (or `target/release/zann` with `--release`)
 ## Server (Docker Compose, local dev)
 
 ```bash
-git clone https://github.com/constXife/zann
-cd zann
 ./scripts/dev-up.sh
 # Or: just dev-up
 ```
@@ -85,12 +129,6 @@ Move this directory to private backup storage outside the checkout. Use
 `docker compose down` to stop while retaining volumes; `docker compose down -v`
 (or `just db-reset`) deletes the database and keys. For Podman, replace
 `docker compose` with `podman compose`.
-
-## Server (prebuilt image)
-
-```bash
-docker pull constxife/zann-server:latest
-```
 
 ## Server config (self-hosted)
 
