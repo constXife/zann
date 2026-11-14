@@ -19,6 +19,13 @@ impl LocalVault {
         );
         let _in_flight = self.syncs.register(operation.operation_id(), cancel);
         let ctx = self.backup_ctx()?;
+        let (selection_before, generation) = {
+            let _context = self.context_gate.read().expect("lock poisoned");
+            (
+                *self.storage_id.lock().expect("lock poisoned"),
+                self.context_generation.load(Ordering::SeqCst),
+            )
+        };
         let target = options.target_storage_id.ok_or_else(|| {
             LocalError::InvalidArgument("select a server storage to import into".into())
         })?;
@@ -34,8 +41,7 @@ impl LocalVault {
                 PathBuf::from(path),
                 &session,
             ))?;
-        let selection_before = *self.storage_id.lock().expect("lock poisoned");
-        self.select_synced_catalog(None, selection_before, &ctx.master_key)?;
+        self.select_synced_catalog(Some(target), selection_before, &ctx.master_key, generation)?;
         Ok(BackupImportReport {
             imported_items: report.imported_items as u64,
             skipped_existing: report.skipped_existing as u64,

@@ -76,7 +76,7 @@ fn connect(core: &LocalVault, url: &str, login: &Value) {
     .unwrap();
     core.initialize_master_password("test master password".into())
         .unwrap();
-    core.remote_sync(None).unwrap();
+    core.remote_sync(None, None).unwrap();
 }
 fn normalized(path: &Path) -> Vec<Value> {
     let backup: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
@@ -128,7 +128,7 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
                 });
             }
         }
-        core.remote_sync(None).unwrap();
+        core.remote_sync(None, None).unwrap();
         let backup = root.path().join("backup.json");
         assert_eq!(core.backup_export_file(backup.display().to_string()).unwrap().items_count,6);
 
