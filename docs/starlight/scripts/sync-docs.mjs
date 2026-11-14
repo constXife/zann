@@ -6,6 +6,10 @@ const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../../..");
 const docsRoot = path.join(repoRoot, "docs");
 const contentDocs = path.join(repoRoot, "docs", "starlight", "src", "content", "docs");
+const publicScreenshots = path.join(repoRoot, "docs", "starlight", "public", "screenshots");
+
+await fs.rm(publicScreenshots, { recursive: true, force: true });
+await fs.cp(path.join(docsRoot, "screenshots"), publicScreenshots, { recursive: true });
 
 await fs.mkdir(contentDocs, { recursive: true });
 

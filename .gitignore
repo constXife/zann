@@ -8,6 +8,7 @@ tmp
 /docs/starlight/dist
 /docs/openapi.json
 /docs/starlight/src/content/docs
+/docs/starlight/public/screenshots
 
 target
 /docs/api/dist

@@ -1,3 +1,8 @@
+---
+title: Chromium extension
+description: Build, install and pair the Chromium browser extension.
+---
+
 # Chromium extension (#25)
 
 `apps/extension` is a Manifest V3 toolbar popup with an optional per-site

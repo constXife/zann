@@ -508,14 +508,18 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@1.92.0
-        with:
-          targets: aarch64-apple-ios,aarch64-apple-ios-sim
       - name: Rust cache
         uses: ./.github/actions/rust-cache
-      - name: Build ZannFFI.xcframework and Swift bindings
+      - name: Install Apple build tools
+        run: brew install jq xcodegen
+      - name: Build macOS-only ZannFFI.xcframework and Swift bindings
         run: apps/apple/ZannCoreKit/build-xcframework.sh debug
       - name: Test ZannCoreKit on macOS
         run: swift test --package-path apps/apple/ZannCoreKit
+      - name: Install iOS Rust targets
+        run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim
+      - name: Build all ZannFFI.xcframework slices and Swift bindings
+        run: apps/apple/ZannCoreKit/build-xcframework.sh debug --all-platforms
       - name: Link ZannCoreKit tests for iOS
         working-directory: apps/apple/ZannCoreKit
         run: |
@@ -526,8 +530,6 @@ jobs:
           xcodebuild build-for-testing -quiet -scheme ZannCoreKit \
             -destination 'generic/platform=iOS Simulator' -derivedDataPath .build/xcode \
             ARCHS=arm64
-      - name: Install XcodeGen
-        run: brew install xcodegen
       - name: Test the macOS app
         working-directory: apps/apple
         run: |

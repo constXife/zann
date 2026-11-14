@@ -17,6 +17,14 @@ Self-hosted password manager for individuals and small teams.
 >
 > Use at your own risk for testing and learning.
 
+## Native clients
+
+COSMIC on Linux, showing the synthetic offline demo vault:
+
+![Zann COSMIC client with sidebar categories and synthetic login and key/value items](/zann/screenshots/cosmic.png)
+
+Build guides: [Linux (COSMIC)](https://github.com/constXife/zann/tree/main/apps/cosmic) · [macOS (SwiftUI)](https://github.com/constXife/zann/tree/main/apps/apple).
+
 ## Features
 
 - **Client-side encryption** - personal vaults are encrypted on the client
@@ -41,34 +49,14 @@ for:
 ### Breaking changes (pre-policy phase)
 
 - May happen without migration steps
-- Will still be noted in [CHANGELOG](CHANGELOG.md) when possible
+- Are marked in pull request titles and descriptions
 
 ## Quick start
 
-### Connect a native client
+For a server-free Linux UI preview, use the [offline demo fixture](https://github.com/constXife/zann/tree/main/apps/cosmic#offline-ui-preview-no-server).
+For normal setup, start a server first:
 
-1. Build the native client for your platform: [COSMIC on Linux](https://github.com/constXife/zann/tree/main/apps/cosmic) or [SwiftUI on macOS](https://github.com/constXife/zann/tree/main/apps/apple)
-2. Connect to a Zann server and sign in or register
-3. Unlock with your master password and complete the first sync
-
-After that, unlock, read, search, edit, export, snapshot and verify work offline.
-Edits stay pending until the server confirms them. Forgetting a connection keeps
-its encrypted cache and unsent changes; reconnect to resume syncing.
-Standalone serverless vault creation is no longer supported. Before upgrading an
-old local-only vault, see [the cutover guide](docs/migrations/server-first-clients.md).
-
-On Linux with Nix, build the COSMIC package from the repository root:
-
-```bash
-nix build .#zann-cosmic
-```
-
-For macOS, follow the [Apple build guide](https://github.com/constXife/zann/tree/main/apps/apple).
-Windows GUI support is planned; the legacy Tauri client has been retired.
-
-Full install guide: `/install/`.
-
-### Run a server via Docker Compose (development quickstart)
+### 1. Start a server
 
 The bundled `compose.yaml` is a local development quickstart, not a production
 setup. For real self-hosting start from `config/config.example.yaml` and supply
@@ -79,17 +67,54 @@ your own secrets.
 git clone https://github.com/constXife/zann
 cd zann
 
-# Provide peppers (the compose file refuses to start without them)
-cp .env.example .env
-# edit .env: set ZANN_PASSWORD_PEPPER and ZANN_TOKEN_PEPPER
-# (openssl rand -base64 32)
-
-# Start the server via Docker Compose
-docker compose up -d
+# Generate .env with private permissions and random peppers, then build and start
+./scripts/dev-up.sh
+# Or, with just installed: just dev-up
 
 # The server is available at http://localhost:8080
-# The shared-vault master key is generated into ./data/smk on first start
 ```
+
+Requires Docker Engine / Docker Desktop with Compose, Bash and OpenSSL. For
+Podman with a Compose provider, use `just dev-up podman` or
+`./scripts/dev-up.sh podman`. Subsequent starts reuse `.env`; it stays `0600`
+and gitignored. Once `.env` exists, `docker compose up -d` also works directly.
+
+PostgreSQL lives in the `zann_pgdata` named volume. The shared-vault master key
+(`/data/smk`) and server identity (`/data/identity-key`) are generated in the
+`zann_data` named volume, writable by the image's nonroot user. Back up both
+volumes and `.env`; see [backup instructions](/install/#local-dev-backups).
+If upgrading an existing checkout using `./data`, copy its keys into `zann_data`
+before starting the new stack; existing bind-mount data is not moved automatically.
+
+### 2. Build and run a native client
+
+- [COSMIC on Linux](https://github.com/constXife/zann/tree/main/apps/cosmic): Nix package or a source build with
+  documented Ubuntu/Debian, Fedora and Arch dependencies.
+- [SwiftUI on macOS](https://github.com/constXife/zann/tree/main/apps/apple): Apple silicon, Xcode, Rust, `jq`
+  and XcodeGen. Local builds need only the macOS SDK; iOS packaging is opt-in.
+
+On Linux with Nix, from the repository root:
+
+```bash
+nix build .#zann-cosmic
+./result/bin/zann-cosmic
+```
+
+### 3. Connect and create your vault
+
+Connect to `http://localhost:8080` (or your existing server), sign in or register,
+then create/unlock your personal vault with its master password and complete the
+first sync.
+
+After that, unlock, read, search, edit, export, snapshot and verify work offline.
+Edits stay pending until the server confirms them. Forgetting a connection keeps
+its encrypted cache and unsent changes; reconnect to resume syncing.
+Standalone serverless vault creation is no longer supported. Before upgrading an
+old local-only vault, see [the cutover guide](docs/migrations/server-first-clients.md).
+
+Native clients are currently built from source; this repository does not yet
+publish GUI installers or a CLI binary release workflow. Windows GUI support is
+planned. Full setup instructions: [Install Guide](/install/).
 
 ## System requirements (server)
 
@@ -164,7 +189,7 @@ zann config set-context ci \
 
 ### Server
 
-- Runs as the shared backend (Docker Compose or prebuilt image).
+- Runs as the shared backend (Docker Compose or a self-hosted source build).
 - Issues tokens and enforces access scope and IP restrictions.
 
 ## For DevOps and CI/CD

@@ -1,3 +1,8 @@
+---
+title: Autofill matching
+description: URL matching policy shared by native clients and browser autofill.
+---
+
 # Autofill matching (#198)
 
 `zann-autofill` implements phases 0–1 of the direction proposed in
