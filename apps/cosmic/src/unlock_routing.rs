@@ -67,6 +67,7 @@ impl App {
         page: zann_cosmic::backend::local::ItemsPage,
         synced: Option<Result<(), String>>,
     ) -> Task<Message> {
+        self.last_activity = std::time::Instant::now();
         let content_width = self.content_width();
         let Shell::Ready { session, screen } = &mut self.shell else {
             return Task::none();

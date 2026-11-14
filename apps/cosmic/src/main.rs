@@ -440,6 +440,15 @@ impl cosmic::Application for App {
     }
 
     fn update(&mut self, message: Self::Message) -> Task<Self::Message> {
+        if matches!(
+            &message,
+            Message::Copy(_)
+                | Message::OpenUrl(_)
+                | Message::TemporaryReveal(true)
+                | Message::OpenSettings
+        ) {
+            self.last_activity = std::time::Instant::now();
+        }
         // Effects and policies that leave a screen are the shell's, whoever
         // asked for them.
         match message {
@@ -546,17 +555,11 @@ impl cosmic::Application for App {
                 } = &mut self.shell
                 {
                     vault.set_temporary_reveal(held);
-                    if held {}
                 }
                 return Task::none();
             }
             Message::Activity => {
                 self.last_activity = std::time::Instant::now();
-                if let Shell::Ready {
-                    screen: Screen::Vault(vault),
-                    ..
-                } = &mut self.shell
-                {}
                 return Task::none();
             }
             Message::ClipboardExpired(generation) => {
@@ -714,10 +717,11 @@ impl App {
             )));
             if let Screen::Connect { return_to, .. } = screen {
                 *return_to = Some(Box::new(locked));
-                return Task::none();
+                Task::none()
+            } else {
+                *screen = locked;
+                remembered_unlock_task(session)
             }
-            *screen = locked;
-            remembered_unlock_task(session)
         };
 
         let clipboard = if self.preferences.clipboard_clear_on_lock {

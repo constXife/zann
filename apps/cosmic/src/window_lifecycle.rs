@@ -74,6 +74,8 @@ mod tests {
             core,
             shell: Shell::Blocked("window lifecycle fixture".into()),
             window_width: WINDOW_SIZE.width,
+            last_activity: std::time::Instant::now(),
+            idle_check_pending: false,
             preferences: DevicePreferences::default(),
             close_to_tray: true,
             tray_available: true,

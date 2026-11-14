@@ -735,7 +735,7 @@
     "context_changed": "The open storage changed. Try again.",
     "storage_empty": "This storage has no cached vaults. Sync it before opening it.",
     "storage_key_mismatch": "This storage uses a different master key. The current storage remains open.",
-    "recovery_invalid_account": "The local account metadata is incomplete. Keep the recovery snapshot and reconnect to the server.",
+    "recovery_invalid_account": "The local account metadata is incomplete. Local data has not been removed.",
     "recovery_limit": "Too many local accounts to show safely. Local data has not been removed.",
     "recovery_busy": "Background work is stopping. Try again.",
     "recovery_changed": "Local data changed. Cancel and review a fresh confirmation.",
