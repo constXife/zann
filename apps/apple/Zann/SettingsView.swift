@@ -16,6 +16,12 @@ struct SettingsView: View {
             security
                 .fittedToContent()
                 .tabItem { Label(model.strings("settings.tabs.security"), systemImage: "lock") }
+            Form {
+                BrowserPairingsView(core: model.browserCore, strings: model.strings)
+            }
+            .formStyle(.grouped)
+            .frame(height: 420)
+            .tabItem { Label(model.strings("browser.title"), systemImage: "globe") }
         }
         .frame(width: 520)
     }

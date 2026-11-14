@@ -5,7 +5,7 @@ profiles:
       masked_by_default: [password, totp_secret, notes]
       copyable: [username, password, url, totp_secret]
       revealable: [password, totp_secret, notes]
-    never_log_fields: [password, totp_secret, notes]
+    never_log_fields: [password, totp_secret, notes, match_rules]
     exposable_public_attrs: [username, url]
 
   note:

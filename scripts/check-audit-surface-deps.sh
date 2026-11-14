@@ -6,6 +6,9 @@ allowed_deps=(
   base64
   blake3
   chacha20poly1305
+  ed25519-dalek
+  snow
+  spake2
   hex
   rand
   serde

@@ -7,6 +7,30 @@ use super::*;
 pub type LocalSyncObserver = dyn Fn(crate::app::SyncProgress) + Send + Sync;
 
 pub trait LocalVaultService: Send + Sync {
+    /// Sink runs under the context read lease: lock/selection cannot complete
+    /// before a bounded IPC response has finished or failed.
+    fn browser_query(
+        &self,
+        context: BrowserContext,
+        cursor: Option<BrowserCursor>,
+        sink: &mut dyn FnMut(BrowserMatches) -> LocalResult<()>,
+    ) -> LocalResult<()>;
+    /// Only a matching, current, non-deleted login reaches this trusted sink.
+    /// A daemon selects one secret field; the payload is never a wire DTO.
+    fn browser_fill(
+        &self,
+        context: BrowserContext,
+        item_id: String,
+        sink: &mut dyn FnMut(&zann_core::EncryptedPayload) -> LocalResult<()>,
+    ) -> LocalResult<()>;
+    /// Create only a typed login in the exact selection observed by the popup.
+    fn browser_save(
+        &self,
+        context: BrowserContext,
+        scope: BrowserScope,
+        login: CapturedLogin,
+        sink: &mut dyn FnMut(String) -> LocalResult<()>,
+    ) -> LocalResult<()>;
     #[cfg(debug_assertions)]
     fn debug_create_kv_item(&self, path: String, key: String, value: String)
         -> LocalResult<String>;

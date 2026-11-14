@@ -13,6 +13,7 @@ use crate::backend::local::{self, Facade};
 use crate::backend::{activate_database, ActiveDatabaseGuard, DatabaseLocation};
 
 pub struct Session {
+    daemon: zann_daemon::Daemon,
     facade: Facade,
     location: DatabaseLocation,
     /// Outlives every vault screen, so a lock from any path forgets what was
@@ -34,9 +35,15 @@ impl Session {
     {
         let location = location.try_into().map_err(|err| err.to_string())?;
         let (facade, status) = local::open_at(&location)?;
+        let daemon = zann_daemon::Daemon::start(
+            location.client_root(),
+            facade.clone(),
+        )
+        .map_err(|error| error.to_string())?;
         let active_database = activate_database(location.clone());
         Ok((
             Self {
+                daemon,
                 facade,
                 location,
                 auto_sync: RefCell::new(AutoSyncSchedule::new()),
@@ -49,6 +56,10 @@ impl Session {
     /// A handle to hand to a worker thread.
     pub fn facade(&self) -> Facade {
         self.facade.clone()
+    }
+
+    pub fn browser_control(&self) -> zann_daemon::DaemonControl {
+        self.daemon.control()
     }
 
     pub fn database_location(&self) -> &DatabaseLocation {

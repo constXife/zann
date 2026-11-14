@@ -1,6 +1,8 @@
 //! Local vault application contract; implementations receive explicit native paths.
 
+mod browser;
 mod error;
+pub use browser::*;
 mod model;
 mod port;
 pub use error::*;

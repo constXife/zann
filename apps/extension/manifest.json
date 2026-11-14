@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Zann",
+  "version": "0.1.0",
+  "minimum_chrome_version": "106",
+  "description": "Fill and save logins with your unlocked Zann desktop vault.",
+  "permissions": ["activeTab", "scripting", "nativeMessaging", "storage", "webNavigation"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "web_accessible_resources": [{ "resources": ["inline.html"], "matches": ["https://*/*"], "use_dynamic_url": true }],
+  "action": { "default_popup": "popup.html", "default_title": "Zann", "default_icon": { "32": "icons/32.png", "128": "icons/128.png" } },
+  "icons": { "32": "icons/32.png", "128": "icons/128.png" },
+  "content_security_policy": {
+    "extension_pages": "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors https:; form-action 'none'"
+  }
+}

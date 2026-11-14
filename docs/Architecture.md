@@ -150,6 +150,54 @@ response from an older operation cannot mutate current state.
 
 ### Domain, protocol and presentation
 
+`zann-autofill` owns canonical website origins, PSL registrable domains,
+per-login match rules and fill admission (#198). It is headless and depends
+only on `zann-core` internally. `zann-ui-core` consumes its typed editor policy;
+future browser/native adapters must use the same matching owner. Its vendored
+ICANN + PRIVATE PSL and equivalent-domain data are build-time digest-pinned,
+with no runtime fetch. See [the autofill contract](autofill.md).
+
+The native local browser service is `zann-daemon` (#199), a single-owner
+application service over an injected `LocalVaultService`. COSMIC and desktop
+FFI production composition explicitly host it over their existing vault instance;
+`create_core` remains a storage factory and `start_browser_service` is a separate
+idempotent native lifecycle operation; a standalone
+binary explicitly composes its own instance. The private socket has one owner
+per client root; a second host is refused. Native Settings holds an
+in-process management capability for one-time-code issuance and browser revocation,
+never a browser-accessible admin endpoint. Code pairing is channel-bound SPAKE2;
+the shared bootstrap client publishes a durable server pin only after mutual
+confirmation and native enrollment.
+`zann-crypto` owns Ed25519 and optional Noise primitives; matching remains in
+`zann-autofill`, and TOTP interpretation/generation remains in `zann-ui-core`.
+The daemon composes those owners and exports only bounded browser use cases.
+The stateless `zann-native-host` selects only the DB/crypto-free framing
+feature of `zann-client`. Desktop-only FFI dependency selection leaves iOS and
+Android builds free of the native daemon. See [the IPC contract](browser-ipc.md).
+
+The Chromium extension (`apps/extension`, #25) is an MV3 toolbar popup and an
+opt-in per-site field chooser over the
+`zann-browser` WASM edge. `zann-client::browser_ipc` owns the shared wire records,
+transcripts, serialized single-flight client state and bounded local autofill
+usage/ranking policy; the daemon no longer
+maintains a parallel protocol module. `browser-ipc` compiles without remote,
+config, Tokio, SQLite or keystore features. WASM projects that owner, `zann-crypto`, and toolkit-neutral `zann-ui-core`
+login filtering/window projections. JS extracts document identity from Chrome APIs and implements
+bounded isolated-world DOM reads/writes; Rust retains URL/pairing/release rules.
+Chrome owns persistent HTTPS host grants and dynamic top-document registrations.
+The inline chooser is an extension-origin iframe; its worker binds both ports to
+browser-observed top document identity and the iframe's read-only ancestor
+origins, and injects released secrets directly
+into the selected document, never into the chooser. Both browser surfaces rank
+complete searches by native match quality and local successful-fill recency.
+Both surfaces share a virtual DOM list over the `zann-ui-core::login_list`
+view. Public title/username filtering preserves the established ordering and
+never changes native admission. The Chrome storage adapter retains only bounded opaque MRU identifiers, never
+URLs, account names or secrets; usage does not mutate vault/sync records. Toolbar capture remains a
+separate explicit review surface. Capture uses the same native selection lease and canonical atomic item creation
+as native editing. See [the extension build and threat contract](chromium-extension.md).
+
+
 `zann-core` contains domain models, invariants, policies and ports. It does not
 know about reqwest, Tauri, libcosmic, Clap, database rows or OS paths.
 

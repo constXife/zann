@@ -6,6 +6,7 @@ publish = false
 license = "MIT"
 
 [dependencies]
+hex = { version = "0.4", optional = true }
 base64 = { version = "0.22", optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 data-encoding = { version = "2", optional = true }
@@ -25,12 +26,15 @@ uuid = { version = "1", features = ["v7", "serde"], optional = true }
 zeroize = { version = "1", optional = true }
 
 zann-core = { path = "../zann-core", optional = true }
+zann-autofill = { path = "../zann-autofill", optional = true }
 zann-crypto = { path = "../zann-crypto", optional = true }
 zann-keystore = { path = "../zann-keystore", default-features = false, features = ["secret-store"], optional = true }
 
 [features]
 default = ["remote"]
-app = ["sync", "delivery"]
+native-messaging = ["dep:zeroize"]
+browser-ipc = ["dep:hex", "dep:serde", "dep:serde_json", "dep:thiserror", "dep:zeroize", "dep:zann-autofill", "dep:zann-crypto", "zann-crypto/ipc-transport", "zann-crypto/ipc-pairing", "dep:zann-core"]
+app = ["sync", "delivery", "browser-ipc"]
 delivery = [
   "dep:serde",
   "dep:serde_yaml",

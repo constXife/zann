@@ -135,6 +135,13 @@ fn totp_params(value: &str, payload: &EncryptedPayload) -> TotpParams {
     params
 }
 
+/// The same TOTP interpretation as the detail view, without projecting or
+/// cloning unrelated secret fields for a browser fill.
+pub fn payload_totp_params(payload: &EncryptedPayload, key: &str) -> Option<TotpParams> {
+    let field = payload.fields.get(key)?;
+    (field.kind == FieldKind::Otp).then(|| totp_params(&field.value, payload))
+}
+
 pub(crate) fn compare_field_keys(left: &str, right: &str) -> std::cmp::Ordering {
     let rank = |key: &str| {
         FIELD_ORDER

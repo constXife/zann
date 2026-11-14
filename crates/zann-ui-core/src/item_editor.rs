@@ -6,6 +6,9 @@ use std::sync::OnceLock;
 pub use zann_core::secrets::FieldKind;
 use zann_core::secrets::{EncryptedPayload, FieldValue, PayloadError};
 
+mod autofill;
+pub use autofill::{MatchMode, MatchRules, MATCH_RULES_KEY};
+
 #[derive(Deserialize)]
 pub struct FieldDefinition {
     pub key: String,
@@ -97,6 +100,8 @@ impl std::fmt::Debug for ItemSave {
 }
 #[derive(Debug, thiserror::Error)]
 pub enum DraftError {
+    #[error("invalid login match rules: {0}")]
+    Autofill(#[source] zann_autofill::AutofillError),
     #[error("invalid item payload: {0}")]
     Payload(#[source] PayloadError),
     #[error("item path is required")]
@@ -117,6 +122,7 @@ pub enum DraftError {
 impl DraftError {
     pub fn translation_key(&self) -> &'static str {
         match self {
+            Self::Autofill(_) => "errors.match_rules_invalid",
             Self::Path => "errors.path_invalid",
             Self::Name => "errors.item_name_invalid",
             Self::Fields => "errors.fields_required",
@@ -202,12 +208,14 @@ impl ItemDraft {
             })
             .collect();
         fields.sort_by(|a, b| crate::item_detail::compare_field_keys(&a.key, &b.key));
-        Ok(Self {
+        let draft = Self {
             path,
             type_id: payload.type_id.clone(),
             fields,
             payload,
-        })
+        };
+        draft.validate_match_rules()?;
+        Ok(draft)
     }
     /// Changing an untouched template may replace its empty fields. Populated
     /// drafts retain every value; unknown existing types may still be edited.
@@ -241,6 +249,7 @@ impl ItemDraft {
         })
     }
     pub fn payload_json(&self) -> Result<String, DraftError> {
+        self.validate_match_rules()?;
         if self.path.trim().is_empty() {
             return Err(DraftError::Path);
         }

@@ -10,6 +10,9 @@ use zann_ui_core::item_editor::{
 
 use crate::{CoreError, CoreResult, ItemCreate, ItemDetail, ItemUpdate};
 
+mod autofill;
+pub use autofill::{LoginMatchRulesFfi, MatchModeFfi};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
 pub enum FieldKindFfi {
     Text,
@@ -45,6 +48,7 @@ impl From<FieldKindFfi> for FieldKind {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
 pub enum DraftErrorKindFfi {
+    Autofill,
     Payload,
     Path,
     Name,
@@ -60,6 +64,7 @@ impl From<DraftError> for CoreError {
         let translation_key = error.translation_key().to_string();
         let message = error.to_string();
         let kind = match error {
+            DraftError::Autofill(_) => DraftErrorKindFfi::Autofill,
             DraftError::Payload(_) => DraftErrorKindFfi::Payload,
             DraftError::Path => DraftErrorKindFfi::Path,
             DraftError::Name => DraftErrorKindFfi::Name,
