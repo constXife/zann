@@ -10,7 +10,7 @@ document below, the canonical document wins.
 2. [`config/architecture-boundaries.json`](config/architecture-boundaries.json) — machine-enforced package graph, feature contracts, and source rules checked by `./scripts/check-client-architecture.sh`.
 3. [`docs/adr/`](docs/adr/) — architectural decisions:
    - [ADR 0001](docs/adr/0001-shared-client-core.md): shared client core & thin interface shells;
-   - [ADR 0002](docs/adr/0002-client-strategy.md): client strategy (`Rust Core + Thin Native Shells` across Linux COSMIC, Apple SwiftUI for macOS/iOS/iPadOS, Android Jetpack Compose, Tauri desktop, and Browser Extension + Daemon);
+   - [ADR 0002](docs/adr/0002-client-strategy.md): client strategy (`Rust Core + Thin Native Shells` across Linux COSMIC, Apple SwiftUI for macOS/iOS/iPadOS, Android Jetpack Compose, and Browser Extension + Daemon);
    - [ADR 0004](docs/adr/0004-machine-secret-plane.md) & [ADR 0005](docs/adr/0005-runtime-secret-delivery-profiles.md): machine secret plane & runtime delivery profiles;
    - [ADR 0009](docs/adr/0009-crypto-format-lifecycle.md): cryptographic format lifecycle (Pre-GA single-`v1` + golden tripwires vs post-`v0.Y` append-only envelopes).
 4. [`crates/zann-server/SECURITY.md`](crates/zann-server/SECURITY.md) & [`docs/audit-surface.md`](docs/audit-surface.md) — server threat model and client/server security audit surface.
@@ -57,9 +57,8 @@ Dependencies point strictly downward (`[SHELL]` → `[PRESENTATION]` → `[CORE]
 ### 3. `[SHELL]` — Native Interfaces & Edge Adapters
 - `apps/apple`: SwiftUI macOS client (`project.yml` for XcodeGen; iOS/iPadOS planned) over the `ZannCoreKit` package around `zann-ffi`. Owns views and Apple OS adapters (Keychain ports) only.
 - `apps/cosmic`: COSMIC-native (`libcosmic` / Iced) reference desktop client for Linux. Links `[CORE]` and `[PRESENTATION]` directly in Rust.
-- `apps/desktop`: Tauri desktop app (`src/` Vue 3 + TypeScript frontend, `src-tauri/` Rust backend).
 - `crates/zann-cli`: server-oriented CLI (`zann-client` `remote` + Config v2 + `CredentialStore` + `delivery` surfaces, free of SQLite and GUI deps).
-- `crates/zann-ffi`: UniFFI edge adapter projecting `[CORE]` and `[PRESENTATION]` to non-Rust clients (`apps/apple` SwiftUI for macOS/iOS/iPadOS and `apps/android` Jetpack Compose). Rust clients must not use `zann-ffi` for new capabilities (`MIG-003`).
+- `crates/zann-ffi`: UniFFI edge adapter projecting `[CORE]` and `[PRESENTATION]` to non-Rust clients (`apps/apple` SwiftUI for macOS/iOS/iPadOS and `apps/android` Jetpack Compose). Rust clients must not use `zann-ffi` for new capabilities.
 - **Shell rule:** Shells own only widgets, layout, navigation, CLI I/O, and OS capability adapters (clipboard, tray, biometrics, file dialogs, browser launch, autofill extensions). Never implement crypto, HTTP routes, sync merge rules, or category/masking logic in a shell.
 
 ---
@@ -80,7 +79,7 @@ Match verification depth to the blast radius of the diff:
 - **T0 — Documentation, translations (`i18n/`), or comments only:**
   - Verify links and accuracy against the code; no heavy test suites required.
 - **T1 — Contained implementation within one crate or shell screen (no boundary/contract change):**
-  - Run `cargo fmt --check`, `cargo clippy` and `cargo test` for the affected package (`cargo test -p <crate>`, `just cosmic-test`, or `just desktop-test`).
+  - Run `cargo fmt --check`, `cargo clippy` and `cargo test` for the affected package (`cargo test -p <crate>` or `just cosmic-test`); Apple shell changes also require the macOS build and tests below.
   - Check consolidation rules ([`.agents/skills/consolidation-check/SKILL.md`](.agents/skills/consolidation-check/SKILL.md)).
 - **T2 — Boundary, architecture, or security audit-surface change:**
   - Triggered by changes to paths in [`docs/audit-surface.md`](docs/audit-surface.md), `crates/zann-crypto/**`, `crates/zann-keystore/**`, `crates/zann-client/**`, `crates/zann-client-sqlite/**`, `crates/zann-server/src/domains/{auth,access_control}/**`, `crates/zann-ffi/**`, `config/architecture-boundaries.json`, or `AGENTS.md`.
@@ -102,8 +101,6 @@ Match verification depth to the blast radius of the diff:
 - `cd apps/apple && xcodegen --spec project.yml && xcodebuild test -project Zann.xcodeproj -scheme Zann -destination 'platform=macOS,arch=arm64'` — generate, build and test the macOS app (needs the xcframework above).
 - `just cosmic-test` (`cd apps/cosmic && cargo test`) — run headless flow and backend tests for the COSMIC client.
 - `just cosmic-run` / `nix build .#zann-cosmic` — run or package the COSMIC desktop client.
-- `just desktop-test` (`cd apps/desktop && bun run test`) — run Tauri frontend unit tests.
-- `cd apps/desktop/src-tauri && cargo test` — run Tauri Rust backend tests.
 - `just server-test-db` — run Postgres-backed server integration tests (requires Podman and `compose.test.yaml`).
 
 ---

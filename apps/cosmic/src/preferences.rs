@@ -3,7 +3,7 @@
 //! The model and defaults are shared, but this file adapter is intentionally
 //! thin: a later config repository can replace it without changing any screen.
 //! Writes patch one owned field into the existing JSON object, preserving
-//! Tauri-only and future fields.
+//! other native-client and future fields.
 
 use std::path::{Path, PathBuf};
 
@@ -74,7 +74,7 @@ impl Store {
             .unwrap_or_default()
     }
 
-    /// Shell-owned preference shared with the Tauri desktop client. It is
+    /// Shell-owned preference for native close-to-tray behavior. It is
     /// intentionally not part of `DevicePreferences`, whose contract excludes
     /// platform-specific window and tray behavior.
     pub fn load_close_to_tray(&self) -> Result<bool, String> {

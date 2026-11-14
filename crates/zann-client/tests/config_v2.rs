@@ -1598,7 +1598,7 @@ fn existing_migration_is_claimed_atomically_by_each_client_without_credentials()
         Some(&other_id)
     );
 
-    let clients = ["cosmic", "tauri"];
+    let clients = ["cosmic", "apple"];
     let barrier = Arc::new(Barrier::new(clients.len()));
     let mut workers = Vec::new();
     for name in clients {
@@ -1621,7 +1621,7 @@ fn existing_migration_is_claimed_atomically_by_each_client_without_credentials()
     let claimed = repo.snapshot().expect("claimed snapshot");
     assert_eq!(claimed.revision(), 5);
     let migration = claimed.config().migration.as_ref().expect("migration");
-    for name in ["cli", "desktop", "cosmic", "tauri"] {
+    for name in ["cli", "desktop", "cosmic", "apple"] {
         assert!(migration.claimed_clients.contains(&client_id(name)));
     }
     assert_eq!(

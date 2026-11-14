@@ -93,8 +93,7 @@ just cosmic-uninstall
 ```
 
 That one builds the release binary, installs the desktop entry from `data/` with
-`Exec` rewritten to the absolute path, and takes the icons from the Tauri app —
-one logo for the whole product rather than a second copy of the same PNGs. The
+`Exec` rewritten to the absolute path, and uses the shared product icons from `assets/icons` — one owner for every client. The
 binary lands in `~/.local/libexec` and `~/.local/bin/zann-cosmic` is a wrapper,
 because winit `dlopen`s libwayland at startup and a launcher starts `Exec=` with
 none of the dev shell's environment — the bare binary dies with `NoWaylandLib`.

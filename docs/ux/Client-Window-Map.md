@@ -1,6 +1,6 @@
-# Client Window Map (Tauri reference)
+# Native Client Window Map
 
-Goal: provide a concrete, platform-agnostic window map based on the current Tauri app.
+Goal: define platform-neutral windows and flows for COSMIC and Apple clients.
 Use this as a reference when building a new client for another platform.
 
 This is about windows and flows, not visual design details.

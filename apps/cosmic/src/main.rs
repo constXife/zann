@@ -63,8 +63,7 @@ enum Shell {
 /// padding. The same value drives libcosmic's condensed-layout breakpoint.
 const NAV_WIDTH: f32 = 288.0;
 
-/// Match the Tauri window and the minimum at which its three panels remain
-/// useful (`apps/desktop/src-tauri/tauri.conf.json`).
+/// Native desktop window sizes that keep all three semantic regions usable.
 const WINDOW_SIZE: Size = Size::new(1200.0, 700.0);
 const WINDOW_MIN: Size = Size::new(1125.0, 650.0);
 
@@ -139,7 +138,7 @@ impl menu::Action for Action {
     }
 }
 
-/// Match the shortcuts used by the Tauri app. The menu reads this same map to
+/// Native application shortcuts. The menu reads this same map to
 /// print the shortcut beside each command.
 fn key_binds() -> &'static HashMap<menu::KeyBind, Action> {
     static BINDS: OnceLock<HashMap<menu::KeyBind, Action>> = OnceLock::new();
@@ -199,8 +198,7 @@ impl cosmic::Application for App {
     type Message = Message;
 
     /// Matches `StartupWMClass` in `data/com.rlyeh.zann.Cosmic.desktop`, which
-    /// is how the compositor ties the window to the launcher entry, and shares
-    /// the prefix the Tauri app already uses (`com.rlyeh.zann`).
+    /// is how the compositor ties the window to the launcher entry.
     const APP_ID: &'static str = "com.rlyeh.zann.Cosmic";
 
     fn core(&self) -> &Core {

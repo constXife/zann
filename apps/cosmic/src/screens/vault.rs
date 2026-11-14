@@ -41,8 +41,7 @@ fn category_icon(schema_icon: &str) -> &'static str {
     }
 }
 
-/// Keep the list/detail split aligned with
-/// `apps/desktop/src/composables/app/state/useAppLayout.ts`.
+/// Native list/detail geometry implementing docs/ux/Layout-Responsive-Spec.md.
 mod layout {
     pub const LIST_MIN: f32 = 320.0;
     pub const LIST_MAX: f32 = 560.0;

@@ -22,7 +22,7 @@ Self-hosted password manager for individuals and small teams.
 - **Client-side encryption** - personal vaults are encrypted on the client
 - **Shared vaults** - shared vaults for small teams
 - **CI/CD CLI** - service account tokens, server fingerprint pinning
-- **Native clients** - server-connected setup, encrypted offline replicas (Linux, macOS, Windows)
+- **Native clients** - COSMIC on Linux and SwiftUI on macOS, with server-connected setup and encrypted offline replicas
 - **Hybrid auth** - OIDC + built-in authentication
 
 ## Stability
@@ -43,15 +43,11 @@ for:
 - May happen without migration steps
 - Will still be noted in [CHANGELOG](CHANGELOG.md) when possible
 
-## Screenshots
-
-![Desktop app](/zann/screenshots/desktop-app.png)
-
 ## Quick start
 
 ### Connect a native client
 
-1. Download the desktop app for your platform from [Releases](https://github.com/constXife/zann/releases)
+1. Build the native client for your platform: [COSMIC on Linux](https://github.com/constXife/zann/tree/main/apps/cosmic) or [SwiftUI on macOS](https://github.com/constXife/zann/tree/main/apps/apple)
 2. Connect to a Zann server and sign in or register
 3. Unlock with your master password and complete the first sync
 
@@ -59,18 +55,16 @@ After that, unlock, read, search, edit, export, snapshot and verify work offline
 Edits stay pending until the server confirms them. Forgetting a connection keeps
 its encrypted cache and unsent changes; reconnect to resume syncing.
 Standalone serverless vault creation is no longer supported. Before upgrading an
-old local-only vault, see [the cutover guide](migrations/server-first-clients.md).
+old local-only vault, see [the cutover guide](docs/migrations/server-first-clients.md).
 
-If your platform is not listed in Releases, build the desktop app from source
-(requires Rust toolchain, Bun, and Tauri system dependencies):
+On Linux with Nix, build the COSMIC package from the repository root:
 
 ```bash
-cd apps/desktop
-bun install
-bun run tauri build
+nix build .#zann-cosmic
 ```
 
-See `CONTRIBUTING.md` for platform-specific Tauri prerequisites.
+For macOS, follow the [Apple build guide](https://github.com/constXife/zann/tree/main/apps/apple).
+Windows GUI support is planned; the legacy Tauri client has been retired.
 
 Full install guide: `/install/`.
 
@@ -108,7 +102,7 @@ docker compose up -d
 ```mermaid
 flowchart TB
     subgraph Clients["Clients"]
-        Desktop["Desktop App<br/>Offline-first"]
+        Desktop["Native clients<br/>Linux / macOS"]
         CLI["CLI Client<br/>CI/CD ready"]
     end
 
@@ -127,8 +121,11 @@ flowchart TB
 Components:
 - `zann-server` - HTTP API (Axum, PostgreSQL)
 - `zann-cli` - CLI client for Linux/macOS/CI
-- `apps/desktop` - Desktop app (Tauri, SQLite)
-- `zann-core` - shared business logic and cryptography
+- `apps/cosmic` - native Linux client (libcosmic)
+- `apps/apple` - SwiftUI macOS client over UniFFI; iOS/iPadOS planned
+- `zann-client` / `zann-client-sqlite` - shared application services and encrypted local replicas
+- `zann-ui-core` - shared presentation, editor and generator policy
+- `zann-core` / `zann-crypto` - domain models and cryptographic primitives
 
 Server threat model: [crates/zann-server/SECURITY.md](crates/zann-server/SECURITY.md) (assumptions and trust boundaries).
 
@@ -212,7 +209,7 @@ CPU usage depends on workload and database performance. See [loadtest/k6/scenari
 ## Tech stack
 
 **Backend**: Rust, Axum, PostgreSQL, SQLx, Argon2id, ChaCha20Poly1305
-**Desktop**: Tauri, Vue 3, TypeScript, TailwindCSS
+**Native clients**: Rust/libcosmic on Linux; SwiftUI + UniFFI on macOS
 **DevOps**: Docker Compose, GitHub Actions, Prometheus, OpenTelemetry
 
 ## Development

@@ -6,6 +6,14 @@
 - **Scope:** `crates/zann-cli`, `apps/desktop`, `apps/cosmic` and their
   shared Rust crates
 
+## Implementation status (2026-11-14)
+
+The original context and phased plan below record the consolidation baseline.
+Tauri was retired under ADR 0002 / #249 after canonical backup import and
+native password/passphrase generation landed. The live capability map now
+retains only COSMIC root/flow debt (MIG-005/006) and legacy DB adoption (MIG-009);
+Tauri paths below are historical evidence, not active consumers or work items.
+
 ## Context
 
 Zann intends to have one Rust implementation of security- and

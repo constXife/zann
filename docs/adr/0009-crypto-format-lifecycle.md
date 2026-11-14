@@ -94,9 +94,9 @@ Before `v0.Y` freezes `v1`, the following sharp edges are resolved in-place so
      `hash_service_token`);
    - `rotation_candidate_aad` ciphertexts;
    - backup format round-trips.
-4. **Eliminate remaining shell crypto duplication (`MIG-004`):** Remove
-   `apps/desktop/src-tauri/src/crypto.rs` so `zann-crypto` is the sole crate
-   constructing AADs and envelopes.
+4. **Shell crypto consolidation (Complete, #249):** The legacy Tauri crypto
+   implementation is deleted and MIG-004 is retired. Keep `zann-crypto` as the
+   sole client owner of AADs and envelopes.
 
 ### 3. Plaintext round-trip completeness as a Pre-GA precondition
 
@@ -145,8 +145,8 @@ review criteria; this ADR adds no second crypto or persistence owner.
   that a failed migration leaves a restorable snapshot.
 - **Lossless import/export:** extend the canonical backup ports and server CLI
   owners with bounded streaming and metadata-preserving round-trip tests.
-  Tauri's duplicate import/crypto paths remain existing migration debt until
-  their replacement or removal under ADR 0002; their allowlists do not expand.
+  Canonical server-backed backup import is implemented (#243); the retired
+  Tauri import/crypto copies and their allowlists are deleted (#249).
 
 These checks belong to the corresponding implementation changes. No new
 runtime dependency, global coordination service or release approval step is

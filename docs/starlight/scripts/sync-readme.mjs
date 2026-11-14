@@ -20,6 +20,9 @@ if (lines[0]?.startsWith("# ")) {
 body = body.replaceAll("docs/screenshots/", `screenshots/`);
 body = body.replaceAll("screenshots/", `${docsBase}screenshots/`);
 body = body.replaceAll("docs/INSTALL.md", "/install/");
+for (const client of ["cosmic", "apple"]) {
+  body = body.replaceAll(`apps/${client}/README.md`, `https://github.com/constXife/zann/tree/main/apps/${client}`);
+}
 
 const frontmatter = [
   "---",
