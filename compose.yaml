@@ -26,7 +26,7 @@ services:
         condition: service_healthy
     volumes:
       - ./config:/config:ro
-      - ./data:/data:U
+      - zann_data:/data
     environment:
       ZANN_DB_URL: postgres://zann:zann@db:5432/zann
       ZANN_DB_POOL_MAX: "5"
@@ -44,7 +44,7 @@ services:
       - .env
     volumes:
       - ./config:/config:ro
-      - ./data:/data:U
+      - zann_data:/data
     depends_on:
       db:
         condition: service_healthy
@@ -64,3 +64,4 @@ services:
 
 volumes:
   zann_pgdata:
+  zann_data:

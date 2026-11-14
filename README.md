@@ -74,17 +74,24 @@ your own secrets.
 git clone https://github.com/constXife/zann
 cd zann
 
-# Provide peppers (the compose file refuses to start without them)
-cp .env.example .env
-# edit .env: set ZANN_PASSWORD_PEPPER and ZANN_TOKEN_PEPPER
-# (openssl rand -base64 32)
-
-# Start the server via Docker Compose
-docker compose up -d
+# Generate .env with private permissions and random peppers, then build and start
+./scripts/dev-up.sh
+# Or, with just installed: just dev-up
 
 # The server is available at http://localhost:8080
-# The shared-vault master key is generated into ./data/smk on first start
 ```
+
+Requires Docker Engine / Docker Desktop with Compose, Bash and OpenSSL. For
+Podman with a Compose provider, use `just dev-up podman` or
+`./scripts/dev-up.sh podman`. Subsequent starts reuse `.env`; it stays `0600`
+and gitignored. Once `.env` exists, `docker compose up -d` also works directly.
+
+PostgreSQL lives in the `zann_pgdata` named volume. The shared-vault master key
+(`/data/smk`) and server identity (`/data/identity-key`) are generated in the
+`zann_data` named volume, writable by the image's nonroot user. Back up both
+volumes and `.env`; see [backup instructions](docs/INSTALL.md#local-dev-backups).
+If upgrading an existing checkout using `./data`, copy its keys into `zann_data`
+before starting the new stack; existing bind-mount data is not moved automatically.
 
 ## System requirements (server)
 

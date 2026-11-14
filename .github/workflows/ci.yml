@@ -53,13 +53,26 @@ jobs:
               - 'rust-toolchain.toml'
             server:
               - 'crates/zann-server/**'
+              - 'crates/zann-crypto/**'
+              - 'crates/zann-core/**'
+              - 'crates/zann-db/**'
               - 'crates/zann-integration-tests/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
               - 'config/*.yaml'
               - 'compose.yaml'
             docker:
               - 'crates/zann-server/Dockerfile'
+              - 'crates/zann-crypto/**'
+              - 'crates/zann-core/**'
+              - 'crates/zann-db/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
               - '.dockerignore'
               - 'compose.yaml'
+              - '.env.example'
+              - 'Justfile'
+              - 'scripts/dev-up.sh'
             extension:
               - 'apps/extension/**'
               - 'crates/zann-browser/**'
@@ -799,6 +812,8 @@ jobs:
       packages: write
     outputs:
       image: ${{ steps.meta.outputs.image }}
+    env:
+      COMPOSE_PROJECT_NAME: zann_quickstart
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -811,6 +826,18 @@ jobs:
         run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
       - name: Build image
         run: docker build --build-arg GIT_COMMIT=${{ github.sha }} -f crates/zann-server/Dockerfile -t "${{ steps.meta.outputs.image }}" .
+      - name: Smoke test local Compose quickstart
+        id: quickstart
+        run: |
+          ./scripts/dev-up.sh
+          test "$(stat -c '%a' .env)" = 600
+          curl --fail --silent --show-error --max-time 5 --retry 30 --retry-all-errors --retry-max-time 60 --retry-delay 1 http://localhost:8080/health
+      - name: Compose diagnostics
+        if: failure() && steps.quickstart.outcome == 'failure'
+        run: docker compose logs --no-color
+      - name: Stop quickstart stack
+        if: always() && steps.quickstart.outcome != 'skipped'
+        run: docker compose down -v
       - name: Push image
         run: docker push "${{ steps.meta.outputs.image }}"
 
