@@ -33,6 +33,7 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 zann-client = { path = "../../crates/zann-client", default-features = false, features = ["app", "os-credentials"] }
 zann-client-sqlite = { path = "../../crates/zann-client-sqlite", features = ["local-vault"] }
 zann-core = { path = "../../crates/zann-core" }
+zann-daemon = { path = "../../crates/zann-daemon" }
 zann-ui-core = { path = "../../crates/zann-ui-core" }
 
 [dev-dependencies]

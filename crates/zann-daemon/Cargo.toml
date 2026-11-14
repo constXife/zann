@@ -1,0 +1,32 @@
+[package]
+name = "zann-daemon"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[features]
+default = []
+standalone = ["dep:zann-client-sqlite", "dep:rpassword"]
+
+[[bin]]
+name = "zann-daemon"
+required-features = ["standalone"]
+
+[dependencies]
+hex = "0.4"
+libc = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "1"
+zeroize = { version = "1", features = ["serde"] }
+zann-client = { path = "../zann-client", default-features = false, features = ["app", "native-messaging"] }
+zann-core = { path = "../zann-core", default-features = false }
+zann-crypto = { path = "../zann-crypto", features = ["ipc-transport"] }
+zann-ui-core = { path = "../zann-ui-core" }
+zann-client-sqlite = { path = "../zann-client-sqlite", features = ["local-vault"], optional = true }
+rpassword = { version = "7", optional = true }
+
+[dev-dependencies]
+zann-client-sqlite = { path = "../zann-client-sqlite", features = ["test-support"] }

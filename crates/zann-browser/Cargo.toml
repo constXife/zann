@@ -1,0 +1,26 @@
+[package]
+name = "zann-browser"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "=0.2.106"
+serde_json = "1"
+hex = "0.4"
+zeroize = "1"
+zann-client = { path = "../zann-client", default-features = false, features = ["browser-ipc"] }
+zann-crypto = { path = "../zann-crypto" }
+zann-ui-core = { path = "../zann-ui-core" }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2", features = ["js"] }
+getrandom03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+uuid = { version = "1", features = ["js"] }
+
+[features]
+default = []

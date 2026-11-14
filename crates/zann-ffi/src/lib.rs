@@ -12,8 +12,10 @@ pub use auto_sync::*;
 mod conversions;
 mod session;
 pub use session::*;
+mod browser;
 mod item_detail;
 mod item_editor;
+pub use browser::*;
 pub use item_detail::*;
 pub use item_editor::*;
 mod presentation;
@@ -29,6 +31,11 @@ pub use platform::*;
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum CoreError {
+    #[error("browser integration: {message}")]
+    Browser {
+        kind: BrowserErrorKindFfi,
+        message: String,
+    },
     #[error("vault is locked")]
     Locked,
     #[error("operation cancelled")]
@@ -76,6 +83,9 @@ impl From<zann_client::app::local::LocalError> for CoreError {
         use zann_client::app::local::LocalError;
         match error {
             LocalError::Backup { kind, message, .. } => Self::Service(format!("{kind}: {message}")),
+            LocalError::BrowserPolicy(_) | LocalError::BrowserDelivery(_) => {
+                Self::Service(error.to_string())
+            }
             LocalError::Locked => Self::Locked,
             LocalError::Cancelled => Self::Cancelled,
             LocalError::DeadlineExceeded => Self::DeadlineExceeded,
@@ -97,6 +107,8 @@ pub trait HardwareEnrollmentProgress: Send + Sync {
 
 #[derive(uniffi::Object)]
 pub struct CoreFacade {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    daemon: std::sync::Mutex<Option<zann_daemon::Daemon>>,
     inner: Arc<native::LocalVault>,
 }
 #[uniffi::export]
@@ -395,9 +407,12 @@ pub fn create_core(
         platform::keystore(keystore),
         platform::secret_store(secret_store),
     );
-    native::open_vault_at_path(Path::new(&db_path), ports)
-        .map(|inner| Arc::new(CoreFacade { inner }))
-        .map_err(Into::into)
+    let inner = native::open_vault_at_path(Path::new(&db_path), ports)?;
+    Ok(Arc::new(CoreFacade {
+        inner,
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        daemon: std::sync::Mutex::new(None),
+    }))
 }
 uniffi::setup_scaffolding!("zann_ffi");
 

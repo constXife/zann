@@ -48,7 +48,24 @@
     "server_credentials": "Server Credentials",
     "secret": "Secret"
   },
+  "browser": {
+    "title": "Browser connections",
+    "codeHint": "Create a one-time code and enter it in the Zann extension. It expires in two minutes and allows five attempts. Connecting again replaces the previous code.",
+    "refresh": "Refresh browser connections",
+    "connect": "Connect browser",
+    "code": "One-time code",
+    "revoke": "Revoke connection"
+  },
+  "autofill": {
+    "registrableDomain": "Registrable domain",
+    "host": "Host",
+    "exact": "Exact URL",
+    "regex": "Regular expression",
+    "never": "Never fill",
+    "pattern": "URL pattern"
+  },
   "fields": {
+    "match_rules": "Autofill matching",
     "username": "Username",
     "password": "Password",
     "url": "URL",
@@ -626,6 +643,7 @@
     "generatorPasswordLength": "Choose a password length within the allowed range.",
     "generatorEmptyAlphabet": "Select at least one character class.",
     "generatorWordCount": "Choose a word count within the allowed range.",
+    "match_rules_invalid": "Check the autofill matching rule.",
     "import_target_required": "Select a server storage to import into.",
     "generic": "Something went wrong",
     "remote_error": "Server error",
@@ -633,6 +651,7 @@
     "unlock_failed": "Unlock failed",
     "unlock_required": "Unlock required",
     "password_required": "Password is required",
+    "master_password_edge_whitespace": "Master password must not start or end with whitespace.",
     "already_initialized": "Vault is already initialized",
     "vault_list_failed": "Failed to load vaults",
     "items_list_failed": "Failed to load items",

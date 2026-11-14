@@ -19,6 +19,7 @@ pub mod i18n;
 pub mod item;
 pub mod item_detail;
 pub mod item_editor;
+pub mod login_list;
 pub mod server_url;
 pub mod settings;
 pub mod sync_status;

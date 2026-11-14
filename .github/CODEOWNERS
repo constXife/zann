@@ -1,6 +1,7 @@
 # Audit-surface owners
 /crates/zann-ui-core/src/generator/ @constXife
 /crates/zann-ffi/src/generator.rs @constXife
+/crates/zann-autofill/ @constXife
 /crates/zann-crypto/ @constXife
 /crates/zann-core/src/auth.rs @constXife
 /crates/zann-core/src/api/auth.rs @constXife
@@ -54,3 +55,18 @@
 /crates/zann-core/src/item_metadata.rs @constXife
 /crates/zann-db/src/services/create_item.rs @constXife
 /crates/zann-db/migrations/0005_item_metadata.sql @constXife
+
+# Authenticated local browser IPC (#199)
+/crates/zann-daemon/ @constXife
+/crates/zann-native-host/ @constXife
+/crates/zann-client/src/app/local/browser.rs @constXife
+/crates/zann-db/src/services/browser.rs @constXife
+/crates/zann-db/src/local/item_repo/browser.rs @constXife
+/crates/zann-db/migrations/0006_browser_login_index.sql @constXife
+/crates/zann-core/src/constants.rs @constXife
+/crates/zann-client/src/native_messaging.rs @constXife
+
+/apps/extension/ @constXife
+/crates/zann-browser/ @constXife
+/crates/zann-db/src/services/create_item.rs @constXife
+/crates/zann-db/src/local/item_history_repo.rs @constXife

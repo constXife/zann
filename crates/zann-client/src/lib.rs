@@ -1,5 +1,7 @@
 #[cfg(feature = "app")]
 pub mod app;
+#[cfg(feature = "browser-ipc")]
+pub mod browser_ipc;
 #[cfg(feature = "config")]
 pub mod config;
 #[cfg(feature = "os-credentials")]
@@ -22,5 +24,7 @@ pub mod session;
 #[cfg(feature = "sync")]
 pub mod sync;
 
+#[cfg(feature = "native-messaging")]
+pub mod native_messaging;
 #[cfg(all(feature = "remote", feature = "config"))]
 pub mod server;

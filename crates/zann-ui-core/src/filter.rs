@@ -74,13 +74,22 @@ pub fn item_matches<I: ItemLike + ?Sized>(
 ///
 /// An empty query matches everything.
 pub fn matches_query<I: ItemLike + ?Sized>(item: &I, query: &str) -> bool {
-    let needle = query.trim().to_lowercase();
-    if needle.is_empty() {
-        return true;
+    TextQuery::new(query).matches([item.title(), item.path(), item.type_id()])
+}
+
+/// Prepared once per list query; native and browser adapters supply only the
+/// public fields actually shown in their list, never secret payload fields.
+pub struct TextQuery(String);
+impl TextQuery {
+    pub fn new(query: &str) -> Self {
+        Self(query.trim().to_lowercase())
     }
-    [item.title(), item.path(), item.type_id()]
-        .iter()
-        .any(|field| field.to_lowercase().contains(&needle))
+    pub fn matches<'a>(&self, fields: impl IntoIterator<Item = &'a str>) -> bool {
+        self.0.is_empty()
+            || fields
+                .into_iter()
+                .any(|field| field.to_lowercase().contains(&self.0))
+    }
 }
 
 /// Positions of the items that pass `filter`, for list views that index back

@@ -19,6 +19,11 @@
     ],
     "advanced": [
       {
+        "key": "match_rules",
+        "type": "text",
+        "label": "fields.match_rules"
+      },
+      {
         "key": "totp_secret",
         "type": "otp",
         "label": "fields.totp_secret"

@@ -9,6 +9,7 @@ license = "MIT"
 tokio = { version = "1", default-features = false, features = ["rt"] }
 uuid = { version = "1", features = ["v7"] }
 zann-client = { path = "../zann-client", default-features = false, features = ["app"] }
+zann-autofill = { path = "../zann-autofill", optional = true }
 zann-core = { path = "../zann-core", default-features = false }
 zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"] }
@@ -28,6 +29,7 @@ zann-keystore = { path = "../zann-keystore", optional = true }
 default = []
 test-support = ["local-vault"]
 local-vault = [
+  "dep:zann-autofill",
   "dep:anyhow", "dep:base64", "dep:chrono", "dep:csv", "dep:percent-encoding",
   "dep:serde", "dep:serde_json", "dep:thiserror", "dep:url", "dep:zann-keystore",
   "zann-client/os-credentials", "tokio/rt-multi-thread", "tokio/sync", "tokio/macros", "tokio/time",

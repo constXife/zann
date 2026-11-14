@@ -432,12 +432,39 @@ mod maintenance;
 mod identity;
 use identity::*;
 
+mod browser;
+mod browser_save;
 mod context;
 mod item_read;
 mod selection;
 use selection::*;
 
 impl LocalVaultService for LocalVault {
+    fn browser_query(
+        &self,
+        context: BrowserContext,
+        cursor: Option<BrowserCursor>,
+        sink: &mut dyn FnMut(BrowserMatches) -> LocalResult<()>,
+    ) -> LocalResult<()> {
+        LocalVault::browser_query(self, context, cursor, sink)
+    }
+    fn browser_save(
+        &self,
+        context: BrowserContext,
+        scope: BrowserScope,
+        login: CapturedLogin,
+        sink: &mut dyn FnMut(String) -> LocalResult<()>,
+    ) -> LocalResult<()> {
+        LocalVault::browser_save(self, context, scope, login, sink)
+    }
+    fn browser_fill(
+        &self,
+        context: BrowserContext,
+        item_id: String,
+        sink: &mut dyn FnMut(&EncryptedPayload) -> LocalResult<()>,
+    ) -> LocalResult<()> {
+        LocalVault::browser_fill(self, context, item_id, sink)
+    }
     #[cfg(debug_assertions)]
     fn debug_create_kv_item(
         &self,

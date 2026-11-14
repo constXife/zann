@@ -17,6 +17,13 @@ pub use zann_keystore::{
 
 use super::LocalVault;
 
+impl LocalVault {
+    /// The native opener's resolved paths, reused by the IPC composition root.
+    pub fn client_paths(&self) -> zann_client::app::ClientPaths {
+        zann_client::app::ClientPaths::with_local_db(&self.root, &self.database_path)
+    }
+}
+
 /// Platform adapters behind one local vault. Choosing them is the composition
 /// root's job; the vault never discovers an OS store on its own.
 pub struct LocalVaultPorts {

@@ -1,5 +1,9 @@
 [workspace]
 members = [
+  "crates/zann-browser",
+  "crates/zann-daemon",
+  "crates/zann-native-host",
+  "crates/zann-autofill",
   "crates/zann-client",
   "crates/zann-client-sqlite",
   "crates/zann-crypto",

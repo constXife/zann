@@ -512,3 +512,35 @@ async fn local_pending_changes_keep_first_base_seq_on_updates() {
         "base_seq should remain from first update"
     );
 }
+
+#[tokio::test]
+async fn item_creation_rolls_back_item_and_history_when_pending_write_fails() {
+    let (pool, storage, vault, master) = setup_local().await;
+    sqlx_core::query::query::<sqlx_sqlite::Sqlite>("CREATE TRIGGER fail_pending BEFORE INSERT ON pending_changes BEGIN SELECT RAISE(FAIL, 'injected pending refusal'); END")
+        .execute(&pool).await.unwrap();
+    let services = LocalServices::new(&pool, &master);
+    assert!(services
+        .put_item_with_metadata(
+            storage,
+            vault,
+            "Atomic login".into(),
+            "login".into(),
+            login_payload("sentinel"),
+            zann_core::ItemMetadata::default()
+        )
+        .await
+        .is_err());
+    assert!(LocalItemRepo::new(&pool)
+        .get_active_by_vault_path(storage, vault, "Atomic login")
+        .await
+        .unwrap()
+        .is_none());
+    let count: (i64,) = sqlx_core::query_as::query_as::<sqlx_sqlite::Sqlite, (i64,)>(
+        "SELECT COUNT(*) FROM item_history",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(count.0, 0);
+    pool.close().await;
+}
