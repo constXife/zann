@@ -4,11 +4,7 @@ default:
     just server-lint
     just server-test
 
-db_url := "sqlite://./.tmp/dev.db"
-pg_url := "postgres://zann:zann@127.0.0.1:5432/zann"
 pg_test_url := "postgres://zann:zann@127.0.0.1:5433/zann"
-
-MIGRATE_SOURCE := "--source crates/zann-server/migrations"
 
 fmt:
     cargo fmt --check
@@ -92,14 +88,19 @@ cosmic-uninstall:
       update-desktop-database "$HOME/.local/share/applications" || true
     echo "removed"
 
-db-up:
-    podman compose up -d db
+# Generate a private .env once, build the image, migrate Postgres and start the server.
+# Select Podman explicitly with `just dev-up podman`.
+dev-up engine='docker':
+    ./scripts/dev-up.sh {{quote(engine)}}
 
-db-down:
-    podman compose down
+db-up engine='docker':
+    ./scripts/dev-up.sh {{quote(engine)}} db
 
-db-reset:
-    podman compose down -v
+db-down engine='docker':
+    {{quote(engine)}} compose down
+
+db-reset engine='docker':
+    {{quote(engine)}} compose down -v
 
 server-test-db:
     podman compose -p zann_test -f compose.test.yaml up -d db
@@ -119,29 +120,12 @@ server-test-pg db:
 test-db-down:
     podman compose -p zann_test -f compose.test.yaml down
 
-server-migrate:
-    mkdir -p .tmp
-    DATABASE_URL={{db_url}} sqlx database create
-    DATABASE_URL={{db_url}} sqlx migrate run {{MIGRATE_SOURCE}}
-
 server-lint:
-    just server-migrate
-    DATABASE_URL={{db_url}} cargo fmt --check
-    DATABASE_URL={{db_url}} cargo clippy -- -D warnings
+    cargo fmt --check
+    cargo clippy -p zann-server --all-targets -- -D warnings
 
 server-test:
     just server-test-db
-
-server-run:
-    just server-migrate
-    DATABASE_URL={{db_url}} cargo run -p zann-server
-
-server-run-dev:
-    just server-migrate
-    ZANN_PASSWORD_PEPPER=dev-pepper \
-    ZANN_TOKEN_PEPPER=dev-pepper \
-    DATABASE_URL={{db_url}} \
-    cargo run -p zann-server
 
 cli-build:
     cargo build -p zann-cli --release
@@ -159,12 +143,6 @@ full-test:
     just fast-test
     just server-test-db
     nix develop .#cosmic --command just cosmic-test
-
-run:
-    just server-run
-
-run-dev:
-    just server-run-dev
 
 cli:
     just cli-build

@@ -10,6 +10,7 @@ COPY . .
 RUN /bin/bash -c 'printf "%s\n" \
   "[workspace]" \
   "members = [" \
+  "  \"crates/zann-crypto\"," \
   "  \"crates/zann-core\"," \
   "  \"crates/zann-db\"," \
   "  \"crates/zann-server\"," \
@@ -52,6 +53,7 @@ COPY . .
 RUN /bin/bash -c 'printf "%s\n" \
   "[workspace]" \
   "members = [" \
+  "  \"crates/zann-crypto\"," \
   "  \"crates/zann-core\"," \
   "  \"crates/zann-db\"," \
   "  \"crates/zann-server\"," \

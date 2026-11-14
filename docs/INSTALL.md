@@ -46,15 +46,45 @@ The binary is at `target/debug/zann` (or `target/release/zann` with `--release`)
 ```bash
 git clone https://github.com/constXife/zann
 cd zann
-cp .env.example .env
-# edit .env: set ZANN_PASSWORD_PEPPER and ZANN_TOKEN_PEPPER
-# (openssl rand -base64 32)
-docker compose up -d
+./scripts/dev-up.sh
+# Or: just dev-up
 ```
 
-This uses `config/dev.yaml`. The shared-vault master key is generated into
-`./data/smk` on first start (mode `auto_generate`); back that file up. No secret
-values ship in the repo.
+Requires Docker Engine / Docker Desktop with Compose, Bash and OpenSSL. With
+Podman and a Compose provider, run `./scripts/dev-up.sh podman` or
+`just dev-up podman` instead. The bootstrap creates `.env` from `.env.example`
+with independent random peppers and `0600` permissions. Existing `.env` contents
+are preserved; blank required values must be filled explicitly. Keep the file
+for subsequent starts. Once it exists, `docker compose up -d` also works directly.
+
+This uses `config/dev.yaml` and PostgreSQL. The `zann_data` named volume holds
+`/data/smk` (generated on first start in `auto_generate` mode) and
+`/data/identity-key`. The `zann_pgdata` named volume holds the database. Compose
+prefixes these volume names with the project name. No secret values ship in the
+repo. Existing `./data` bind-mount keys must be copied into `zann_data` before
+starting an upgraded checkout; they are not moved automatically.
+
+### Local dev backups
+
+Keep `.env`, a database dump, and both key files together in private backup
+storage. Losing the SMK makes shared vaults unreadable; losing the identity key
+changes the server identity pinned by clients. For Docker, from the repository
+root with the stack running:
+
+```bash
+umask 077
+backup_dir="$(mktemp -d)"
+docker compose exec -T db pg_dump -U zann -d zann > "$backup_dir/database.sql"
+docker compose cp server:/data/smk "$backup_dir/smk"
+docker compose cp server:/data/identity-key "$backup_dir/identity-key"
+cp .env "$backup_dir/.env"
+chmod 600 "$backup_dir/"*
+```
+
+Move this directory to private backup storage outside the checkout. Use
+`docker compose down` to stop while retaining volumes; `docker compose down -v`
+(or `just db-reset`) deletes the database and keys. For Podman, replace
+`docker compose` with `podman compose`.
 
 ## Server (prebuilt image)
 
