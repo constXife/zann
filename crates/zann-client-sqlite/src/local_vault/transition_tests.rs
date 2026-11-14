@@ -49,7 +49,8 @@ fn restore_excludes_unlock_and_late_remembered_publication() {
         stored: Mutex::new(None),
     });
     let core = open_vault_at_path(&root.join("local.sqlite"), ports).expect("core");
-    core.seed_offline_fixture("transition fixture password".into())
+    let password = Uuid::now_v7().to_string();
+    core.seed_offline_fixture(password.clone())
         .expect("fixture");
     let snapshot = core.snapshot_create(None).expect("snapshot");
     let worker = core.clone();
@@ -64,8 +65,7 @@ fn restore_excludes_unlock_and_late_remembered_publication() {
     assert!(!core.remembered_unlock().expect("remembered state").armed);
     assert!(!core.vault_status().expect("locked").unlocked);
 
-    core.unlock("transition fixture password".into())
-        .expect("unlock");
+    core.unlock(password).expect("unlock");
     let previous_root = core.root_key().expect("root");
     let pool = core.pool();
     let _entered = core.runtime.enter();

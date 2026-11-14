@@ -47,6 +47,10 @@ impl LegacyCredentialSource for Credentials {
         Ok(None)
     }
 }
+fn tempdir() -> tempfile::TempDir {
+    tempfile::tempdir_in(std::env::temp_dir().canonicalize().unwrap()).unwrap()
+}
+
 fn open(root: &Path) -> Arc<LocalVault> {
     let credentials = Arc::new(Credentials::default());
     LocalVault::open(
@@ -74,7 +78,9 @@ fn connect(core: &LocalVault, url: &str, login: &Value) {
         ),
     )
     .unwrap();
-    core.initialize_master_password("test master password".into())
+    core.initialize_master_password("test device unlock password".into())
+        .unwrap();
+    core.enroll_account_key("test master password".into())
         .unwrap();
     core.remote_sync(None, None).unwrap();
 }
@@ -111,7 +117,7 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
     });
     let pool = app.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let root = tempfile::tempdir().unwrap();
+        let root = tempdir();
         let core = open(root.path());
         connect(&core,&url,&login);
         let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -151,7 +157,7 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
         });
         runtime.block_on(local.close());
         drop(core);
-        let restored_root = tempfile::tempdir().unwrap();
+        let restored_root = tempdir();
         let core = open(restored_root.path());
         connect(&core,&url,&login);
         let storage = core.current_storage_id().unwrap();
@@ -178,7 +184,7 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
         let restored = root.path().join("restored.json");core.backup_export_file(restored.display().to_string()).unwrap();
         assert_eq!(normalized(&restored),expected);
         // A second device pulls from the real server: this catches metadata lost in push or pull.
-        let second = tempfile::tempdir().unwrap();let other = open(second.path());connect(&other,&url,&login);
+        let second = tempdir();let other = open(second.path());connect(&other,&url,&login);
         let pulled = second.path().join("pulled.json");other.backup_export_file(pulled.display().to_string()).unwrap();
         assert_eq!(normalized(&pulled),expected);
         assert!(other.verify().unwrap().problems.is_empty());

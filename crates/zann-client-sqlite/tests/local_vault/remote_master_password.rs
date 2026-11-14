@@ -91,16 +91,20 @@ fn remote_login_create_master_then_relogin_unlock() {
     drop(login(email.clone(), password.clone()));
 
     let core = create_core(db_url.clone()).expect("create core");
+    let device_password = format!("device-{master_password}");
     let init = core
-        .initialize_master_password(master_password.clone())
+        .initialize_master_password(device_password.clone())
         .expect("initialize master password");
     assert!(init.unlocked);
+    core.enroll_account_key(master_password)
+        .expect("enroll the account key");
     drop(core);
 
     drop(login(email, password));
 
     let core = create_core(db_url).expect("create core");
-    core.unlock(master_password).expect("unlock after relogin");
+    core.unlock(device_password).expect("unlock after relogin");
+    assert!(core.activate_connected_account().expect("activate account"));
 }
 
 fn select_personal_vault(core: &LocalVault, storage_id: &str) {
@@ -118,9 +122,9 @@ fn select_personal_vault(core: &LocalVault, storage_id: &str) {
 
 /// One account, two devices. Device A registers, publishes the personal vault
 /// and pushes an item created in it; device B starts from an empty root, logs
-/// in, syncs, opens that vault's key with the same master password and
-/// decrypts the item. Device B opens its database before the login, as every
-/// client does, so a salt invented at open would collide with the account's.
+/// in, enrolls the same account key under a different device password,
+/// syncs and decrypts the item. Device B opens its database before login;
+/// its device KDF must remain independent from the account KDF.
 #[test]
 #[ignore]
 fn second_device_unlocks_the_synced_personal_vault() {
@@ -178,8 +182,10 @@ fn second_device_unlocks_the_synced_personal_vault() {
     drop(core);
 
     let core = create_core(make_db_url(device_a.path())).expect("reopen device A");
-    core.initialize_master_password(master_password.clone())
-        .expect("device A creates the vault");
+    core.initialize_master_password("device A unlock password".into())
+        .expect("device A initializes its unlock password");
+    core.enroll_account_key(master_password.clone())
+        .expect("device A enrolls the account key");
     core.remote_sync(Some(storage_id.clone()), None)
         .expect("device A publishes the personal vault");
     select_personal_vault(&core, &storage_id);
@@ -211,19 +217,24 @@ fn second_device_unlocks_the_synced_personal_vault() {
     drop(core);
 
     let core = create_core(make_db_url(device_b.path())).expect("reopen device B");
-    core.unlock(master_password.clone())
-        .expect("device B derives the account's master key");
+    let device_password = "device B unlock password";
+    core.initialize_master_password(device_password.into())
+        .expect("device B initializes its own unlock password");
+    core.enroll_account_key(format!("wrong-{master_password}"))
+        .expect_err("wrong account key cannot enroll");
+    assert!(!core.activate_connected_account().expect("not enrolled"));
+    core.enroll_account_key(master_password)
+        .expect("device B enrolls the account key");
     core.remote_sync(Some(prepared.storage_id().to_string()), None)
         .expect("device B syncs");
     select_personal_vault(&core, prepared.storage_id());
 
-    // Unlocking again checks the derived key against the synced vault key,
-    // which was wrapped on device A.
+    // Restarting the device session opens its enrolled account key locally.
     core.lock().expect("lock");
-    core.unlock(format!("wrong-{master_password}"))
-        .expect_err("another password must not open device A's vault");
-    core.unlock(master_password)
-        .expect("device B opens device A's vault key");
+    core.unlock(format!("wrong-{device_password}"))
+        .expect_err("another password must not unlock this device");
+    core.unlock(device_password.into())
+        .expect("device B opens its enrolled account key");
     select_personal_vault(&core, prepared.storage_id());
     let item = core
         .item_get(item_id)

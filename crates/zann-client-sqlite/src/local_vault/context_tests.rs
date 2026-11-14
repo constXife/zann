@@ -2,12 +2,15 @@ use super::*;
 use zann_db::local::LocalStorage;
 
 pub(super) fn fixture() -> (tempfile::TempDir, Arc<LocalVault>, Uuid, Uuid) {
+    fixture_with_password(Uuid::now_v7().to_string())
+}
+
+fn fixture_with_password(password: String) -> (tempfile::TempDir, Arc<LocalVault>, Uuid, Uuid) {
     let dir = tempfile::tempdir().expect("tempdir");
     let root = dir.path().canonicalize().expect("canonical root");
     let core =
         open_vault(format!("sqlite://{}", root.join("local.sqlite").display())).expect("open");
-    core.seed_offline_fixture("context fixture password".into())
-        .expect("initialize");
+    core.seed_offline_fixture(password).expect("initialize");
     let pool = core.pool();
     let first = core.storage_id().expect("first storage");
     let remote = LocalStorage {
@@ -246,7 +249,9 @@ fn a_late_sync_target_cannot_replace_an_explicitly_selected_empty_replica() {
 
 #[test]
 fn one_password_change_keeps_both_independent_accounts_readable_after_restart() {
-    let (dir, core, first, remote) = fixture();
+    let old_password = Uuid::now_v7().to_string();
+    let new_password = Uuid::now_v7().to_string();
+    let (dir, core, first, remote) = fixture_with_password(old_password.clone());
     let first_key = core.account_key_for_storage(first).expect("first key");
     let second_key = core.account_key_for_storage(remote).expect("second key");
     assert!(first_key.as_bytes() != second_key.as_bytes());
@@ -267,11 +272,8 @@ fn one_password_change_keeps_both_independent_accounts_readable_after_restart() 
         vault_crypto::decrypt_vault_key(&first_key, before[0].id, &before[0].vault_key_enc)
             .is_err()
     );
-    core.change_unlock_password(
-        "context fixture password".into(),
-        "replacement device password".into(),
-    )
-    .expect("change password");
+    core.change_unlock_password(old_password.clone(), new_password.clone())
+        .expect("change password");
     let after = core
         .runtime
         .block_on(LocalVaultRepo::new(&pool).list_by_storage(remote))
@@ -286,9 +288,8 @@ fn one_password_change_keeps_both_independent_accounts_readable_after_restart() 
         .expect("root")
         .join("local.sqlite");
     let core = open_vault(format!("sqlite://{}", path.display())).expect("reopen");
-    assert!(core.unlock("context fixture password".into()).is_err());
-    core.unlock("replacement device password".into())
-        .expect("offline unlock");
+    assert!(core.unlock(old_password).is_err());
+    core.unlock(new_password).expect("offline unlock");
     core.set_current_storage(first.to_string()).expect("first");
     assert!(core.item_get(first_item).is_ok());
     core.set_current_storage(remote.to_string())
