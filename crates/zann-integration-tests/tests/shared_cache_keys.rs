@@ -247,17 +247,31 @@ async fn shared_accounts_need_one_device_password_and_keep_cache_on_personal_pol
         let options = || BackupImportOptions {
             target_storage_id: Some(new_storage.clone()),
         };
-        let before_invalid_source = export(&next, destination.path(), "before-invalid-source.json");
+        let export_next = |name: &str| {
+            let path = destination.path().join(name);
+            let authorization = next
+                .authorize_export(
+                    zann_client::app::local::ExportStepUp::device_password(
+                        "new device unlock password".into(),
+                    ),
+                    operation(),
+                )
+                .unwrap();
+            next.backup_export_file(path.display().to_string(), authorization)
+                .unwrap();
+            normalized(&path)
+        };
+        let before_invalid_source = export_next("before-invalid-source.json");
         assert!(next
             .backup_import_file(backup.clone(), uuid::Uuid::now_v7().to_string(), options())
             .is_err());
         assert_eq!(
-            export(&next, destination.path(), "after-invalid-source.json"),
+            export_next("after-invalid-source.json"),
             before_invalid_source
         );
         next.backup_import_file(backup, storage_b.clone(), options())
             .unwrap();
-        let transferred = export(&next, destination.path(), "transferred.json");
+        let transferred = export_next("transferred.json");
         let expected_b: Vec<_> = before_transition
             .into_iter()
             .filter(|item| item["path"] != "accounts/shared-first")
