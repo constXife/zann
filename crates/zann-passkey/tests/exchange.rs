@@ -267,3 +267,19 @@ fn xml_rejects_duplicate_elements_instead_of_concatenating_identity_or_key_field
         assert!(import(bad.as_bytes(), ExchangeFormat::KeepassXml).is_err());
     }
 }
+
+#[test]
+fn duplicate_manager_item_ids_cannot_produce_an_unreadable_cxf_export() {
+    let mut wire: serde_json::Value = serde_json::from_slice(BW).unwrap();
+    let mut second = wire["items"][0].clone();
+    second["login"]["fido2Credentials"][0]["credentialId"] =
+        serde_json::json!("10112233-4455-6677-8899-aabbccddeeff");
+    wire["items"].as_array_mut().unwrap().push(second);
+    let error = import(
+        serde_json::to_vec(&wire).unwrap().as_slice(),
+        ExchangeFormat::Bitwarden,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(error.kind(), "passkey_duplicate_item");
+}

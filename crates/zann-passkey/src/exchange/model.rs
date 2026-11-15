@@ -125,8 +125,12 @@ impl ExchangeDocument {
             return Err(ExchangeError::new("passkey_exchange_limit"));
         }
         let mut identities = std::collections::BTreeSet::new();
+        let mut entry_ids = std::collections::BTreeSet::new();
         let mut total = 0usize;
         for entry in &self.entries {
+            if !entry_ids.insert(&entry.id) {
+                return Err(ExchangeError::new("passkey_duplicate_item"));
+            }
             if entry.id.is_empty() || entry.id.len() > 64 || entry.tags.len() > 32 {
                 return Err(ExchangeError::new("passkey_metadata_invalid"));
             }
