@@ -15,7 +15,7 @@ final class LiveConnectionTests: XCTestCase {
         continueAfterFailure = false
         executionTimeAllowance = 420
         let app = XCUIApplication()
-        app.launch()
+        app.activate()
         let workspace = app.buttons["workspace.settings"].firstMatch
         if !workspace.waitForExistence(timeout: 2) {
             let onboarding = app.buttons["onboarding.connect"]
@@ -45,8 +45,12 @@ final class LiveConnectionTests: XCTestCase {
         XCTAssertFalse(error.exists, error.exists ? error.label : "")
         XCTAssertTrue(workspace.exists, "The owner must complete sign-in/unlock on the device")
 
-        let sync = app.buttons["workspace.sync"].firstMatch
-        XCTAssertTrue(sync.waitForExistence(timeout: 15))
+        let syncButtons = app.buttons.matching(identifier: "workspace.sync")
+        let visibleSync = expectation(for: NSPredicate { _, _ in
+            syncButtons.allElementsBoundByIndex.contains { $0.isHittable }
+        }, evaluatedWith: app)
+        await fulfillment(of: [visibleSync], timeout: 15)
+        let sync = try XCTUnwrap(syncButtons.allElementsBoundByIndex.first { $0.isHittable })
         sync.tap()
         let status = app.descendants(matching: .any).matching(identifier: "sync.status.sync.synced").firstMatch
         let syncError = app.staticTexts["sync.error"]

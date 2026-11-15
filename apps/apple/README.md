@@ -139,10 +139,17 @@ first sync, runs a manual sync and verifies that the success timestamp changes.
 Run this test individually on the paired device with
 `-collect-test-diagnostics never`; it does not create or edit vault records.
 
-Signed-device acceptance on iPad mini (A17 Pro), iPadOS 27.0.1, passed on
-2026-11-15 before the account/device key separation: system CA trust, Rauthy OIDC sign-in, initial record synchronization,
-Touch ID unlock after relaunch and manual sync with a new success timestamp.
-The integrated account/device key model requires fresh signed-device acceptance.
+Signed-device acceptance of `main` (`0c6bef4`) on iPad mini (A17 Pro),
+iPadOS 27.0.1, passed on 2026-11-15 with the integrated account/device key model:
+Rauthy OIDC sign-in, device-password setup, account-key unlock, initial record
+synchronization, password/Touch ID unlock after relaunch and manual sync with
+a new success timestamp. The final live UI test passed over USB without runtime
+warnings. It activates an existing session and selects the visible sync button;
+compact navigation can retain hidden toolbar buttons from earlier screens.
+The earlier development replica used a different migration 0005. Its owner-only
+snapshot was verified to contain no unsent changes before the owner explicitly
+approved local reinitialization and a fresh server sync. No migration checksum
+was bypassed, and no automatic reset or compatibility path was added.
 Bidirectional edit propagation, offline behavior and the remaining lifecycle
 scenarios below still require separate device acceptance.
 
