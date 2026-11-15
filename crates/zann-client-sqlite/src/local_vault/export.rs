@@ -18,7 +18,10 @@ pub(super) struct AuthorizedExport {
 }
 impl AuthorizedExport {
     pub(super) fn check_persisted(&self, core: &LocalVault) -> LocalResult<()> {
-        self.check(core)?;
+        {
+            let _context = core.context_gate.read().expect("context");
+            self.check(core)?;
+        }
         core.verify_database()?;
         if core.export_source(&self.operation)? != (self.keyring.clone(), self.policy) {
             return Err(ExportError::AuthorizationChanged.into());

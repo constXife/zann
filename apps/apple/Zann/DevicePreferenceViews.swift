@@ -43,7 +43,9 @@ struct DeviceSecuritySections: View {
         }
         UnlockPasswordSettings(core: model.browserCore, unlocked: model.isUnlocked, strings: model.strings)
         biometrics
-        ExportSecuritySection(core: model.browserCore, unlocked: model.isUnlocked, strings: model.strings)
+        if let core = model.browserCore {
+            ExportSecuritySection(core: core, unlocked: model.isUnlocked, strings: model.strings)
+        }
         SettingsFailure()
     }
 

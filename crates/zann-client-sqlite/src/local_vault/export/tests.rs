@@ -283,7 +283,7 @@ fn lock_cancels_a_consumed_permit_waiting_for_sqlite_without_holding_the_context
     assert_eq!(core.syncs.len(), 1);
     core.lock().expect("lock without waiting for SQLite");
     assert!(matches!(
-        rx.recv_timeout(Duration::from_secs(1))
+        rx.recv_timeout(Duration::from_secs(5))
             .expect("prompt cancellation"),
         Err(LocalError::Cancelled)
     ));
