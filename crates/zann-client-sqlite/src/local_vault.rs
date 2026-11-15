@@ -252,7 +252,8 @@ impl LocalVault {
     }
 }
 impl LocalVault {
-    fn app_client(&self) -> LocalResult<AppClient> {
+    /// Construct a handle for metadata reads without initializing credentials.
+    fn app_client_handle(&self) -> LocalResult<AppClient> {
         let factory = Arc::new(
             SqliteSyncStoreFactory::new(&self.database_path)
                 .map_err(|error| LocalError::Service(error.to_string()))?,
@@ -265,9 +266,14 @@ impl LocalVault {
             SessionClient::new(client_id),
             factory,
         );
+        Ok(client)
+    }
+
+    fn app_client(&self) -> LocalResult<AppClient> {
+        let client = self.app_client_handle()?;
         client
             .initialize(self.legacy_credentials.as_ref())
-            .map_err(|error| LocalError::Service(error.to_string()))?;
+            .map_err(unlock::keyring_error)?;
         Ok(client)
     }
 }

@@ -52,15 +52,7 @@ impl AppClient {
 impl AppClient {
     /// Configured account locations survive a reset of local keys/cache.
     pub fn account_locations(&self) -> Result<Vec<super::local::AccountLocation>, ConfigError> {
-        Self::account_locations_in(&self.paths)
-    }
-
-    /// Metadata-only lookup: no credential initialization or account selection.
-    /// A root without Config has no configured accounts.
-    pub fn account_locations_in(
-        paths: &super::ClientPaths,
-    ) -> Result<Vec<super::local::AccountLocation>, ConfigError> {
-        let snapshot = match crate::config::ConfigRepository::new(paths.clone()).snapshot() {
+        let snapshot = match self.repository.snapshot() {
             Ok(snapshot) => snapshot,
             Err(ConfigError::MissingConfig { .. }) => return Ok(Vec::new()),
             Err(error) => return Err(error),
