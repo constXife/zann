@@ -6,6 +6,8 @@ struct Entry {
     fields: BTreeMap<String, Zeroizing<String>>,
     id: String,
     created: Option<String>,
+    uuid_seen: bool,
+    string_fields: Option<(bool, bool)>,
 }
 pub(super) fn read(bytes: &[u8]) -> Result<ExchangeDocument, ExchangeError> {
     let mut reader = Reader::from_reader(bytes);
@@ -15,7 +17,7 @@ pub(super) fn read(bytes: &[u8]) -> Result<ExchangeDocument, ExchangeError> {
     let mut current = None::<Entry>;
     let mut field = Zeroizing::new(String::new());
     let mut value = Zeroizing::new(String::new());
-    let mut buffer = Vec::new();
+    let mut buffer = Zeroizing::new(Vec::new());
     let mut nodes = 0usize;
     let mut document = ExchangeDocument::new();
     let mut root_seen = false;
@@ -40,14 +42,55 @@ pub(super) fn read(bytes: &[u8]) -> Result<ExchangeDocument, ExchangeError> {
                     return Err(ExchangeError::new("passkey_exchange_limit"));
                 }
                 if name == b"Entry" && !stack.iter().any(|n| n == b"History") {
-                    if current.is_some() {
+                    if current.is_some() || stack.last().is_none_or(|n| n != b"Group") {
                         return Err(ExchangeError::new("passkey_xml_invalid"));
                     }
                     current = Some(Entry::default());
                 }
-                if name == b"String" {
-                    field.zeroize();
-                    value.zeroize();
+                if !stack.iter().any(|n| n == b"History") {
+                    if let Some(entry) = &mut current {
+                        if entry.string_fields.is_some() && name != b"Key" && name != b"Value" {
+                            return Err(ExchangeError::new("passkey_xml_invalid"));
+                        }
+                        match name.as_slice() {
+                            b"String" => {
+                                if stack.last().is_none_or(|n| n != b"Entry") {
+                                    return Err(ExchangeError::new("passkey_xml_invalid"));
+                                }
+                                entry.string_fields = Some((false, false));
+                                field.zeroize();
+                                value.zeroize();
+                            }
+                            b"Key" | b"Value" => {
+                                if stack.last().is_none_or(|n| n != b"String") {
+                                    return Err(ExchangeError::new("passkey_xml_invalid"));
+                                }
+                                let fields = entry
+                                    .string_fields
+                                    .as_mut()
+                                    .ok_or_else(|| ExchangeError::new("passkey_xml_invalid"))?;
+                                let seen = if name == b"Key" {
+                                    &mut fields.0
+                                } else {
+                                    &mut fields.1
+                                };
+                                if std::mem::replace(seen, true) {
+                                    return Err(ExchangeError::new("passkey_xml_duplicate_field"));
+                                }
+                            }
+                            b"UUID" if stack.last().is_some_and(|n| n == b"Entry") => {
+                                if std::mem::replace(&mut entry.uuid_seen, true) {
+                                    return Err(ExchangeError::new("passkey_xml_duplicate_field"));
+                                }
+                            }
+                            b"CreationTime" if stack.last().is_some_and(|n| n == b"Times") => {
+                                if entry.created.replace(String::new()).is_some() {
+                                    return Err(ExchangeError::new("passkey_xml_duplicate_field"));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
                 }
                 if name == b"Value" {
                     for attribute in start.attributes() {
@@ -70,7 +113,9 @@ pub(super) fn read(bytes: &[u8]) -> Result<ExchangeDocument, ExchangeError> {
                 if let Some(entry) = &mut current {
                     if !stack.iter().any(|n| n == b"History") {
                         if name == b"String"
-                            && (entry.fields.len() >= 128
+                            && (entry.string_fields.take() != Some((true, true))
+                                || field.is_empty()
+                                || entry.fields.len() >= 128
                                 || entry
                                     .fields
                                     .insert(
@@ -123,6 +168,9 @@ pub(super) fn read(bytes: &[u8]) -> Result<ExchangeDocument, ExchangeError> {
                 append(&stack, &mut current, &mut field, &mut value, &expanded)?;
             }
             Event::Decl(declaration) => {
+                if root_seen || nodes != 1 {
+                    return Err(ExchangeError::new("passkey_xml_invalid"));
+                }
                 if declaration.xml_version().map_err(xml_error)? != XmlVersion::Explicit1_0 {
                     return Err(ExchangeError::new("passkey_xml_version"));
                 }
@@ -171,9 +219,12 @@ fn append(
                 b"UUID" if stack.len() > 1 && stack[stack.len() - 2] == b"Entry" => {
                     Some(&mut entry.id)
                 }
-                b"CreationTime" if stack.len() > 1 && stack[stack.len() - 2] == b"Times" => {
-                    Some(entry.created.get_or_insert_with(String::new))
-                }
+                b"CreationTime" if stack.len() > 1 && stack[stack.len() - 2] == b"Times" => Some(
+                    entry
+                        .created
+                        .as_mut()
+                        .ok_or_else(|| ExchangeError::new("passkey_xml_invalid"))?,
+                ),
                 _ => None,
             };
             if let Some(target) = target {

@@ -245,3 +245,25 @@ fn cxf_metadata_selects_the_pair_of_rp_and_id_and_preserves_mixed_unknown_dates(
         expected
     );
 }
+
+#[test]
+fn xml_rejects_duplicate_elements_instead_of_concatenating_identity_or_key_fields() {
+    let xml = std::str::from_utf8(XML).unwrap();
+    for bad in [
+        xml.replacen("<Key>Title</Key>", "<Key></Key><Key>Title</Key>", 1),
+        xml.replacen(
+            "<Value ProtectInMemory=\"True\">Fixture passkey</Value>",
+            "<Value></Value><Value>Fixture passkey</Value>",
+            1,
+        ),
+        xml.replacen("<UUID>", "<UUID></UUID><UUID>", 1),
+        xml.replacen(
+            "<CreationTime>",
+            "<CreationTime></CreationTime><CreationTime>",
+            1,
+        ),
+        xml.replacen("<Root>", "<Root><?xml version=\"1.0\"?>", 1),
+    ] {
+        assert!(import(bad.as_bytes(), ExchangeFormat::KeepassXml).is_err());
+    }
+}
