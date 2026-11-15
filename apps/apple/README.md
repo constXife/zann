@@ -99,6 +99,10 @@ bundle for each, and errors when the required runtime/profile is unavailable.
 This keeps the reference tablet aligned with the physical mini.
 It never downloads a runtime or substitutes another test platform. The Apple
 CI job runs it after macOS tests and retains mobile `.xcresult` bundles on every run.
+Blocking FFI effects use the shared `BlockingCore.run` Dispatch adapter so a
+network, storage or native-prompt wait cannot occupy Swift's cooperative pool.
+Operation admission and cancellation remain with the existing flow/core ports;
+CI tests run with a single cooperative worker to check forward progress.
 Test ports live in `DebugSupport/` and are compiled for tests and the explicit
 Debug UI-fixture host only; Release excludes their definitions. The replica
 fixture comes from the existing Rust `test-support` debug binding.

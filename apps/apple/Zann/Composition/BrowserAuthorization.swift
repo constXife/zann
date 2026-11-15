@@ -30,12 +30,12 @@ enum BrowserAuthorization {
         }
         switch self {
         case .loopback:
-            return try await Task.detached { Result { try login.finish() } }.value.get()
+            return try await BlockingCore.run { Result { try login.finish() } }.get()
         case .system(_, let authorize, _):
             let callback = try await authorize(url, login.callbackScheme(), login.remainingTimeoutMs())
-            return try await Task.detached {
+            return try await BlockingCore.run {
                 Result { try login.finishWithCallback(callbackUri: callback.absoluteString) }
-            }.value.get()
+            }.get()
         }
     }
 

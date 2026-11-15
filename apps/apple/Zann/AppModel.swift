@@ -165,7 +165,7 @@ final class AppModel: ObservableObject {
         touchIDBusy = true
         defer { touchIDBusy = false }
         settingsError = nil
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result {
                 if enabled {
                     try core.rememberWithKeystore()
@@ -174,7 +174,7 @@ final class AppModel: ObservableObject {
                 }
                 return try Self.touchIDArmed(core)
             }
-        }.value
+        }
         switch result {
         case .success(let armed): touchIDArmed = armed
         case .failure(let failure): settingsError = message(for: failure)
@@ -392,7 +392,7 @@ final class AppModel: ObservableObject {
         idleCheckPending = true
         defer { idleCheckPending = false }
         do {
-            let present = try await Task.detached { try core.idleUnlockKeyPresent() }.value
+            let present = try await BlockingCore.run { Result { try core.idleUnlockKeyPresent() } }.get()
             guard unlockIdleLockDue(unlocked: isUnlocked, timeoutMinutes: minutes, idleMillis: Int64(now.timeIntervalSince(lastActivity) * 1000)) else { return }
             if present { lastActivity = now } else { await lock() }
         } catch {
@@ -447,7 +447,7 @@ final class AppModel: ObservableObject {
         await checkIdle()
         if isUnlocked { vault?.startAutoSync() }
         guard let core, !busy, !touchIDBusy else { return }
-        let status = await Task.detached { Result { try Self.touchIDArmed(core) } }.value
+        let status = await BlockingCore.run { Result { try Self.touchIDArmed(core) } }
         switch status {
         case .success(let armed): touchIDArmed = armed
         case .failure(let failure): lastFailure = failure; error = message(for: failure)
@@ -477,9 +477,9 @@ final class AppModel: ObservableObject {
     }
 
     private func closeCore(_ core: CoreFacade) async -> AppStatusFfi? {
-        let result = await Task.detached {
+        let result = await BlockingCore.run {
             Result { _ = try core.lock(); return try core.appStatus() }
-        }.value
+        }
         switch result {
         case .success(let status): return status
         case .failure(let failure):
@@ -530,7 +530,7 @@ final class AppModel: ObservableObject {
         busy = true
         error = nil
         lastFailure = nil
-        let pending = Task.detached(priority: .userInitiated) { Result(catching: work) }
+        let pending = Task(priority: .userInitiated) { await BlockingCore.run { Result(catching: work) } }
         pendingCoreWork = Task { _ = await pending.value }
         let result = await pending.value
         guard unlockOperations.finish(operation: operation) else { return nil }

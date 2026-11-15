@@ -558,11 +558,15 @@ jobs:
             ARCHS=arm64
       - name: Test the macOS app
         working-directory: apps/apple
+        env:
+          TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT: "1"
         run: |
           xcodegen --spec project.yml
           xcodebuild test -quiet -project Zann.xcodeproj -scheme Zann \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath build
       - name: Test the iPhone and iPad app
+        env:
+          TEST_RUNNER_LIBDISPATCH_COOPERATIVE_POOL_STRICT: "1"
         run: bash apps/apple/test-mobile.sh
       - name: Build production mobile artifacts without test fixtures
         run: |

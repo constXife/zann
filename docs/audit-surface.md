@@ -16,7 +16,7 @@ a focused security review.
 
 The current surface covers:
 
-- Apple path and credential-port composition in `apps/apple/Zann/Composition/**`,
+- Apple path/credential-port composition and blocking-FFI execution in `apps/apple/Zann/Composition/**`,
   desktop service activation in `apps/apple/Zann/Platform/macOS/MacComposition.swift`,
   and native secret adapters in `apps/apple/Zann/Keychain*.swift`;
 - Apple auth/unlock invalidation in `apps/apple/Zann/{AppModel.swift,Connect/**}`,

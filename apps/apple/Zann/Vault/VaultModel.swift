@@ -192,9 +192,9 @@ final class VaultModel: ObservableObject {
         let core = core
         guard let wanted = storageID else { return }
         let generation = contextGeneration
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try core.storageSyncState(storageId: wanted) }
-        }.value
+        }
         guard wanted == storageID, generation == contextGeneration, !switching else { return }
         if case .success(let state) = result { applySyncState(state) }
     }
@@ -282,7 +282,7 @@ final class VaultModel: ObservableObject {
             schedule.finished(ticket: ticket)
         }
         let core = core
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { () -> Synced in
                 if let wantedStorage {
                     let state = try core.storageSyncState(storageId: wantedStorage)
@@ -301,7 +301,7 @@ final class VaultModel: ObservableObject {
                 }
                 return .completed(changed: outcome.changesCommitted > 0)
             }
-        }.value
+        }
         await relay.finish()
         guard syncRunID == runID, syncingStorageID == storageID else { return }
         switch result {
@@ -357,9 +357,9 @@ final class VaultModel: ObservableObject {
             let core = core
             let shown = trimmedQuery
             let loaded = items.count
-            let result = await Task.detached(priority: .userInitiated) {
+            let result = await BlockingCore.run {
                 Result { try VaultContextLoader.load(core, query: shown, keeping: loaded) }
-            }.value
+            }
             guard generation == contextGeneration else { continue }
             guard !switching else { return }
             switch result {
@@ -426,7 +426,7 @@ final class VaultModel: ObservableObject {
             Task { await refreshSyncedContents() }
         }
         let core = core
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { () -> Contents in
                 let previous = core.currentVaultId()
                 _ = try core.setCurrentVault(id: id)
@@ -437,7 +437,7 @@ final class VaultModel: ObservableObject {
                     throw error
                 }
             }
-        }.value
+        }
         switch result {
         case .success(let contents):
             error = nil
@@ -470,9 +470,9 @@ final class VaultModel: ObservableObject {
             Task { await refreshSyncedContents() }
         }
         let core = core
-        let outcome = await Task.detached(priority: .userInitiated) {
+        let outcome = await BlockingCore.run {
             VaultContextLoader.select(core, storage: target)
-        }.value
+        }
         switch outcome {
         case .refused(let failure):
             error = strings.message(for: failure)
@@ -528,9 +528,9 @@ final class VaultModel: ObservableObject {
         let core = core
         let wanted = storageID
         let token = selection
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try core.itemGet(id: id) }
-        }.value
+        }
         guard wanted == storageID, token == selection, !switching else { return }
         open { try ItemEditorModel.edit(try result.get()) }
     }
@@ -566,9 +566,9 @@ final class VaultModel: ObservableObject {
         let loaded = items.count
         let wanted = storageID
         let generation = contextGeneration
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try VaultContextLoader.load(core, query: query, keeping: loaded) }
-        }.value
+        }
         guard wanted == storageID, generation == contextGeneration, !switching else { return false }
         switch result {
         case .success(let contents):
@@ -713,9 +713,9 @@ final class VaultModel: ObservableObject {
         search = Task { [weak self] in
             if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
             guard !Task.isCancelled else { return }
-            let result = await Task.detached(priority: .userInitiated) {
+            let result = await BlockingCore.run {
                 Result { try VaultContextLoader.page(core, query: wanted, cursor: nil, limit: itemsPageLimit) }
-            }.value
+            }
             guard let self, !Task.isCancelled else { return }
             self.search = nil
             self.searching = false
@@ -744,9 +744,9 @@ final class VaultModel: ObservableObject {
         let query = appliedQuery
         let core = core
         Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
+            let result = await BlockingCore.run {
                 Result { try VaultContextLoader.page(core, query: query, cursor: cursor, limit: itemsPageLimit) }
-            }.value
+            }
             guard let self, generation == self.listGeneration else { return }
             self.loadingMore = false
             switch result {

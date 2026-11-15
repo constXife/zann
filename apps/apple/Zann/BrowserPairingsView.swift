@@ -56,9 +56,9 @@ struct BrowserPairingsView: View {
     @MainActor private func refresh() async {
         guard let core, !busy else { return }
         busy = true
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try core.browserPairings() }
-        }.value
+        }
         busy = false
         switch result {
         case .success(let value):
@@ -73,9 +73,9 @@ struct BrowserPairingsView: View {
         guard let core, !busy else { return }
         busy = true
         code = nil
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try core.browserBeginPairing() }
-        }.value
+        }
         busy = false
         switch result {
         case .success(let value): code = value; error = nil
@@ -86,9 +86,9 @@ struct BrowserPairingsView: View {
     @MainActor private func revoke(_ key: String) async {
         guard let core, !busy else { return }
         busy = true
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try core.browserRevoke(publicKey: key) }
-        }.value
+        }
         busy = false
         switch result {
         case .success: await refresh()

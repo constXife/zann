@@ -18,30 +18,34 @@ final class RecoveryModel: ObservableObject {
     init(core: CoreFacade, strings: Strings, stateChanged: @escaping () -> Void, completed: @escaping (RecoveryOutcomeFfi) -> Void) { self.core = core; self.strings = strings; self.completed = completed; self.stateChanged = stateChanged }
 
     func reload() async {
+        let core = core
         await run {
-            let accounts = try await Task.detached { try self.core.setupAccounts() }.value
+            let accounts = try await BlockingCore.run { Result { try core.setupAccounts() } }.get()
             self.accounts = accounts
         }
     }
     func prepare(_ account: SetupAccountFfi?) async {
+        let core = core
         await run {
             self.selected = account
             let id = account?.storageId
-            self.preview = try await Task.detached { try self.core.prepareLocalRecovery(storageId: id) }.value
+            self.preview = try await BlockingCore.run { Result { try core.prepareLocalRecovery(storageId: id) } }.get()
         }
     }
     func cancel() async {
         guard let id = preview?.id, !busy else { return }
-        await run { try await Task.detached { try self.core.cancelLocalRecovery(id: id) }.value; self.preview = nil }
+        let core = core
+        await run { try await BlockingCore.run { Result { try core.cancelLocalRecovery(id: id) } }.get(); self.preview = nil }
     }
     func confirm(discardUnsent: Bool) async {
         guard let id = preview?.id else { return }
+        let core = core
         await run {
-            let result = try await Task.detached { try self.core.confirmLocalRecovery(id: id, discardUnsent: discardUnsent) }.value
+            let result = try await BlockingCore.run { Result { try core.confirmLocalRecovery(id: id, discardUnsent: discardUnsent) } }.get()
             self.completed(result)
             self.snapshotPath = result.snapshotPath
             self.preview = nil
-            self.accounts = try await Task.detached { try self.core.setupAccounts() }.value
+            self.accounts = try await BlockingCore.run { Result { try core.setupAccounts() } }.get()
         }
     }
     private func run(_ work: () async throws -> Void) async {

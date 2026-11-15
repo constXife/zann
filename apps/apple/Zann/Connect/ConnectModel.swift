@@ -184,7 +184,7 @@ final class ConnectModel: ObservableObject {
                         _ work: @escaping () throws -> T,
                         _ complete: (T) -> ConnectCompletionFfi) async {
         guard flow.accepts(id: id, step: step) else { return }
-        let result = await Task.detached(priority: .userInitiated) { Result(catching: work) }.value
+        let result = await BlockingCore.run { Result(catching: work) }
         guard flow.accepts(id: id, step: step) else { return }
         switch result {
         case .success(let value): await perform(flow.complete(completion: complete(value)))

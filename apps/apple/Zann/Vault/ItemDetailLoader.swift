@@ -42,9 +42,9 @@ final class ItemDetailLoader {
         task = Task { [weak self] in
             guard !Task.isCancelled else { return }
             let result = await withTaskCancellationHandler {
-                await Task.detached(priority: .userInitiated) {
+                await BlockingCore.run {
                     Result { try read(id, operation) }
-                }.value
+                }
             } onCancel: {
                 operation.cancel()
             }
