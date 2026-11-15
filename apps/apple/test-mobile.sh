@@ -32,11 +32,11 @@ for family in ("iPhone", "iPad"):
     print("platform=iOS Simulator,id=" + device["udid"])
 ' <<< "$inventory")
 
-destination_args=()
+# One xcodebuild invocation per device keeps scheduling and xcresult ownership
+# separate. Xcode's multi-destination mode can leave the next worker queued and
+# retain only the first destination in the completed result bundle.
 while IFS= read -r destination; do
-  destination_args+=(-destination "$destination")
+  xcodebuild test -quiet -project Zann.xcodeproj -scheme ZannMobile \
+    -derivedDataPath build/mobile -parallel-testing-enabled NO \
+    -destination "$destination"
 done <<< "$destinations"
-
-exec xcodebuild test -quiet -project Zann.xcodeproj -scheme ZannMobile \
-  -derivedDataPath build/mobile -parallel-testing-enabled NO \
-  -disable-concurrent-destination-testing "${destination_args[@]}"

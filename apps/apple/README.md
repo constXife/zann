@@ -94,8 +94,9 @@ bash apps/apple/test-mobile.sh
 
 The script selects one iPhone and the iPad mini (A17 Pro) profile from the
 newest installed iOS runtime. It creates that exact mini simulator if needed,
-runs both destinations serially and errors when the required runtime/profile
-is unavailable. This keeps the reference tablet aligned with the physical mini.
+runs both destinations serially with a separate Xcode invocation and result
+bundle for each, and errors when the required runtime/profile is unavailable.
+This keeps the reference tablet aligned with the physical mini.
 It never downloads a runtime or substitutes another test platform. The Apple
 CI job runs it after macOS tests and retains mobile `.xcresult` bundles on every run.
 Test ports live in `DebugSupport/` and are compiled for tests and the explicit
@@ -113,7 +114,7 @@ attachments as `mobile-ui-captures`; inspect those images before accepting the
 layout on both families. Local execution still requires an installed runtime.
 
 The local reference tablet is iPad mini (A17 Pro). The iPadOS 27.2 simulator
-passes the 44-test mobile suite, including keyboard/rotation draft retention,
+passes the mobile suite, including keyboard/rotation draft retention,
 portrait/landscape scroll retention and accessibility text in the editor and
 settings. These simulator checks do not replace signed-device acceptance on
 the physical mini running iPadOS 27.0.1.
