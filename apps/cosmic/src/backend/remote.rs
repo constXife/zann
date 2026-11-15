@@ -10,7 +10,7 @@ use zann_client::app::{
     SessionOperation,
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
-use zann_client::oidc::{OidcBrowserErrorKind, OidcBrowserLogin};
+use zann_client::oidc::{OidcBrowserErrorKind, OidcBrowserLogin, OidcCallback};
 use zann_client_sqlite::local_vault::initialize_database;
 use zann_client_sqlite::SqliteSyncStoreFactory;
 use zann_flows::connect::{

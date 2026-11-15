@@ -217,7 +217,7 @@ impl Plan {
                         .begin_oidc_login(
                             prepared.target().clone(),
                             operation,
-                            zann_client::oidc::OidcCallback::Loopback,
+                            OidcCallback::Loopback,
                         )
                         .await
                         .map(|login| ResultValue::Browser(Box::new(login)))
