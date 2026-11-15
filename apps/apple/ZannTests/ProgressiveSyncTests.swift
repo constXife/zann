@@ -14,7 +14,12 @@ private final class ProgressiveCore: UXDelayedCore {
     var onPageRead: (() -> Void)?
     private let stateLock = NSLock()
     private var stage = 0
+    private var relay: SyncCommitRelay?
     var fixtureStorageID: String? { super.currentStorageId() }
+    var publishedProgress: SyncCommitRelay? {
+        stateLock.lock(); defer { stateLock.unlock() }
+        return relay
+    }
 
     private func currentStage() -> Int {
         stateLock.lock(); defer { stateLock.unlock() }
@@ -47,7 +52,7 @@ private final class ProgressiveCore: UXDelayedCore {
         let stage = currentStage()
         let actual = try super.itemsList(filter: filter, page: page)
         let available = stage < 2 ? [] : stage == 2 ? actual.items.filter { $0.title == "First" } : actual.items
-        if let gate = pageReadGate {
+        if stage == 2, filter.query == nil, let gate = pageReadGate {
             pageReadGate = nil
             onPageRead?()
             try wait(gate)
@@ -59,6 +64,8 @@ private final class ProgressiveCore: UXDelayedCore {
         guard gate.wait(timeout: .now() + 10) == .success else { throw CoreError.Service("progress fixture timed out") }
     }
     override func remoteSync(storageId: String?, progress: SyncCommitObserver?) throws -> SyncOutcomeFfi {
+        let relay = try XCTUnwrap(progress as? SyncCommitRelay)
+        stateLock.lock(); self.relay = relay; stateLock.unlock()
         let id = try XCTUnwrap(super.currentStorageId())
         publish(1)
         progress?.committed(update: .init(storageId: id, phase: .catalog, pagesCommitted: 0, changesCommitted: 0))
@@ -157,6 +164,10 @@ private final class ProgressiveCore: UXDelayedCore {
         model.query = "First"
         try await until { !model.searching }
 
+        // No earlier catalog/page projection may consume the search barrier.
+        let relay = try XCTUnwrap(core.publishedProgress)
+        await relay.finish()
+        XCTAssertEqual(model.searchedQuery, "First")
         let queryCaptured = expectation(description: "search captured the old page")
         core.pageReadGate = queryRead
         core.onPageRead = { queryCaptured.fulfill() }
