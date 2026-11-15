@@ -128,7 +128,8 @@ final class MobileWorkspaceTests: XCTestCase {
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
         warning.buttons["Export JSON"].tap()
         let save = app.descendants(matching: .any).matching(identifier: "Save").firstMatch
-        XCTAssertTrue(save.waitForExistence(timeout: 10))
+        // A fresh CI simulator can take over 10 seconds to cold-start Files.
+        XCTAssertTrue(save.waitForExistence(timeout: 30))
         capture(app, "maintenance-files-export")
         cancelExport(in: app, save: save)
         expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: save)
