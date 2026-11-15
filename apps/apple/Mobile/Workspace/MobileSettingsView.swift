@@ -9,6 +9,9 @@ struct MobileSettingsView: View {
             Form {
                 Section(model.strings("settings.tabs.general")) { DeviceLanguagePicker() }
                 DeviceSecuritySections()
+                if let maintenance = model.maintenance {
+                    MaintenanceSections(maintenance: maintenance, unlocked: model.isUnlocked, strings: model.strings)
+                }
                 Section(model.strings("nav.serverAccount")) {
                     Button(model.strings("settings.accounts.signOut"), role: .destructive) {
                         dismiss()

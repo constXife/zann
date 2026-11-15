@@ -45,7 +45,7 @@ struct MobileVaultView: View {
                 .dynamicTypeSize(textSize)
                 .interactiveDismissDisabled(editor.busy)
         }
-        .sheet(isPresented: $navigation.settingsPresented) {
+        .sheet(isPresented: $navigation.settingsPresented, onDismiss: { app.maintenance?.dismissed() }) {
             MobileSettingsView().environmentObject(app).dynamicTypeSize(textSize)
         }
         .onChange(of: vault.selectedItemID) { navigation.selectionChanged($0) }

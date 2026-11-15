@@ -77,6 +77,16 @@ impl AutoSyncSchedule {
         self.state = State::Locked;
     }
 
+    /// A still-unlocked app returned to the foreground. Reconcile immediately;
+    /// an existing sync keeps its admission and schedules one follow-up.
+    pub fn foregrounded(&mut self, now: Instant) {
+        match &mut self.state {
+            State::Locked => {}
+            State::Waiting { due } => *due = now,
+            State::Running { changed } => *changed = true,
+        }
+    }
+
     /// A local write committed; it is pushed after [`AUTO_SYNC_DEBOUNCE`], or
     /// right after the sync already running.
     pub fn local_change(&mut self, now: Instant) {
@@ -258,5 +268,24 @@ mod tests {
         schedule.locked();
         assert!(!schedule.finished(ticket, now));
         assert_eq!(schedule.next_due(), None);
+    }
+
+    #[test]
+    fn foreground_preserves_single_flight_and_never_unlocks() {
+        let now = Instant::now();
+        let mut schedule = AutoSyncSchedule::new();
+        schedule.foregrounded(now);
+        assert_eq!(schedule.take_now(), None);
+        schedule.unlocked(now, true);
+        schedule.foregrounded(now);
+        let ticket = schedule.take_due(now).expect("foreground sync");
+        schedule.foregrounded(now);
+        assert_eq!(schedule.take_due(now), None);
+        assert_eq!(schedule.take_now(), None);
+        assert!(schedule.finished(ticket, now));
+        assert_eq!(schedule.next_due(), Some(now + AUTO_SYNC_DEBOUNCE));
+        schedule.locked();
+        schedule.foregrounded(now);
+        assert_eq!(schedule.take_now(), None);
     }
 }

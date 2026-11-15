@@ -15,6 +15,13 @@ struct SettingsView: View {
             security
                 .fittedToContent()
                 .tabItem { Label(model.strings("settings.tabs.security"), systemImage: "lock") }
+            if let maintenance = model.maintenance {
+                Form { MaintenanceSections(maintenance: maintenance, unlocked: model.isUnlocked, strings: model.strings) }
+                    .formStyle(.grouped)
+                    .frame(height: 480)
+                    .onDisappear { maintenance.dismissed() }
+                    .tabItem { Label(model.strings("settings.tabs.backups"), systemImage: "externaldrive") }
+            }
             Form {
                 BrowserPairingsView(core: model.browserCore, strings: model.strings)
             }

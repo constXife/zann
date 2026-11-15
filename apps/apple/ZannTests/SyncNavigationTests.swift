@@ -1,6 +1,10 @@
 import XCTest
 import ZannCoreKit
+#if os(iOS)
+@testable import ZannMobile
+#else
 @testable import Zann
+#endif
 
 /// The second vault is a UI projection fixture; native storage/key isolation
 /// is exercised separately by StorageContextTests and the Rust context tests.

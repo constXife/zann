@@ -1,6 +1,10 @@
 import XCTest
 import ZannCoreKit
+#if os(iOS)
+@testable import ZannMobile
+#else
 @testable import Zann
+#endif
 
 /// Delays effects around a real temporary core; no real server or Keychain.
 class UXDelayedCore: CoreFacade {

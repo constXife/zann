@@ -48,6 +48,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var syncAfterUnlock = false
 
     private let core: CoreFacade?
+    let maintenance: MaintenanceModel?
     var browserCore: CoreFacade? { core }
     /// The keystore the core was composed with; asked for its status only,
     /// which never prompts.
@@ -105,6 +106,7 @@ final class AppModel: ObservableObject {
         strings = Strings(language: loaded.language ?? systemLanguage)
         preferencesFile = openedFile
         core = opened?.core
+        maintenance = opened.map { MaintenanceModel(core: $0.core) }
         keystore = opened?.keystore
         touchIDArmed = armed
         startupTouchIDPending = unlockAttemptRememberedAtStartup(startup: true, armed: armed, phase: .unlock) && screen == .master(.unlock)
@@ -112,6 +114,7 @@ final class AppModel: ObservableObject {
         if let rememberedError {
             error = message(for: rememberedError)
         }
+        Task { await maintenance?.automaticSnapshot() }
     }
 
     /// What Touch ID can do on this device right now; never prompts.
@@ -374,6 +377,7 @@ final class AppModel: ObservableObject {
     /// the usable vault UI. The core still owns preferred-storage selection.
     private func open(core: CoreFacade, contents: VaultModel.Contents) {
         let vault = VaultModel(core: core, contents: contents, strings: strings)
+        maintenance?.sessionOpened()
         syncAfterUnlock = false
         self.vault = vault
         lastActivity = Date()
@@ -426,7 +430,8 @@ final class AppModel: ObservableObject {
         connect?.cancel()
         keystore?.cancelUnlock()
         logoutOperation?.cancel()
-        vault?.stopAutoSync()
+        if shouldLock { vault?.stopAutoSync() } else { vault?.pauseAutoSync() }
+        maintenance?.invalidate()
         if preferences.clipboardClearOnExit { Clipboard.clearOwned() }
         guard let core, shouldLock else { return Task {} }
         vault = nil
@@ -445,7 +450,9 @@ final class AppModel: ObservableObject {
 
     func resumeFromBackground() async {
         await checkIdle()
-        if isUnlocked { vault?.startAutoSync() }
+        if isUnlocked { maintenance?.sessionOpened(); vault?.resumeAutoSync() }
+        // Disk-sized maintenance must not delay removal of the privacy cover.
+        Task { await maintenance?.automaticSnapshot() }
         guard let core, !busy, !touchIDBusy else { return }
         let status = await BlockingCore.run { Result { try Self.touchIDArmed(core) } }
         switch status {
@@ -465,6 +472,7 @@ final class AppModel: ObservableObject {
         do { operation = try SessionOperationFfi(timeoutMs: 30_000) }
         catch { lastFailure = error; self.error = message(for: error); return }
         logoutOperation = operation
+        maintenance?.invalidate()
         defer { logoutOperation = nil }
         vault?.stopAutoSync()
         vault = nil
@@ -497,6 +505,7 @@ final class AppModel: ObservableObject {
         guard let core, isUnlocked || busy else { return }
         let keepConnecting = screen == .connect && connect != nil
         unlockOperations.cancel()
+        maintenance?.invalidate()
         // Clear visible secrets before awaiting any fallible core operation.
         vault?.stopAutoSync()
         if !keepConnecting { vault = nil; screen = .master(.unlock) }

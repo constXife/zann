@@ -215,6 +215,18 @@ final class VaultModel: ObservableObject {
         }
     }
 
+    /// Suspension stops the shell's timer without invalidating an admitted
+    /// core sync or the still-unlocked scheduler.
+    func pauseAutoSync() {
+        autoSync?.cancel()
+        autoSync = nil
+    }
+
+    func resumeAutoSync() {
+        schedule.foregrounded()
+        startAutoSync()
+    }
+
     /// The vault is locking: nothing more is due, and a sync still running
     /// (which the core's lock cancels) schedules nothing.
     func stopAutoSync() {

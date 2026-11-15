@@ -35,8 +35,31 @@ for family in ("iPhone", "iPad"):
 # One xcodebuild invocation per device keeps scheduling and xcresult ownership
 # separate. Xcode's multi-destination mode can leave the next worker queued and
 # retain only the first destination in the completed result bundle.
+mkdir -p build/mobile/Logs/Test
 while IFS= read -r destination; do
-  xcodebuild test -quiet -project Zann.xcodeproj -scheme ZannMobile \
+  result_bundle="build/mobile/Logs/Test/Mobile-$(uuidgen).xcresult"
+  if xcodebuild test -quiet -project Zann.xcodeproj -scheme ZannMobile \
     -derivedDataPath build/mobile -parallel-testing-enabled NO \
-    -destination "$destination"
+    -destination "$destination" -resultBundlePath "$result_bundle"; then
+    continue
+  else
+    test_status=$?
+  fi
+  # Keep the original Xcode failure, with assertion locations in the CI log.
+  if summary=$(xcrun xcresulttool get test-results summary --path "$result_bundle"); then
+    printf '%s\n' "$summary"
+    if failures=$(python3 -c '
+import json, sys
+for failure in json.load(sys.stdin)["testFailures"]:
+    print(failure["testIdentifierString"])
+' <<< "$summary"); then
+      while IFS= read -r test_id; do
+        [[ -n "$test_id" ]] || continue
+        if ! xcrun xcresulttool get test-results test-details --path "$result_bundle" --test-id "$test_id"; then
+          printf 'Could not read failure details for %s\n' "$test_id" >&2
+        fi
+      done <<< "$failures"
+    fi
+  fi
+  exit "$test_status"
 done <<< "$destinations"

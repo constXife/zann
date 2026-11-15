@@ -22,6 +22,9 @@ The current surface covers:
 - Apple auth/unlock invalidation in `apps/apple/Zann/{AppModel.swift,Connect/**}`,
   owned clipboard delivery in `apps/apple/Zann/Platform/Clipboard*.swift`,
   and mobile system web-session/privacy lifecycle in `apps/apple/Mobile/**`;
+- native backup staging, picker ownership, cleanup and lifecycle maintenance in
+  `apps/apple/Zann/Maintenance/**`, and signed local mobile artifact preparation
+  in `apps/apple/release-mobile.sh`;
 - Apple transient reveal state in `apps/apple/Zann/Platform/FieldRevealState.swift`,
   security preference controls in `apps/apple/Zann/DevicePreferenceViews.swift`,
   and masked field editing/copying in `apps/apple/Zann/Vault/{ItemDetailView,ItemEditorView,FieldEditorRow,ItemDetailFieldRow,CopyValueButton}.swift`;

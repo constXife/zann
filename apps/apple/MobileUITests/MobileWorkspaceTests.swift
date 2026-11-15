@@ -98,6 +98,46 @@ final class MobileWorkspaceTests: XCTestCase {
         capture(app, "list-scrolled-landscape")
     }
 
+    func testMaintenanceSnapshotVerifyAndExportCancellation() {
+        let app = launchFixture()
+        app.buttons["workspace.settings"].tap()
+        let snapshot = app.buttons["maintenance.snapshot"]
+        for _ in 0..<8 where !fullyVisible(snapshot, in: app) { app.swipeUp() }
+        XCTAssertTrue(fullyVisible(snapshot, in: app))
+        let rows = app.staticTexts.matching(identifier: "maintenance.snapshotResult")
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10))
+        let previousCount = rows.count
+        snapshot.tap()
+        // An existing automatic snapshot does not prove the manual one ended.
+        expectation(for: NSPredicate { _, _ in rows.count == previousCount + 1 }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
+        let verify = app.buttons["maintenance.verify"]
+        for _ in 0..<4 where !fullyVisible(verify, in: app) { app.swipeUp() }
+        XCTAssertTrue(fullyVisible(verify, in: app))
+        XCTAssertTrue(verify.isEnabled)
+        verify.tap()
+        let result = app.staticTexts["maintenance.verifyResult"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        XCTAssertEqual(result.label, "Verification completed")
+        capture(app, "maintenance-verification")
+        let export = app.buttons["maintenance.export"]
+        for _ in 0..<8 where !fullyVisible(export, in: app) { app.swipeDown() }
+        XCTAssertTrue(fullyVisible(export, in: app))
+        export.tap()
+        let warning = app.alerts["Plain JSON Export"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        warning.buttons["Export JSON"].tap()
+        let save = app.descendants(matching: .any).matching(identifier: "Save").firstMatch
+        // A fresh CI simulator can take over 10 seconds to cold-start Files.
+        XCTAssertTrue(save.waitForExistence(timeout: 30))
+        capture(app, "maintenance-files-export")
+        cancelExport(in: app, save: save)
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: save)
+        expectation(for: NSPredicate { _, _ in self.fullyVisible(export, in: app) }, evaluatedWith: app)
+        waitForExpectations(timeout: 5)
+        XCTAssertTrue(export.isEnabled)
+    }
+
     func testConnectAndUnlockFormsWithSoftwareKeyboard() {
         let app = XCUIApplication()
         app.launchArguments += ["--mobile-ui-large-text"]
@@ -128,6 +168,26 @@ final class MobileWorkspaceTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["workspace.create"].waitForExistence(timeout: 15))
         return app
+    }
+
+    private func fullyVisible(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        // isHittable can be true for a sliver clipped at the sheet's edge.
+        element.isHittable && app.windows.firstMatch.frame.insetBy(dx: 0, dy: 44).contains(element.frame)
+    }
+
+    private func cancelExport(in app: XCUIApplication, save: XCUIElement) {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // The tablet picker supports explicit cancellation; dragging changes its detent.
+            let cancel = app.buttons["Cancel"].firstMatch
+            XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+            cancel.tap()
+        } else {
+            // Phone picker Cancel AX proxies can overlap Files' search controls.
+            let window = app.windows.firstMatch
+            let top = window.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: window.frame.width / 2, dy: save.frame.minY - window.frame.minY - 8))
+            top.press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+        }
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {

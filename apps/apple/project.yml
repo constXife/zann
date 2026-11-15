@@ -90,6 +90,7 @@ targets:
       - Mobile
       - DebugSupport
       - Zann/Composition
+      - Zann/Maintenance
       - Zann/PreferencesFile.swift
       - Zann/WelcomeIntro.swift
       - Zann/WelcomeView.swift
@@ -172,6 +173,12 @@ targets:
       - ZannTests/MobileNavigationTests.swift
       - ZannTests/ItemDetailLoaderTests.swift
       - ZannTests/VaultModelTests.swift
+      - ZannTests/MaintenanceTests.swift
+      - ZannTests/OfflineLifecycleTests.swift
+      - ZannTests/BackgroundUXTests.swift
+      - ZannTests/ProgressiveSyncTests.swift
+      - ZannTests/SyncNavigationTests.swift
+      - ZannTests/StorageContextTests.swift
     configFiles:
       Debug: MobileTests.xcconfig
       Release: MobileTests.xcconfig

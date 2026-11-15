@@ -116,6 +116,8 @@ jobs:
               - 'apps/apple/Zann/KeychainStores.swift'
               - 'apps/apple/Zann/Keychain.swift'
               - 'apps/apple/Zann/AppModel.swift'
+              - 'apps/apple/Zann/Maintenance/**'
+              - 'apps/apple/release-mobile.sh'
               - 'apps/apple/Zann/Connect/**'
               - 'apps/apple/Zann/Platform/Clipboard*.swift'
               - 'apps/apple/Zann/DevicePreferenceViews.swift'

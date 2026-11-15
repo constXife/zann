@@ -11,6 +11,9 @@ pub use model::*;
 pub use port::*;
 pub use recovery::*;
 
+/// Maximum age of automatic local snapshots at native lifecycle opportunities.
+pub const AUTO_SNAPSHOT_MAX_AGE_HOURS: u32 = 24;
+
 /// Cancellation/deadline controls accepted by the local item-read port.
 pub use crate::session::{SessionCancellationHandle, SessionOperation};
 
