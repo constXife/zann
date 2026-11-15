@@ -1,7 +1,7 @@
 //! Native confirmation form. Authorization and policy enforcement live in LocalVault.
 use super::*;
 use zann_client::app::local::{ExportFactor, ExportPolicy, ExportSecurity, ExportStepUp};
-use zann_client::app::{SessionCancellationHandle, SessionOperation};
+use zann_client::app::local::{SessionCancellationHandle, SessionOperation};
 use zeroize::Zeroize;
 
 #[derive(Default)]

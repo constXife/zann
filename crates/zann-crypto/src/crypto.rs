@@ -310,6 +310,12 @@ fn decrypt_v1_envelope(
         .map_err(|_| CryptoError::DecryptionFailed)
 }
 
+/// Constant-time equality for local key/authorization checks; no values enter diagnostics.
+pub fn secret_bytes_equal(left: &[u8], right: &[u8]) -> bool {
+    use subtle::ConstantTimeEq;
+    bool::from(left.ct_eq(right))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,9 +366,4 @@ mod tests {
         let result = decrypt_blob(&key, &blob, b"aad");
         assert!(matches!(result, Err(CryptoError::DecryptionFailed)));
     }
-}
-/// Constant-time equality for local key/authorization checks; no values enter diagnostics.
-pub fn secret_bytes_equal(left: &[u8], right: &[u8]) -> bool {
-    use subtle::ConstantTimeEq;
-    bool::from(left.ct_eq(right))
 }
