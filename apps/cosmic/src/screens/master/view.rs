@@ -19,14 +19,7 @@ impl State {
             action
         }))
         .width(Length::Fill);
-        if !self.busy
-            && !self.password.is_empty()
-            && (!self.creating()
-                || (self.password == self.confirmation
-                    && zann_ui_core::password::password_feedback(&self.password)
-                        .validation_key
-                        .is_none()))
-        {
+        if self.can_submit() {
             submit = submit.on_press(Message::Submit);
         }
 
@@ -39,8 +32,9 @@ impl State {
                     Some(Message::ToggleVisibility),
                     self.hidden,
                 )
+                .id(self.password_id.clone())
                 .on_input(Message::PasswordInput)
-                .on_submit(|_| Message::Submit),
+                .on_submit(|_| Message::PasswordSubmitted),
             )
             .spacing(spacing.space_s)
             .width(Length::Fixed(360.0));
@@ -50,11 +44,20 @@ impl State {
                 widget::text_input::secure_input(
                     t(self.mode.confirmation_key()),
                     &self.confirmation,
-                    None::<Message>,
-                    true,
+                    Some(Message::ToggleVisibility),
+                    self.hidden,
                 )
+                .id(self.confirmation_id.clone())
                 .on_input(Message::ConfirmationInput)
                 .on_submit(|_| Message::Submit),
+            );
+            form = form.push(
+                widget::text::caption(if self.passwords_mismatch() {
+                    t("wizard.passwordMismatch")
+                } else {
+                    String::new()
+                })
+                .height(20),
             );
         }
         form = form.push(widget::text::caption(t(self.mode.help_key())));

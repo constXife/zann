@@ -44,7 +44,10 @@ Do not commit generated WASM/glue or the unpacked distribution.
    rebuild/moving a binary does not silently relocate an installed manifest.
 3. Open the native macOS/COSMIC client on that same root. In **Settings → Browser
    connections**, click **Connect browser** to display a one-time six-digit code.
-4. Enter that code in the extension and click **Connect browser**. It expires in
+   COSMIC shows **Copy code** beside the code, a remaining-lifetime counter and
+   transient copied feedback. Copy uses the normal native clipboard clear policy;
+   the native owner is checked first so consumed/expired codes are not copied.
+4. Paste that code in the extension and click **Connect**. It expires in
    two minutes and permits five attempts total. A new native code replaces the
    previous one. Successful PAKE pairing consumes the code, saves native trust
    and installs the authenticated server pin in extension storage; the popup

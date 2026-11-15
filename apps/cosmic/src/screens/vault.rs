@@ -139,6 +139,7 @@ pub enum Message {
     QueryInput(String),
     ClearQuery,
     EscapeClearQuery,
+    FocusSearch,
     ListScrolled {
         remaining: f32,
         viewport_height: f32,
@@ -422,6 +423,11 @@ impl State {
             | Message::LoadMore
             | Message::MoreLoaded { .. }) => return self.update_search(message, session),
 
+            Message::FocusSearch => {
+                if self.can_focus_search() {
+                    return Outcome::Task(widget::text_input::focus(self.search_id.clone()));
+                }
+            }
             Message::Select(id) => {
                 if !self.switching_context
                     && self.editor.is_none()

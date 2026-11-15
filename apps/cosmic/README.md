@@ -188,6 +188,19 @@ each save, and every minute otherwise. The vault screen keeps one timer armed
 for it; Settings → Sync now takes the same one-sync-at-a-time admission, and a
 lock forgets what was due and cancels a sync in flight.
 
+## Desktop interactions
+
+- Creating a device-unlock or account-encryption password requires matching
+  confirmation; unlock needs one field. Focus starts in the password field.
+  Enter advances to confirmation during creation and submits during unlock.
+- `Ctrl+N` creates an item, `Ctrl+E` edits the selection, `Ctrl+R` syncs and
+  `Ctrl+F` focuses search. `Ctrl+L` locks, `Ctrl+,` opens settings and `Ctrl+Q`
+  quits. The application menu shows these same commands and shortcuts.
+
+Browser pairing in Settings → Security shows a **Copy code** button and the
+remaining code lifetime. Copy uses the normal clipboard clear policy; the UI
+checks native code validity and refreshes consumed codes/connections automatically.
+
 ## Connecting without a server
 
 `tools/mock-server` answers the endpoints a password login needs

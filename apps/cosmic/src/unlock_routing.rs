@@ -30,7 +30,11 @@ impl App {
                 *screen = Screen::Master(Box::new(
                     master::State::new(master::Mode::Unlock, None).with_storage(storage),
                 ));
-                remembered_unlock_task(session)
+                let focus = match screen {
+                    Screen::Master(master) => lift(master.focus_password(), Message::Master),
+                    _ => Task::none(),
+                };
+                Task::batch([remembered_unlock_task(session), focus])
             }
             accounts::Outcome::Connect(url) => {
                 let Shell::Ready { screen, .. } = &mut self.shell else {

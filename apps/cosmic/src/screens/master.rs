@@ -23,6 +23,8 @@ pub struct State {
     /// with what. Absent until the shell has asked the facade.
     remembered: Option<RememberedUnlock>,
     password: String,
+    password_id: cosmic::iced::widget::Id,
+    confirmation_id: cosmic::iced::widget::Id,
     hidden: bool,
     busy: bool,
     error: Option<String>,
@@ -51,6 +53,8 @@ pub enum Message {
     ConfirmationInput(String),
     ToggleVisibility,
     Submit,
+    PasswordSubmitted,
+    FocusPassword,
     UseUnlocked,
     Recovery,
     /// The vault contents, plus the outcome of the sync that ran on the way
@@ -90,6 +94,8 @@ impl State {
             confirmation: String::new(),
             remembered: None,
             password: String::new(),
+            password_id: cosmic::iced::widget::Id::unique(),
+            confirmation_id: cosmic::iced::widget::Id::unique(),
             hidden: true,
             busy: false,
             error: None,
@@ -121,6 +127,24 @@ impl State {
     pub fn with_account(mut self, has_keys: bool) -> Self {
         self.connected_keys = Some(has_keys);
         self
+    }
+
+    pub fn focus_password(&self) -> Task<Message> {
+        cosmic::widget::text_input::focus(self.password_id.clone())
+    }
+
+    pub fn can_submit(&self) -> bool {
+        !self.busy
+            && !self.password.is_empty()
+            && (!self.creating()
+                || (self.password == self.confirmation
+                    && zann_ui_core::password::password_feedback(&self.password)
+                        .validation_key
+                        .is_none()))
+    }
+
+    fn passwords_mismatch(&self) -> bool {
+        !self.confirmation.is_empty() && self.password != self.confirmation
     }
 
     fn creating(&self) -> bool {
@@ -155,23 +179,22 @@ impl State {
             Message::Recovery => {}
             Message::UseRemembered => return self.unlock_remembered(session),
 
-            Message::PasswordInput(value) => self.password = value,
-            Message::ConfirmationInput(value) => self.confirmation = value,
+            Message::PasswordInput(value) if !self.busy => self.password = value,
+            Message::ConfirmationInput(value) if !self.busy => self.confirmation = value,
+            Message::PasswordInput(_) | Message::ConfirmationInput(_) => {}
 
             Message::ToggleVisibility => self.hidden = !self.hidden,
 
-            Message::Submit | Message::UseUnlocked => {
+            Message::FocusPassword => return Outcome::Task(self.focus_password()),
+            Message::PasswordSubmitted if self.creating() => {
+                return Outcome::Task(cosmic::widget::text_input::focus(
+                    self.confirmation_id.clone(),
+                ));
+            }
+            Message::Submit | Message::UseUnlocked | Message::PasswordSubmitted => {
                 self.platform_prompt = false;
                 let use_unlocked = matches!(message, Message::UseUnlocked);
-                if self.busy
-                    || (!use_unlocked && self.password.is_empty())
-                    || (!use_unlocked
-                        && self.creating()
-                        && (self.password != self.confirmation
-                            || zann_ui_core::password::password_feedback(&self.password)
-                                .validation_key
-                                .is_some()))
-                {
+                if self.busy || (!use_unlocked && !self.can_submit()) {
                     return Outcome::None;
                 }
                 let Some(id) = self.operations.begin() else {

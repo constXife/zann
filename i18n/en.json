@@ -49,6 +49,8 @@
     "secret": "Secret"
   },
   "browser": {
+    "copyCode": "Copy code",
+    "codeRemaining": "Expires in {seconds} s",
     "title": "Browser connections",
     "codeHint": "Create a one-time code and enter it in the Zann extension. It expires in two minutes and allows five attempts. Connecting again replaces the previous code.",
     "refresh": "Refresh browser connections",

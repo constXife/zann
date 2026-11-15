@@ -122,7 +122,8 @@ COSMIC consumes the durable catalog/page observer through a bounded metadata
 relay and one correlated cache refresh, including the first vault selection.
 The unlock-owned network call and separate final-sync cache loader are removed,
 narrowing MIG-006 without adding sync or recovery policy to the shell. Keyboard
-layout/Caps Lock observation remains platform interaction owned by COSMIC.
+layout/Caps Lock observation and native shortcut bindings remain platform
+interaction owned by COSMIC.
 
 Category projections also supply empty-state creation actions (target type and
 translation key); Trash supplies none. Shells render these actions and open the

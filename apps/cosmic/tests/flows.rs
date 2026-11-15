@@ -14,6 +14,8 @@ use zann_ui_core::{DevicePreferences, ItemCounts};
 mod card_effects;
 #[path = "flows/card_selection.rs"]
 mod card_selection;
+#[path = "flows/desktop_parity.rs"]
+mod desktop_parity;
 #[path = "flows/first_sync.rs"]
 mod first_sync;
 #[path = "flows/list_states.rs"]
