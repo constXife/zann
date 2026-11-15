@@ -70,6 +70,12 @@ ownership.
   hiding it MUST NOT move controls between semantic regions.
 - MUST: A vault switch clears stale item detail, loads the selected vault's
   first page and updates category/folder counts as one visible transition.
+- COSMIC password creation requires a matching confirmation before submission.
+  Unlock uses one password field. Keyboard focus starts in the password field;
+  Enter advances to confirmation during creation and submits during unlock.
+- COSMIC commands expose create, edit, sync and search using `Ctrl` shortcuts,
+  with the same admission as their visible
+  controls. Commands cannot open a hidden editor behind Settings or another draft.
 - COSMIC shows the compositor's active keyboard layout and Caps Lock state in a
   reserved header slot, including on password screens. English layouts and their
   variants are hidden; Caps Lock is shown only while enabled. Layout is read from

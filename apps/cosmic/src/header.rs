@@ -10,39 +10,40 @@ impl App {
             return Vec::new();
         }
 
-        let lock = if self.is_unlocked() {
-            menu::Item::Button
-        } else {
-            menu::Item::ButtonDisabled
-        }(
-            t("common.lock"),
-            Some(widget::icon::from_name("system-lock-screen-symbolic").handle()),
-            Action::Lock,
-        );
-        let settings = if self.can_open_settings() {
-            menu::Item::Button
-        } else {
-            menu::Item::ButtonDisabled
-        }(
-            t("common.settings"),
-            Some(widget::icon::from_name("preferences-system-symbolic").handle()),
-            Action::Settings,
-        );
+        let command = |label: &str, icon: &str, action: Action| {
+            let button = if self.command_enabled(action) {
+                menu::Item::Button
+            } else {
+                menu::Item::ButtonDisabled
+            };
+            button(
+                t(label),
+                Some(widget::icon::from_name(icon).handle()),
+                action,
+            )
+        };
         let items = menu::items(
             key_binds(),
             vec![
-                if matches!(&self.shell, Shell::Ready { screen: Screen::Vault(state), .. } if state.can_edit())
-                {
-                    menu::Item::Button
-                } else {
-                    menu::Item::ButtonDisabled
-                }(
-                    t("common.edit"),
-                    Some(widget::icon::from_name("edit-symbolic").handle()),
-                    Action::Edit,
+                command("common.create", "list-add-symbolic", Action::Create),
+                command("common.edit", "edit-symbolic", Action::Edit),
+                command(
+                    "items.searchPlaceholder",
+                    "system-search-symbolic",
+                    Action::Search,
                 ),
-                lock,
-                settings,
+                command(
+                    "settings.accounts.syncNow",
+                    "view-refresh-symbolic",
+                    Action::Sync,
+                ),
+                menu::Item::Divider,
+                command("common.lock", "system-lock-screen-symbolic", Action::Lock),
+                command(
+                    "common.settings",
+                    "preferences-system-symbolic",
+                    Action::Settings,
+                ),
                 menu::Item::Divider,
                 menu::Item::Button(
                     t("common.quit"),

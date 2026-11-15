@@ -71,6 +71,7 @@ impl App {
                                 tasks.push(lift(task, Message::Master));
                             }
                         }
+                        tasks.push(lift(master.focus_password(), Message::Master));
                         *screen = Screen::Master(Box::new(master));
                     }
                 }

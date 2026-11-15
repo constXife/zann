@@ -12,11 +12,10 @@
 //! [`Session`], and the routing between screens. Each screen in [`screens`]
 //! owns its own state and messages and reports back through its `Outcome`.
 
+mod commands;
 mod connect_routing;
+use commands::{key_binds, Action};
 mod unlock_routing;
-
-use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use cosmic::app::{Core, Settings, Task};
 use cosmic::iced::core::layout::Limits;
@@ -88,6 +87,7 @@ struct App {
 
 #[derive(Clone)]
 enum Message {
+    Command(Action),
     Welcome(welcome::Message),
     Connect(connect::Event),
     Master(master::Message),
@@ -126,46 +126,6 @@ impl std::fmt::Debug for Message {
         // Nested input and clipboard messages can carry decrypted values.
         f.write_str("Message(<redacted>)")
     }
-}
-
-/// Commands in the native header menu. Keeping these separate from messages
-/// lets libcosmic pair them with their keyboard shortcuts.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum Action {
-    Edit,
-    Lock,
-    Settings,
-    Quit,
-}
-
-impl menu::Action for Action {
-    type Message = Message;
-
-    fn message(&self) -> Message {
-        match self {
-            Self::Edit => Message::Vault(vault::Message::OpenEdit),
-            Self::Lock => Message::Lock,
-            Self::Settings => Message::OpenSettings,
-            Self::Quit => Message::Quit,
-        }
-    }
-}
-
-/// Native application shortcuts. The menu reads this same map to
-/// print the shortcut beside each command.
-fn key_binds() -> &'static HashMap<menu::KeyBind, Action> {
-    static BINDS: OnceLock<HashMap<menu::KeyBind, Action>> = OnceLock::new();
-    BINDS.get_or_init(|| {
-        let bind = |character: &str| menu::KeyBind {
-            modifiers: vec![menu::key_bind::Modifier::Ctrl],
-            key: keyboard::Key::Character(character.into()),
-        };
-        HashMap::from([
-            (bind("l"), Action::Lock),
-            (bind(","), Action::Settings),
-            (bind("q"), Action::Quit),
-        ])
-    })
 }
 
 /// Option is conventional on macOS and does not participate in application
@@ -288,10 +248,14 @@ impl cosmic::Application for App {
 
         if let Shell::Ready {
             session,
-            screen: Screen::Master(_),
+            screen: Screen::Master(master),
         } = &app.shell
         {
-            task = Task::batch([task, remembered_unlock_task(session)]);
+            task = Task::batch([
+                task,
+                remembered_unlock_task(session),
+                lift(master.focus_password(), Message::Master),
+            ]);
         }
 
         (app, task)
@@ -385,12 +349,19 @@ impl cosmic::Application for App {
                 screen: Screen::Vault(vault),
                 ..
             } => vault.subscription().map(Message::Vault),
+            Shell::Ready {
+                screen: Screen::Settings { state, .. },
+                ..
+            } => state.subscription().map(Message::Settings),
             _ => Subscription::none(),
         };
 
         let shell_events = event::listen_with(|event, _, _| match event {
             Event::Window(window::Event::CloseRequested) => Some(Message::CloseRequested),
             Event::Window(window::Event::Unfocused) => Some(Message::Unfocused),
+            Event::Window(window::Event::Focused) => {
+                Some(Message::Master(master::Message::FocusPassword))
+            }
             Event::Keyboard(keyboard::Event::KeyPressed { ref key, .. })
                 if *key == temporary_reveal_key() =>
             {
@@ -469,6 +440,7 @@ impl cosmic::Application for App {
         // Effects and policies that leave a screen are the shell's, whoever
         // asked for them.
         match message {
+            Message::Command(action) => return self.execute_command(action),
             Message::KeyboardLayout(value) => {
                 self.keyboard_status.layout_changed(value);
                 return Task::none();
@@ -649,7 +621,8 @@ impl cosmic::Application for App {
             }
 
             // Handled above, before the session was borrowed.
-            Message::Copy(_)
+            Message::Command(_)
+            | Message::Copy(_)
             | Message::OpenUrl(_)
             | Message::Lock
             | Message::OpenSettings
@@ -748,7 +721,11 @@ impl App {
                 Task::none()
             } else {
                 *screen = locked;
-                remembered_unlock_task(session)
+                let focus = match screen {
+                    Screen::Master(master) => lift(master.focus_password(), Message::Master),
+                    _ => Task::none(),
+                };
+                Task::batch([remembered_unlock_task(session), focus])
             }
         };
 
@@ -797,6 +774,7 @@ impl App {
             settings::Outcome::None => Task::none(),
             settings::Outcome::Task(task) => lift(task, Message::Settings),
             settings::Outcome::Changed(change) => self.change_preference(change),
+            settings::Outcome::Copy(value) => self.copy(value),
             settings::Outcome::Open(target) => cosmic::task::message(Message::OpenUrl(target)),
             settings::Outcome::Sync(storage_id) => {
                 let Shell::Ready { session, .. } = &self.shell else {

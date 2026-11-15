@@ -28,7 +28,7 @@ const SOURCE_URL: &str = "https://github.com/constxife/zann";
 pub struct State {
     password: password::State,
     browser_pairings: Option<zann_daemon::PairingSettings>,
-    browser_code: Option<zann_daemon::PairingCode>,
+    browser_code: Option<browser::ActiveCode>,
     section: SettingsSection,
     preferences: DevicePreferences,
     close_to_tray: bool,
@@ -145,6 +145,8 @@ pub enum Outcome {
     None,
     Task(Task<Message>),
     Changed(Change),
+    /// Clipboard effects use the native shell's generation and clear policy.
+    Copy(String),
     Sync(String),
     AddServer,
     /// The stale server is forgotten, or the storage's connection is gone;
@@ -210,7 +212,7 @@ impl State {
         let facade = session.facade();
         let snapshots = session.facade();
         Task::batch([
-            browser::load(session.browser_control()),
+            browser::load(session.browser_control(), None),
             cosmic::task::future(async move {
                 Message::Loaded(
                     off_thread(move || {

@@ -1,7 +1,7 @@
 //! Admission shared by native workspace controls.
 use super::*;
 impl State {
-    fn can_focus_search(&self) -> bool {
+    pub fn can_focus_search(&self) -> bool {
         !self.switching_context && self.editor.is_none() && self.history.is_none()
     }
     pub fn can_create(&self) -> bool {
