@@ -116,6 +116,14 @@ async fn two_accounts_one_endpoint_enroll_sync_restart_export_logout_and_remove_
         assert_ne!(first, second);
         create_note(&core, "second-only");
         core.remote_sync(Some(second.clone()), None).unwrap();
+        let labels: std::collections::BTreeMap<_, _> = core
+            .list_storages()
+            .unwrap()
+            .into_iter()
+            .map(|storage| (storage.id, storage.account_name))
+            .collect();
+        assert_eq!(labels[&first].as_deref(), Some("first@example.test"));
+        assert_eq!(labels[&second].as_deref(), Some("second@example.test"));
         let repository = ConfigRepository::new(ClientPaths::new(root.path()));
         let snapshot = repository.snapshot().unwrap();
         assert_eq!(snapshot.config().connections.len(), 1);

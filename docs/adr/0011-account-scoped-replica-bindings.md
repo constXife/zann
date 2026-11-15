@@ -65,6 +65,11 @@ subject becomes `expected_account_subject` on that explicit pending profile. Thi
 is a constraint, not authenticated identity or proof of a usable key. Only a matching
 canonical `/me` result may replace it with `account_subject` and credentials. Repeated
 reconnects reuse the same constrained profile; they cannot retarget another storage.
+Native storage summaries project the matching profile's optional canonical account
+name from `account_identities`; `zann-ui-core::sync_status::storage_context_label`
+formats server/account labels for COSMIC and Apple/FFI. Labels never authorize or
+select a profile. Metadata listing does not initialize/read credentials.
+
 Pin replacement and reservation publish in one exact-revision Config transaction.
 A changed server ID is refused. A changed fingerprint requires explicit confirmation,
 including when it comes from the selected disconnected replica's cached pin.
