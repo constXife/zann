@@ -66,7 +66,7 @@ does not authorize another temporary implementation.
 | Unlock routing, operation admission and lock timing | `zann-flows::unlock` **(active policy slice)** | COSMIC directly; Apple through pure FFI projections | four password phases, explicit enrollment hints, operation IDs, startup remembered admission, focus and idle policy | copied phase reducers, per-vault idle timers, stale unlock results reopening the UI |
 | New-password policy and strength feedback | `zann-core::unlock`; `zann-ui-core::password` | native creation/change forms through Rust or FFI | NFC length and edge-whitespace validation; bounded value-free strength keys | trimming existing credentials, shell scoring or validation copies |
 | Scoped local account forget and device reset | `zann-client::app::local`; `zann-client-sqlite::local_vault::recovery`, `zann-db::local::recovery` | native account recovery screens only | exact preview token/source, encrypted snapshot, unsent-data confirmation, reserved SQLite writer, canonical Config connection removal | browser IPC access; shell SQL; deletion before snapshot/source proof; remote encryption recovery promises |
-| Categories, folders, filters, list captions, item-detail projection and editor drafts | `zann-ui-core`; the list subtitle's payload fields are `zann-core::item_subtitle`, applied where `zann-db` decrypts a list page | COSMIC, Apple/FFI and future clients | canonical schema/catalogue data, translation and abstract-icon resolver | category, ordering, masking/copy/reveal, TOTP parsing or list-caption policy in components or screens; payload decryption for list rows outside `zann-db` |
+| Categories, folders, filters, list titles/captions, item-detail projection and editor drafts | `zann-ui-core`; domain-only IDNA display titles use `item::display_item_title`; the list subtitle's payload fields are `zann-core::item_subtitle`, applied where `zann-db` decrypts a list page | COSMIC, Apple/FFI and future clients | canonical schema/catalogue data, translation and abstract-icon resolver; original title retained for identity and matching | category, ordering, masking/copy/reveal, TOTP parsing or list-title/caption policy in components or screens; payload decryption for list rows outside `zann-db` |
 | Native password/passphrase generation | `zann-ui-core::generator` | COSMIC directly; Apple and future non-Rust shells through `zann-ffi`; browser through `zann-browser` | explicit bounded options, shared defaults and separator catalogue; fallible OS entropy | alphabets, dictionaries, validation, RNG selection or default copies in shells/FFI; generated secrets in Debug/logs |
 | Streaming backup/import/export use cases | `zann-client::app::local` (port), `zann-client-sqlite::maintenance` (native implementation) | native clients | `Read`/`Write`, explicit paths, progress and cancellation ports | file dialogs in shared services; parsing/encryption policy in shells |
 | Privileged shared-server backup recovery | `zann-server::domains::backup`; bounded persistence in `zann-db::repo::ServerBackupRepo` | `zann-server export/import` CLI adapters | shared-only v1 JSON, explicit owner/confirmation, private files, snapshot paging and one atomic restore transaction | personal plaintext/keys on the server; parsing or encryption orchestration in CLI adapters |
@@ -117,6 +117,12 @@ only its source storage, and a separate list read must match the current
 storage, vault and list revision. Native context switches remain available
 during network work. This narrows MIG-006's uncorrelated sync completion path;
 no shell sync, credential or recovery policy is added.
+
+COSMIC consumes the durable catalog/page observer through a bounded metadata
+relay and one correlated cache refresh, including the first vault selection.
+The unlock-owned network call and separate final-sync cache loader are removed,
+narrowing MIG-006 without adding sync or recovery policy to the shell. Keyboard
+layout/Caps Lock observation remains platform interaction owned by COSMIC.
 
 Category projections also supply empty-state creation actions (target type and
 translation key); Trash supplies none. Shells render these actions and open the

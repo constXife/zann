@@ -145,7 +145,13 @@ impl State {
                 }
             }
             Message::SyncNow => {
-                if self.switching_context || self.sync.running_storage.is_some() {
+                if self.switching_context || self.progress.running {
+                    return Outcome::None;
+                }
+                if self.progress.awaiting_first && self.selected_storage_id().is_none() {
+                    if let Some(ticket) = session.auto_sync().take_now() {
+                        return Outcome::Task(self.start_sync(ticket, session));
+                    }
                     return Outcome::None;
                 }
                 match self.sync_indicator_state().map(|s| s.action()) {

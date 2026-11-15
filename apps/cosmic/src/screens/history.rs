@@ -5,7 +5,10 @@ use cosmic::{theme, widget, Element};
 use zann_client::app::local::{ItemDetail, ItemHistoryDetail, ItemHistorySummary};
 
 use super::detail::{self, Detail};
-use crate::i18n::t;
+use crate::i18n::{format_timestamp, t};
+
+#[cfg(test)]
+mod tests;
 
 pub struct State {
     item_id: String,
@@ -13,6 +16,7 @@ pub struct State {
     path: String,
     entries: Vec<ItemHistorySummary>,
     selected_version: Option<i64>,
+    version_request: u64,
     detail: Option<Detail>,
     loading: bool,
     version_loading: bool,
@@ -24,9 +28,11 @@ pub struct State {
 #[derive(Clone, Debug)]
 pub enum Message {
     EntriesLoaded(Result<Vec<ItemHistorySummary>, String>),
+    EntriesRefreshed(Result<Vec<ItemHistorySummary>, String>),
     Select(i64),
     VersionLoaded {
         version: i64,
+        request: u64,
         result: Result<ItemHistoryDetail, String>,
     },
     Detail(detail::Message),
@@ -39,7 +45,7 @@ pub enum Message {
 
 pub enum Outcome {
     None,
-    LoadVersion(i64),
+    LoadVersion { version: i64, request: u64 },
     Restore(i64),
     Restored(Detail),
     Copy(String),
@@ -54,6 +60,7 @@ impl State {
             path: detail.path.clone(),
             entries: Vec::new(),
             selected_version: None,
+            version_request: crate::backend::next_view_request(),
             detail: None,
             loading: true,
             version_loading: false,
@@ -65,6 +72,10 @@ impl State {
 
     pub fn is_loading(&self) -> bool {
         self.loading
+    }
+
+    pub fn is_restoring(&self) -> bool {
+        self.restoring
     }
 
     pub fn item_id(&self) -> &str {
@@ -97,6 +108,35 @@ impl State {
 
     pub fn update(&mut self, message: Message) -> Outcome {
         match message {
+            Message::EntriesRefreshed(Ok(entries)) => {
+                if self.restoring {
+                    return Outcome::None;
+                }
+                let selected = self.selected_version;
+                let unchanged = selected.is_some_and(|version| {
+                    let old = self.entries.iter().find(|entry| entry.version == version);
+                    let new = entries.iter().find(|entry| entry.version == version);
+                    matches!((old, new), (Some(old), Some(new)) if old.checksum == new.checksum)
+                });
+                self.entries = entries;
+                // Metadata-only updates keep the selected preview and masking.
+                // A different payload must discard the stale preview first.
+                if !unchanged {
+                    self.selected_version = None;
+                    self.detail = None;
+                    self.version_loading = false;
+                    self.confirming_restore = false;
+                    if let Some(version) = selected
+                        .filter(|version| {
+                            self.entries.iter().any(|entry| entry.version == *version)
+                        })
+                        .or_else(|| self.entries.first().map(|entry| entry.version))
+                    {
+                        return self.select(version);
+                    }
+                }
+            }
+            Message::EntriesRefreshed(Err(error)) => self.error = Some(error),
             Message::EntriesLoaded(Ok(entries)) => {
                 self.loading = false;
                 self.entries = entries;
@@ -110,8 +150,12 @@ impl State {
                 self.error = Some(error);
             }
             Message::Select(version) => return self.select(version),
-            Message::VersionLoaded { version, result } => {
-                if self.selected_version != Some(version) {
+            Message::VersionLoaded {
+                version,
+                request,
+                result,
+            } => {
+                if self.selected_version != Some(version) || self.version_request != request {
                     return Outcome::None;
                 }
                 self.version_loading = false;
@@ -165,11 +209,15 @@ impl State {
             return Outcome::None;
         }
         self.selected_version = Some(version);
+        self.version_request = crate::backend::next_view_request();
         self.detail = None;
         self.version_loading = true;
         self.confirming_restore = false;
         self.error = None;
-        Outcome::LoadVersion(version)
+        Outcome::LoadVersion {
+            version,
+            request: self.version_request,
+        }
     }
 
     pub fn view(&self) -> Element<'_, Message> {
@@ -178,7 +226,11 @@ impl State {
             .push(
                 widget::column::with_capacity(2)
                     .push(widget::text::title4(t("items.historyTimeTravelTitle")))
-                    .push(widget::text::caption(self.title.clone()))
+                    .push(widget::tooltip(
+                        widget::text::caption(zann_ui_core::item::display_item_title(&self.title)),
+                        widget::text::body(self.title.clone()),
+                        widget::tooltip::Position::Bottom,
+                    ))
                     .width(Length::Fill),
             )
             .push(widget::button::standard(t("common.close")).on_press(Message::Close))
@@ -293,7 +345,7 @@ fn history_row(entry: &ItemHistorySummary) -> Element<'_, Message> {
         _ => "items.historyChangeUpdate",
     });
     let status = if entry.pending {
-        format!(" · {}", t("items.historyPending"))
+        format!(" · {}", t("items.historyLocalVersion"))
     } else {
         String::new()
     };
@@ -306,13 +358,4 @@ fn history_row(entry: &ItemHistorySummary) -> Element<'_, Message> {
         .push(widget::text::caption(author.to_string()))
         .spacing(spacing.space_xxxs)
         .into()
-}
-
-fn format_timestamp(timestamp: &str) -> String {
-    timestamp
-        .split_once('.')
-        .map_or(timestamp, |(seconds, _)| seconds)
-        .replace('T', " ")
-        .trim_end_matches('Z')
-        .to_string()
 }

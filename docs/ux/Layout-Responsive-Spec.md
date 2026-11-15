@@ -49,7 +49,7 @@ ownership.
   shared sync state, server address, last confirmed sync, failure details and
   explicit Sync now / Reconnect / recovery actions. Progress and failures stay
   with their source storage and never appear as list-workspace banners.
-- On a new device, macOS shows an explicit first-sync explanation before the
+- On a new device, desktop clients show an explicit first-sync explanation before the
   first cache exists. Committed catalog metadata exposes server/vault navigation
   immediately; committed pull pages progressively populate the current list.
   An unfinished first pull must not be presented as an empty vault. Subsequent
@@ -70,6 +70,11 @@ ownership.
   hiding it MUST NOT move controls between semantic regions.
 - MUST: A vault switch clears stale item detail, loads the selected vault's
   first page and updates category/folder counts as one visible transition.
+- COSMIC shows the compositor's active keyboard layout and Caps Lock state in a
+  reserved header slot, including on password screens. English layouts and their
+  variants are hidden; Caps Lock is shown only while enabled. Layout is read from
+  the COSMIC keyboard-layout protocol, never inferred from typed secret text.
+  Unavailable platform status is explicit; no guessed layout is displayed.
 - MUST: Transient input state (held modifiers, hover, focus, loading hints,
   copy/reveal feedback) MUST NOT insert or remove layout rows or resize columns.
   Use an overlay, reserved slot or style-only change if feedback is necessary.
@@ -143,6 +148,17 @@ clients SHOULD use platform-native controls inside the same semantic regions.
 - Create/edit and history occupy the detail workspace while preserving the
   navigation and list columns. COSMIC and Apple render native forms and
   history controls in the same semantic region.
+- COSMIC field editors put key/type/delete controls above the full-width value;
+  generator controls use a compact action beside the value. Inputs must remain
+  usable at 1200×700 logical pixels with all three columns visible.
+- COSMIC caps detail/editor content at 800 logical pixels and Settings sections
+  at 960; growing the window leaves breathing room instead of stretching fields.
+  These are native shell dimensions; Apple retains its existing native form layout.
+- Domain-only item titles may display decoded IDNA names. COSMIC keeps the stored
+  ASCII spelling available in a tooltip; display never changes matching or identity.
+- Local history snapshots are labelled as saved on this device, never as an active
+  synchronization. An open history list refreshes metadata after successful sync
+  while preserving the selected preview and its masking state.
 - Field templates come from `schemas/item_fields.json`. Draft validation and
   payload construction for Rust clients belong to `zann-ui-core::item_editor`.
 - Duplicate or invalid field keys prevent submission. Editing preserves typed
@@ -154,7 +170,8 @@ clients SHOULD use platform-native controls inside the same semantic regions.
   version discards its previous preview before loading the new one.
 - Closing a desktop window to tray follows its configured preference. If the
   tray becomes unavailable, a hidden COSMIC window is reopened; the configured
-  lock-on-hidden policy applies before closing the window.
+  lock-on-hidden policy applies before closing the window. Reopening from the
+  tray preserves whether the COSMIC window was maximized.
 - macOS keeps running when its window closes and provides Open, Lock and Quit
   through its menu-bar icon. Opening restores the single main window; idle
   lock and clear-on-exit remain active while no window is visible.

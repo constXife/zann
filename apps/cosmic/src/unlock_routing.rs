@@ -59,13 +59,15 @@ impl App {
             master::Outcome::None => Task::none(),
             master::Outcome::Task(task) => lift(task, Message::Master),
             master::Outcome::Recovery => self.show_account_recovery(),
-            master::Outcome::Opened { page, synced } => self.open_unlocked_vault(page, synced),
+            master::Outcome::Opened { page, sync_after } => {
+                self.open_unlocked_vault(page, sync_after)
+            }
         }
     }
     fn open_unlocked_vault(
         &mut self,
         page: zann_cosmic::backend::local::ItemsPage,
-        synced: Option<Result<(), String>>,
+        sync_after: Option<String>,
     ) -> Task<Message> {
         self.last_activity = std::time::Instant::now();
         let content_width = self.content_width();
@@ -74,8 +76,9 @@ impl App {
         };
         session
             .auto_sync()
-            .unlocked(std::time::Instant::now(), synced.is_some());
-        let mut state = vault::State::new(page, synced.and_then(Result::err));
+            .unlocked(std::time::Instant::now(), false);
+        let mut state = vault::State::new(page, None);
+        state.set_initial_sync_target(sync_after, session.facade().current_vault_id().is_none());
         state.set_content_width(content_width);
         state.set_reveal_seconds(self.preferences.auto_hide_reveal_seconds);
         let load = state.load_vaults(session);

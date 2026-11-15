@@ -28,7 +28,7 @@ impl App {
             };
         }
 
-        let (id, open) = window::open(main_window_settings());
+        let (id, open) = window::open(main_window_settings(self.core.window.is_maximized));
         self.core.set_main_window_id(Some(id));
         let title = self.set_window_title("zann".to_string(), id);
         let open = open.map(move |_| match &activation_token {
@@ -39,9 +39,10 @@ impl App {
     }
 }
 
-fn main_window_settings() -> window::Settings {
+fn main_window_settings(maximized: bool) -> window::Settings {
     let mut settings = window::Settings {
         size: WINDOW_SIZE,
+        maximized,
         min_size: Some(WINDOW_MIN),
         decorations: false,
         transparent: true,
@@ -81,6 +82,7 @@ mod tests {
             tray_available: true,
             preference_store: None,
             clipboard: (String::new(), 0),
+            keyboard_status: keyboard_status::Status::default(),
         }
     }
 
@@ -146,6 +148,28 @@ mod tests {
                     assert!(matches!(action, RuntimeAction::Exit));
                 }
             }
+        }
+    }
+
+    #[test]
+    fn reopening_uses_the_compositors_last_maximized_state() {
+        for maximized in [true, false] {
+            let mut shell = cosmic::app::cosmic::Cosmic::new(app_with_window());
+            let old_id = shell.app.core.main_window_id().unwrap();
+            shell.app.core.window.is_maximized = maximized;
+            let _ = shell.update(cosmic::Action::Cosmic(cosmic::app::Action::Close));
+            let _ = shell.update(cosmic::Action::Cosmic(cosmic::app::Action::SurfaceClosed(
+                old_id,
+            )));
+            let open = shell.update(cosmic::Action::App(Message::Tray(tray::Event::Open)));
+            let RuntimeAction::Window(runtime::window::Action::Open(id, settings, _)) =
+                first_action(open)
+            else {
+                panic!("tray must open a window");
+            };
+            assert_eq!(shell.app.core.main_window_id(), Some(id));
+            assert_eq!(settings.maximized, maximized);
+            assert_eq!(settings.size, WINDOW_SIZE);
         }
     }
 }

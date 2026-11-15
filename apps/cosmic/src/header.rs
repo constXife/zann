@@ -31,6 +31,16 @@ impl App {
         let items = menu::items(
             key_binds(),
             vec![
+                if matches!(&self.shell, Shell::Ready { screen: Screen::Vault(state), .. } if state.can_edit())
+                {
+                    menu::Item::Button
+                } else {
+                    menu::Item::ButtonDisabled
+                }(
+                    t("common.edit"),
+                    Some(widget::icon::from_name("edit-symbolic").handle()),
+                    Action::Edit,
+                ),
                 lock,
                 settings,
                 menu::Item::Divider,
@@ -48,7 +58,7 @@ impl App {
 
         vec![menu::bar(vec![menu::Tree::with_children(root, items)])
             .item_width(menu::ItemWidth::Uniform(240))
-            .item_height(menu::ItemHeight::Uniform(36))
+            .item_height(menu::ItemHeight::Dynamic(36))
             .into()]
     }
 }

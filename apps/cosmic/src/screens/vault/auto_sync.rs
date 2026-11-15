@@ -29,26 +29,26 @@ impl State {
         ticket: AutoSyncTicket,
         session: &Session,
     ) -> Task<Message> {
-        let Some(storage_id) = self.workspace.storage_id.clone() else {
-            session.auto_sync().finished(ticket, Instant::now());
-            return self.arm_auto_sync(session);
-        };
-        self.sync.running_storage = Some(storage_id.clone());
-        let list_generation = self.list_generation;
-        let facade = session.facade();
-        cosmic::task::future(async move {
-            let target = storage_id.clone();
-            let result = off_thread(move || Ok(local::sync(&facade, Some(target))))
-                .await
-                .unwrap_or_else(|error| Err(local::SyncFailure::Other(error)));
-            Message::AutoSynced {
-                ticket,
-                storage_id,
-                list_generation,
-                result,
-            }
-        })
+        let storage_id = self
+            .workspace
+            .storage_id
+            .clone()
+            .or_else(|| self.progress.initial_target.clone());
+        self.sync.running_storage = storage_id.clone();
+        self.progress.run = crate::backend::next_view_request();
+        self.progress.refreshing = false;
+        self.progress.pending = false;
+        self.progress.failure = None;
+        self.progress.running = true;
+        super::sync_progress::sync_task(
+            session.facade(),
+            ticket,
+            storage_id,
+            self.list_generation,
+            self.progress.run,
+        )
     }
+
     pub(super) fn update_auto_sync(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
             Message::SyncDue(timer) => {
@@ -56,7 +56,7 @@ impl State {
                     return Outcome::None;
                 }
                 // Context completion rearms the schedule; do not spin on an overdue timer.
-                if self.switching_context || self.selected_storage_id().is_none() {
+                if self.switching_context {
                     return Outcome::None;
                 }
                 let Some(ticket) = session.auto_sync().take_due(Instant::now()) else {
@@ -73,7 +73,21 @@ impl State {
                 if !session.auto_sync().finished(ticket, Instant::now()) {
                     return Outcome::None;
                 }
+                let storage_id = storage_id.or_else(|| self.sync.running_storage.clone());
                 self.sync.running_storage = None;
+                self.progress.running = false;
+                let succeeded = result.is_ok();
+                let Some(storage_id) = storage_id else {
+                    if let Err(failure) = result {
+                        self.progress.failure = Some(failure.to_string());
+                    }
+                    let refresh = if succeeded {
+                        self.queue_committed_refresh(session)
+                    } else {
+                        Task::none()
+                    };
+                    return Outcome::Task(Task::batch([self.arm_auto_sync(session), refresh]));
+                };
                 let reload = match result {
                     Ok(outcome) => {
                         self.sync
@@ -81,9 +95,12 @@ impl State {
                             .entry(storage_id.clone())
                             .or_default()
                             .failure = None;
-                        outcome.changes_committed > 0 || outcome.vaults_reconciled > 0
+                        outcome.changes_committed > 0
+                            || outcome.vaults_reconciled > 0
+                            || self.progress.awaiting_first
                     }
                     Err(failure) => {
+                        self.progress.failure = Some(failure.to_string());
                         self.sync
                             .servers
                             .entry(storage_id.clone())
@@ -96,65 +113,22 @@ impl State {
                     self.arm_auto_sync(session),
                     self.load_sync_state(session, storage_id.clone()),
                 ];
+                if succeeded && self.selected_storage_id() == Some(storage_id.as_str()) {
+                    tasks.push(self.refresh_history(session));
+                }
                 if reload
-                    && self.selected_storage_id() == Some(storage_id.as_str())
+                    && (self.selected_storage_id().is_none()
+                        || self.selected_storage_id() == Some(storage_id.as_str()))
                     && list_generation == self.list_generation
                     && !self.busy
                     && !self.searching
                     && self.editor.is_none()
                     && self.history.is_none()
                 {
-                    let facade = session.facade();
-                    let query =
-                        (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
-                    tasks.push(cosmic::task::future(async move {
-                        let result = off_thread(move || {
-                            let context = local::vault_context(&facade)?;
-                            Ok((context, local::items(&facade, None, query)?))
-                        })
-                        .await;
-                        Message::SyncedWorkspaceLoaded {
-                            storage_id,
-                            list_generation,
-                            result,
-                        }
-                    }));
+                    tasks.push(self.queue_committed_refresh(session));
                 }
+
                 Outcome::Task(Task::batch(tasks))
-            }
-            Message::SyncedWorkspaceLoaded {
-                storage_id,
-                list_generation,
-                result,
-            } => {
-                if self.selected_storage_id() != Some(storage_id.as_str())
-                    || self.list_generation != list_generation
-                    || self.switching_context
-                    || self.busy
-                    || self.searching
-                    || self.editor.is_some()
-                    || self.history.is_some()
-                {
-                    return Outcome::None;
-                }
-                match result {
-                    Ok((context, page))
-                        if context.current_storage_id.as_deref() == Some(storage_id.as_str())
-                            && context.current_vault_id == self.selected_vault_id =>
-                    {
-                        self.apply_context(context);
-                        self.list_generation = self.list_generation.wrapping_add(1);
-                        self.apply_page(page, true);
-                        self.reconcile_selection();
-                        self.rebuild_nav();
-                        if let Some(id) = self.selected_item_id().map(str::to_owned) {
-                            return Outcome::Task(self.load_detail(id, session));
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(error) => self.list_error = Some(error),
-                }
-                Outcome::None
             }
             _ => unreachable!("only sync effects reach this handler"),
         }

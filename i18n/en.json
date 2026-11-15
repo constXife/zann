@@ -54,7 +54,8 @@
     "refresh": "Refresh browser connections",
     "connect": "Connect browser",
     "code": "One-time code",
-    "revoke": "Revoke connection"
+    "revoke": "Revoke connection",
+    "connected": "Connected"
   },
   "autofill": {
     "registrableDomain": "Registrable domain",
@@ -221,7 +222,6 @@
     "previousPasswordsNote": "5 previous versions retained.",
     "previousPasswordsLoading": "Loading history...",
     "previousPasswordsEmpty": "No previous versions yet.",
-    "historyPending": "Syncing",
     "historyCopySuccess": "Version copied",
     "historyCopyFailed": "Failed to copy version",
     "restorePreviousTitle": "Restore previous version",
@@ -260,7 +260,8 @@
     "historyChangeDelete": "Deleted",
     "historyChangeRestore": "Restored",
     "resolveConflict": "Resolve conflict",
-    "resolveConflictDone": "Conflict marked for sync"
+    "resolveConflictDone": "Conflict marked for sync",
+    "historyLocalVersion": "Saved on this device"
   },
   "totp": {
     "refreshEvery": "refresh every {seconds}s",
@@ -810,5 +811,9 @@
     "confirmUnsent": "I understand that unsent changes will leave the active profile and remain only in the encrypted recovery snapshot.",
     "confirm": "Confirm local reset",
     "snapshotSaved": "Encrypted recovery snapshot saved:"
+  },
+  "keyboard": {
+    "capsLock": "Caps Lock is on",
+    "unavailable": "Keyboard status unavailable"
   }
 }

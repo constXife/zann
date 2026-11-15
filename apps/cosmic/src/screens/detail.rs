@@ -162,7 +162,9 @@ impl Detail {
                 self.path,
                 type_label(&self.type_id)
             )))
-            .spacing(spacing.space_s);
+            .spacing(spacing.space_s)
+            .width(Length::Fill)
+            .max_width(super::DETAIL_CONTENT_MAX);
 
         if self.fields.is_empty() {
             column = column.push(widget::text::body(t("items.noFields")));

@@ -102,6 +102,11 @@ fn categories_use_shared_creation_actions_and_trash_has_none() {
         let _ = state.view();
     }
     assert!(state.empty_create_action().is_none());
+    assert!(!state.can_create());
+    assert!(matches!(
+        state.update(vault::Message::OpenCreate, &session),
+        vault::Outcome::None
+    ));
 }
 
 #[test]
@@ -214,7 +219,7 @@ fn background_sync_failure_preserves_empty_state_actions_and_list_errors_keep_th
     state.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: local::current_storage_id(&session.facade()).unwrap(),
+            storage_id: Some(local::current_storage_id(&session.facade()).unwrap()),
             list_generation: 1,
             result: Err(local::SyncFailure::Other("offline".into())),
         },

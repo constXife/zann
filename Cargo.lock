@@ -6564,6 +6564,7 @@ version = "0.1.0"
 dependencies = [
  "data-encoding",
  "getrandom 0.2.16",
+ "idna",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

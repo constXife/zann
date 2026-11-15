@@ -54,7 +54,8 @@
     "refresh": "Обновить подключения браузера",
     "connect": "Подключить браузер",
     "code": "Одноразовый код",
-    "revoke": "Отозвать подключение"
+    "revoke": "Отозвать подключение",
+    "connected": "Подключён"
   },
   "autofill": {
     "registrableDomain": "Основной домен",
@@ -221,7 +222,6 @@
     "previousPasswordsNote": "Храним 5 предыдущих версий.",
     "previousPasswordsLoading": "Загружаем историю...",
     "previousPasswordsEmpty": "Предыдущих версий пока нет.",
-    "historyPending": "Синхронизация",
     "historyCopySuccess": "Версия скопирована",
     "historyCopyFailed": "Не удалось скопировать версию",
     "restorePreviousTitle": "Восстановить предыдущую версию",
@@ -260,7 +260,8 @@
     "historyChangeDelete": "Удалено",
     "historyChangeRestore": "Восстановлено",
     "resolveConflict": "Разрешить конфликт",
-    "resolveConflictDone": "Конфликт отправлен на синхронизацию"
+    "resolveConflictDone": "Конфликт отправлен на синхронизацию",
+    "historyLocalVersion": "Сохранено на устройстве"
   },
   "totp": {
     "refreshEvery": "обновляется каждые {seconds}с",
@@ -810,5 +811,9 @@
     "confirmUnsent": "Я понимаю, что неотправленные изменения останутся только в зашифрованном снимке и исчезнут из активного профиля.",
     "confirm": "Подтвердить локальный сброс",
     "snapshotSaved": "Сохранён зашифрованный снимок для восстановления:"
+  },
+  "keyboard": {
+    "capsLock": "Включён Caps Lock",
+    "unavailable": "Раскладка недоступна"
   }
 }

@@ -9,6 +9,7 @@
 
 pub mod backend;
 pub mod i18n;
+pub mod keyboard_status;
 pub mod preferences;
 pub mod screens;
 pub mod session;
