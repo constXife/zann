@@ -209,10 +209,22 @@ impl<'a> LocalServices<'a> {
         item_id: Uuid,
         payload: &EncryptedPayload,
     ) -> ServiceResult<(Vec<u8>, String)> {
-        let bytes = payload
-            .to_bytes()
-            .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
-        let key = self.payload_key_for_id(storage_id, vault_id).await?;
+        let keys = self.vault_payload_keys(storage_id, vault_id).await?;
+        zann_core::item_policy::admit_item_type(
+            &payload.type_id,
+            keys.vault.kind,
+            if keys.vault.key_wrap_type == KeyWrapType::RemoteServer {
+                zann_core::VaultEncryptionType::Server
+            } else {
+                zann_core::VaultEncryptionType::Client
+            },
+        )?;
+        let key = keys.primary;
+        let bytes = Zeroizing::new(
+            payload
+                .to_bytes()
+                .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?,
+        );
         let key_fp = Self::key_fingerprint(&key);
         let payload_enc = core_crypto::encrypt_payload_bytes(&key, vault_id, item_id, &bytes)
             .map_err(|err| ServiceError::new("payload_encrypt_failed", err.to_string()))?;
@@ -325,6 +337,9 @@ impl<'a> LocalServices<'a> {
         type_id: String,
         payload: EncryptedPayload,
     ) -> ServiceResult<Uuid> {
+        if type_id != payload.type_id {
+            return Err(ServiceError::new("item_type_mismatch", "invalid item type"));
+        }
         let normalized_path = Self::normalize_path(&path)?;
         Self::validate_payload_size(&payload)?;
         let repo = LocalItemRepo::new(self.pool);

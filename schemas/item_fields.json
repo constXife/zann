@@ -1,4 +1,20 @@
 {
+  "passkey": {
+    "main": [
+      { "key": "rp_id", "type": "text", "label": "fields.rp_id" },
+      { "key": "rp_name", "type": "text", "label": "fields.rp_name" },
+      { "key": "user_name", "type": "text", "label": "fields.user_name" },
+      { "key": "user_display_name", "type": "text", "label": "fields.user_display_name" }
+    ],
+    "advanced": [
+      { "key": "credential_id", "type": "secret", "label": "fields.credential_id" },
+      { "key": "user_handle", "type": "secret", "label": "fields.user_handle" },
+      { "key": "private_key", "type": "secret", "label": "fields.private_key" },
+      { "key": "alg", "type": "text", "label": "fields.alg" },
+      { "key": "created_at", "type": "text", "label": "fields.created_at" },
+      { "key": "discoverable", "type": "text", "label": "fields.discoverable" }
+    ]
+  },
   "login": {
     "main": [
       {

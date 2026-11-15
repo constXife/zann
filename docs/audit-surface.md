@@ -230,3 +230,24 @@ AAD, shared-only enrollment and sync admission. Review
 sync proof boundary. A random candidate is persisted before its Config fingerprint;
 local-cache purpose cannot publish personal keys. The explicit format/policy-change
 procedure is in `docs/operations/shared-cache-key-cutover.md`.
+
+## Headless passkeys (#200)
+
+`crates/zann-passkey/**`, `zann-crypto::es256` behind the `passkey` feature,
+`zann-autofill::RpId`, and `zann-core::item_policy` own credential custody,
+ES256/COSE/attestation, origin admission and personal-only eligibility.
+Review immutable `get_assertion`, permanent zero counters and BE/BS flags,
+explicit presence and truthful verification, bounded candidate/ID/key input,
+PKCS#8 validation and zeroizing temporary key material. Provider adapters must
+authenticate observed origins and bind fresh confirmation to one operation;
+this headless stage does not qualify a live browser/OS provider.
+
+`zann-ui-core::{item_policy,item_detail,item_editor,categories}` and shared
+schemas project only public profile-admitted passkey fields. Neither malicious
+payload field kinds nor reveal/copy metadata can expose a passkey key through
+the generic detail/editor APIs. FFI and COSMIC consume the same policy. Local
+write encryption and server typed/history payload admission reject shared
+passkeys. Vault `v1` envelopes, sync checkpoints and keyring transitions are
+unchanged. Regression coverage includes standard RFC/W3C/CTAP vectors and two
+independent offline credential copies; live provider and export qualification
+remain #292–#294, #297 and #298.

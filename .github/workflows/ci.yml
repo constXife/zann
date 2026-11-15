@@ -80,6 +80,7 @@ jobs:
               - 'crates/zann-client-sqlite/**'
               - 'crates/zann-daemon/**'
               - 'crates/zann-native-host/**'
+              - 'crates/zann-passkey/**'
               - 'crates/zann-autofill/**'
               - 'crates/zann-crypto/**'
               - 'crates/zann-core/**'
@@ -88,6 +89,14 @@ jobs:
               - 'Cargo.toml'
               - 'Cargo.lock'
             audit_surface:
+              - 'crates/zann-core/src/item_policy.rs'
+              - 'crates/zann-ui-core/src/item_policy.rs'
+              - 'crates/zann-ui-core/src/item_detail.rs'
+              - 'crates/zann-ui-core/src/item_editor.rs'
+              - 'crates/zann-ui-core/src/categories.rs'
+              - 'schemas/security_profiles.yaml'
+              - 'schemas/item_fields.json'
+              - 'schemas/ui_categories.json'
               - 'crates/zann-flows/**'
               - 'crates/zann-ffi/src/connect_flow.rs'
               - 'crates/zann-ffi/src/connect_flow/**'
@@ -110,6 +119,7 @@ jobs:
               - 'crates/zann-db/migrations/0006_browser_login_index.sql'
               - 'crates/zann-core/src/constants.rs'
               - 'crates/zann-daemon/**'
+              - 'crates/zann-passkey/**'
               - 'crates/zann-autofill/**'
               - 'apps/apple/Zann/Composition/**'
               - 'apps/apple/Zann/Platform/macOS/MacComposition.swift'
@@ -218,6 +228,7 @@ jobs:
               - 'crates/zann-cli/**'
               - 'crates/zann-core/**'
               - 'crates/zann-daemon/**'
+              - 'crates/zann-passkey/**'
               - 'crates/zann-autofill/**'
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
@@ -244,6 +255,7 @@ jobs:
               - 'crates/zann-client-sqlite/**'
               - 'crates/zann-core/**'
               - 'crates/zann-daemon/**'
+              - 'crates/zann-passkey/**'
               - 'crates/zann-autofill/**'
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
@@ -263,6 +275,7 @@ jobs:
               - 'crates/zann-client-sqlite/**'
               - 'crates/zann-core/**'
               - 'crates/zann-daemon/**'
+              - 'crates/zann-passkey/**'
               - 'crates/zann-autofill/**'
               - 'crates/zann-crypto/**'
               - 'crates/zann-db/**'
@@ -376,7 +389,7 @@ jobs:
       - name: Dependency guard
         run: scripts/check-audit-surface-deps.sh
       - name: Clippy (audit-surface)
-        run: cargo clippy -p zann-autofill -p zann-crypto -p zann-core -p zann-server -p zann-keystore --all-targets -- -D warnings
+        run: cargo clippy -p zann-passkey -p zann-autofill -p zann-crypto -p zann-core -p zann-server -p zann-keystore --all-targets -- -D warnings
       - name: Clippy (client security core)
         run: cargo clippy -p zann-client --no-default-features --features remote,os-credentials --all-targets --locked -- -D warnings
       - name: Clippy (native secret generator and FFI projection)
@@ -400,11 +413,11 @@ jobs:
       - name: Tests (native framing isolation)
         run: cargo test -p zann-client --no-default-features --features native-messaging --test native_messaging --locked
       - name: Tests (audit-surface)
-        run: cargo test -p zann-crypto -p zann-autofill -p zann-keystore --locked
+        run: cargo test -p zann-passkey -p zann-crypto -p zann-autofill -p zann-keystore --locked
       - name: Tests (pull-only SQLite sync adapter)
         run: cargo test -p zann-client-sqlite --locked
       - name: Tests (SQLite sync and path seams)
-        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration --test local_history --test local_payload_versions
+        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration --test local_history --test local_payload_versions --test passkey_vault
 
   extension:
     needs: changes

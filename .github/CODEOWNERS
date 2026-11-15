@@ -22,6 +22,8 @@
 /apps/apple/ZannCoreKit/check-build-profile.sh @constXife
 /crates/zann-ui-core/src/generator/ @constXife
 /crates/zann-ffi/src/generator.rs @constXife
+/crates/zann-passkey/ @constXife
+/crates/zann-core/src/item_policy.rs @constXife
 /crates/zann-autofill/ @constXife
 /crates/zann-crypto/ @constXife
 /crates/zann-core/src/auth.rs @constXife

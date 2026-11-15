@@ -7,6 +7,7 @@ members = [
   "crates/zann-client",
   "crates/zann-client-sqlite",
   "crates/zann-crypto",
+  "crates/zann-passkey",
   "crates/zann-core",
   "crates/zann-db",
   "crates/zann-ffi",

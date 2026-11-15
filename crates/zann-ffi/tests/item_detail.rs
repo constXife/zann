@@ -66,3 +66,41 @@ fn one_read_projects_canonical_fields_without_exporting_payload_json() {
         Err(CoreError::Locked)
     ));
 }
+
+#[test]
+fn passkeys_project_public_fields_and_do_not_offer_a_raw_key_editor() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let core = support::open(&root.path().join("local.sqlite"));
+    core.seed_offline_fixture("adapter-test-password".into())
+        .expect("initialize");
+    let payload = r#"{"v":1,"typeId":"passkey","fields":{
+        "rp_id":{"kind":"text","value":"example.com"},
+        "user_name":{"kind":"text","value":"alice"},
+        "private_key":{"kind":"text","value":"sentinel-private-key","meta":{"masked":false,"copyable":true}},
+        "credential_id":{"kind":"text","value":"sentinel-credential-id"},
+        "user_handle":{"kind":"text","value":"sentinel-user-handle"}}}"#;
+    let item = core
+        .item_create(ItemCreate {
+            path: "Example passkey".into(),
+            title: "Example passkey".into(),
+            type_id: "passkey".into(),
+            payload_json: payload.into(),
+        })
+        .expect("create personal item");
+    let detail = core
+        .item_detail(item.id.clone(), SessionOperationFfi::new(10_000).unwrap())
+        .unwrap();
+    assert_eq!(detail.type_id, "passkey");
+    assert_eq!(detail.fields.len(), 2);
+    assert!(detail
+        .fields
+        .iter()
+        .all(|field| !field.value.contains("sentinel")));
+    assert!(matches!(
+        zann_ffi::ItemDraftFfi::edit(item),
+        Err(CoreError::Draft {
+            kind: zann_ffi::DraftErrorKindFfi::CeremonyManaged,
+            ..
+        })
+    ));
+}

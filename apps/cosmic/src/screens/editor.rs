@@ -14,7 +14,7 @@ use cosmic::{theme, widget, Element};
 #[cfg(test)]
 use serde_json::Value;
 use zann_client::app::local::{ItemCreate, ItemUpdate};
-use zann_ui_core::item_editor::{field_schemas, DraftField, FieldKind, ItemDraft};
+use zann_ui_core::item_editor::{editable_field_schemas, DraftField, FieldKind, ItemDraft};
 
 use super::detail::Detail;
 use crate::i18n::{has, t};
@@ -312,7 +312,9 @@ impl State {
 
     pub fn view(&self) -> Element<'_, Message> {
         let spacing = theme::spacing();
-        let type_ids: Vec<_> = field_schemas().keys().map(String::as_str).collect();
+        let type_ids: Vec<_> = editable_field_schemas()
+            .map(|(type_id, _)| type_id.as_str())
+            .collect();
         let type_labels: Vec<String> = type_ids.iter().map(|type_id| type_label(type_id)).collect();
         let selected_type = type_ids
             .iter()

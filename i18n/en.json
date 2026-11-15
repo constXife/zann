@@ -35,6 +35,7 @@
     "expand": "Expand sidebar"
   },
   "types": {
+    "passkey": "Passkey",
     "login": "Login",
     "card": "Card",
     "note": "Note",
@@ -68,6 +69,15 @@
     "pattern": "URL pattern"
   },
   "fields": {
+    "rp_id": "Website domain",
+    "rp_name": "Website",
+    "user_name": "Account",
+    "user_display_name": "Display name",
+    "credential_id": "Credential ID",
+    "user_handle": "User handle",
+    "alg": "Algorithm",
+    "created_at": "Created",
+    "discoverable": "Discoverable",
     "match_rules": "Autofill matching",
     "username": "Username",
     "password": "Password",
@@ -108,6 +118,7 @@
     "otp": "One-time code"
   },
   "nav": {
+    "passkeys": "Passkeys",
     "vaults": "Vaults",
     "storages": "Storages",
     "sections": "Sections",
@@ -667,6 +678,7 @@
     }
   },
   "errors": {
+    "passkey_managed": "Passkeys are managed through registration and import.",
     "generatorPasswordLength": "Choose a password length within the allowed range.",
     "generatorEmptyAlphabet": "Select at least one character class.",
     "generatorWordCount": "Choose a word count within the allowed range.",

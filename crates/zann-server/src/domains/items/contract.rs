@@ -21,6 +21,7 @@ pub(crate) enum ItemContractError {
     InvalidVersion,
     InvalidPayload,
     PayloadTooLarge,
+    PasskeyPersonalOnly,
 }
 
 impl ItemContractError {
@@ -35,6 +36,7 @@ impl ItemContractError {
             Self::InvalidVersion => "invalid_version",
             Self::InvalidPayload => "invalid_payload",
             Self::PayloadTooLarge => "payload_too_large",
+            Self::PasskeyPersonalOnly => "passkey_personal_only",
         }
     }
 }
@@ -214,6 +216,12 @@ pub(crate) fn validate_server_typed_payload(
     type_id: &str,
 ) -> Result<(), ItemContractError> {
     validate_typed_payload(payload, type_id)?;
+    zann_core::item_policy::admit_item_type(
+        type_id,
+        zann_core::VaultKind::Shared,
+        zann_core::VaultEncryptionType::Server,
+    )
+    .map_err(|_| ItemContractError::PasskeyPersonalOnly)?;
     if type_id == crate::domains::secrets::service::SECRET_TYPE_ID {
         crate::domains::secrets::service::validate_secret_typed_payload(payload)
             .map_err(|_| ItemContractError::InvalidPayload)?;

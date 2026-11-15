@@ -5,7 +5,7 @@
 use std::sync::{Arc, Mutex};
 
 use zann_ui_core::item_editor::{
-    field_schemas, DraftError, DraftField, FieldDefinition, FieldKind, ItemDraft,
+    editable_field_schemas, DraftError, DraftField, FieldDefinition, FieldKind, ItemDraft,
 };
 
 use crate::{CoreError, CoreResult, ItemCreate, ItemDetail, ItemUpdate};
@@ -48,6 +48,7 @@ impl From<FieldKindFfi> for FieldKind {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
 pub enum DraftErrorKindFfi {
+    CeremonyManaged,
     Autofill,
     Payload,
     Path,
@@ -64,6 +65,7 @@ impl From<DraftError> for CoreError {
         let translation_key = error.translation_key().to_string();
         let message = error.to_string();
         let kind = match error {
+            DraftError::CeremonyManaged => DraftErrorKindFfi::CeremonyManaged,
             DraftError::Autofill(_) => DraftErrorKindFfi::Autofill,
             DraftError::Payload(_) => DraftErrorKindFfi::Payload,
             DraftError::Path => DraftErrorKindFfi::Path,
@@ -109,8 +111,7 @@ pub struct ItemTypeSchemaFfi {
 /// The item types a draft can be created as, with their field templates.
 #[uniffi::export]
 pub fn item_type_schemas() -> Vec<ItemTypeSchemaFfi> {
-    field_schemas()
-        .iter()
+    editable_field_schemas()
         .map(|(type_id, schema)| ItemTypeSchemaFfi {
             type_id: type_id.clone(),
             main: schema.main.iter().map(Into::into).collect(),

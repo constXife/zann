@@ -1,4 +1,13 @@
 profiles:
+  passkey:
+    version: 1
+    ui:
+      masked_by_default: [private_key, credential_id, user_handle]
+      copyable: [rp_id, rp_name, user_name, user_display_name]
+      revealable: []
+    never_log_fields: [private_key, credential_id, user_handle]
+    exposable_public_attrs: [rp_id, rp_name, user_name, user_display_name, alg, created_at, discoverable]
+
   login:
     version: 1
     ui:

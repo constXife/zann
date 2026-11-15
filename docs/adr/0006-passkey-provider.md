@@ -9,10 +9,10 @@
   pairing model and origin derivation this ADR rides on
 - **Out of scope:** signing *into Zann* with a passkey (Zann as a relying party)
 
-This is a proposal, not an implementation contract. Platform admission details
-below are proposal-time assumptions; they need verification against platform
-documentation before implementation. Shared-vault eligibility and user
-verification remain unresolved in the consequences below.
+The platform-provider plan remains proposed. The core implementation contract
+for #200 is recorded below; #291 tracks the staged delivery. Platform admission
+requires verification before #293/#294, and verified backup/exchange support
+(#292, #297, #298) must precede shipping live registration.
 
 ## Context
 
@@ -69,12 +69,13 @@ COSMIC is the pacesetting client (ADR 0002, Decision §2) and runs on the platfo
 provider API at all. For Zann, "become a passkey provider" therefore means
 "ship a browser extension" before it means anything else.
 
-### What the repository already gives us, and what it does not
+### Proposal-time baseline
 
 `Item` carries `type_id: String` and an opaque `payload_enc`
 (`crates/zann-core/src/models/structs.rs:147-166`). A passkey is a new
-`type_id` and **no schema change**: sync, history, tombstones, sharing and
-export all apply unchanged. `schemas/security_profiles.yaml` is keyed by
+`type_id` without a database migration. Sync, history and tombstones reuse the
+existing item mechanism. Shared vaults reject passkeys; backup durability and
+external exchange require the explicit verification in #292. `schemas/security_profiles.yaml` is keyed by
 `type_id`, so masking and never-log rules are declarative.
 
 Three gaps:
@@ -97,8 +98,15 @@ URL, and there is no username to autofill. The payload is:
 
 ```
 rp_id, rp_name, credential_id, user_handle, user_name, user_display_name,
-alg (COSE), private_key, created_at, last_used_at, discoverable: true
+alg (COSE), private_key, created_at, discoverable: true
 ```
+
+`private_key` is canonical unencrypted PKCS#8 DER encoded as base64url without
+padding inside the encrypted payload; `credential_id` and `user_handle` use the
+same base64url encoding. `alg` is `-7`; `created_at` is RFC3339 UTC.
+There is no synced `last_used_at`: assertions borrow credentials immutably and
+never write an Item or increment its version. Optional recency is bounded
+device-local metadata owned by the future provider.
 
 `security_profiles.yaml` gains the strictest profile in the file:
 `private_key` is never copyable, never revealable and in `never_log_fields`;
@@ -111,7 +119,9 @@ objects, `authenticatorData` assembly, `getAssertion` credential selection. No
 HID, no browser, no `$HOME`, no toolkit — the layering rule of
 [ADR 0001](0001-shared-client-core.md)
 applies from the first commit. `passkey-rs` supplies types and CTAP2 structures
-where they fit; the credential store is ours. Correctness is proved against
+where they fit; the credential store is ours. The #200 implementation uses
+bounded typed ceremony inputs and `ciborium` for the small public CBOR/COSE
+responses; no second CTAP stack or untrusted CBOR request parser is needed. Correctness is proved against
 WebAuthn test vectors before any client exists.
 
 **3. ES256 only, at first.** Add `p256`/`ecdsa` to `zann-crypto` behind a
@@ -119,7 +129,9 @@ feature so `scripts/check-audit-surface-deps.sh` keeps meaning something. Ed2551
 (`-8`) is added when relying-party support justifies a second code path, not
 before.
 
-**4. The signature counter is permanently `0`, and we never lie about flags.**
+**4. The signature counter is permanently `0`, `BE = 1` and `BS = 1`.**
+The backup flags are identical during registration and assertion. We never lie
+about presence or verification:
 `uv` is set if and only if a user verification actually happened for this
 request — vault unlock by password or biometric within the presence window, not
 "the session happens to be unlocked". `up` requires an explicit per-assertion
@@ -127,9 +139,11 @@ confirmation. **There are no silent assertions**, including for a vault that is
 already open.
 
 **5. In the extension path, origin validation is our obligation.** The `rp_id`
-is derived from the browser-supplied top-level origin and nothing else; page
-content is never trusted for it; cross-origin iframe requests are refused unless
-the relying party has permitted them. This is the single highest-risk rule in
+is admitted against the browser/OS-observed requesting-frame origin; page
+content is never trusted for it. Top-level and requesting-frame origins must be
+HTTPS. Cross-origin frames are refused unless a trusted adapter supplies an
+explicit browser Permissions Policy grant for this operation. The grant is
+never inferred from the URL or accepted as a page-message boolean. This is the single highest-risk rule in
 the ADR and belongs in Rust with adversarial tests, not in extension JavaScript.
 Registrable-domain derivation itself comes from `zann-autofill`
 ([ADR 0007](0007-browser-integration.md) §5), which owns origins for the whole
@@ -153,7 +167,8 @@ different threat model, no shared code beyond COSE parsing.
 **Good.** The expensive half is platform-independent: item type, crypto,
 ceremonies and origin rules are one headless crate that every future provider
 reuses, and it is exercisable from the CLI long before a browser is involved.
-Sync, sharing, history and export come free from the existing item model. The
+Sync and history reuse the existing item model. Passkeys are restricted to
+personal client-encrypted vaults; backups and portability are verified separately. The
 work also finishes the daemon, which three other clients need anyway.
 
 **Bad.** We take on origin validation, which the browser does for hardware keys —
@@ -166,13 +181,65 @@ many relying parties have no password to fall back on. Export and snapshots
 at all. And `p256` in `zann-crypto` widens the audit surface that
 `CONTRIBUTING.md` asks us to keep narrow.
 
-**Unresolved.** Whether passkeys may live in *shared* vaults. A shared password is
-a delegated secret; a shared passkey is a shared identity, and several relying
-parties treat re-registration from a second device as account compromise. The
-conservative default — personal vaults only — is easy to relax later and
-impossible to tighten. Also unresolved: what counts as user verification on
-Linux, where there is no uniform biometric prompt, and how the daemon raises a
-presence prompt when COSMIC is not running.
+**Eligibility resolved for #200:** passkeys require both personal scope and
+client encryption. Canonical local write admission and server-readable payload
+admission reject shared passkeys, including imports and history publication.
+No sharing exception is introduced. Provider-specific user verification and
+request-bound native prompts remain #293/#294.
+
+### Core implementation contract (#200)
+
+- `zann-crypto/passkey` alone enables P-256 key generation, PKCS#8 validation,
+  DER ES256 signatures and hashing. Secret scalars and decoded DER buffers are
+  zeroized; keys have no Debug/Serialize implementations. Default features
+  retain the prior dependency closure and all vault `v1` envelopes/fixtures.
+- `zann-autofill::RpId` reuses the pinned PSL and canonical URL parser. It admits
+  an exact host or label-boundary suffix, never an IP or a bare public suffix
+  (including private suffixes); canonical HTTPS localhost is supported.
+- `zann-passkey` owns bounded headless registration, exclusion/selection,
+  anonymous `none` attestation, COSE EC2 keys and read-only assertions.
+  Adapters provide complete matching exclusion candidates, authenticated
+  origins, fresh per-operation presence/verification evidence and an injected
+  creation time. This pure API is not itself a browser authentication boundary.
+  Existing credentials are supplied as bounded candidates; storage queries and
+  final selection remain application/provider responsibilities.
+- `zann-ui-core` projects only profile-admitted public passkey fields, ignoring
+  hostile reveal/copy metadata. Generic creation and editing are refused;
+  passkeys are listed in a personal-only category without a manual-create action.
+  COSMIC and FFI/Apple reuse those projections and templates.
+- Standards tripwires: RFC 6979 A.2.5 ES256 signature; WebAuthn Level 3
+  §6.5.1.1 public COSE example; CTAP 2.1 §9 example RP hash. Behavioral tests
+  cover flags, origin/frame admission, presence/verification, bounds, malformed
+  keys/payloads and immutable assertions on two independent synced copies.
+
+### Values and system alignment for #200
+
+The repository has no separate values manifest; `AGENTS.md` and the capability
+map supply the invariants. Each mechanism is evaluated independently:
+
+- **Optional ES256:** one crypto owner preserves custody and `v1` compatibility;
+  the cost is an opt-in pure Rust dependency closure, checked by architecture
+  gates and a published signature vector. No new key-envelope format is added.
+- **Origin and ceremony admission:** the existing PSL remains the source of
+  domain truth; bounded, headless policy has adversarial tests. Browser authority
+  and actual user verification are intentionally supplied by trusted adapters,
+  with live qualification deferred explicitly to #293/#294.
+- **Immutable assertions:** existing opaque payload sync stays authoritative;
+  no counter reconciliation, timestamp writes, recovery commands or network IO
+  are introduced. Identical credential copies can sign independently offline.
+- **Personal-only storage and public UI projection:** the domain predicate and
+  declarative security profile enforce the trust boundary. Existing native
+  adapters consume one projection; no shell masking/crypto implementation is
+  added. Manual key editing is unavailable because it would expose signing keys.
+
+Alignment: the crypto lifecycle (ADR 0009), existing item/history persistence,
+origin matching (ADR 0007) and Rust/native-shell boundaries (ADRs 0001/0002) are
+aligned as-is. The earlier synced-recency and unresolved-sharing proposal is
+realigned now. Live providers and backup qualification remain tracked above;
+no compatibility shim, extra operator action, or runtime service is introduced.
+Modules are split by responsibility; only the existing workspace/schema/owner
+maps are shared edit points. Shell-specific ceremony implementations and a
+parallel CTAP credential store are rejected as duplicate owners.
 
 ## Plan
 

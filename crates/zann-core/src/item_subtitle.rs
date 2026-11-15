@@ -59,6 +59,7 @@ impl ZeroizeOnDrop for ItemSubtitle {}
 /// key must be one of the type's `exposable_public_attrs` in
 /// `schemas/security_profiles.yaml`, which a test checks.
 const SUBTITLE_KEYS: &[(&str, &[&str])] = &[
+    ("passkey", &["user_name", "rp_id"]),
     ("login", &["username", "url"]),
     ("api", &["url"]),
     ("identity", &["email"]),

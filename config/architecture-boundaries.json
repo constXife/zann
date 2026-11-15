@@ -1,8 +1,9 @@
 {
   "schema_version": 1,
   "manifests": ["Cargo.toml", "apps/cosmic/Cargo.toml"],
-  "internal_packages": ["zann-cli", "zann-client", "zann-client-sqlite", "zann-core", "zann-cosmic", "zann-crypto", "zann-db", "zann-ffi", "zann-flows", "zann-keystore", "zann-server", "zann-ui-core", "zann-integration-tests", "zann-browser", "zann-daemon", "zann-native-host", "zann-autofill"],
+  "internal_packages": ["zann-passkey", "zann-cli", "zann-client", "zann-client-sqlite", "zann-core", "zann-cosmic", "zann-crypto", "zann-db", "zann-ffi", "zann-flows", "zann-keystore", "zann-server", "zann-ui-core", "zann-integration-tests", "zann-browser", "zann-daemon", "zann-native-host", "zann-autofill"],
   "allowed_internal_dependencies": {
+    "zann-passkey": ["zann-autofill", "zann-core", "zann-crypto"],
     "zann-integration-tests": ["zann-client", "zann-client-sqlite", "zann-core", "zann-crypto", "zann-db", "zann-keystore", "zann-server"],
     "zann-cli": ["zann-client", "zann-core", "zann-ui-core"],
     "zann-client": ["zann-autofill", "zann-core", "zann-crypto", "zann-keystore"],
@@ -21,9 +22,10 @@
     "zann-autofill": ["zann-core"],
     "zann-browser": ["zann-client", "zann-crypto", "zann-ui-core"]
   },
-  "shared_packages": ["zann-client", "zann-client-sqlite", "zann-core", "zann-crypto", "zann-db", "zann-flows", "zann-keystore", "zann-ui-core", "zann-autofill"],
+  "shared_packages": ["zann-passkey", "zann-client", "zann-client-sqlite", "zann-core", "zann-crypto", "zann-db", "zann-flows", "zann-keystore", "zann-ui-core", "zann-autofill"],
   "forbidden_shared_dependencies": ["clap", "libcosmic", "tauri"],
   "forbidden_direct_dependencies": {
+    "zann-passkey": ["clap", "dirs", "keyring", "reqwest", "sqlx", "sqlx-core", "sqlx-sqlite", "tokio", "uniffi", "zann-client", "zann-db", "zann-ffi"],
     "zann-flows": ["clap", "dirs", "libcosmic", "reqwest", "sqlx", "sqlx-core", "sqlx-postgres", "sqlx-sqlite", "tokio", "uniffi", "zann-client", "zann-client-sqlite", "zann-db", "zann-ffi"],
     "zann-cli": ["argon2", "keyring", "reqwest", "zann-crypto", "zann-db", "zann-ffi"],
     "zann-client": ["argon2"],
@@ -68,6 +70,13 @@
   "dependency_exceptions": [],
   "feature_exceptions": [],
   "feature_contracts": [
+    {
+      "package": "zann-passkey",
+      "feature": "default",
+      "required_members": [],
+      "forbidden_members": [],
+      "forbidden_packages": ["clap", "dirs", "keyring", "reqwest", "sqlx", "sqlx-core", "sqlx-sqlite", "tokio", "uniffi", "libcosmic", "zann-client", "zann-db", "zann-ffi"]
+    },
     {
       "package": "zann-flows",
       "feature": "default",
@@ -163,8 +172,8 @@
       "package": "zann-crypto",
       "feature": "default",
       "required_members": [],
-      "forbidden_members": ["ipc-transport", "ipc-pairing", "dep:snow", "dep:spake2"],
-      "forbidden_packages": ["snow", "spake2", "ring", "openssl"]
+      "forbidden_members": ["passkey", "dep:p256", "ipc-transport", "ipc-pairing", "dep:snow", "dep:spake2"],
+      "forbidden_packages": ["p256", "snow", "spake2", "ring", "openssl"]
     },
     {
       "package": "zann-daemon",
@@ -189,6 +198,14 @@
     }
   ],
   "source_rules": [
+    {
+      "name": "passkey-no-runtime-or-platform-io",
+      "exception_ids": [],
+      "pattern": "(std::(fs|net|thread)|tokio|reqwest|sqlx|libcosmic|uniffi|dirs)::|home_dir|current_dir",
+      "roots": ["crates/zann-passkey/src"],
+      "max_matches": 0,
+      "allowed_files": []
+    },
     {
       "name": "flows-no-runtime-or-platform-io",
       "exception_ids": [],

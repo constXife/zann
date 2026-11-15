@@ -1,0 +1,23 @@
+[package]
+name = "zann-passkey"
+version = "0.1.0"
+edition = "2021"
+publish = false
+license = "MIT"
+
+[features]
+default = []
+
+[dependencies]
+base64 = "0.22"
+chrono = "0.4"
+ciborium = "0.2"
+thiserror = "1"
+zeroize = { version = "1", features = ["derive"] }
+zann-autofill = { path = "../zann-autofill" }
+zann-core = { path = "../zann-core", default-features = false }
+zann-crypto = { path = "../zann-crypto", features = ["passkey"] }
+
+[dev-dependencies]
+hex = "0.4"
+serde_json = "1"

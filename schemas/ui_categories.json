@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "min_client_version": "0.8.0",
-  "updated_at": "2026-01-26T05:05:45Z",
+  "updated_at": "2026-11-15T00:00:00Z",
   "fallback_category_id": "all",
   "categories": [
     {
@@ -23,6 +23,16 @@
       "group": "items",
       "order": 20,
       "filter": { "type_ids": ["login"], "is_deleted": false }
+    },
+    {
+      "id": "passkey",
+      "labels": [{ "key": "nav.passkeys" }],
+      "icon": "key",
+      "view": "items_list",
+      "scope": "personal",
+      "group": "items",
+      "order": 25,
+      "filter": { "type_ids": ["passkey"], "is_deleted": false }
     },
     {
       "id": "note",

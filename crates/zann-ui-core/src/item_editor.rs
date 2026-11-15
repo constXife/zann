@@ -34,6 +34,13 @@ pub fn field_schemas() -> &'static BTreeMap<String, FieldSchema> {
     })
 }
 
+/// Templates for ordinary item editing; credentials use their ceremony owner.
+pub fn editable_field_schemas() -> impl Iterator<Item = (&'static String, &'static FieldSchema)> {
+    field_schemas()
+        .iter()
+        .filter(|(kind, _)| !zann_core::item_policy::ceremony_managed(kind))
+}
+
 #[derive(Clone)]
 pub struct DraftField {
     pub key: String,
@@ -100,6 +107,8 @@ impl std::fmt::Debug for ItemSave {
 }
 #[derive(Debug, thiserror::Error)]
 pub enum DraftError {
+    #[error("passkeys are managed by registration and import ceremonies")]
+    CeremonyManaged,
     #[error("invalid login match rules: {0}")]
     Autofill(#[source] zann_autofill::AutofillError),
     #[error("invalid item payload: {0}")]
@@ -122,6 +131,7 @@ pub enum DraftError {
 impl DraftError {
     pub fn translation_key(&self) -> &'static str {
         match self {
+            Self::CeremonyManaged => "errors.passkey_managed",
             Self::Autofill(_) => "errors.match_rules_invalid",
             Self::Path => "errors.path_invalid",
             Self::Name => "errors.item_name_invalid",
@@ -189,6 +199,7 @@ impl ItemDraft {
     }
 
     pub fn create(type_id: &str) -> Result<Self, DraftError> {
+        crate::item_policy::ensure_editable(type_id)?;
         Ok(Self {
             path: String::new(),
             type_id: type_id.into(),
@@ -199,6 +210,7 @@ impl ItemDraft {
     pub fn edit(path: String, payload_json: &str) -> Result<Self, DraftError> {
         let payload =
             EncryptedPayload::from_bytes(payload_json.as_bytes()).map_err(DraftError::Payload)?;
+        crate::item_policy::ensure_editable(&payload.type_id)?;
         let mut fields: Vec<_> = payload
             .fields
             .iter()
@@ -220,6 +232,8 @@ impl ItemDraft {
     /// Changing an untouched template may replace its empty fields. Populated
     /// drafts retain every value; unknown existing types may still be edited.
     pub fn set_type(&mut self, type_id: String) -> Result<bool, DraftError> {
+        crate::item_policy::ensure_editable(&self.type_id)?;
+        crate::item_policy::ensure_editable(&type_id)?;
         let replace = self
             .fields
             .iter()
@@ -249,6 +263,8 @@ impl ItemDraft {
         })
     }
     pub fn payload_json(&self) -> Result<String, DraftError> {
+        crate::item_policy::ensure_editable(&self.type_id)?;
+        crate::item_policy::ensure_editable(&self.payload.type_id)?;
         self.validate_match_rules()?;
         if self.path.trim().is_empty() {
             return Err(DraftError::Path);

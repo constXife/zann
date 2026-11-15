@@ -7,6 +7,7 @@ allowed_deps=(
   blake3
   chacha20poly1305
   ed25519-dalek
+  p256
   snow
   spake2
   hex

@@ -84,6 +84,13 @@ fn validation_rejects_duplicate_and_invalid_field_keys() {
 #[test]
 fn type_changes_preserve_populated_drafts_and_templates_come_from_shared_schema() {
     for (kind, schema) in field_schemas() {
+        if zann_core::item_policy::ceremony_managed(kind) {
+            assert!(matches!(
+                ItemDraft::create(kind),
+                Err(DraftError::CeremonyManaged)
+            ));
+            continue;
+        }
         let draft = ItemDraft::create(kind).unwrap();
         if !schema.main.is_empty() {
             assert_eq!(
