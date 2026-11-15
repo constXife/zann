@@ -35,6 +35,7 @@ final class StorageContextTests: XCTestCase {
         XCTAssertEqual(model.totalCount, 0)
         XCTAssertEqual(model.syncState?.serverUrl, "https://work.example.test")
         XCTAssertEqual(model.syncState?.link, .disconnected)
+        XCTAssertEqual(model.disconnected?.storageID, remote)
         XCTAssertEqual(model.disconnected?.serverURL, "https://work.example.test")
         try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertTrue(model.visibleItems.isEmpty, "a superseded search must not restore the old list")

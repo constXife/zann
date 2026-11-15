@@ -2,7 +2,11 @@
 use super::*;
 
 fn storage_label(storage: &StorageSummary) -> String {
-    zann_ui_core::sync_status::storage_context_label(&storage.name, storage.server_url.as_deref())
+    zann_ui_core::sync_status::storage_context_label(
+        &storage.name,
+        storage.server_url.as_deref(),
+        storage.account_name.as_deref(),
+    )
 }
 
 impl State {

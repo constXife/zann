@@ -194,7 +194,13 @@ impl State {
                 .workspace
                 .storages
                 .iter()
-                .map(|s| storage_context_label(&s.name, s.server_url.as_deref()))
+                .map(|s| {
+                    storage_context_label(
+                        &s.name,
+                        s.server_url.as_deref(),
+                        s.account_name.as_deref(),
+                    )
+                })
                 .collect();
             let dropdown =
                 widget::dropdown(labels, selected, Message::SelectStorage).width(Length::Fill);
@@ -203,6 +209,7 @@ impl State {
             widget::text::body(storage_context_label(
                 &storage.name,
                 storage.server_url.as_deref(),
+                storage.account_name.as_deref(),
             ))
             .into()
         } else {

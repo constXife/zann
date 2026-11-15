@@ -1,6 +1,6 @@
 //! Captures capabilities and registers cancellation before worker dispatch.
 use super::*;
-use zann_flows::connect::{CONNECTION_NAME, LOGIN_TIMEOUT_MS, PROFILE_NAME};
+use zann_flows::connect::{CONNECTION_NAME, LOGIN_TIMEOUT_MS};
 
 pub struct Plan {
     pub id: OperationId,
@@ -11,7 +11,7 @@ pub struct Plan {
 }
 
 enum Work {
-    Probe(String),
+    Probe(String, Option<String>),
     Trust(ConnectionTrustChallenge),
     Password {
         prepared: PreparedConnection,
@@ -83,7 +83,9 @@ impl Plan {
             cancellation
         };
         let (step, work) = match effect {
-            Effect::Probe { url, .. } => (Step::Probe, Work::Probe(url)),
+            Effect::Probe {
+                url, storage_id, ..
+            } => (Step::Probe, Work::Probe(url, storage_id)),
             Effect::TrustFingerprint { .. } => (
                 Step::Trust,
                 Work::Trust(
@@ -166,10 +168,10 @@ impl Plan {
     fn execute(remote: &Remote, work: Work) -> Result<ResultValue, Failure> {
         remote.runtime.block_on(async {
             let (access, storage_id) = match work {
-                Work::Probe(url) => {
+                Work::Probe(url, storage_id) => {
                     return remote
                         .client
-                        .prepare_connection(&url, CONNECTION_NAME, PROFILE_NAME)
+                        .prepare_account_connection(&url, CONNECTION_NAME, storage_id.as_deref())
                         .await
                         .map(ResultValue::Probed)
                         .map_err(session_failure)

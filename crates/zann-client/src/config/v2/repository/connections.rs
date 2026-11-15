@@ -9,69 +9,6 @@ impl ConfigRepository {
         self.upsert_connection_checked(None, connection_id, metadata)
     }
 
-    /// Installs a server identity verified by the crate-owned signed probe.
-    /// Existing bindings may only be completed, never silently replaced.
-    #[cfg(feature = "remote")]
-    pub(crate) fn pin_verified_connection(
-        &self,
-        expected_revision: u64,
-        connection_id: ConnectionId,
-        name: String,
-        endpoint: &VerifiedEndpointBinding,
-        storage_id: Option<String>,
-    ) -> Result<ConfigSnapshot, ConfigError> {
-        if let Some(storage_id) = storage_id.as_deref() {
-            validate_required_metadata("$.verified_connection.storage_id", storage_id)?;
-        }
-        self.mutate(Some(expected_revision), move |config| {
-            match config.connections.get_mut(&connection_id) {
-                Some(connection) => {
-                    let metadata = &mut connection.metadata;
-                    let normalized = normalize_address(
-                        &metadata.address,
-                        &format!("$.connections.{connection_id}.metadata.address"),
-                    )?;
-                    if normalized != endpoint.address
-                        || metadata
-                            .server_id
-                            .as_deref()
-                            .is_some_and(|value| value != endpoint.server_id)
-                        || metadata
-                            .server_fingerprint
-                            .as_deref()
-                            .is_some_and(|value| value != endpoint.server_fingerprint)
-                        || metadata.storage_id.as_deref().is_some_and(|value| {
-                            storage_id
-                                .as_deref()
-                                .is_some_and(|expected| value != expected)
-                        })
-                    {
-                        return Err(ConfigError::BindingChangeRequiresRebind {
-                            connection_id,
-                            field: "verified_endpoint",
-                        });
-                    }
-                    metadata.name = name;
-                    metadata.server_id = Some(endpoint.server_id.clone());
-                    metadata.server_fingerprint = Some(endpoint.server_fingerprint.clone());
-                    if let Some(storage_id) = storage_id {
-                        metadata.storage_id = Some(storage_id);
-                    }
-                }
-                None => {
-                    let mut metadata = ConnectionMetadata::new(name, endpoint.address.clone());
-                    metadata.server_id = Some(endpoint.server_id.clone());
-                    metadata.server_fingerprint = Some(endpoint.server_fingerprint.clone());
-                    metadata.storage_id = storage_id;
-                    config
-                        .connections
-                        .insert(connection_id, ConnectionConfig::from_metadata(metadata));
-                }
-            }
-            Ok(())
-        })
-    }
-
     /// Replaces exactly one user-confirmed fingerprint while preserving the
     /// endpoint, server id, storage binding and every credential profile.
     #[cfg(feature = "remote")]

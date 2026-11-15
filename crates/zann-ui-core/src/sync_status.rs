@@ -144,16 +144,48 @@ fn server_label(url: &str) -> String {
 }
 
 /// A storage context names its server when remote, and its stored name when local.
-pub fn storage_context_label(name: &str, server_url: Option<&str>) -> String {
-    match server_url {
+pub fn storage_context_label(
+    name: &str,
+    server_url: Option<&str>,
+    account_name: Option<&str>,
+) -> String {
+    let server = match server_url {
         Some(url) => server_label(url),
         None => name.to_string(),
+    };
+    match account_name {
+        Some(account) => format!("{server} · {account}"),
+        None => server,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accounts_on_the_same_server_have_distinct_labels() {
+        assert_eq!(
+            storage_context_label(
+                "Remote",
+                Some("https://accounts.test/"),
+                Some("first@example.test")
+            ),
+            "accounts.test · first@example.test"
+        );
+        assert_eq!(
+            storage_context_label(
+                "Remote",
+                Some("https://accounts.test/"),
+                Some("second@example.test")
+            ),
+            "accounts.test · second@example.test"
+        );
+        assert_eq!(
+            storage_context_label("Remote", Some("https://accounts.test/"), None),
+            "accounts.test"
+        );
+    }
 
     fn input(link: SyncLink) -> SyncStatusInput<'static> {
         SyncStatusInput {

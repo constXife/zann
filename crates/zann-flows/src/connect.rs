@@ -18,6 +18,7 @@ pub struct Snapshot {
 
 pub struct Connect {
     instance: u64,
+    reconnect_storage: Option<String>,
     sequence: u64,
     active: Option<(OperationId, Step)>,
     snapshot: Snapshot,
@@ -27,6 +28,7 @@ impl Connect {
     pub fn new(instance: u64) -> Self {
         Self {
             instance,
+            reconnect_storage: None,
             sequence: 0,
             active: None,
             snapshot: Snapshot {
@@ -39,6 +41,12 @@ impl Connect {
                 error: None,
             },
         }
+    }
+
+    pub fn reconnect(instance: u64, storage_id: String) -> Self {
+        let mut flow = Self::new(instance);
+        flow.reconnect_storage = Some(storage_id);
+        flow
     }
 
     pub fn snapshot(&self) -> &Snapshot {
@@ -98,7 +106,14 @@ impl Connect {
                 self.snapshot.server_url = url.clone();
                 self.clear_connection();
                 let id = self.start(Step::Probe);
-                vec![Effect::ResetConnection, Effect::Probe { id, url }]
+                vec![
+                    Effect::ResetConnection,
+                    Effect::Probe {
+                        id,
+                        url,
+                        storage_id: self.reconnect_storage.clone(),
+                    },
+                ]
             }
             Action::TrustFingerprint
                 if matches!(self.snapshot.stage, Stage::Fingerprint { .. }) =>

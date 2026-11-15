@@ -4,7 +4,7 @@
 - **Proposed:** 2026-11-15
 - **Scope:** canonical auth/config/local recovery owners, shared flows, native account UI and FFI
 - **Related:** [ADR 0010](0010-device-unlock-account-keys.md) (Accepted),
-  [ADR 0011](0011-account-scoped-replica-bindings.md) (Proposed),
+  [ADR 0011](0011-account-scoped-replica-bindings.md) (Accepted),
   [ADR 0008](0008-device-unlock.md) (Proposed lifetime/UV policy)
 
 This proposal aligns user actions with existing owners. It does not propose a
@@ -51,7 +51,7 @@ flows, particularly once several subjects share one endpoint under ADR 0011.
   without a cached replica and disconnected replicas without credentials. Reuse
   current account location/key-binding projections; shells must not infer state
   from errors or invent their own reconnect rules.
-- Specify profile-scoped credential removal with ADR 0011. The current connection-wide
+- Preserve ADR 0011's implemented profile-scoped credential removal. Whole-endpoint
   removal operation must not be called as a one-profile deletion after that cutover.
 - Preserve recovery from locked setup and existing unsent-data confirmation. Test
   stale preview, same-cardinality edits, snapshot failure, interruption and a second

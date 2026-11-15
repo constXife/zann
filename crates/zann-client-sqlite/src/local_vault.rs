@@ -9,7 +9,7 @@ use zann_client::app::{
     AccountKeyCheck, AppClient, ClientId, ClientPaths, ConfigIdentity, CredentialSecret,
     LegacySessionImport, SessionClient, SessionOperation,
 };
-use zann_client::config::{CredentialStore, LegacyCredentialSource};
+use zann_client::config::{ConfigRepository, CredentialStore, LegacyCredentialSource};
 use zann_core::{ItemCounts as DomainItemCounts, ItemListParams, ItemsService};
 use zann_crypto::crypto::SecretKey;
 #[cfg(debug_assertions)]
@@ -252,7 +252,8 @@ impl LocalVault {
     }
 }
 impl LocalVault {
-    fn app_client(&self) -> LocalResult<AppClient> {
+    /// Construct a handle for metadata reads without initializing credentials.
+    fn app_client_handle(&self) -> LocalResult<AppClient> {
         let factory = Arc::new(
             SqliteSyncStoreFactory::new(&self.database_path)
                 .map_err(|error| LocalError::Service(error.to_string()))?,
@@ -265,9 +266,14 @@ impl LocalVault {
             SessionClient::new(client_id),
             factory,
         );
+        Ok(client)
+    }
+
+    fn app_client(&self) -> LocalResult<AppClient> {
+        let client = self.app_client_handle()?;
         client
             .initialize(self.legacy_credentials.as_ref())
-            .map_err(|error| LocalError::Service(error.to_string()))?;
+            .map_err(unlock::keyring_error)?;
         Ok(client)
     }
 }
@@ -306,6 +312,9 @@ impl LocalVault {
         } = ports;
         let runtime = Runtime::new().map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
         let root = location.root().to_path_buf();
+        ConfigRepository::new(ClientPaths::new(&root))
+            .validate_existing_replica_format()
+            .map_err(unlock::keyring_error)?;
         let database_path = location.path().to_path_buf();
         // The client root holds the config and credentials journal; the sync
         // store refuses a database in a directory others can read.
@@ -720,6 +729,9 @@ impl LocalVaultService for LocalVault {
 
 /// Prepare the explicitly selected native database before remote session setup.
 pub async fn initialize_database(location: &SqliteFileLocation) -> LocalResult<()> {
+    ConfigRepository::new(ClientPaths::new(location.root()))
+        .validate_existing_replica_format()
+        .map_err(unlock::keyring_error)?;
     let pool = connect_sqlite_file_with_max(location, 5)
         .await
         .map_err(|err| LocalError::Service(err.to_string()))?;

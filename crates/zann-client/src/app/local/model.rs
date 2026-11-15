@@ -218,6 +218,8 @@ pub struct Retention {
 pub struct StorageSummary {
     pub id: String,
     pub name: String,
+    /// Canonical authenticated account label, independently of endpoint trust.
+    pub account_name: Option<String>,
     pub kind: String, // "remote"
     pub server_url: Option<String>,
 }

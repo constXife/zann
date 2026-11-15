@@ -20,11 +20,26 @@ impl ConnectionConfig {
     pub fn active_credential(&self) -> Option<&str> {
         self.active_credential.as_deref()
     }
+
+    pub fn profile_storage_id(&self, name: &str) -> Option<&str> {
+        self.credential_profiles.get(name)?.storage_id()
+    }
+
+    pub fn profile_key_fingerprint(&self, name: &str) -> Option<&str> {
+        self.credential_profiles.get(name)?.expected_master_key_fp()
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CredentialProfile {
+    /// Reconnect constraint from an explicitly selected local replica; not an authenticated identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) expected_account_subject: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) storage_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) expected_master_key_fp: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) account_subject: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -36,6 +51,14 @@ pub struct CredentialProfile {
 }
 
 impl CredentialProfile {
+    pub fn storage_id(&self) -> Option<&str> {
+        self.storage_id.as_deref()
+    }
+
+    pub fn expected_master_key_fp(&self) -> Option<&str> {
+        self.expected_master_key_fp.as_deref()
+    }
+
     pub fn account_subject(&self) -> Option<&str> {
         self.account_subject.as_deref()
     }

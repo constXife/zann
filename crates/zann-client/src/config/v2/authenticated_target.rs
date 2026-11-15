@@ -10,10 +10,6 @@ pub(super) fn changed_binding_field(
         Some("server_id")
     } else if previous.server_fingerprint != next.server_fingerprint {
         Some("server_fingerprint")
-    } else if previous.expected_master_key_fp != next.expected_master_key_fp {
-        Some("expected_master_key_fp")
-    } else if previous.storage_id != next.storage_id {
-        Some("storage_id")
     } else {
         None
     }
@@ -114,7 +110,6 @@ pub(super) fn apply_authenticated_connection_target(
     resolved_connection_id: &ConnectionId,
     target: &AuthenticatedConnectionTarget,
     endpoint: &VerifiedEndpointBinding,
-    storage_id: Option<&str>,
 ) -> Result<(), ConfigError> {
     match target {
         AuthenticatedConnectionTarget::ReplaceFingerprint { expected, .. } => {
@@ -135,9 +130,6 @@ pub(super) fn apply_authenticated_connection_target(
     match target {
         AuthenticatedConnectionTarget::Create { connection_name } => {
             ensure_authenticated_endpoint_unique(config, None, endpoint)?;
-            if let Some(storage_id) = storage_id {
-                ensure_storage_unique(config, None, storage_id)?;
-            }
             if config.connections.contains_key(resolved_connection_id) {
                 return Err(ConfigError::AuthenticatedEndpointAlias {
                     connection_id: resolved_connection_id.clone(),
@@ -147,7 +139,6 @@ pub(super) fn apply_authenticated_connection_target(
             let mut metadata = ConnectionMetadata::new(connection_name, endpoint.address());
             metadata.server_id = Some(endpoint.server_id().to_string());
             metadata.server_fingerprint = Some(endpoint.server_fingerprint().to_string());
-            metadata.storage_id = storage_id.map(str::to_string);
             config.connections.insert(
                 resolved_connection_id.clone(),
                 ConnectionConfig::from_metadata(metadata),
@@ -192,9 +183,6 @@ pub(super) fn apply_authenticated_connection_target(
     }
 
     ensure_authenticated_endpoint_unique(config, Some(resolved_connection_id), endpoint)?;
-    if let Some(storage_id) = storage_id {
-        ensure_storage_unique(config, Some(resolved_connection_id), storage_id)?;
-    }
     let connection = config
         .connections
         .get_mut(resolved_connection_id)
@@ -265,19 +253,6 @@ pub(super) fn apply_authenticated_connection_target(
         }
     }
 
-    if let Some(storage_id) = storage_id {
-        match metadata.storage_id.as_deref() {
-            None => metadata.storage_id = Some(storage_id.to_string()),
-            Some(stored) if stored == storage_id => {}
-            Some(_) => {
-                return Err(ConfigError::AuthenticatedBindingConflict {
-                    connection_id: resolved_connection_id.clone(),
-                    reason: "authenticated storage id does not match the stored binding"
-                        .to_string(),
-                });
-            }
-        }
-    }
     consume_authenticated_known_hosts(config, endpoint.address())?;
     Ok(())
 }
@@ -343,25 +318,6 @@ pub(super) fn ensure_authenticated_endpoint_unique(
 }
 
 #[allow(dead_code)]
-pub(super) fn ensure_storage_unique(
-    config: &ConfigV2,
-    except: Option<&ConnectionId>,
-    storage_id: &str,
-) -> Result<(), ConfigError> {
-    for (connection_id, connection) in &config.connections {
-        if except != Some(connection_id)
-            && connection.metadata.storage_id.as_deref() == Some(storage_id)
-        {
-            return Err(ConfigError::StorageBindingConflict {
-                storage_id: storage_id.to_string(),
-                connection_id: connection_id.clone(),
-            });
-        }
-    }
-    Ok(())
-}
-
-#[allow(dead_code)]
 pub(super) fn ensure_authenticated_known_host_fingerprint(
     config: &ConfigV2,
     connection_id: &ConnectionId,
@@ -400,4 +356,22 @@ pub(super) fn consume_authenticated_known_hosts(
         }
     }
     Ok(())
+}
+
+impl ConfigV2 {
+    /// Read-only trust admission before an imported bearer reaches the endpoint.
+    #[cfg(feature = "session")]
+    pub(crate) fn verify_import_trust(
+        &self,
+        connection: &ConnectionId,
+        endpoint: &VerifiedEndpointBinding,
+    ) -> Result<(), ConfigError> {
+        ensure_authenticated_known_host_fingerprint(
+            self,
+            connection,
+            endpoint.address(),
+            Some(endpoint.server_fingerprint()),
+        )?;
+        ensure_authenticated_endpoint_unique(self, Some(connection), endpoint)
+    }
 }

@@ -42,9 +42,9 @@ impl App {
                 };
                 let return_to = Box::new(std::mem::replace(screen, Screen::Welcome));
                 *screen = Screen::Connect {
-                    state: Box::new(
-                        url.map_or_else(connect::State::default, connect::State::with_server_url),
-                    ),
+                    state: Box::new(url.map_or_else(connect::State::default, |(storage, url)| {
+                        connect::State::with_replica(storage, Some(url))
+                    })),
                     return_to: Some(return_to),
                 };
                 Task::none()

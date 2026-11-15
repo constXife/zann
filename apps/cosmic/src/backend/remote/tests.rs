@@ -16,6 +16,7 @@ fn cancel_before_worker_start_is_registered_and_sticky() {
     };
     let plan = remote
         .plan(Effect::Probe {
+            storage_id: None,
             id,
             url: "https://must-not-be-contacted.invalid".into(),
         })
@@ -38,6 +39,7 @@ fn cancel_before_worker_start_is_registered_and_sticky() {
     remote.close();
     assert!(remote
         .plan(Effect::Probe {
+            storage_id: None,
             id,
             url: "https://must-not-be-contacted.invalid".into()
         })
@@ -56,12 +58,14 @@ fn cancelling_an_old_operation_cannot_cancel_a_new_one() {
     };
     let _old = remote
         .plan(Effect::Probe {
+            storage_id: None,
             id: old,
             url: "https://old.invalid".into(),
         })
         .expect("old plan");
     let next_plan = remote
         .plan(Effect::Probe {
+            storage_id: None,
             id: next,
             url: "https://new.invalid".into(),
         })

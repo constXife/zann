@@ -187,7 +187,7 @@ fn enrollment_binding(
         .credential_profiles()
         .get(target.profile_name())?;
     Some((
-        metadata.storage_id.clone()?,
+        profile.storage_id()?.to_owned(),
         metadata.server_id.clone()?,
         metadata.address.clone(),
         metadata.server_fingerprint.clone()?,

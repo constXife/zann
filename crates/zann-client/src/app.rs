@@ -34,8 +34,11 @@ pub use crate::sync::{
 };
 use crate::sync::{SyncEngine, SyncFuture};
 
+mod account_authentication;
 /// Narrow persistence-adapter SPI. It contains bounded plans, opaque proofs
 /// and the transactional local-store port, but no session or sync owner.
+mod connections;
+
 pub mod spi {
     pub use crate::config::AuthorizedTargetGeneration;
     pub use crate::sync::{
@@ -71,6 +74,14 @@ use admission::AppSyncPermit;
 /// migration, projection creation or binding belongs to a separate explicit
 /// workflow. Implementations must remain lazy and perform no I/O before the
 /// returned future is polled.
+#[derive(Clone, Debug)]
+pub struct ReplicaAccount {
+    pub storage_id: Uuid,
+    pub address: String,
+    pub account_subject: String,
+    pub server_fingerprint: String,
+}
+
 pub trait AppSyncStoreFactory: Send + Sync {
     fn open_existing(
         self: Arc<Self>,
@@ -94,14 +105,12 @@ pub trait AppSyncStoreFactory: Send + Sync {
         master_key: Arc<SecretKey>,
     ) -> SyncStoreFuture<'static, ()>;
 
-    /// The remote storage the database keeps for the normalized server
-    /// `address`, if any. A database keeps at most one storage per address,
-    /// so a new connection there takes it over instead of creating another.
-    fn storage_at(
+    /// Read one explicitly selected replica's authenticated metadata.
+    fn replica_at(
         self: Arc<Self>,
         paths: ClientPaths,
-        address: String,
-    ) -> SyncStoreFuture<'static, Option<Uuid>>;
+        storage_id: Uuid,
+    ) -> SyncStoreFuture<'static, Option<ReplicaAccount>>;
 
     /// Voids the claim of the connection generation that synced
     /// `storage_id`, keeping its projection and unsent changes. The caller
@@ -182,6 +191,10 @@ pub struct ConnectionTrustChallenge {
     expected_old_fingerprint: String,
     verified: crate::remote::trust::VerifiedSystemInfo,
     prepared: PreparedConnection,
+    expected_subject: Option<String>,
+    expected_connection_pin: Option<String>,
+    connection_name: String,
+    reuse_pending: bool,
 }
 
 impl fmt::Debug for ConnectionTrustChallenge {
@@ -281,11 +294,14 @@ impl AppClient {
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
         let config = snapshot.config();
         let connection_id = if let Some(storage_id) = storage_id {
-            connection_removal::storage_connection(config, storage_id)
-                .map_err(|kind| SessionError::for_app(operation_id, kind))?
+            let (connection, profile) = config
+                .replica_profile(storage_id)
+                .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?
                 .ok_or_else(|| {
                     SessionError::for_app(operation_id, SessionErrorKind::Configuration)
-                })?
+                })?;
+            return SessionTarget::new(connection, profile)
+                .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration));
         } else if let Some(active) = config
             .clients
             .get(&self.client_id)
@@ -313,149 +329,6 @@ impl AppClient {
             .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))
     }
 
-    pub async fn prepare_connection(
-        &self,
-        endpoint: &str,
-        connection_name: &str,
-        profile_name: &str,
-    ) -> Result<PrepareConnectionOutcome, SessionError> {
-        let operation_id = SessionOperationId::new();
-        let transport = AuthHttpTransport::new(endpoint)
-            .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Protocol))?;
-        let info = transport
-            .system_info()
-            .await
-            .map_err(|error| SessionError::from_http_for_app(operation_id, &error))?;
-        let verified = crate::remote::trust::verify_and_bind_system_info(endpoint, info)
-            .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::TrustInvalid))?;
-        let snapshot = self
-            .repository
-            .snapshot()
-            .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
-        let connection_id = ConnectionId::deterministic(connection_name, endpoint);
-        let existing = snapshot.config().connections.get(&connection_id);
-        let storage_id =
-            match existing.and_then(|connection| connection.metadata().storage_id.clone()) {
-                Some(storage_id) => storage_id,
-                None => {
-                    self.storage_for_new_connection(
-                        snapshot.config(),
-                        verified.binding().address(),
-                        operation_id,
-                    )
-                    .await?
-                }
-            };
-        let target = SessionTarget::new(connection_id.clone(), profile_name.to_string())
-            .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
-        let prepared = PreparedConnection {
-            target,
-            auth_methods: verified
-                .info()
-                .auth_methods
-                .iter()
-                .filter_map(|value| AuthMethod::try_from(*value).ok())
-                .collect(),
-            registration_available: verified.info().internal_users_present == Some(false),
-            server_name: verified.info().server_name.clone(),
-            storage_id: storage_id.clone(),
-        };
-        if let Some(connection) = existing {
-            let metadata = connection.metadata();
-            match metadata.server_id.as_deref() {
-                Some(pinned) if pinned == verified.binding().server_id() => {}
-                // A changed identity key is refused outright, never offered
-                // for re-trust: recovery is an explicit `remove_connection`.
-                Some(_) => {
-                    return Err(SessionError::for_app(
-                        operation_id,
-                        SessionErrorKind::ServerIdentityChanged,
-                    ));
-                }
-                None => {
-                    return Err(SessionError::for_app(
-                        operation_id,
-                        SessionErrorKind::TrustInvalid,
-                    ));
-                }
-            }
-            if let Some(old) = metadata.server_fingerprint.as_deref() {
-                if old != verified.binding().server_fingerprint() {
-                    return Ok(PrepareConnectionOutcome::FingerprintChanged(Box::new(
-                        ConnectionTrustChallenge {
-                            expected_revision: snapshot.revision(),
-                            connection_id,
-                            expected_old_fingerprint: old.to_string(),
-                            verified,
-                            prepared,
-                        },
-                    )));
-                }
-            }
-        }
-        self.repository
-            .pin_verified_connection(
-                snapshot.revision(),
-                connection_id,
-                connection_name.to_string(),
-                verified.binding(),
-                Some(storage_id),
-            )
-            .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
-        Ok(PrepareConnectionOutcome::Ready(prepared))
-    }
-
-    pub fn trust_connection(
-        &self,
-        challenge: ConnectionTrustChallenge,
-    ) -> Result<PreparedConnection, SessionError> {
-        let operation_id = SessionOperationId::new();
-        self.repository
-            .replace_verified_fingerprint(
-                challenge.expected_revision,
-                &challenge.connection_id,
-                &challenge.expected_old_fingerprint,
-                challenge.verified.binding(),
-            )
-            .map_err(|_| SessionError::for_app(operation_id, SessionErrorKind::Configuration))?;
-        Ok(challenge.prepared)
-    }
-
-    /// The storage a connection without one syncs: the one the database
-    /// already keeps for `address`, released from the forgotten connection
-    /// that synced it, or a new one. Its unsent changes then reach the server
-    /// once it proves the same account and vault keys; see
-    /// [`AppSyncStoreFactory::release_storage`].
-    async fn storage_for_new_connection(
-        &self,
-        config: &crate::config::ConfigV2,
-        address: &str,
-        operation_id: SessionOperationId,
-    ) -> Result<String, SessionError> {
-        let local_error = |_| SessionError::for_app(operation_id, SessionErrorKind::Internal);
-        let found = Arc::clone(&self.sync_store_factory)
-            .storage_at(self.paths.clone(), address.to_string())
-            .await
-            .map_err(local_error)?;
-        let Some(storage_id) = found else {
-            return Ok(Uuid::now_v7().to_string());
-        };
-        let pinned = connection_removal::storage_connection(config, &storage_id.to_string())
-            .map_err(|kind| SessionError::for_app(operation_id, kind))?;
-        if pinned.is_some() {
-            // Another connection to this address syncs it already.
-            return Err(SessionError::for_app(
-                operation_id,
-                SessionErrorKind::Configuration,
-            ));
-        }
-        Arc::clone(&self.sync_store_factory)
-            .release_storage(self.paths.clone(), storage_id)
-            .await
-            .map_err(local_error)?;
-        Ok(storage_id.to_string())
-    }
-
     /// Installs a metadata-only progress observer for subsequent sync calls.
     #[must_use]
     pub fn with_sync_progress(mut self, progress: Arc<dyn SyncProgressSink>) -> Self {
@@ -469,7 +342,8 @@ impl AppClient {
         request: PasswordLoginRequest,
         operation: SessionOperation,
     ) -> Result<SessionAccess, SessionError> {
-        self.session.password_login(request, operation).await
+        let access = self.session.password_login(request, operation).await?;
+        self.finish_account_authentication(access).await
     }
 
     pub async fn password_register(
@@ -477,7 +351,8 @@ impl AppClient {
         request: PasswordRegistrationRequest,
         operation: SessionOperation,
     ) -> Result<SessionAccess, SessionError> {
-        self.session.password_register(request, operation).await
+        let access = self.session.password_register(request, operation).await?;
+        self.finish_account_authentication(access).await
     }
 
     /// Exchanges one external OIDC token with the verified server and commits
@@ -487,7 +362,8 @@ impl AppClient {
         request: OidcLoginInput,
         operation: SessionOperation,
     ) -> Result<SessionAccess, SessionError> {
-        self.session.oidc_login(request, operation).await
+        let access = self.session.oidc_login(request, operation).await?;
+        self.finish_account_authentication(access).await
     }
 
     /// Commits an already-authenticated legacy session (live tokens, known
@@ -497,12 +373,16 @@ impl AppClient {
         request: LegacySessionImport,
         operation: SessionOperation,
     ) -> Result<SessionAccess, SessionError> {
-        self.session.import_session_tokens(request, operation).await
+        let access = self
+            .session
+            .import_session_tokens(request, operation)
+            .await?;
+        self.finish_account_authentication(access).await
     }
 
     /// Checks a master key against the account's published personal vault
     /// key before a new device keeps anything derived from it: the first sync
-    /// binds the key's fingerprint to the connection for good.
+    /// binds the key's fingerprint to the account profile for good.
     pub async fn verify_account_key(
         &self,
         target: &SessionTarget,
@@ -550,7 +430,7 @@ impl AppClient {
     /// returned future must be polled on a Tokio runtime with its time driver
     /// enabled.
     ///
-    /// A connection binds its master key's fingerprint for good, so one that
+    /// An account profile binds its master key's fingerprint for good, so one that
     /// has not bound it yet binds it only after the server's catalog proves
     /// the key: it opens every published personal vault key, or this device
     /// publishes the account's first one. A key the catalog refuses fails the
@@ -878,6 +758,7 @@ fn map_reset_store_error(error: SyncStoreError) -> SyncErrorKind {
 
 #[cfg(test)]
 mod tests {
+    mod account_replicas;
     mod recovery_plan;
     use std::future::pending;
     use std::path::PathBuf;
@@ -953,11 +834,11 @@ mod tests {
             Box::pin(async move { Err(error) })
         }
 
-        fn storage_at(
+        fn replica_at(
             self: Arc<Self>,
             _paths: ClientPaths,
-            _address: String,
-        ) -> SyncStoreFuture<'static, Option<Uuid>> {
+            _storage_id: Uuid,
+        ) -> SyncStoreFuture<'static, Option<ReplicaAccount>> {
             self.calls.fetch_add(1, Ordering::AcqRel);
             let error = SyncStoreError::new(self.kind);
             Box::pin(async move { Err(error) })
@@ -978,7 +859,7 @@ mod tests {
     /// for flows that only pin connections.
     #[derive(Default)]
     struct StorageDatabase {
-        kept: Option<Uuid>,
+        kept: Option<ReplicaAccount>,
         released: std::sync::Mutex<Vec<Uuid>>,
     }
 
@@ -1001,12 +882,12 @@ mod tests {
             Box::pin(async { Err(SyncStoreError::new(SyncStoreErrorKind::Unavailable)) })
         }
 
-        fn storage_at(
+        fn replica_at(
             self: Arc<Self>,
             _paths: ClientPaths,
-            _address: String,
-        ) -> SyncStoreFuture<'static, Option<Uuid>> {
-            Box::pin(async move { Ok(self.kept) })
+            _storage_id: Uuid,
+        ) -> SyncStoreFuture<'static, Option<ReplicaAccount>> {
+            Box::pin(async move { Ok(self.kept.clone()) })
         }
 
         fn release_storage(
@@ -1067,11 +948,11 @@ mod tests {
             })
         }
 
-        fn storage_at(
+        fn replica_at(
             self: Arc<Self>,
             _paths: ClientPaths,
-            _address: String,
-        ) -> SyncStoreFuture<'static, Option<Uuid>> {
+            _storage_id: Uuid,
+        ) -> SyncStoreFuture<'static, Option<ReplicaAccount>> {
             Box::pin(pending())
         }
 
@@ -1557,42 +1438,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_new_connection_takes_over_the_storage_kept_for_its_address() {
+    async fn an_explicit_reconnect_reserves_its_subject_without_releasing_before_authentication() {
         let dir = tempfile::tempdir().expect("temp dir");
+        let mut server = mockito::Server::new_async().await;
         let kept = Uuid::now_v7();
+        let subject = Uuid::now_v7().to_string();
         let database = Arc::new(StorageDatabase {
-            kept: Some(kept),
+            kept: Some(ReplicaAccount {
+                storage_id: kept,
+                address: server.url(),
+                account_subject: subject.clone(),
+                server_fingerprint: "fingerprint-1".into(),
+            }),
             ..StorageDatabase::default()
         });
-        let app = trusting_client_over(&dir, Arc::clone(&database));
-        let mut server = mockito::Server::new_async().await;
-        let endpoint = first_connect(&app, &mut server).await;
-
-        let pinned_storage = |name: &str| {
-            app.repository
-                .snapshot()
-                .expect("config snapshot")
-                .config()
-                .connections
-                .get(&ConnectionId::deterministic(name, &endpoint))
-                .and_then(|connection| connection.metadata().storage_id.clone())
-        };
-        assert_eq!(pinned_storage(CONNECTION_NAME), Some(kept.to_string()));
-        assert_eq!(*database.released.lock().expect("released"), vec![kept]);
-
+        let app = trusting_client_over(&dir, database.clone());
         let _identity = serve_identity(
             &mut server,
             &ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
             "fingerprint-1",
         )
         .await;
-        let refused = app
-            .prepare_connection(&endpoint, "Second", "default")
+        let prepared = app
+            .prepare_account_connection(&server.url(), CONNECTION_NAME, Some(&kept.to_string()))
             .await
-            .expect_err("a storage another connection syncs is not taken over");
-        assert_eq!(refused.kind(), SessionErrorKind::Configuration);
-        assert_eq!(pinned_storage("Second"), None);
-        assert_eq!(*database.released.lock().expect("released"), vec![kept]);
+            .expect("reconnect");
+        let PrepareConnectionOutcome::Ready(prepared) = prepared else {
+            panic!("ready")
+        };
+        assert_eq!(prepared.storage_id(), kept.to_string());
+        assert!(
+            database.released.lock().expect("released").is_empty(),
+            "no release before authenticated account proof"
+        );
+        let config = app.repository.snapshot().expect("snapshot");
+        let profile = &config.config().connections[prepared.target().connection_id()]
+            .credential_profiles()[prepared.target().profile_name()];
+        assert!(profile.account_subject().is_none());
+        assert_eq!(
+            serde_json::to_value(profile).expect("profile JSON")["expected_account_subject"],
+            subject
+        );
+        assert_eq!(profile.storage_id(), Some(kept.to_string().as_str()));
     }
 
     #[tokio::test]
@@ -1671,9 +1558,8 @@ mod tests {
             .connections
             .get(&ConnectionId::deterministic(CONNECTION_NAME, &endpoint))
             .expect("pinned connection")
-            .metadata()
-            .storage_id
-            .clone()
+            .profile_storage_id("default")
+            .map(str::to_owned)
             .expect("first connect pins the storage");
 
         assert!(app.syncs_storage(&storage_id).expect("synced storage"));
@@ -1690,13 +1576,15 @@ mod tests {
                 .expect("forget the storage's server"),
             Some(endpoint.clone())
         );
-        assert!(app
-            .repository
-            .snapshot()
-            .expect("config snapshot")
-            .config()
-            .connections
-            .is_empty());
+        assert!(
+            app.repository
+                .snapshot()
+                .expect("config snapshot")
+                .config()
+                .connections
+                .is_empty(),
+            "explicit whole-server recovery clears trust"
+        );
         assert!(!app.syncs_storage(&storage_id).expect("forgotten storage"));
         assert_eq!(
             app.remove_storage_connection(&storage_id)
@@ -1725,8 +1613,7 @@ mod tests {
         assert_eq!(refused.kind(), SessionErrorKind::ServerIdentityChanged);
 
         assert_eq!(
-            app.remove_connection(&endpoint, CONNECTION_NAME)
-                .expect("forget the server"),
+            app.remove_connection(&endpoint).expect("forget the server"),
             ConnectionRemoval::Removed {
                 cleanup_deferred: false
             }
@@ -1739,7 +1626,7 @@ mod tests {
             .connections
             .is_empty());
         assert_eq!(
-            app.remove_connection(&endpoint, CONNECTION_NAME)
+            app.remove_connection(&endpoint)
                 .expect("forgetting twice is a no-op"),
             ConnectionRemoval::AlreadyAbsent
         );
@@ -1756,7 +1643,7 @@ mod tests {
 }
 
 mod connection_removal;
-pub use connection_removal::{ConnectionRemoval, ConnectionRemovalPlan};
+pub use connection_removal::{AccountRemovalPlan, ConnectionRemoval};
 mod account_keys;
 /// Local vault services, independent of SQLite and native adapters.
 mod kdf_identity;

@@ -981,6 +981,7 @@ fn map_store_error(
     error: SyncStoreError,
 ) -> SyncError {
     let kind = match error.kind() {
+        SyncStoreErrorKind::ReauthenticationRequired => SyncErrorKind::SessionExpired,
         SyncStoreErrorKind::MetadataRefreshRequired => SyncErrorKind::MetadataRefreshRequired,
         SyncStoreErrorKind::StaleCheckpoint
         | SyncStoreErrorKind::StaleKeyBinding
@@ -990,7 +991,7 @@ fn map_store_error(
         SyncStoreErrorKind::CommitOutcomeUnknown => SyncErrorKind::CommitOutcomeUnknown,
         _ => SyncErrorKind::Local,
     };
-    SyncError::new(operation_id, kind, stage)
+    SyncError::new(operation_id, kind, stage).with_source(error)
 }
 
 fn partial_outcome(

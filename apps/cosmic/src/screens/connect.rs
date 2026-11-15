@@ -43,6 +43,14 @@ impl State {
         state.url = url;
         state
     }
+    pub fn with_replica(storage_id: String, url: Option<String>) -> Self {
+        let mut state = Self::default();
+        state.flow = Connect::reconnect(state.generation, storage_id);
+        if let Some(url) = url {
+            state.url = url;
+        }
+        state
+    }
     pub fn server_url(&self) -> &str {
         &self.url
     }

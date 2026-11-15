@@ -209,6 +209,7 @@ pub struct RetentionFfi {
 pub struct StorageSummaryFfi {
     pub id: String,
     pub name: String,
+    pub account_name: Option<String>,
     pub kind: String, // "local" or "remote"
     pub server_url: Option<String>,
     pub display_name: String,

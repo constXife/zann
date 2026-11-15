@@ -817,9 +817,10 @@ impl App {
                 Task::none()
             }
             settings::Outcome::AddServer => self.connect_from_settings(connect::State::default()),
-            settings::Outcome::Reconnect { server_url } => self.connect_from_settings(
-                server_url.map_or_else(connect::State::default, connect::State::with_server_url),
-            ),
+            settings::Outcome::Reconnect {
+                storage_id,
+                server_url,
+            } => self.connect_from_settings(connect::State::with_replica(storage_id, server_url)),
             settings::Outcome::Restored { notice } => {
                 let Shell::Ready { session, screen } = &mut self.shell else {
                     return Task::none();

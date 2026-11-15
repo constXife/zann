@@ -132,7 +132,7 @@ pub enum Message {
     AskForget,
     CancelForget,
     ConfirmForget,
-    Forgotten(Result<Option<String>, String>),
+    Forgotten(String, Result<Option<String>, String>),
     /// Connect again to the disconnected storage's server.
     Reconnect,
     AddServer,
@@ -152,6 +152,7 @@ pub enum Outcome {
     /// The stale server is forgotten, or the storage's connection is gone;
     /// connect again, starting from its address when there is one.
     Reconnect {
+        storage_id: String,
         server_url: Option<String>,
     },
     Open(String),
@@ -659,23 +660,29 @@ impl State {
                 self.busy = true;
                 self.error = None;
                 return Outcome::Task(cosmic::task::future(async move {
+                    let selected = storage_id.clone();
                     Message::Forgotten(
+                        selected,
                         off_thread(move || local::forget_server(&facade, storage_id)).await,
                     )
                 }));
             }
-            Message::Forgotten(Ok(server_url)) => {
+            Message::Forgotten(storage_id, Ok(server_url)) => {
                 self.busy = false;
                 self.stale_server = None;
-                return Outcome::Reconnect { server_url };
+                return Outcome::Reconnect {
+                    storage_id,
+                    server_url,
+                };
             }
-            Message::Forgotten(Err(err)) => {
+            Message::Forgotten(_, Err(err)) => {
                 self.busy = false;
                 self.error = Some(err);
             }
             Message::Reconnect => {
                 if let Some(gone) = self.disconnected.take() {
                     return Outcome::Reconnect {
+                        storage_id: gone.storage_id,
                         server_url: gone.server_url,
                     };
                 }

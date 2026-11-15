@@ -2,10 +2,8 @@
 //!
 //! An instance is an operation-scoped lease over exactly one explicit session
 //! target, config root, database pool and immutable master key. Vaults, items
-//! and history are keyed by `(storage_id, id)`, so every configured connection
-//! syncs its own remote storage into the shared database. A connection with
-//! several credential profiles is still rejected because its profiles would
-//! share one storage projection. Missing exact remote projections may be
+//! and history are keyed by `(storage_id, id)`, so each authenticated profile
+//! syncs its own account replica into the shared database. Missing exact projections may be
 //! materialized, but existing storage and key bindings are never replaced.
 
 #![deny(clippy::unwrap_used)]
@@ -18,6 +16,9 @@ pub mod maintenance;
 pub use zann_db::SqliteFileLocation;
 
 mod master_key;
+mod replica_binding;
+mod target_binding;
+use target_binding::target_binding_from_generation;
 #[cfg(test)]
 mod test_support;
 
@@ -115,29 +116,34 @@ impl AppSyncStoreFactory for SqliteSyncStoreFactory {
         })
     }
 
-    fn storage_at(
+    fn replica_at(
         self: Arc<Self>,
         paths: ClientPaths,
-        address: String,
-    ) -> SyncStoreFuture<'static, Option<Uuid>> {
+        storage_id: Uuid,
+    ) -> SyncStoreFuture<'static, Option<zann_client::app::ReplicaAccount>> {
         let database_path = self.location.path().to_path_buf();
         Box::pin(async move {
             let database = open_projection_database(&paths, &database_path).await?;
-            let storages = LocalStorageRepo::new(database.pool())
-                .list()
+            let storage = LocalStorageRepo::new(database.pool())
+                .get_bounded(storage_id)
                 .await
-                .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
+                .map_err(|error| store_error(SyncStoreErrorKind::Unavailable).with_source(error))?;
             database
                 .verify_identity()
                 .await
-                .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
-            Ok(storages
-                .into_iter()
-                .find(|storage| {
-                    storage.kind == StorageKind::Remote
-                        && storage.server_url.as_deref() == Some(address.as_str())
-                })
-                .map(|storage| storage.id))
+                .map_err(|error| store_error(SyncStoreErrorKind::Unavailable).with_source(error))?;
+            let Some(storage) = storage else {
+                return Ok(None);
+            };
+            if storage.kind != StorageKind::Remote {
+                return Err(store_error(SyncStoreErrorKind::InvalidData));
+            }
+            Ok(Some(zann_client::app::ReplicaAccount {
+                storage_id,
+                address: required(storage.server_url.as_deref())?.into(),
+                account_subject: required(storage.account_subject.as_deref())?.into(),
+                server_fingerprint: required(storage.server_fingerprint.as_deref())?.into(),
+            }))
         })
     }
 
@@ -489,64 +495,9 @@ impl SqliteSyncStore {
         personal_vaults_enabled: bool,
     ) -> Result<ResolvedSyncTarget, SyncStoreError> {
         let expected = target_binding_from_generation(target, &generation, &self.master_key)?;
-        let snapshot = self.config.snapshot().map_err(map_config_lease_error)?;
-        let identity_email = snapshot
-            .config()
-            .account_identities
-            .get(&format!(
-                "{}/{}",
-                target.connection_id(),
-                target.profile_name()
-            ))
-            .and_then(|identity| identity.email.as_deref());
-        self.database.verify_identity().await?;
-        let storage_repository = LocalStorageRepo::new(self.database.pool());
-        let stored = storage_repository
-            .get_bounded(expected.storage_id)
-            .await
-            .map_err(map_projection_read)?;
-        if let Some(stored) = stored {
-            if ensure_storage_matches_target(&stored, &expected).is_err()
-                && stored.kind == StorageKind::Remote
-                && stored.server_url.as_deref() == Some(expected.address.as_str())
-                && same_account(&stored, &expected.account_subject, identity_email)
-            {
-                // A storage a new connection took over (see
-                // `AppSyncStoreFactory::release_storage`) learns what its
-                // server proves now. A storage still claimed is left as it
-                // is, and the exact check below refuses it.
-                storage_repository
-                    .rebind_released(
-                        &stored,
-                        &expected.display_name,
-                        &expected.server_fingerprint,
-                        expected.auth_method,
-                        &expected.account_subject,
-                    )
-                    .await
-                    .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
-            }
-        } else {
-            let candidate = LocalStorage {
-                id: expected.storage_id,
-                kind: StorageKind::Remote,
-                name: expected.display_name.clone(),
-                server_url: Some(expected.address.clone()),
-                server_name: None,
-                server_fingerprint: Some(expected.server_fingerprint.clone()),
-                account_subject: Some(expected.account_subject.clone()),
-                personal_vaults_enabled,
-                auth_method: Some(expected.auth_method),
-            };
-            storage_repository
-                .insert_if_absent(&candidate)
-                .await
-                .map_err(|_| store_error(SyncStoreErrorKind::Unavailable))?;
-        }
-        let storage = self.exact_local_storage(&expected).await?;
-        if storage.personal_vaults_enabled != personal_vaults_enabled {
-            return Err(store_error(SyncStoreErrorKind::InvalidData));
-        }
+        let storage = self
+            .resolve_replica_binding(&expected, personal_vaults_enabled)
+            .await?;
         let candidate = InstalledAuthorization {
             target: target.clone(),
             generation: Some(generation),
@@ -1446,9 +1397,6 @@ fn capture_target_binding_for_test(
             .connections
             .get(target.connection_id())
             .ok_or_else(|| store_error(SyncStoreErrorKind::NotFound))?;
-        if connection.credential_profiles().len() != 1 {
-            return Err(store_error(SyncStoreErrorKind::InvalidData));
-        }
         let profile = connection
             .credential_profiles()
             .get(target.profile_name())
@@ -1510,50 +1458,6 @@ fn target_binding_from_anchor_for_test(
     })
 }
 
-fn target_binding_from_generation(
-    target: &SessionTarget,
-    generation: &AuthorizedTargetGeneration,
-    master_key: &SecretKey,
-) -> Result<TargetBinding, SyncStoreError> {
-    ensure_single_profile_connection(generation.single_profile_connection())?;
-    if generation.connection_id() != target.connection_id()
-        || generation.profile_name() != target.profile_name()
-        || generation.display_name().is_empty()
-        || generation.address().is_empty()
-    {
-        return Err(store_error(SyncStoreErrorKind::InvalidData));
-    }
-    let server_id = required(generation.server_id())?;
-    let server_fingerprint = required(generation.server_fingerprint())?;
-    let storage_id_text = required(generation.storage_id())?;
-    let storage_id = canonical_uuid(storage_id_text)?;
-    let account_subject = required(generation.account_subject())?;
-    canonical_uuid(account_subject)?;
-    let auth_method = generation
-        .auth_method()
-        .ok_or_else(|| store_error(SyncStoreErrorKind::InvalidData))?;
-    let master_key = master_key_binding(generation.expected_master_key_fingerprint(), master_key)?;
-    Ok(TargetBinding {
-        connection_id: target.connection_id().clone(),
-        profile_name: target.profile_name().to_string(),
-        display_name: generation.display_name().to_string(),
-        address: generation.address().to_string(),
-        server_id: server_id.to_string(),
-        server_fingerprint: server_fingerprint.to_string(),
-        storage_id,
-        master_key,
-        account_subject: account_subject.to_string(),
-        auth_method,
-    })
-}
-
-fn ensure_single_profile_connection(proven: bool) -> Result<(), SyncStoreError> {
-    if !proven {
-        return Err(store_error(SyncStoreErrorKind::InvalidData));
-    }
-    Ok(())
-}
-
 fn ensure_same_authorization(
     installed: &InstalledAuthorization,
     candidate: &InstalledAuthorization,
@@ -1574,23 +1478,6 @@ fn local_generation_proof(generation: &AuthorizedTargetGeneration) -> LocalSyncG
         generation.revision(),
         *generation.content_fingerprint(),
     )
-}
-
-/// Whether a storage a new connection takes over belongs to the account it
-/// authorized: the same canonical account subject, or, for a storage the
-/// legacy desktop app recorded under the account's email rather than its
-/// subject, that email as this client's account identity names it. A
-/// canonical subject never matches by email.
-fn same_account(
-    stored: &LocalStorage,
-    account_subject: &str,
-    identity_email: Option<&str>,
-) -> bool {
-    match stored.account_subject.as_deref() {
-        Some(subject) if subject == account_subject => true,
-        Some(subject) => Uuid::parse_str(subject).is_err() && identity_email == Some(subject),
-        None => false,
-    }
 }
 
 fn ensure_storage_matches_target(
@@ -1861,12 +1748,13 @@ fn map_local_sync_error(error: LocalSyncError) -> SyncStoreError {
 }
 
 fn map_projection_read(error: LocalProjectionReadError) -> SyncStoreError {
-    match error {
+    let classified = match &error {
         LocalProjectionReadError::InvalidInput
         | LocalProjectionReadError::CorruptProjection
         | LocalProjectionReadError::TooManyRows => store_error(SyncStoreErrorKind::InvalidData),
         LocalProjectionReadError::Database(_) => store_error(SyncStoreErrorKind::Internal),
-    }
+    };
+    classified.with_source(error)
 }
 
 fn map_model_error(_: impl std::error::Error) -> SyncStoreError {
@@ -2014,9 +1902,6 @@ mod tests {
         let mut metadata = ConnectionMetadata::new("Adapter", "HTTPS://ADAPTER.TEST:443/");
         metadata.server_id = Some("server-identity-binding".to_string());
         metadata.server_fingerprint = Some("server-fingerprint-binding".to_string());
-        metadata.storage_id = Some(storage_id.to_string());
-        metadata.expected_master_key_fp =
-            bound.then(|| zann_crypto::cache_key_fingerprint(&master_key));
         repository
             .upsert_connection(connection_id.clone(), metadata)
             .expect("insert pinned connection");
@@ -2044,6 +1929,11 @@ mod tests {
             serde_json::from_slice(&fs::read(&config_path).expect("read adapter config"))
                 .expect("parse adapter config");
         raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
+            ["storage_id"] = json!(storage_id.to_string());
+        raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
+            ["expected_master_key_fp"] =
+            json!(bound.then(|| zann_crypto::cache_key_fingerprint(&master_key)));
+        raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
             ["account_subject"] = json!(account_subject.to_string());
         raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
             ["auth_method"] = json!(AuthMethod::Password.as_i32());
@@ -2064,52 +1954,11 @@ mod tests {
     }
 
     #[test]
-    fn a_legacy_storage_matches_its_account_only_through_the_identity_email() {
-        let fixture = configured_fixture();
-        let subject = fixture.account_subject.to_string();
-        let with = |account_subject: Option<&str>| LocalStorage {
-            account_subject: account_subject.map(str::to_string),
-            ..matching_storage(&fixture)
-        };
-        let email = Some("owner@example.test");
-
-        assert!(same_account(&with(Some(&subject)), &subject, None));
-        assert!(same_account(
-            &with(Some("owner@example.test")),
-            &subject,
-            email
-        ));
-        assert!(!same_account(
-            &with(Some("other@example.test")),
-            &subject,
-            email
-        ));
-        assert!(!same_account(
-            &with(Some("owner@example.test")),
-            &subject,
-            None
-        ));
-        assert!(
-            !same_account(&with(Some(&Uuid::now_v7().to_string())), &subject, email),
-            "another account's subject never matches by email"
-        );
-        assert!(!same_account(&with(None), &subject, email));
-    }
-
-    #[test]
     fn cache_fingerprint_format_is_exact() {
         assert!(canonical_cache_fingerprint("012345abcdef"));
         assert!(!canonical_cache_fingerprint("012345ABCDEf"));
         assert!(!canonical_cache_fingerprint("012345abcdef0"));
         assert!(!canonical_cache_fingerprint(""));
-    }
-
-    #[test]
-    fn adapter_rejects_a_multi_profile_connection_before_binding_conversion() {
-        let error = ensure_single_profile_connection(false)
-            .expect_err("profiles of one connection would share one storage projection");
-        assert_eq!(error.kind(), SyncStoreErrorKind::InvalidData);
-        ensure_single_profile_connection(true).expect("a single-profile connection is supported");
     }
 
     #[test]

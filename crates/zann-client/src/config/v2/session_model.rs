@@ -142,7 +142,6 @@ pub(crate) struct StoredConnectionBinding {
     pub(super) address: String,
     pub(super) server_id: Option<String>,
     pub(super) server_fingerprint: Option<String>,
-    pub(super) storage_id: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -151,13 +150,11 @@ impl StoredConnectionBinding {
         address: impl Into<String>,
         server_id: Option<String>,
         server_fingerprint: Option<String>,
-        storage_id: Option<String>,
     ) -> Self {
         Self {
             address: address.into(),
             server_id,
             server_fingerprint,
-            storage_id,
         }
     }
 
@@ -166,7 +163,6 @@ impl StoredConnectionBinding {
             address: metadata.address.clone(),
             server_id: metadata.server_id.clone(),
             server_fingerprint: metadata.server_fingerprint.clone(),
-            storage_id: metadata.storage_id.clone(),
         }
     }
 
@@ -180,10 +176,6 @@ impl StoredConnectionBinding {
 
     pub fn server_fingerprint(&self) -> Option<&str> {
         self.server_fingerprint.as_deref()
-    }
-
-    pub fn storage_id(&self) -> Option<&str> {
-        self.storage_id.as_deref()
     }
 }
 

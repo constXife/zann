@@ -3,14 +3,14 @@ import XCTest
 
 final class ConnectFlowBindingTests: XCTestCase {
     func testTypedConnectEffectsAndCompletionsCrossTheBinding() throws {
-        let flow = ConnectFlowFfi()
+        let flow = ConnectFlowFfi(reconnectStorage: nil)
         let effects = flow.dispatch(action: .probe(url: "https://fixture.example.test"))
-        guard case .probe(let id, let url, let name, let profile)? = effects.last else {
+        guard case .probe(let id, let url, let name, let storage)? = effects.last else {
             return XCTFail("typed probe effect")
         }
         XCTAssertEqual(url, "https://fixture.example.test")
         XCTAssertEqual(name, "Remote")
-        XCTAssertEqual(profile, "default")
+        XCTAssertNil(storage)
         XCTAssertTrue(flow.accepts(id: id, step: .probe))
         let next = flow.complete(completion: .probed(id: id, probe: .ready(info:
             ConnectServerFfi(methods: [.password], registrationAvailable: false, serverName: "Fixture"))))

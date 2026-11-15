@@ -101,40 +101,18 @@ pub(super) fn validate_config(config: &ConfigV2) -> Result<(), ConfigError> {
         }
     }
 
-    let mut trust_by_address: BTreeMap<String, (Option<String>, Option<String>, ConnectionId)> =
-        BTreeMap::new();
+    let mut trust_by_address = BTreeMap::new();
     for (connection_id, connection) in &config.connections {
         let metadata = &connection.metadata;
         let normalized = normalize_address(
             &metadata.address,
             &format!("$.connections.{connection_id}.metadata.address"),
         )?;
-        if let Some((server_id, fingerprint, previous_id)) = trust_by_address.get(&normalized) {
-            if server_id.as_deref() != metadata.server_id.as_deref() {
-                return Err(ConfigError::InvalidConfig {
-                    path: format!("$.connections.{connection_id}.metadata.server_id"),
-                    reason: format!(
-                        "must match connection {previous_id} for normalized address {normalized}"
-                    ),
-                });
-            }
-            if fingerprint.as_deref() != metadata.server_fingerprint.as_deref() {
-                return Err(ConfigError::InvalidConfig {
-                    path: format!("$.connections.{connection_id}.metadata.server_fingerprint"),
-                    reason: format!(
-                        "must match connection {previous_id} for normalized address {normalized}"
-                    ),
-                });
-            }
-        } else {
-            trust_by_address.insert(
-                normalized.clone(),
-                (
-                    metadata.server_id.clone(),
-                    metadata.server_fingerprint.clone(),
-                    connection_id.clone(),
-                ),
-            );
+        if let Some(previous_id) = trust_by_address.insert(normalized.clone(), connection_id) {
+            return Err(ConfigError::InvalidConfig {
+                path: format!("$.connections.{connection_id}.metadata.address"),
+                reason: format!("normalized endpoint already has trust owner {previous_id}"),
+            });
         }
         if let Some((known_address, known_fingerprint)) = known_hosts_by_address.get(&normalized) {
             if metadata.server_fingerprint.as_deref() != Some(*known_fingerprint) {
@@ -203,7 +181,8 @@ pub(super) fn validate_config(config: &ConfigV2) -> Result<(), ConfigError> {
         }
     }
     let mut credential_locations: BTreeMap<CredentialId, String> = BTreeMap::new();
-    let mut storage_locations: BTreeMap<String, ConnectionId> = BTreeMap::new();
+    let mut storage_locations: BTreeMap<String, String> = BTreeMap::new();
+    let mut account_locations: BTreeMap<(String, String), String> = BTreeMap::new();
     let mut profile_count = 0usize;
     let mut credential_slot_count = 0usize;
     for (connection_id, connection) in &config.connections {
@@ -224,11 +203,6 @@ pub(super) fn validate_config(config: &ConfigV2) -> Result<(), ConfigError> {
                 "server_fingerprint",
                 connection.metadata.server_fingerprint.as_deref(),
             ),
-            (
-                "expected_master_key_fp",
-                connection.metadata.expected_master_key_fp.as_deref(),
-            ),
-            ("storage_id", connection.metadata.storage_id.as_deref()),
         ] {
             if let Some(value) = value {
                 validate_string_len(
@@ -236,18 +210,6 @@ pub(super) fn validate_config(config: &ConfigV2) -> Result<(), ConfigError> {
                     value,
                     MAX_METADATA_VALUE_LEN,
                 )?;
-            }
-        }
-        if let Some(storage_id) = &connection.metadata.storage_id {
-            if let Some(previous) =
-                storage_locations.insert(storage_id.clone(), connection_id.clone())
-            {
-                return Err(ConfigError::InvalidConfig {
-                    path: format!("{path}.metadata.storage_id"),
-                    reason: format!(
-                        "storage id {storage_id} is already bound to connection {previous}"
-                    ),
-                });
             }
         }
         if let Some(active_credential) = &connection.active_credential {
@@ -280,6 +242,39 @@ pub(super) fn validate_config(config: &ConfigV2) -> Result<(), ConfigError> {
                 MAX_PROFILES_TOTAL,
             )?;
             let profile_path = format!("{path}.credential_profiles.{profile_name}");
+            if let Some(storage) = &profile.storage_id {
+                validate_required_metadata(&format!("{profile_path}.storage_id"), storage)?;
+                if let Some(previous) =
+                    storage_locations.insert(storage.clone(), profile_path.clone())
+                {
+                    return Err(ConfigError::InvalidConfig {
+                        path: profile_path.clone(),
+                        reason: format!("replica storage is already bound to {previous}"),
+                    });
+                }
+                if let (Some(server), Some(subject)) =
+                    (&connection.metadata.server_id, &profile.account_subject)
+                {
+                    if let Some(previous) = account_locations
+                        .insert((server.clone(), subject.clone()), profile_path.clone())
+                    {
+                        return Err(ConfigError::InvalidConfig {
+                            path: profile_path.clone(),
+                            reason: format!("account replica is already bound to {previous}"),
+                        });
+                    }
+                }
+            }
+            if let Some(fp) = &profile.expected_master_key_fp {
+                validate_master_key_fingerprint(fp)?;
+                if profile.storage_id.is_none() {
+                    return Err(ConfigError::InvalidConfig {
+                        path: profile_path.clone(),
+                        reason: "account-key fingerprint requires a replica storage binding".into(),
+                    });
+                }
+            }
+
             if profile_name.is_empty() {
                 return Err(ConfigError::InvalidConfig {
                     path: profile_path,
@@ -287,9 +282,29 @@ pub(super) fn validate_config(config: &ConfigV2) -> Result<(), ConfigError> {
                 });
             }
             if profile.credentials.is_empty() {
+                if profile.storage_id.is_none()
+                    || profile.expected_master_key_fp.is_some()
+                    || profile.account_subject.is_some()
+                    || profile.auth_method.is_some()
+                    || profile.access_expires_at.is_some()
+                {
+                    return Err(ConfigError::InvalidConfig {
+                        path: profile_path.clone(),
+                        reason: "empty profile must be an unauthenticated replica reservation"
+                            .into(),
+                    });
+                }
+                if let Some(subject) = &profile.expected_account_subject {
+                    validate_canonical_account_subject(
+                        &format!("{profile_path}.expected_account_subject"),
+                        subject,
+                    )?;
+                }
+            } else if profile.expected_account_subject.is_some() {
                 return Err(ConfigError::InvalidConfig {
-                    path: profile_path,
-                    reason: "credential profile must reference at least one credential".to_string(),
+                    path: profile_path.clone(),
+                    reason: "authenticated profile cannot retain a pending subject constraint"
+                        .into(),
                 });
             }
             validate_string_len(&profile_path, profile_name, MAX_LEGACY_NAME_LEN)?;

@@ -61,6 +61,13 @@ impl LocalVault {
     }
 
     pub fn list_storages(&self) -> LocalResult<Vec<StorageSummary>> {
+        let accounts: std::collections::BTreeMap<_, _> = self
+            .app_client_handle()?
+            .account_locations()
+            .map_err(unlock::keyring_error)?
+            .into_iter()
+            .map(|account| (account.storage_id, account.account_name))
+            .collect();
         let pool = self.pool();
         let repo = LocalStorageRepo::new(&pool);
         let storages = self
@@ -70,6 +77,7 @@ impl LocalVault {
         Ok(storages
             .into_iter()
             .map(|s| StorageSummary {
+                account_name: accounts.get(&s.id.to_string()).cloned().flatten(),
                 id: s.id.to_string(),
                 name: s.name,
                 server_url: s.server_url,

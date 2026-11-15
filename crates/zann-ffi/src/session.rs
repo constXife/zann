@@ -345,13 +345,16 @@ impl RemoteSession {
         &self,
         endpoint: String,
         connection_name: String,
-        profile_name: String,
+        storage_id: Option<String>,
     ) -> CoreResult<PrepareConnectionOutcomeFfi> {
-        let outcome = self.0.runtime.block_on(self.0.client.prepare_connection(
-            &endpoint,
-            &connection_name,
-            &profile_name,
-        ))?;
+        let outcome = self
+            .0
+            .runtime
+            .block_on(self.0.client.prepare_account_connection(
+                &endpoint,
+                &connection_name,
+                storage_id.as_deref(),
+            ))?;
         Ok(match outcome {
             PrepareConnectionOutcome::Ready(prepared) => PrepareConnectionOutcomeFfi::Ready {
                 connection: Arc::new(PreparedConnectionFfi(prepared)),
@@ -382,20 +385,11 @@ impl RemoteSession {
         Ok(Arc::new(PreparedConnectionFfi(prepared)))
     }
 
-    /// Forgets the connection `prepare_connection` keys by this endpoint and
-    /// name, with its credentials, without contacting the server. It is the
+    /// Forgets the canonical endpoint trust owner with all its credentials, without contacting the server. It is the
     /// "Forget this server" recovery from `ServerIdentityChanged`; the next
     /// `prepare_connection` pins the server as on first use.
-    pub fn remove_connection(
-        &self,
-        endpoint: String,
-        connection_name: String,
-    ) -> CoreResult<ConnectionRemovalFfi> {
-        Ok(self
-            .0
-            .client
-            .remove_connection(&endpoint, &connection_name)?
-            .into())
+    pub fn remove_connection(&self, endpoint: String) -> CoreResult<ConnectionRemovalFfi> {
+        Ok(self.0.client.remove_connection(&endpoint)?.into())
     }
 
     pub fn password_login(

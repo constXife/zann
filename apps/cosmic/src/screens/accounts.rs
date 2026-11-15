@@ -28,7 +28,7 @@ pub struct State {
 pub enum Selection {
     Open(ItemsPage),
     Unlock(String),
-    Connect(String),
+    Connect { storage_id: String, url: String },
 }
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -52,7 +52,7 @@ pub enum Outcome {
     Task(Task<Message>),
     Opened(ItemsPage),
     Unlock(String),
-    Connect(Option<String>),
+    Connect(Option<(String, String)>),
 }
 pub(super) fn message(error: zann_client::app::local::LocalError) -> String {
     if let zann_client::app::local::LocalError::Unlock { ref kind, .. } = error {
@@ -129,9 +129,10 @@ impl State {
                                     local::items(&facade, None, None).map(Selection::Open)
                                 }
                                 Route::Password(_) => Ok(Selection::Unlock(id)),
-                                Route::Connect => {
-                                    Ok(Selection::Connect(account.location.server_url))
-                                }
+                                Route::Connect => Ok(Selection::Connect {
+                                    storage_id: id,
+                                    url: account.location.server_url,
+                                }),
                                 Route::ChooseAccount => {
                                     unreachable!("account selection has a concrete target")
                                 }
@@ -149,7 +150,9 @@ impl State {
                 match result {
                     Ok(Selection::Open(page)) => return Outcome::Opened(page),
                     Ok(Selection::Unlock(id)) => return Outcome::Unlock(id),
-                    Ok(Selection::Connect(url)) => return Outcome::Connect(Some(url)),
+                    Ok(Selection::Connect { storage_id, url }) => {
+                        return Outcome::Connect(Some((storage_id, url)))
+                    }
                     Err(error) => self.error = Some(error),
                 }
             }

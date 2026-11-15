@@ -477,10 +477,12 @@ impl From<native::StorageSummary> for StorageSummaryFfi {
         let display_name = zann_ui_core::sync_status::storage_context_label(
             &value.name,
             value.server_url.as_deref(),
+            value.account_name.as_deref(),
         );
         Self {
             id: value.id,
             name: value.name,
+            account_name: value.account_name,
             kind: value.kind,
             server_url: value.server_url,
             display_name,
@@ -507,6 +509,7 @@ impl From<StorageSummaryFfi> for native::StorageSummary {
         Self {
             id: value.id,
             name: value.name,
+            account_name: value.account_name,
             kind: value.kind,
             server_url: value.server_url,
         }

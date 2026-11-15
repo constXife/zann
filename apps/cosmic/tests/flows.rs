@@ -884,14 +884,22 @@ fn a_changed_server_identity_offers_to_forget_it_after_counting_local_changes() 
     ));
 
     let forgotten = state.update(
-        settings::Message::Forgotten(Ok(Some("https://zann.example".to_string()))),
+        settings::Message::Forgotten(
+            "selected-storage".into(),
+            Ok(Some("https://zann.example".to_string())),
+        ),
         &session,
     );
-    let settings::Outcome::Reconnect { server_url } = forgotten else {
+    let settings::Outcome::Reconnect {
+        server_url,
+        storage_id,
+    } = forgotten
+    else {
         panic!("a forgotten server is connected to again");
     };
     assert!(state.stale_server().is_none());
-    let connect = connect::State::with_server_url(server_url.expect("pinned address"));
+    assert_eq!(storage_id, "selected-storage");
+    let connect = connect::State::with_replica(storage_id, server_url);
     assert_eq!(connect.stage(), &connect::Stage::Server);
     assert_eq!(connect.server_url(), "https://zann.example");
 }
@@ -1190,11 +1198,14 @@ fn a_storage_without_its_connection_leads_to_connecting_its_server_again() {
     assert_eq!(state.error(), None, "the account row carries the reason");
     assert!(state.stale_server().is_none(), "nothing to forget");
 
-    let settings::Outcome::Reconnect { server_url } =
-        state.update(settings::Message::Reconnect, &session)
+    let settings::Outcome::Reconnect {
+        server_url,
+        storage_id,
+    } = state.update(settings::Message::Reconnect, &session)
     else {
         panic!("the row leads to connecting again");
     };
+    assert_eq!(storage_id, storage.to_string());
     assert_eq!(server_url.as_deref(), Some("https://zann.example.test"));
     assert!(state.disconnected().is_none());
 

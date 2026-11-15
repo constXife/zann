@@ -7,24 +7,40 @@ use super::*;
 struct SecondConnection {
     target: SessionTarget,
     storage: LocalStorage,
+    master_key: Arc<SecretKey>,
 }
 
 /// Adds a second fully bound connection to the fixture's config, owning its
 /// own storage and account.
-fn add_second_connection(fixture: &ConfigFixture) -> SecondConnection {
+fn add_second_connection(fixture: &ConfigFixture, same_server: bool) -> SecondConnection {
     let repository = ConfigRepository::new(fixture.paths.clone());
     let credentials = MemoryCredentials::default();
     let storage_id = Uuid::now_v7();
     let account_subject = Uuid::now_v7();
-    let connection_id = ConnectionId::deterministic("second", "https://second.test/");
-    let mut metadata = ConnectionMetadata::new("Second", "https://second.test");
-    metadata.server_id = Some("second-server-identity".to_string());
-    metadata.server_fingerprint = Some("second-server-fingerprint".to_string());
-    metadata.storage_id = Some(storage_id.to_string());
-    metadata.expected_master_key_fp = Some(zann_crypto::cache_key_fingerprint(&fixture.master_key));
-    repository
-        .upsert_connection(connection_id.clone(), metadata)
-        .expect("insert second connection");
+    let master_key = Arc::new(SecretKey::from_bytes([8; 32]));
+    let connection_id = if same_server {
+        fixture.target.connection_id().clone()
+    } else {
+        ConnectionId::deterministic("second", "https://second.test/")
+    };
+    let address = if same_server {
+        "https://adapter.test"
+    } else {
+        "https://second.test"
+    };
+    let fingerprint = if same_server {
+        "server-fingerprint-binding"
+    } else {
+        "second-server-fingerprint"
+    };
+    if !same_server {
+        let mut metadata = ConnectionMetadata::new("Second", address);
+        metadata.server_id = Some("second-server-identity".into());
+        metadata.server_fingerprint = Some(fingerprint.into());
+        repository
+            .upsert_connection(connection_id.clone(), metadata)
+            .expect("second endpoint");
+    }
     let revision = repository
         .snapshot()
         .expect("snapshot second connection")
@@ -33,7 +49,7 @@ fn add_second_connection(fixture: &ConfigFixture) -> SecondConnection {
         .replace_credential_bundle(
             revision,
             &connection_id,
-            "profile",
+            "second-profile",
             CredentialBundle::new(
                 Some(CredentialSecret::new("second-access").expect("access secret")),
                 None,
@@ -48,10 +64,14 @@ fn add_second_connection(fixture: &ConfigFixture) -> SecondConnection {
     let mut raw: serde_json::Value =
         serde_json::from_slice(&fs::read(&config_path).expect("read config"))
             .expect("parse config");
-    raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
+    raw["connections"][connection_id.as_str()]["credential_profiles"]["second-profile"]
+        ["storage_id"] = json!(storage_id.to_string());
+    raw["connections"][connection_id.as_str()]["credential_profiles"]["second-profile"]
+        ["expected_master_key_fp"] = json!(zann_crypto::cache_key_fingerprint(&master_key));
+    raw["connections"][connection_id.as_str()]["credential_profiles"]["second-profile"]
         ["account_subject"] = json!(account_subject.to_string());
-    raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]["auth_method"] =
-        json!(AuthMethod::Password.as_i32());
+    raw["connections"][connection_id.as_str()]["credential_profiles"]["second-profile"]
+        ["auth_method"] = json!(AuthMethod::Password.as_i32());
     fs::write(
         &config_path,
         serde_json::to_vec_pretty(&raw).expect("serialize config"),
@@ -59,14 +79,15 @@ fn add_second_connection(fixture: &ConfigFixture) -> SecondConnection {
     .expect("write config");
 
     SecondConnection {
-        target: SessionTarget::new(connection_id, "profile").expect("second target"),
+        target: SessionTarget::new(connection_id, "second-profile").expect("second target"),
+        master_key,
         storage: LocalStorage {
             id: storage_id,
             kind: StorageKind::Remote,
-            name: "Second".to_string(),
-            server_url: Some("https://second.test".to_string()),
+            name: if same_server { "Adapter" } else { "Second" }.into(),
+            server_url: Some(address.into()),
             server_name: Some("Second Server".to_string()),
-            server_fingerprint: Some("second-server-fingerprint".to_string()),
+            server_fingerprint: Some(fingerprint.into()),
             account_subject: Some(account_subject.to_string()),
             personal_vaults_enabled: true,
             auth_method: Some(AuthMethod::Password),
@@ -231,83 +252,203 @@ fn two_connected_and_one_disconnected_server_replicas_isolate_identical_ids() {
         .build()
         .expect("multi-storage test runtime");
     runtime.block_on(async {
-        let fixture = configured_fixture();
-        let second = add_second_connection(&fixture);
-        let first = matching_storage(&fixture);
-        let (database_path, pool) = reset_test_database(&fixture, "multi-storage.sqlite").await;
-        let vault_id = Uuid::now_v7();
-        let item_id = Uuid::now_v7();
+        for same_server in [false, true] {
+            let fixture = configured_fixture();
+            let second = add_second_connection(&fixture, same_server);
+            let first = matching_storage(&fixture);
+            let (database_path, pool) = reset_test_database(&fixture, "multi-storage.sqlite").await;
+            let vault_id = Uuid::now_v7();
+            let item_id = Uuid::now_v7();
 
-        sync_shared_vault(&pool, &first, &fixture.master_key, vault_id, item_id, &[1]).await;
-        sync_shared_vault(
-            &pool,
-            &second.storage,
-            &fixture.master_key,
-            vault_id,
-            item_id,
-            &[2],
-        )
-        .await;
-        let disconnected = seed_disconnected_replica(&pool, vault_id, item_id, &[3]).await;
-
-        assert_eq!(
-            stored_payload(&pool, first.id, item_id).await,
-            Some(vec![1])
-        );
-        assert_eq!(
-            stored_payload(&pool, second.storage.id, item_id).await,
-            Some(vec![2])
-        );
-        assert_eq!(
-            stored_payload(&pool, disconnected, item_id).await,
-            Some(vec![3])
-        );
-
-        for target in [&fixture.target, &second.target] {
-            let store = SqliteSyncStore::from_pool(
-                bound_paths(&fixture, &database_path),
-                file_location(&database_path),
-                pool.clone(),
-                fixture.master_key.clone(),
-                target.clone(),
+            sync_shared_vault(&pool, &first, &fixture.master_key, vault_id, item_id, &[1]).await;
+            sync_shared_vault(
+                &pool,
+                &second.storage,
+                &second.master_key,
+                vault_id,
+                item_id,
+                &[2],
             )
-            .expect("construct a store for one of several connections");
-            store
-                .resolve_exact_target_for_test(target)
+            .await;
+            let disconnected = seed_disconnected_replica(&pool, vault_id, item_id, &[3]).await;
+
+            assert_eq!(
+                stored_payload(&pool, first.id, item_id).await,
+                Some(vec![1])
+            );
+            assert_eq!(
+                stored_payload(&pool, second.storage.id, item_id).await,
+                Some(vec![2])
+            );
+            assert_eq!(
+                stored_payload(&pool, disconnected, item_id).await,
+                Some(vec![3])
+            );
+
+            for (target, key) in [
+                (&fixture.target, &fixture.master_key),
+                (&second.target, &second.master_key),
+            ] {
+                let store = SqliteSyncStore::from_pool(
+                    bound_paths(&fixture, &database_path),
+                    file_location(&database_path),
+                    pool.clone(),
+                    key.clone(),
+                    target.clone(),
+                )
+                .expect("construct a store for one of several connections");
+                store
+                    .resolve_exact_target_for_test(target)
+                    .await
+                    .expect("each connection resolves its own storage");
+            }
+            pool.close().await;
+
+            let (database_path, paths) = canonical_reset_paths(&database_path);
+            Arc::new(SqliteSyncStoreFactory::new(&database_path).expect("construct reset factory"))
+                .reset_projection(paths, second.target.clone(), second.master_key.clone())
                 .await
-                .expect("each connection resolves its own storage");
+                .expect("reset the second connection's clean projection");
+
+            let pool = zann_db::connect_sqlite_path_with_max(&database_path, 1)
+                .await
+                .expect("reopen multi-storage database");
+            assert_eq!(
+                stored_payload(&pool, second.storage.id, item_id).await,
+                None
+            );
+            assert!(!LocalVaultRepo::new(&pool)
+                .exists(second.storage.id, vault_id)
+                .await
+                .expect("read reset vault"));
+            assert_eq!(
+                stored_payload(&pool, first.id, item_id).await,
+                Some(vec![1])
+            );
+            assert_eq!(
+                stored_payload(&pool, disconnected, item_id).await,
+                Some(vec![3])
+            );
+            assert!(LocalVaultRepo::new(&pool)
+                .exists(first.id, vault_id)
+                .await
+                .expect("read surviving remote vault"));
+            pool.close().await;
         }
-        pool.close().await;
+    });
+}
 
-        let (database_path, paths) = canonical_reset_paths(&database_path);
-        Arc::new(SqliteSyncStoreFactory::new(&database_path).expect("construct reset factory"))
-            .reset_projection(paths, second.target.clone(), fixture.master_key.clone())
-            .await
-            .expect("reset the second connection's clean projection");
-
-        let pool = zann_db::connect_sqlite_path_with_max(&database_path, 1)
-            .await
-            .expect("reopen multi-storage database");
+#[test]
+fn shared_pin_confirmation_requires_each_claimed_account_to_reauthenticate() {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("pin-rotation fixture");
+    runtime.block_on(async {
+        let fixture = configured_fixture();
+        let second = add_second_connection(&fixture, true);
+        let first = matching_storage(&fixture);
+        let (database_path, pool) = reset_test_database(&fixture, "pin-rotation.sqlite").await;
+        for (index, storage) in [&first, &second.storage].into_iter().enumerate() {
+            LocalStorageRepo::new(&pool)
+                .upsert(storage)
+                .await
+                .expect("pin-rotation fixture");
+            LocalVaultRepo::new(&pool)
+                .bind_cache_key_fingerprints_leased(
+                    &LocalStorageProof::try_from(storage).expect("pin-rotation fixture"),
+                    &zann_db::local::LocalSyncGenerationProof::new(
+                        [1; 32],
+                        [index as u8; 32],
+                        1,
+                        [3; 32],
+                    ),
+                    &[],
+                )
+                .await
+                .expect("pin-rotation fixture");
+        }
+        // This is the Config result of explicit endpoint-wide trust confirmation.
+        let mut config: serde_json::Value = serde_json::from_slice(
+            &fs::read(fixture.paths.config()).expect("pin-rotation fixture"),
+        )
+        .expect("pin-rotation fixture");
+        config["revision"] = json!(config["revision"].as_u64().expect("pin-rotation fixture") + 1);
+        config["connections"][fixture.target.connection_id().as_str()]["metadata"]
+            ["server_fingerprint"] = json!("confirmed-new-pin");
+        fs::write(
+            fixture.paths.config(),
+            serde_json::to_vec_pretty(&config).expect("pin-rotation fixture"),
+        )
+        .expect("pin-rotation fixture");
+        let store = SqliteSyncStore::from_pool(
+            bound_paths(&fixture, &database_path),
+            file_location(&database_path),
+            pool.clone(),
+            second.master_key.clone(),
+            second.target.clone(),
+        )
+        .expect("pin-rotation fixture");
         assert_eq!(
-            stored_payload(&pool, second.storage.id, item_id).await,
-            None
+            store
+                .resolve_replica_binding(
+                    &store.installed().expect("pin-rotation fixture").expected,
+                    true
+                )
+                .await
+                .expect_err("claimed account requires reauthentication")
+                .kind(),
+            SyncStoreErrorKind::ReauthenticationRequired
         );
-        assert!(!LocalVaultRepo::new(&pool)
-            .exists(second.storage.id, vault_id)
-            .await
-            .expect("read reset vault"));
         assert_eq!(
-            stored_payload(&pool, first.id, item_id).await,
-            Some(vec![1])
+            LocalStorageRepo::new(&pool)
+                .get(second.storage.id)
+                .await
+                .expect("pin-rotation fixture")
+                .expect("pin-rotation fixture")
+                .server_fingerprint,
+            second.storage.server_fingerprint
         );
-        assert_eq!(
-            stored_payload(&pool, disconnected, item_id).await,
-            Some(vec![3])
-        );
-        assert!(LocalVaultRepo::new(&pool)
-            .exists(first.id, vault_id)
+        // Only the selected account's successful reauthentication may release it.
+        LocalStorageRepo::new(&pool)
+            .release_claim(second.storage.id)
             .await
-            .expect("read surviving remote vault"));
+            .expect("pin-rotation fixture");
+        store
+            .resolve_replica_binding(
+                &store.installed().expect("pin-rotation fixture").expected,
+                true,
+            )
+            .await
+            .expect("pin-rotation fixture");
+        assert_eq!(
+            LocalStorageRepo::new(&pool)
+                .get(first.id)
+                .await
+                .expect("pin-rotation fixture")
+                .expect("pin-rotation fixture")
+                .server_fingerprint,
+            first.server_fingerprint
+        );
+        let other = SqliteSyncStore::from_pool(
+            bound_paths(&fixture, &database_path),
+            file_location(&database_path),
+            pool.clone(),
+            fixture.master_key.clone(),
+            fixture.target.clone(),
+        )
+        .expect("pin-rotation fixture");
+        assert_eq!(
+            other
+                .resolve_replica_binding(
+                    &other.installed().expect("pin-rotation fixture").expected,
+                    true
+                )
+                .await
+                .expect_err("claimed account requires reauthentication")
+                .kind(),
+            SyncStoreErrorKind::ReauthenticationRequired
+        );
         pool.close().await;
     });
 }

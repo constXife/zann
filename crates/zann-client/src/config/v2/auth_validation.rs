@@ -113,7 +113,15 @@ pub(super) fn validate_auth_operation_intent(
             });
         }
         let profile_present = intent.source.profile_present.unwrap_or(false);
-        if profile_present == intent.source.credentials.is_empty() {
+        let reservation = profile_present
+            && intent.source.credentials.is_empty()
+            && intent.endpoint.storage_id.is_some()
+            && intent.source.account_subject.is_none()
+            && intent.source.auth_method.is_none()
+            && intent.source.access_expires_at.is_none();
+        if (!profile_present && !intent.source.credentials.is_empty())
+            || (profile_present && intent.source.credentials.is_empty() && !reservation)
+        {
             return Err(ConfigError::InvalidConfig {
                 path: "$.source.credentials".to_string(),
                 reason: "password-login source credentials must match profile presence".to_string(),

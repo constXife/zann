@@ -256,6 +256,11 @@ pub(super) fn build_provisional_legacy_config(
             }
         }
 
+        if legacy_connection.storage_id.is_some()
+            || legacy_connection.expected_master_key_fp.is_some()
+        {
+            return Err(ConfigError::InvalidConfig { path: "$.connections.*.metadata".into(), reason: "pre-profile replica configuration: export with the previous build and reconnect in a fresh client root; original files are unchanged".into() });
+        }
         let connection_id = ConnectionId::deterministic(name, &legacy_connection.addr);
         let mut connection = ConnectionConfig {
             metadata: ConnectionMetadata {
@@ -264,8 +269,6 @@ pub(super) fn build_provisional_legacy_config(
                 needs_salt_update: legacy_connection.needs_salt_update,
                 server_id: legacy_connection.server_id.clone(),
                 server_fingerprint: fingerprint,
-                expected_master_key_fp: legacy_connection.expected_master_key_fp.clone(),
-                storage_id: legacy_connection.storage_id.clone(),
             },
             credential_profiles: BTreeMap::new(),
             active_credential: legacy_connection.current_token.clone(),
@@ -295,6 +298,9 @@ pub(super) fn build_provisional_legacy_config(
             connection.credential_profiles.insert(
                 profile_name.clone(),
                 CredentialProfile {
+                    expected_account_subject: None,
+                    storage_id: None,
+                    expected_master_key_fp: None,
                     account_subject: None,
                     auth_method: None,
                     access_expires_at: legacy_profile.access_expires_at.clone(),

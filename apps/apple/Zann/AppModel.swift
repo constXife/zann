@@ -214,7 +214,7 @@ final class AppModel: ObservableObject {
     }
 
     /// `serverURL` prefills the address, as after forgetting a server.
-    func startConnecting(serverURL: String? = nil, returnTo: Screen = .welcome) {
+    func startConnecting(serverURL: String? = nil, storageID: String? = nil, returnTo: Screen = .welcome) {
         guard let core else { return }
         error = nil
         let session: RemoteSession
@@ -227,7 +227,7 @@ final class AppModel: ObservableObject {
         // Pending tasks retain the previous adapter; do not rely on deinit.
         connect?.cancel()
         connect = ConnectModel(
-            session: session, strings: strings, browser: browser,
+            session: session, strings: strings, reconnectStorage: storageID, browser: browser,
             copyBrowserUrl: { [weak self] value in
                 guard let self else { return }
                 Clipboard.copy(value, clearAfter: self.preferences.clipboardClearSeconds,
@@ -256,7 +256,7 @@ final class AppModel: ObservableObject {
     func forgetStaleServer() async {
         guard let core, let stale = vault?.staleServer, !busy else { return }
         let storageID = stale.storageID
-        await reconnect { try core.forgetServer(storageId: storageID) }
+        await reconnect(storageID: storageID) { try core.forgetServer(storageId: storageID) }
     }
 
     /// Connects again to the server of a vault whose connection is gone;
@@ -265,12 +265,12 @@ final class AppModel: ObservableObject {
     func reconnectServer() async {
         guard let gone = vault?.disconnected, !busy else { return }
         let serverURL = gone.serverURL
-        await reconnect { serverURL }
+        await reconnect(storageID: gone.storageID) { serverURL }
     }
 
     /// Locks the vault, since connecting ends at the master password, and
     /// opens the connect screen at the address `address` returns.
-    private func reconnect(_ address: @escaping () throws -> String?) async {
+    private func reconnect(storageID: String, _ address: @escaping () throws -> String?) async {
         guard let core else { return }
         vault?.stopAutoSync()
         guard let serverURL = await perform({ () -> String? in
@@ -285,7 +285,7 @@ final class AppModel: ObservableObject {
         if preferences.clipboardClearOnLock {
             Clipboard.clearOwned()
         }
-        startConnecting(serverURL: serverURL, returnTo: .master(.unlock))
+        startConnecting(serverURL: serverURL, storageID: storageID, returnTo: .master(.unlock))
     }
 
     /// Shared routing distinguishes an unlocked device from one needing a password.
@@ -328,7 +328,7 @@ final class AppModel: ObservableObject {
             return (route, nil)
         }
         guard let (route, contents) = prepared else { return }
-        if case .connect = route { startConnecting(serverURL: account.serverUrl, returnTo: .accounts) }
+        if case .connect = route { startConnecting(serverURL: account.serverUrl, storageID: account.storageId, returnTo: .accounts) }
         else { pendingStorage = account.storageId; applyUnlockRoute(route, contents: contents) }
     }
 
