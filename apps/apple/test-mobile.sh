@@ -39,4 +39,4 @@ done <<< "$destinations"
 
 exec xcodebuild test -quiet -project Zann.xcodeproj -scheme ZannMobile \
   -derivedDataPath build/mobile -parallel-testing-enabled NO \
-  -maximum-concurrent-test-simulator-destinations 1 "${destination_args[@]}"
+  -disable-concurrent-destination-testing "${destination_args[@]}"
