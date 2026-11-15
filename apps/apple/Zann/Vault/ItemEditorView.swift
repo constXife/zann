@@ -8,58 +8,52 @@ struct ItemEditorView: View {
     @ObservedObject var editor: ItemEditorModel
     @ObservedObject var vault: VaultModel
     let strings: Strings
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Explicit per-field reveals; reset whenever field indices shift.
-    @State private var revealed: Set<Int> = []
+    @StateObject private var reveal = FieldRevealState()
     @State private var additionalExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(strings(editor.mode == .create ? "create.itemHeader" : "create.itemEditHeader"))
-                .font(.title2.bold())
-                .padding([.horizontal, .top], 24)
-                .padding(.bottom, 16)
+            #if os(macOS)
+            heading.padding([.horizontal, .top], 24).padding(.bottom, 16)
+            #endif
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    location
+                    #if os(iOS)
+                    heading.padding(.top, 20)
+                    if let error = editor.error { Text(message(error)).foregroundStyle(.red) }
+                    #endif
+                    ItemEditorLocation(editor: editor, strings: strings, onSetType: setType)
                     fieldList
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 16)
             }
+            #if os(iOS)
+            .scrollDismissesKeyboard(.interactively)
+            #endif
             Divider()
             footer.padding(16)
         }
+        #if os(macOS)
         .frame(minWidth: 640, idealWidth: 700, minHeight: 440, idealHeight: 560)
+        #else
+        .frame(maxWidth: 760)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        #endif
         .disabled(editor.busy)
+        .onChange(of: scenePhase) { if $0 != .active { reveal.reset() } }
+        .onDisappear { reveal.reset() }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in reveal.reset() }
+        .onChange(of: editor.fields.map { $0.key }) { _ in reveal.reset() }
     }
 
-    private var location: some View {
-        Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 12, verticalSpacing: 10) {
-            GridRow {
-                Text(strings("create.itemTitle")).foregroundStyle(.secondary)
-                TextField(strings("create.itemTitle"), text: $editor.name)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel(strings("create.itemTitle"))
-            }
-            GridRow {
-                Text(strings("create.itemFolder")).foregroundStyle(.secondary)
-                TextField(strings("create.itemFolderPlaceholder"), text: $editor.folder)
-                    .textFieldStyle(.roundedBorder)
-                    .accessibilityLabel(strings("create.itemFolder"))
-            }
-            GridRow {
-                Text(strings("create.itemType")).foregroundStyle(.secondary)
-                Picker(strings("create.itemType"), selection: Binding(get: { editor.typeID }, set: { setType($0) })) {
-                    ForEach(ItemEditorModel.typeIDs, id: \.self) { typeID in
-                        Label(strings("types.\(typeID)"), systemImage: Symbols.item(typeID))
-                            .tag(typeID)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-        }
+    private var heading: some View {
+        Text(strings(editor.mode == .create ? "create.itemHeader" : "create.itemEditHeader"))
+            .font(.title2.bold())
     }
 
     private var fieldList: some View {
@@ -75,6 +69,7 @@ struct ItemEditorView: View {
                         Button(strings("create.customFields")) { editor.addField() }
                     } label: {
                         Label(strings("create.addField"), systemImage: "plus")
+                            .appleTouchTarget()
                     }
                     .fixedSize()
                 }
@@ -94,14 +89,14 @@ struct ItemEditorView: View {
                     field: field,
                     label: labeled ? editor.label(for: field.key).map { strings($0) } : nil,
                     strings: strings,
-                    revealed: revealed.contains(index),
+                    revealed: reveal.revealed.contains(index),
                     key: binding(field, index, \.key, editor.setKey),
                     value: binding(field, index, \.value, editor.setValue),
                     kind: binding(field, index, \.kind, editor.setKind),
                     onToggleReveal: { toggleReveal(index) },
                     onRemove: { remove(index) },
                     onGenerated: { value in
-                        revealed.remove(index)
+                        reveal.reset()
                         editor.setValue(index, value)
                     }
                 )
@@ -109,29 +104,47 @@ struct ItemEditorView: View {
         }
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor))
+                .fill(Color.zannFieldBackground)
         )
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor))
+                .strokeBorder(Color.zannSeparator)
         )
     }
 
     private var footer: some View {
-        HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            #if os(macOS)
             if let error = editor.error {
                 Text(message(error))
                     .foregroundStyle(.red)
-                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            Spacer()
-            if editor.busy {
-                ProgressView().controlSize(.small)
-            }
-            Button(strings("common.cancel")) { vault.cancelEditing() }
-                .keyboardShortcut(.cancelAction)
-            Button(strings("common.save")) { Task { await vault.saveEditor() } }
-                .keyboardShortcut(.defaultAction)
+            #endif
+            ViewThatFits(in: .horizontal) {
+                footerButtons.labelStyle(.titleOnly)
+                footerButtons.labelStyle(.iconOnly)
+            }.frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    private var footerButtons: some View {
+        HStack {
+                if editor.busy {
+                    ProgressView().controlSize(.small)
+                }
+                Button { vault.cancelEditing() } label: {
+                    Label(strings("common.cancel"), systemImage: "xmark")
+                        .appleTouchTarget()
+                }
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("editor.cancel")
+                Button { Task { await vault.saveEditor() } } label: {
+                    Label(strings("common.save"), systemImage: "checkmark")
+                        .appleTouchTarget()
+                }
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityIdentifier("editor.save")
         }
     }
 
@@ -158,18 +171,16 @@ struct ItemEditorView: View {
 
     private func setType(_ typeID: String) {
         editor.setType(typeID)
-        revealed = []
+        reveal.reset()
         additionalExpanded = false
     }
 
     private func toggleReveal(_ index: Int) {
-        if revealed.remove(index) == nil {
-            revealed.insert(index)
-        }
+        reveal.toggle(index, seconds: app.preferences.autoHideRevealSeconds)
     }
 
     private func remove(_ index: Int) {
         editor.removeField(index)
-        revealed = []
+        reveal.reset()
     }
 }

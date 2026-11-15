@@ -111,6 +111,26 @@ jobs:
               - 'crates/zann-core/src/constants.rs'
               - 'crates/zann-daemon/**'
               - 'crates/zann-autofill/**'
+              - 'apps/apple/Zann/Composition/**'
+              - 'apps/apple/Zann/Platform/macOS/MacComposition.swift'
+              - 'apps/apple/Zann/KeychainStores.swift'
+              - 'apps/apple/Zann/Keychain.swift'
+              - 'apps/apple/Zann/AppModel.swift'
+              - 'apps/apple/Zann/Connect/**'
+              - 'apps/apple/Zann/Platform/Clipboard*.swift'
+              - 'apps/apple/Zann/DevicePreferenceViews.swift'
+              - 'apps/apple/Zann/Platform/FieldRevealState.swift'
+              - 'apps/apple/Zann/Vault/ItemDetailView.swift'
+              - 'apps/apple/Zann/Vault/ItemEditorView.swift'
+              - 'apps/apple/Zann/Vault/FieldEditorRow.swift'
+              - 'apps/apple/Zann/Vault/ItemDetailFieldRow.swift'
+              - 'apps/apple/Zann/Vault/CopyValueButton.swift'
+              - 'apps/apple/DebugSupport/**'
+              - 'apps/apple/project.yml'
+              - 'apps/apple/Mobile.xcconfig'
+              - 'apps/apple/Mobile/**'
+              - 'apps/apple/ZannCoreKit/build-xcframework.sh'
+              - 'apps/apple/ZannCoreKit/check-build-profile.sh'
               - 'crates/zann-crypto/**'
               - 'tests/fixtures/crypto/**'
               - 'crates/zann-core/src/auth.rs'
@@ -536,12 +556,52 @@ jobs:
           xcodegen --spec project.yml
           xcodebuild test -quiet -project Zann.xcodeproj -scheme Zann \
             -destination 'platform=macOS,arch=arm64' -derivedDataPath build
-      - name: Upload Apple test results on failure
-        if: failure()
+      - name: Test the iPhone and iPad app
+        run: bash apps/apple/test-mobile.sh
+      - name: Build production mobile artifacts without test fixtures
+        run: |
+          apps/apple/ZannCoreKit/build-xcframework.sh release --all-platforms
+          if rg -q 'seedOfflineFixture' apps/apple/ZannCoreKit/Generated/Swift/zann_ffi.swift; then
+            echo 'release bindings unexpectedly expose test-support' >&2
+            exit 1
+          fi
+          xcodebuild build -quiet -project apps/apple/Zann.xcodeproj -scheme ZannMobile \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -derivedDataPath apps/apple/build/release CODE_SIGNING_ALLOWED=NO
+          xcodebuild build -quiet -project apps/apple/Zann.xcodeproj -scheme ZannMobile \
+            -configuration Release -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath apps/apple/build/release CODE_SIGNING_ALLOWED=NO
+          for sdk in iphoneos iphonesimulator; do
+            symbols=$(xcrun nm -j "apps/apple/build/release/Build/Products/Release-$sdk/ZannMobile.app/ZannMobile")
+            if rg -q 'MobileUIFixture|MobileTestHost|MemoryKeystore|MemorySecretStore' <<< "$symbols"; then
+              echo 'release app unexpectedly contains UI-test support' >&2
+              exit 1
+            fi
+          done
+      - name: Export mobile UI captures
+        if: always()
+        run: |
+          for result in apps/apple/build/mobile/Logs/Test/*.xcresult; do
+            if [[ -d "$result" ]]; then
+              xcrun xcresulttool export attachments --filter "*.png" --path "$result" \
+                --output-path "apps/apple/build/mobile-captures/$(basename "$result" .xcresult)"
+            fi
+          done
+      - name: Upload mobile UI captures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mobile-ui-captures
+          path: apps/apple/build/mobile-captures
+          retention-days: 7
+      - name: Upload Apple test results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: apple-test-results
-          path: apps/apple/build/Logs/Test/*.xcresult
+          path: |
+            apps/apple/build/Logs/Test/*.xcresult
+            apps/apple/build/mobile/Logs/Test/*.xcresult
           retention-days: 7
 
   # COSMIC is outside the root workspace; shared API changes require its own

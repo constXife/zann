@@ -24,7 +24,7 @@ final class AccountRecoveryTests: XCTestCase {
         }
         return AppModel(opening: { (core, keystore) },
                         preferences: { PreferencesFile(url: self.directory.appendingPathComponent("preferences.json")) },
-                        systemLanguage: "en", openBrowser: { _ in })
+                        systemLanguage: "en", browser: .loopback(open: { _ in }))
     }
 
     func testAccountNavigationPreservesUnlockAndIdleLockCoversAccountScreen() async throws {

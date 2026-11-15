@@ -66,7 +66,12 @@ struct RecoveryView: View {
                     .disabled(preview.hasUnsent && !discardUnsent)
             }.disabled(recovery.busy)
         }
-        .padding(24).frame(width: 460)
+        .padding(24)
+        #if os(iOS)
+        .frame(maxWidth: 460)
+        #else
+        .frame(width: 460)
+        #endif
         .onAppear { discardUnsent = false }
         .interactiveDismissDisabled(recovery.busy)
     }

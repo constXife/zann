@@ -1,12 +1,10 @@
-//! Browser OIDC authorization-code flow with PKCE and an ephemeral loopback callback.
+//! Browser OIDC authorization-code flow with PKCE and explicit callback transport.
 //!
 //! This module obtains one external provider token and immediately hands it to
 //! [`crate::app::AppClient`]. Provider and Zann session tokens never cross the
 //! public API boundary.
 
-use std::fmt;
-use std::io::{Read, Write};
-use std::net::{IpAddr, TcpListener, TcpStream};
+use std::net::IpAddr;
 use std::time::Duration;
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -22,117 +20,27 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::app::{AppClient, OidcLoginInput, OidcToken};
 use crate::remote::auth::AuthHttpTransport;
-use crate::session::{SessionAccess, SessionError, SessionOperation, SessionTarget};
+use crate::session::{SessionAccess, SessionOperation, SessionTarget};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_RESPONSE_BYTES: usize = 512 * 1024;
 const MAX_CALLBACK_BYTES: usize = 8 * 1024;
 const MAX_METADATA_FIELD_BYTES: usize = 8 * 1024;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum OidcBrowserErrorKind {
-    Configuration,
-    InvalidProvider,
-    Transport,
-    Protocol,
-    Cancelled,
-    DeadlineExceeded,
-    AuthorizationRejected,
-    Session,
-}
-
-pub struct OidcBrowserError {
-    repr: Repr,
-}
-
-enum Repr {
-    /// A failure of the browser flow itself, before Zann saw the token.
-    Flow(OidcBrowserErrorKind),
-    /// Zann's own answer to the provider token: a rejected login, an
-    /// unreachable server or a session that could not be kept.
-    Session(SessionError),
-}
-
-impl OidcBrowserError {
-    fn new(kind: OidcBrowserErrorKind) -> Self {
-        debug_assert_ne!(kind, OidcBrowserErrorKind::Session);
-        Self {
-            repr: Repr::Flow(kind),
-        }
-    }
-
-    fn session(error: SessionError) -> Self {
-        Self {
-            repr: Repr::Session(error),
-        }
-    }
-
-    #[must_use]
-    pub fn kind(&self) -> OidcBrowserErrorKind {
-        match &self.repr {
-            Repr::Flow(kind) => *kind,
-            Repr::Session(_) => OidcBrowserErrorKind::Session,
-        }
-    }
-
-    /// The session failure behind [`OidcBrowserErrorKind::Session`], so a
-    /// caller can report it the way it reports any other login.
-    pub fn into_session_error(self) -> Result<SessionError, Self> {
-        match self.repr {
-            Repr::Session(error) => Ok(error),
-            Repr::Flow(_) => Err(self),
-        }
-    }
-}
-
-impl fmt::Debug for OidcBrowserError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut debug = formatter.debug_struct("OidcBrowserError");
-        debug.field("kind", &self.kind());
-        if let Repr::Session(error) = &self.repr {
-            debug.field("session", error);
-        }
-        debug.finish()
-    }
-}
-
-impl fmt::Display for OidcBrowserError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let kind = match &self.repr {
-            Repr::Session(error) => return write!(formatter, "OIDC session failed: {error}"),
-            Repr::Flow(kind) => kind,
-        };
-        formatter.write_str(match kind {
-            OidcBrowserErrorKind::Configuration => "OIDC target is not configured",
-            OidcBrowserErrorKind::InvalidProvider => "OIDC provider metadata is invalid",
-            OidcBrowserErrorKind::Transport => "OIDC provider is unavailable",
-            OidcBrowserErrorKind::Protocol => "OIDC protocol response is invalid",
-            OidcBrowserErrorKind::Cancelled => "OIDC login was cancelled",
-            OidcBrowserErrorKind::DeadlineExceeded => "OIDC login timed out",
-            OidcBrowserErrorKind::AuthorizationRejected => "OIDC authorization was rejected",
-            OidcBrowserErrorKind::Session => "OIDC session failed",
-        })
-    }
-}
-
-impl std::error::Error for OidcBrowserError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.repr {
-            Repr::Session(error) => Some(error),
-            Repr::Flow(_) => None,
-        }
-    }
-}
+mod callback;
+mod error;
+pub use callback::OidcCallback;
+use callback::{Callback, CallbackTransport};
+pub use error::{OidcBrowserError, OidcBrowserErrorKind};
 
 /// Prepared browser login. The caller opens [`Self::authorization_url`] and
-/// then awaits [`Self::finish`]. Dropping the value closes the callback port.
+/// then awaits [`Self::finish`] or supplies its native callback through
+/// [`Self::finish_with_callback`]. Dropping it closes any loopback port.
 pub struct OidcBrowserLogin {
     authorization_url: String,
-    listener: TcpListener,
-    callback_port: u16,
+    callback: CallbackTransport,
     oauth_state: Zeroizing<String>,
     code_verifier: Zeroizing<String>,
-    redirect_uri: String,
     oidc_config: OidcConfigResponse,
     discovery: OidcDiscovery,
     target: SessionTarget,
@@ -146,39 +54,64 @@ impl OidcBrowserLogin {
         &self.authorization_url
     }
 
+    /// Scheme the native system session must admit for this prepared login.
+    pub fn callback_scheme(&self) -> &str {
+        self.callback.redirect_uri().scheme()
+    }
+
+    pub fn remaining_timeout_ms(&self) -> u64 {
+        self.operation
+            .deadline()
+            .saturating_duration_since(std::time::Instant::now())
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX)
+    }
+
     /// Waits for the exact loopback callback, exchanges its code with the
     /// provider, and commits the resulting Zann session.
-    pub async fn finish(mut self, client: &AppClient) -> Result<SessionAccess, OidcBrowserError> {
-        let listener = self
-            .listener
-            .try_clone()
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?;
-        let port = self.callback_port;
-        let callback_operation = self.operation.detached_copy();
-        let callback = tokio::task::spawn_blocking(move || {
-            wait_for_callback(listener, port, &callback_operation)
-        })
-        .await
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))??;
-        if callback.state != *self.oauth_state {
-            return Err(OidcBrowserError::new(OidcBrowserErrorKind::Protocol));
-        }
-        let mut provider_token = exchange_authorization_code(
+    pub async fn finish(self, client: &AppClient) -> Result<SessionAccess, OidcBrowserError> {
+        let callback = self
+            .callback
+            .receive(&self.operation, &self.oauth_state)
+            .await?;
+        self.complete(client, callback).await
+    }
+
+    /// Native web sessions supply only the OS-delivered URI; matching the
+    /// exact redirect, state, and exchanging its single-use code stay here.
+    pub async fn finish_with_callback(
+        self,
+        client: &AppClient,
+        uri: String,
+    ) -> Result<SessionAccess, OidcBrowserError> {
+        let callback = self.callback.application_callback(uri)?;
+        self.complete(client, callback).await
+    }
+
+    async fn complete(
+        mut self,
+        client: &AppClient,
+        callback: Callback,
+    ) -> Result<SessionAccess, OidcBrowserError> {
+        check_operation(&self.operation)?;
+        let code = callback.authorization_code(&self.oauth_state)?;
+        let exchange = exchange_authorization_code(
             &self.http,
             &self.discovery.token_endpoint,
             &self.oidc_config.client_id,
-            &callback.code,
-            &self.redirect_uri,
+            &code,
+            self.callback.redirect_uri().as_str(),
             self.code_verifier.as_str(),
-        )
-        .await?;
+        );
+        let mut provider_token = within_operation(&self.operation, exchange).await?;
         self.code_verifier.zeroize();
         let token = provider_token
             .id_token
             .take()
             .unwrap_or_else(|| std::mem::take(&mut provider_token.access_token));
         let token = OidcToken::new(token)
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Protocol))?;
+            .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::Protocol, error))?;
         client
             .oidc_login(OidcLoginInput::new(self.target, token), self.operation)
             .await
@@ -193,17 +126,13 @@ impl AppClient {
         &self,
         target: SessionTarget,
         operation: SessionOperation,
+        callback: OidcCallback,
     ) -> Result<OidcBrowserLogin, OidcBrowserError> {
-        if let Some(kind) = operation.pre_dispatch_error() {
-            return Err(OidcBrowserError::new(match kind {
-                crate::session::SessionErrorKind::Cancelled => OidcBrowserErrorKind::Cancelled,
-                _ => OidcBrowserErrorKind::DeadlineExceeded,
-            }));
-        }
-        let snapshot = self
-            .repository
-            .snapshot()
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Configuration))?;
+        check_operation(&operation)?;
+        let callback = CallbackTransport::new(callback)?;
+        let snapshot = self.repository.snapshot().map_err(|error| {
+            OidcBrowserError::caused_by(OidcBrowserErrorKind::Configuration, error)
+        })?;
         let connection = snapshot
             .config()
             .connections
@@ -213,44 +142,40 @@ impl AppClient {
         if metadata.server_id.is_none() || metadata.server_fingerprint.is_none() {
             return Err(OidcBrowserError::new(OidcBrowserErrorKind::Configuration));
         }
-        let transport = AuthHttpTransport::new(&metadata.address)
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Configuration))?;
-        let oidc_config = transport
-            .oidc_config()
-            .await
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?;
+        let transport = AuthHttpTransport::new(&metadata.address).map_err(|error| {
+            OidcBrowserError::caused_by(OidcBrowserErrorKind::Configuration, error)
+        })?;
+        let oidc_config = within_operation(&operation, async {
+            transport.oidc_config().await.map_err(|error| {
+                OidcBrowserError::caused_by(OidcBrowserErrorKind::Transport, error)
+            })
+        })
+        .await?;
         validate_oidc_config(&oidc_config)?;
 
-        let http = reqwest::Client::builder()
+        let http = crate::http::client_builder()
             .redirect(Policy::none())
             .timeout(HTTP_TIMEOUT)
             .build()
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?;
+            .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::Transport, error))?;
         let discovery_url = discovery_url(&oidc_config.issuer)?;
-        let discovery: OidcDiscovery = bounded_json(&http, discovery_url).await?;
+        let discovery: OidcDiscovery =
+            within_operation(&operation, bounded_json(&http, discovery_url)).await?;
         validate_sensitive_url(&discovery.authorization_endpoint)?;
         validate_sensitive_url(&discovery.token_endpoint)?;
 
-        let listener = TcpListener::bind("127.0.0.1:0")
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?;
-        listener
-            .set_nonblocking(true)
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?;
-        let callback_port = listener
-            .local_addr()
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?
-            .port();
-        let redirect_uri = format!("http://127.0.0.1:{callback_port}/oidc/callback");
         let oauth_state = Zeroizing::new(random_url_safe(24));
         let code_verifier = Zeroizing::new(random_url_safe(48));
         let code_challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(code_verifier.as_bytes()));
-        let mut authorization_url = Url::parse(&discovery.authorization_endpoint)
-            .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::InvalidProvider))?;
+        let mut authorization_url =
+            Url::parse(&discovery.authorization_endpoint).map_err(|error| {
+                OidcBrowserError::caused_by(OidcBrowserErrorKind::InvalidProvider, error)
+            })?;
         {
             let mut query = authorization_url.query_pairs_mut();
             query.append_pair("client_id", &oidc_config.client_id);
             query.append_pair("response_type", "code");
-            query.append_pair("redirect_uri", &redirect_uri);
+            query.append_pair("redirect_uri", callback.redirect_uri().as_str());
             query.append_pair("scope", &oidc_config.scopes.join(" "));
             query.append_pair("state", &oauth_state);
             query.append_pair("code_challenge", &code_challenge);
@@ -261,17 +186,40 @@ impl AppClient {
         }
         Ok(OidcBrowserLogin {
             authorization_url: authorization_url.to_string(),
-            listener,
-            callback_port,
+            callback,
             oauth_state,
             code_verifier,
-            redirect_uri,
             oidc_config,
             discovery,
             target,
             operation,
             http,
         })
+    }
+}
+
+fn check_operation(operation: &SessionOperation) -> Result<(), OidcBrowserError> {
+    match operation.pre_dispatch_error() {
+        Some(crate::session::SessionErrorKind::Cancelled) => {
+            Err(OidcBrowserError::new(OidcBrowserErrorKind::Cancelled))
+        }
+        Some(_) => Err(OidcBrowserError::new(
+            OidcBrowserErrorKind::DeadlineExceeded,
+        )),
+        None => Ok(()),
+    }
+}
+
+async fn within_operation<T>(
+    operation: &SessionOperation,
+    work: impl std::future::Future<Output = Result<T, OidcBrowserError>>,
+) -> Result<T, OidcBrowserError> {
+    check_operation(operation)?;
+    tokio::select! {
+        biased;
+        _ = operation.cancelled() => Err(OidcBrowserError::new(OidcBrowserErrorKind::Cancelled)),
+        _ = tokio::time::sleep_until(operation.deadline().into()) => Err(OidcBrowserError::new(OidcBrowserErrorKind::DeadlineExceeded)),
+        result = work => result,
     }
 }
 
@@ -295,11 +243,6 @@ impl Drop for ProviderTokenResponse {
             token.zeroize();
         }
     }
-}
-
-struct Callback {
-    code: String,
-    state: String,
 }
 
 fn random_url_safe(bytes: usize) -> String {
@@ -332,8 +275,9 @@ fn validate_sensitive_url(value: &str) -> Result<(), OidcBrowserError> {
     if value.len() > MAX_METADATA_FIELD_BYTES {
         return Err(OidcBrowserError::new(OidcBrowserErrorKind::InvalidProvider));
     }
-    let url = Url::parse(value)
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::InvalidProvider))?;
+    let url = Url::parse(value).map_err(|error| {
+        OidcBrowserError::caused_by(OidcBrowserErrorKind::InvalidProvider, error)
+    })?;
     let loopback = url
         .host_str()
         .and_then(|host| host.parse::<IpAddr>().ok())
@@ -354,7 +298,8 @@ fn discovery_url(issuer: &str) -> Result<Url, OidcBrowserError> {
         "{}/.well-known/openid-configuration",
         issuer.trim_end_matches('/')
     );
-    Url::parse(&value).map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::InvalidProvider))
+    Url::parse(&value)
+        .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::InvalidProvider, error))
 }
 
 async fn bounded_json<T: for<'de> Deserialize<'de>>(
@@ -365,7 +310,7 @@ async fn bounded_json<T: for<'de> Deserialize<'de>>(
         .get(url)
         .send()
         .await
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?;
+        .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::Transport, error))?;
     if !response.status().is_success() {
         return Err(OidcBrowserError::new(OidcBrowserErrorKind::Transport));
     }
@@ -379,14 +324,15 @@ async fn bounded_json<T: for<'de> Deserialize<'de>>(
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?
+        .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::Transport, error))?
     {
         if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
             return Err(OidcBrowserError::new(OidcBrowserErrorKind::Protocol));
         }
         body.extend_from_slice(&chunk);
     }
-    serde_json::from_slice(&body).map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Protocol))
+    serde_json::from_slice(&body)
+        .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::Protocol, error))
 }
 
 async fn exchange_authorization_code(
@@ -409,17 +355,17 @@ async fn exchange_authorization_code(
         .form(&params)
         .send()
         .await
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?;
+        .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::Transport, error))?;
     if !response.status().is_success() {
         return Err(OidcBrowserError::new(
             OidcBrowserErrorKind::AuthorizationRejected,
         ));
     }
-    let mut body = Vec::new();
+    let mut body = Zeroizing::new(Vec::new());
     while let Some(chunk) = response
         .chunk()
         .await
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?
+        .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::Transport, error))?
     {
         if body.len().saturating_add(chunk.len()) > MAX_RESPONSE_BYTES {
             return Err(OidcBrowserError::new(OidcBrowserErrorKind::Protocol));
@@ -427,7 +373,7 @@ async fn exchange_authorization_code(
         body.extend_from_slice(&chunk);
     }
     let token: ProviderTokenResponse = serde_json::from_slice(&body)
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Protocol))?;
+        .map_err(|error| OidcBrowserError::caused_by(OidcBrowserErrorKind::Protocol, error))?;
     if token.access_token.is_empty()
         || token.access_token.len() > MAX_RESPONSE_BYTES
         || token
@@ -440,135 +386,5 @@ async fn exchange_authorization_code(
     Ok(token)
 }
 
-fn wait_for_callback(
-    listener: TcpListener,
-    port: u16,
-    operation: &SessionOperation,
-) -> Result<Callback, OidcBrowserError> {
-    loop {
-        if let Some(kind) = operation.pre_dispatch_error() {
-            return Err(OidcBrowserError::new(match kind {
-                crate::session::SessionErrorKind::Cancelled => OidcBrowserErrorKind::Cancelled,
-                _ => OidcBrowserErrorKind::DeadlineExceeded,
-            }));
-        }
-        match listener.accept() {
-            Ok((mut stream, _)) => match parse_callback(&mut stream, port) {
-                Ok(Some(callback)) => {
-                    let _ = respond(&mut stream, 200, "Login complete. You can return to Zann.");
-                    return Ok(callback);
-                }
-                Ok(None) => {
-                    let _ = respond(&mut stream, 404, "Not found");
-                }
-                Err(error) if error.kind() == OidcBrowserErrorKind::AuthorizationRejected => {
-                    let _ = respond(&mut stream, 400, "Authorization was rejected.");
-                    return Err(error);
-                }
-                Err(_) => {
-                    let _ = respond(&mut stream, 404, "Not found");
-                }
-            },
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Err(_) => return Err(OidcBrowserError::new(OidcBrowserErrorKind::Transport)),
-        }
-    }
-}
-
-fn parse_callback(stream: &mut TcpStream, port: u16) -> Result<Option<Callback>, OidcBrowserError> {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Transport))?;
-    let mut buffer = [0_u8; MAX_CALLBACK_BYTES];
-    let size = stream
-        .read(&mut buffer)
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Protocol))?;
-    let request = std::str::from_utf8(&buffer[..size])
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Protocol))?;
-    let mut parts = request
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .split_whitespace();
-    if parts.next() != Some("GET") {
-        return Ok(None);
-    }
-    let path = parts.next().unwrap_or_default();
-    let url = Url::parse(&format!("http://127.0.0.1:{port}{path}"))
-        .map_err(|_| OidcBrowserError::new(OidcBrowserErrorKind::Protocol))?;
-    if url.path() != "/oidc/callback" {
-        return Ok(None);
-    }
-    let mut code = None;
-    let mut state = None;
-    let mut rejected = false;
-    for (key, value) in url.query_pairs() {
-        match key.as_ref() {
-            "code" => code = Some(value.into_owned()),
-            "state" => state = Some(value.into_owned()),
-            "error" => rejected = true,
-            _ => {}
-        }
-    }
-    if rejected {
-        return Err(OidcBrowserError::new(
-            OidcBrowserErrorKind::AuthorizationRejected,
-        ));
-    }
-    Ok(match (code, state) {
-        (Some(code), Some(state)) if !code.is_empty() && !state.is_empty() => {
-            Some(Callback { code, state })
-        }
-        _ => None,
-    })
-}
-
-fn respond(stream: &mut TcpStream, status: u16, body: &str) -> std::io::Result<()> {
-    let reason = if status == 200 { "OK" } else { "Not Found" };
-    write!(
-        stream,
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    )
-}
-
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::session::{SessionErrorKind, SessionOperationId};
-
-    #[test]
-    fn session_failure_keeps_its_cause() {
-        let cause = SessionError::for_app(SessionOperationId::new(), SessionErrorKind::Protocol);
-        let rendered = cause.to_string();
-        let error = OidcBrowserError::session(cause);
-
-        assert_eq!(error.kind(), OidcBrowserErrorKind::Session);
-        assert_eq!(
-            error.to_string(),
-            format!("OIDC session failed: {rendered}")
-        );
-        let source = std::error::Error::source(&error).expect("session cause");
-        assert_eq!(source.to_string(), rendered);
-        let session = error.into_session_error().expect("session error");
-        assert_eq!(session.kind(), SessionErrorKind::Protocol);
-    }
-
-    #[test]
-    fn flow_failure_is_not_a_session_error() {
-        let error = OidcBrowserError::new(OidcBrowserErrorKind::Transport);
-        assert!(std::error::Error::source(&error).is_none());
-        let error = error.into_session_error().expect_err("flow error");
-        assert_eq!(error.kind(), OidcBrowserErrorKind::Transport);
-    }
-
-    #[test]
-    fn provider_urls_require_tls_except_loopback() {
-        assert!(validate_sensitive_url("https://id.example.test/authorize").is_ok());
-        assert!(validate_sensitive_url("http://127.0.0.1:8080/authorize").is_ok());
-        assert!(validate_sensitive_url("http://id.example.test/authorize").is_err());
-        assert!(validate_sensitive_url("https://user@id.example.test/authorize").is_err());
-    }
-}
+mod tests;

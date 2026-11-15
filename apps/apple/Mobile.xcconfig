@@ -1,0 +1,6 @@
+// Deployment floors and Rust profile are generated from ZannCoreKit's manifest.
+#include "ZannCoreKit/Generated/BuildSettings.xcconfig"
+
+CODE_SIGN_STYLE = Automatic
+#include? "Mobile.Local.xcconfig"
+CODE_SIGN_ENTITLEMENTS = Mobile/ZannMobile.entitlements

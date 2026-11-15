@@ -54,7 +54,9 @@ final class AppModel: ObservableObject {
     private let keystore: DeviceKeystore?
     private let preferencesFile: PreferencesFile?
     private let systemLanguage: String
-    private let openBrowser: (URL) -> Void
+    private let browser: BrowserAuthorization
+    private var pendingCoreWork: Task<Void, Never>?
+    private var logoutOperation: SessionOperationFfi?
     /// One prompt for the launch unlock screen, never for a later lock.
     private var startupTouchIDPending = false
     private var platformUnlockPending = false
@@ -72,10 +74,10 @@ final class AppModel: ObservableObject {
         opening open: () throws -> (core: CoreFacade, keystore: DeviceKeystore),
         preferences file: () throws -> PreferencesFile,
         systemLanguage: String,
-        openBrowser: @escaping (URL) -> Void
+        browser: BrowserAuthorization
     ) {
         self.systemLanguage = systemLanguage
-        self.openBrowser = openBrowser
+        self.browser = browser
         var opened: (core: CoreFacade, keystore: DeviceKeystore)?
         var openedFile: PreferencesFile?
         var armed = false
@@ -225,7 +227,7 @@ final class AppModel: ObservableObject {
         // Pending tasks retain the previous adapter; do not rely on deinit.
         connect?.cancel()
         connect = ConnectModel(
-            session: session, strings: strings, openBrowser: openBrowser,
+            session: session, strings: strings, browser: browser,
             copyBrowserUrl: { [weak self] value in
                 guard let self else { return }
                 Clipboard.copy(value, clearAfter: self.preferences.clipboardClearSeconds,
@@ -412,6 +414,77 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Called after the OS adapter has synchronously covered the window.
+    /// Drain canceled work before the final lock, so late biometric/KDF results
+    /// cannot leave keys live after background cleanup completes.
+    func secureForBackground() -> Task<Void, Never> {
+        let pending = pendingCoreWork
+        let shouldLock = preferences.lockOnHidden || !isUnlocked || busy || touchIDBusy
+        unlockOperations.cancel()
+        pendingConnection = nil
+        startupTouchIDPending = false
+        connect?.cancel()
+        keystore?.cancelUnlock()
+        logoutOperation?.cancel()
+        vault?.stopAutoSync()
+        if preferences.clipboardClearOnExit { Clipboard.clearOwned() }
+        guard let core, shouldLock else { return Task {} }
+        vault = nil
+        deviceUnlocked = false
+        if case .vault = screen { screen = .master(.unlock) }
+        if preferences.clipboardClearOnLock { Clipboard.clearOwned() }
+        return Task {
+            await pending?.value
+            _ = await closeCore(core)
+            pendingCoreWork = nil
+            busy = false
+        }
+    }
+
+    func resumeFromBackground() async {
+        await checkIdle()
+        if isUnlocked { vault?.startAutoSync() }
+        guard let core, !busy, !touchIDBusy else { return }
+        let status = await Task.detached { Result { try Self.touchIDArmed(core) } }.value
+        switch status {
+        case .success(let armed): touchIDArmed = armed
+        case .failure(let failure): lastFailure = failure; error = message(for: failure)
+        }
+    }
+
+    /// Locks locally before the canonical, credential-aware logout. An
+    /// offline replica remains available through its normal unlock screen.
+    func logout() async {
+        guard let core, isUnlocked, !busy else { return }
+        // Before the first catalog arrives there is no local storage ID.
+        // The session owner resolves that client's active connection itself.
+        let storageID = vault?.storageID
+        let operation: SessionOperationFfi
+        do { operation = try SessionOperationFfi(timeoutMs: 30_000) }
+        catch { lastFailure = error; self.error = message(for: error); return }
+        logoutOperation = operation
+        defer { logoutOperation = nil }
+        vault?.stopAutoSync()
+        vault = nil
+        screen = .master(.unlock)
+        if preferences.clipboardClearOnLock { Clipboard.clearOwned() }
+        _ = await perform {
+            _ = try core.lock()
+            return try core.remoteSession().logout(storageId: storageID, operation: operation)
+        }
+    }
+
+    private func closeCore(_ core: CoreFacade) async -> Bool {
+        let result = await Task.detached { Result { _ = try core.lock() } }.value
+        switch result {
+        case .success: return true
+        case .failure(let failure):
+            lastFailure = failure
+            screen = .failed(message(for: failure))
+            return false
+        }
+    }
+
     func lock() async {
         guard let core, isUnlocked || busy else { return }
         let keepConnecting = screen == .connect && connect != nil
@@ -449,10 +522,11 @@ final class AppModel: ObservableObject {
         busy = true
         error = nil
         lastFailure = nil
-        let result = await Task.detached(priority: .userInitiated) {
-            Result(catching: work)
-        }.value
+        let pending = Task.detached(priority: .userInitiated) { Result(catching: work) }
+        pendingCoreWork = Task { _ = await pending.value }
+        let result = await pending.value
         guard unlockOperations.finish(operation: operation) else { return nil }
+        pendingCoreWork = nil
         busy = false
         refreshUnlockState()
         switch result {
@@ -475,27 +549,4 @@ final class AppModel: ObservableObject {
     }
 
 
-}
-
-/// The core's own message for an error, without the enum wrapping.
-func describe(_ error: Error) -> String {
-    guard let error = error as? CoreError else {
-        return error.localizedDescription
-    }
-    switch error {
-    case .Browser(_, let message):
-        return message
-    case .Locked:
-        return "The vault is locked."
-    case .Cancelled:
-        return "Operation cancelled."
-    case .DeadlineExceeded:
-        return "The operation timed out."
-    case .InvalidArgument(let message), .Service(let message), .Unimplemented(let message):
-        return message
-    case .Unlock(_, let message), .Sync(_, let message), .Generator(_, _, let message):
-        return message
-    case .Session(_, let message), .Oidc(_, let message), .Draft(_, _, let message):
-        return message
-    }
 }

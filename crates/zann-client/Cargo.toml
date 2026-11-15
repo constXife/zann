@@ -11,7 +11,7 @@ base64 = { version = "0.22", optional = true }
 chrono = { version = "0.4", features = ["serde"], optional = true }
 data-encoding = { version = "2", optional = true }
 ed25519-dalek = { version = "2", optional = true }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"], optional = true }
+reqwest = { version = "0.12", default-features = false, features = ["json"], optional = true }
 rand = { version = "0.8", optional = true }
 same-file = { version = "1", optional = true }
 serde = { version = "1", features = ["derive"], optional = true }
@@ -29,6 +29,15 @@ zann-core = { path = "../zann-core", optional = true }
 zann-autofill = { path = "../zann-autofill", optional = true }
 zann-crypto = { path = "../zann-crypto", optional = true }
 zann-keystore = { path = "../zann-keystore", default-features = false, features = ["secret-store"], optional = true }
+
+# rustls-native-certs probes Unix CA files on iOS, where trust is managed by
+# Security.framework. Select the native verifier at compile time for every
+# HTTP client in this crate (discovery, authentication, OIDC, sync and secrets).
+[target.'cfg(target_os = "ios")'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"], optional = true }
+
+[target.'cfg(not(target_os = "ios"))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots"], optional = true }
 
 [features]
 default = ["remote"]

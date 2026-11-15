@@ -1,6 +1,10 @@
 import XCTest
 import ZannCoreKit
+#if os(iOS)
+@testable import ZannMobile
+#else
 @testable import Zann
+#endif
 
 @MainActor final class ItemDetailLoaderTests: XCTestCase {
     private nonisolated static func card(_ id: String) -> ItemDetailViewFfi {

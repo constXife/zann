@@ -48,7 +48,12 @@ struct UnlockPasswordSettings: View {
         }
         .textFieldStyle(.roundedBorder)
         .padding(24)
+
+        #if os(iOS)
+        .frame(maxWidth: 420)
+        #else
         .frame(width: 420)
+        #endif
         .onDisappear { clear(); message = nil }
     }
 
