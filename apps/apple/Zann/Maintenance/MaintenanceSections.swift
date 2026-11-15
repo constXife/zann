@@ -15,8 +15,9 @@ struct MaintenanceSections: View {
                 .disabled(maintenance.busy)
             Text(strings("maintenance.snapshotHelp"))
                 .font(.caption).foregroundStyle(.secondary)
+            // Read-only results remain labels, without native text-selection focus.
             ForEach(maintenance.snapshots, id: \.path) { row in
-                Text(row.createdAt).font(.caption).textSelection(.enabled)
+                Text(row.createdAt).font(.caption)
                     .accessibilityIdentifier("maintenance.snapshotResult")
             }
         }
@@ -31,12 +32,12 @@ struct MaintenanceSections: View {
                                                           "skipped": String(report.vaultsSkipped)]))
                 ForEach(Array(report.problems.enumerated()), id: \.offset) { _, problem in
                     Text([problem.kind, problem.vaultName, problem.itemPath, problem.detail].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).textSelection(.enabled)
+                        .font(.caption)
                 }
             }
         }
         if maintenance.busy { ProgressView().accessibilityIdentifier("maintenance.busy") }
-        if let failure = maintenance.failure { Text(strings.message(for: failure)).foregroundStyle(.red).textSelection(.enabled) }
+        if let failure = maintenance.failure { Text(strings.message(for: failure)).foregroundStyle(.red) }
     }
 
     private var exportAction: some View {
