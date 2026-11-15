@@ -3,10 +3,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use zann_client::{app::unlock::DeviceUnlock, sync::AccountKeyOrigin};
 use zann_crypto::SecretKey;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let password = format!(
-        "synthetic fixture {}",
-        STANDARD.encode(SecretKey::generate().as_bytes())
-    );
+    let password = STANDARD.encode(SecretKey::generate().as_bytes());
     let (mut keyring, root) = DeviceUnlock::create(&password)?;
     let account = SecretKey::generate();
     let cache = SecretKey::generate();
