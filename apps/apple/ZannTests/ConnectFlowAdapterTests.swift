@@ -47,7 +47,7 @@ private final class ConnectFixtureCore: CoreFacade {
 final class ConnectFlowAdapterTests: XCTestCase {
     private func model(_ session: RemoteSession) -> ConnectModel {
         ConnectModel(session: session, strings: Strings(language: "en"),
-                     openBrowser: { _ in XCTFail("unexpected browser effect") },
+                     browser: .loopback(open: { _ in XCTFail("unexpected browser effect") }),
                      copyBrowserUrl: { _ in XCTFail("unexpected copy effect") },
                      connected: { _ in XCTFail("unexpected navigation effect") })
     }
@@ -84,7 +84,7 @@ final class ConnectFlowAdapterTests: XCTestCase {
         let core = ConnectFixtureCore(wrapping: native, session: session)
         let app = AppModel(opening: { (core, keystore) },
                            preferences: { PreferencesFile(url: directory.appendingPathComponent("preferences.json")) },
-                           systemLanguage: "en", openBrowser: { _ in XCTFail("unexpected browser") })
+                           systemLanguage: "en", browser: .loopback(open: { _ in XCTFail("unexpected browser") }))
         let gate = DispatchSemaphore(value: 0)
         let started = expectation(description: "old root probe started")
         session.gate = gate

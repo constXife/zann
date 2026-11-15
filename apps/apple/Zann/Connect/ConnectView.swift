@@ -7,6 +7,8 @@ struct ConnectView: View {
     @ObservedObject var connect: ConnectModel
     @EnvironmentObject private var app: AppModel
 
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var textSize
     @State private var password = ""
     @FocusState private var focused: Bool
 
@@ -19,12 +21,13 @@ struct ConnectView: View {
             step
             if let error = connect.error {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
+                    .accessibilityIdentifier("connect.error")
             }
-            HStack {
-                Button(app.strings("wizard.back")) {
+            actionsLayout {
+                Button {
                     password = ""
                     if !connect.back() { app.leaveConnecting() }
-                }
+                } label: { Text(app.strings("wizard.back")).appleTouchTarget() }
                 .keyboardShortcut(.cancelAction)
                 Spacer()
                 if connect.busy {
@@ -34,19 +37,35 @@ struct ConnectView: View {
             }
         }
         .textFieldStyle(.roundedBorder)
+        #if os(iOS)
+        .controlSize(.large)
+        .padding(20)
+        #else
         .padding(32)
+        #endif
         .frame(maxWidth: 420)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear { focused = true }
+        .onChange(of: scenePhase) { if $0 != .active { password = "" } }
+    }
+
+    private var actionsLayout: AnyLayout {
+        textSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .trailing)) : AnyLayout(HStackLayout())
     }
 
     @ViewBuilder private var step: some View {
         switch connect.stage {
         case .server:
             TextField(app.strings("auth.serverUrl"), text: $connect.url, prompt: Text("https://zann.example.com"))
+                .accessibilityIdentifier("connect.server")
+                .appleTouchTarget()
                 .focused($focused)
                 .onSubmit(probe)
                 .disableAutocorrection(true)
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.URL)
+                #endif
         case .fingerprint(let old, let new):
             Text(app.strings("wizard.fingerprintWarning"))
             fingerprint(app.strings("wizard.oldFingerprint"), old)
@@ -56,13 +75,15 @@ struct ConnectView: View {
             ForEach(connect.methods, id: \.self) { method in
                 switch method {
                 case .password:
-                    Button(app.strings("auth.emailPassword")) { connect.choosePassword() }
-                        .frame(maxWidth: .infinity)
-                case .oidc:
-                    Button(app.strings("auth.oidc")) {
-                        Task { await connect.signInWithBrowser() }
+                    Button { connect.choosePassword() } label: {
+                        Text(app.strings("auth.emailPassword")).frame(maxWidth: .infinity).appleTouchTarget()
                     }
-                    .frame(maxWidth: .infinity)
+                    .accessibilityIdentifier("connect.method.password")
+                case .oidc:
+                    Button {
+                        Task { await connect.signInWithBrowser() }
+                    } label: { Text(app.strings("auth.oidc")).frame(maxWidth: .infinity).appleTouchTarget() }
+                    .accessibilityIdentifier("connect.method.oidc")
                 case .serviceAccount:
                     EmptyView()
                 }
@@ -70,45 +91,59 @@ struct ConnectView: View {
             .disabled(connect.busy)
         case .password(let register):
             TextField(app.strings("auth.email"), text: $connect.email, prompt: Text("you@example.com"))
+                .appleTouchTarget()
                 .textContentType(.username)
                 .disableAutocorrection(true)
+                #if os(iOS)
+                .textInputAutocapitalization(.never)
+                .keyboardType(.emailAddress)
+                #endif
             if register {
                 TextField(app.strings("auth.fullName"), text: $connect.fullName)
             }
             SecureField(app.strings("auth.password"), text: $password)
+                .accessibilityIdentifier("connect.password")
+                .appleTouchTarget()
                 .textContentType(.password)
                 .onSubmit(submitPassword)
             if connect.registrationAvailable {
-                Button(app.strings(register ? "auth.haveAccount" : "auth.noAccount")) {
+                Button {
                     connect.setRegistering(!register)
-                }
-                .buttonStyle(.link)
+                } label: { Text(app.strings(register ? "auth.haveAccount" : "auth.noAccount")).appleTouchTarget() }
+                .buttonStyle(.borderless)
                 .disabled(connect.busy)
             }
         case .complete, .closed:
             EmptyView()
         case .browser:
-            Text(app.strings("wizard.oidcHint"))
-            Button(app.strings("wizard.oidcReopen")) { connect.reopenBrowser() }
-                .buttonStyle(.link)
-            Button(app.strings("auth.copyLink")) { connect.copyBrowserLink() }
-                .buttonStyle(.link)
+            Text(app.strings("wizard.oidcHint")).accessibilityIdentifier("connect.browser")
+            if connect.canReopenBrowser {
+                Button(app.strings("wizard.oidcReopen")) { connect.reopenBrowser() }.buttonStyle(.borderless)
+                Button(app.strings("auth.copyLink")) { connect.copyBrowserLink() }.buttonStyle(.borderless)
+            } else if !connect.busy {
+                Button { Task { await connect.signInWithBrowser() } } label: {
+                    Text(app.strings("common.retry")).appleTouchTarget()
+                }
+            }
         }
     }
 
     @ViewBuilder private var primary: some View {
         switch connect.stage {
         case .server:
-            Button(app.strings("common.continue"), action: probe)
+            Button(action: probe) { Text(app.strings("common.continue")).appleTouchTarget() }
+                .accessibilityIdentifier("connect.continue")
                 .keyboardShortcut(.defaultAction)
                 .disabled(connect.busy || connect.url.trimmingCharacters(in: .whitespaces).isEmpty)
         case .fingerprint:
-            Button(app.strings("wizard.trustFingerprint"), role: .destructive) {
+            Button(role: .destructive) {
                 Task { await connect.trustFingerprint() }
-            }
+            } label: { Text(app.strings("wizard.trustFingerprint")).appleTouchTarget() }
             .disabled(connect.busy)
         case .password(let register):
-            Button(app.strings(register ? "auth.signUp" : "auth.signIn"), action: submitPassword)
+            Button(action: submitPassword) {
+                Text(app.strings(register ? "auth.signUp" : "auth.signIn")).appleTouchTarget()
+            }
                 .keyboardShortcut(.defaultAction)
                 .disabled(!connect.canSubmitPassword(password))
         case .methods, .browser, .complete, .closed:
@@ -128,9 +163,10 @@ struct ConnectView: View {
     }
 
     private func submitPassword() {
-        guard connect.canSubmitPassword(password) else { return }
-        let submitted = password
-        password = ""
-        Task { await connect.submitPassword(submitted) }
+        let password = password
+        Task {
+            await connect.submitPassword(password)
+            self.password = ""
+        }
     }
 }

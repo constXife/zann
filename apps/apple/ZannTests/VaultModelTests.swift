@@ -1,6 +1,10 @@
 import XCTest
 import ZannCoreKit
+#if os(iOS)
+@testable import ZannMobile
+#else
 @testable import Zann
+#endif
 
 /// VaultModel over the real core: categories and filtering come from
 /// zann-ui-core, details from the stored payload, and a stale selection never

@@ -8,7 +8,7 @@ final class MenuBarControllerTests: XCTestCase {
         AppModel(opening: { throw CocoaError(.fileNoSuchFile) }, preferences: {
             PreferencesFile(url: FileManager.default.temporaryDirectory
                 .appendingPathComponent("zann-menu-\(UUID().uuidString).json"))
-        }, systemLanguage: "en", openBrowser: { _ in })
+        }, systemLanguage: "en", browser: .loopback(open: { _ in }))
     }
 
     private func click(_ type: NSEvent.EventType, modifiers: NSEvent.ModifierFlags = []) throws -> NSEvent {

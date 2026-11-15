@@ -126,7 +126,7 @@ final class ItemEditorModel: ObservableObject, Identifiable {
         }
         busy = true
         defer { busy = false }
-        let result = await Task.detached(priority: .userInitiated) { Result(catching: store) }.value
+        let result = await BlockingCore.run { Result(catching: store) }
         switch result {
         case .success(let item):
             return item

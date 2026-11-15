@@ -28,12 +28,14 @@ struct SyncIndicatorButton<Recovery: View>: View {
                 }
             }
             .frame(width: 18, height: 18)
+            .appleTouchTarget()
         }
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
         .help(strings("sync.details"))
         .accessibilityLabel(strings("sync.details"))
         .accessibilityValue(statusLabel)
+        .accessibilityIdentifier("workspace.sync")
         .popover(isPresented: $showingDetails, arrowEdge: .bottom) {
             details
                 .buttonStyle(.bordered)
@@ -46,6 +48,7 @@ struct SyncIndicatorButton<Recovery: View>: View {
             Label(statusLabel, systemImage: Symbols.sync(indicator.state))
                 .font(.headline)
                 .foregroundStyle((indicator.needsAttention || error != nil) ? Color.red : Color.primary)
+                .accessibilityIdentifier("sync.status.\(indicator.labelKey)")
             if let server = syncState?.serverUrl {
                 Text(server)
                     .foregroundStyle(.secondary)
@@ -54,17 +57,26 @@ struct SyncIndicatorButton<Recovery: View>: View {
             Text(lastSynced)
                 .font(.callout)
                 .foregroundStyle(.secondary)
+                .accessibilityIdentifier(lastSyncedIdentifier)
             if let error {
                 Text(error).foregroundStyle(.red).textSelection(.enabled)
+                    .accessibilityIdentifier("sync.error")
             }
             if indicator.action != .noAction {
                 Divider()
                 action
             }
             recovery
+            #if os(iOS)
+            Button { showingDetails = false } label: { Text(strings("common.close")).appleTouchTarget() }
+            #endif
         }
         .padding(16)
+        #if os(macOS)
         .frame(width: 300, alignment: .leading)
+        #else
+        .frame(maxWidth: 360, alignment: .leading)
+        #endif
     }
 
     @ViewBuilder private var action: some View {
@@ -73,8 +85,11 @@ struct SyncIndicatorButton<Recovery: View>: View {
             HStack {
                 Button(strings("settings.accounts.syncNow")) { Task { await onSync() } }
                     .disabled(busy)
+                    .accessibilityIdentifier("sync.run")
                 Spacer()
+                #if os(macOS)
                 Text("⌘R").foregroundStyle(.secondary).accessibilityHidden(true)
+                #endif
             }
         case .reconnect:
             Button(strings("settings.accounts.reconnect")) {
@@ -89,6 +104,11 @@ struct SyncIndicatorButton<Recovery: View>: View {
 
     private var statusLabel: String {
         strings(indicator.labelKey, indicator.labelArgs)
+    }
+
+    private var lastSyncedIdentifier: String {
+        if let timestamp = syncState?.lastSyncedAt { return "sync.lastSynced.\(timestamp)" }
+        return "sync.neverSynced"
     }
 
     private var lastSynced: String {

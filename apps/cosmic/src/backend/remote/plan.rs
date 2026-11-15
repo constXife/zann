@@ -214,7 +214,11 @@ impl Plan {
                 } => {
                     return remote
                         .client
-                        .begin_oidc_login(prepared.target().clone(), operation)
+                        .begin_oidc_login(
+                            prepared.target().clone(),
+                            operation,
+                            OidcCallback::Loopback,
+                        )
                         .await
                         .map(|login| ResultValue::Browser(Box::new(login)))
                         .map_err(|error| {

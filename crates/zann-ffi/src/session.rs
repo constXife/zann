@@ -15,7 +15,7 @@ use zann_client::app::{
     PersonalVaultStatus, PrepareConnectionOutcome, PreparedConnection, RemoteLogoutStatus,
     SessionAccess, SessionCancellationHandle, SessionError, SessionErrorKind, SessionOperation,
 };
-use zann_client::oidc::{OidcBrowserError, OidcBrowserErrorKind, OidcBrowserLogin};
+use zann_client::oidc::{OidcBrowserError, OidcBrowserErrorKind};
 
 use crate::{CoreError, CoreResult};
 
@@ -243,36 +243,8 @@ pub enum PrepareConnectionOutcomeFfi {
 #[derive(uniffi::Object)]
 pub struct SessionAccessFfi(SessionAccess);
 
-/// A prepared browser login. The shell opens `authorization_url` and then
-/// calls `finish`, which commits the session through the client that began it.
-#[derive(uniffi::Object)]
-pub struct OidcLoginFfi {
-    authorization_url: String,
-    login: Mutex<Option<OidcBrowserLogin>>,
-    bridge: Arc<Bridge>,
-}
-
-#[uniffi::export]
-impl OidcLoginFfi {
-    pub fn authorization_url(&self) -> String {
-        self.authorization_url.clone()
-    }
-
-    /// Waits for the browser callback and commits the resulting session.
-    pub fn finish(&self) -> CoreResult<Arc<SessionAccessFfi>> {
-        let login = self
-            .login
-            .lock()
-            .expect("lock poisoned")
-            .take()
-            .ok_or_else(|| CoreError::InvalidArgument("OIDC login was already used".to_string()))?;
-        let access = self
-            .bridge
-            .runtime
-            .block_on(login.finish(&self.bridge.client))?;
-        Ok(Arc::new(SessionAccessFfi(access)))
-    }
-}
+mod oidc;
+pub use oidc::{OidcCallbackFfi, OidcLoginFfi};
 
 #[derive(Clone, Debug, Eq, PartialEq, uniffi::Record)]
 pub struct PersonalVaultStatusFfi {
@@ -466,26 +438,6 @@ impl RemoteSession {
             .runtime
             .block_on(self.0.client.password_register(request, operation))?;
         Ok(Arc::new(SessionAccessFfi(access)))
-    }
-
-    /// Prepares a browser login. Its `operation` also bounds and cancels the
-    /// wait in `OidcLoginFfi::finish`.
-    pub fn begin_oidc_login(
-        &self,
-        connection: Arc<PreparedConnectionFfi>,
-        operation: Arc<SessionOperationFfi>,
-    ) -> CoreResult<Arc<OidcLoginFfi>> {
-        let operation = operation.take()?;
-        let login = self.0.runtime.block_on(
-            self.0
-                .client
-                .begin_oidc_login(connection.0.target().clone(), operation),
-        )?;
-        Ok(Arc::new(OidcLoginFfi {
-            authorization_url: login.authorization_url().to_string(),
-            login: Mutex::new(Some(login)),
-            bridge: Arc::clone(&self.0),
-        }))
     }
 
     pub fn personal_vault_status(

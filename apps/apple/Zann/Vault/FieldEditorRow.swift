@@ -16,6 +16,46 @@ struct FieldEditorRow: View {
     @State private var generatorOpen = false
 
     var body: some View {
+        #if os(iOS)
+        VStack(alignment: .leading, spacing: 8) {
+            if let label {
+                Text(label).foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    TextField(strings("create.fieldKeyPlaceholder"), text: $key)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .accessibilityLabel(strings("create.keyLabel"))
+                    Button(action: onRemove) { Image(systemName: "minus.circle").appleTouchTarget() }
+                        .accessibilityLabel(strings("create.removeRow"))
+                }
+            }
+            HStack {
+                valueEditor
+                    .accessibilityLabel(label ?? strings("create.valueLabel"))
+                    .accessibilityIdentifier("editor.value.\(field.key)")
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .appleTouchTarget()
+                if field.masked {
+                    Button(action: onToggleReveal) {
+                        Image(systemName: revealed ? "eye.slash" : "eye").appleTouchTarget()
+                    }
+                    .accessibilityLabel(strings(revealed ? "create.hideValue" : "create.revealValue"))
+                    .accessibilityIdentifier("editor.reveal.\(field.key)")
+                }
+            }
+            if label == nil {
+                Picker(strings("create.fieldType"), selection: $kind) {
+                    ForEach(ItemEditorModel.kinds, id: \.self) { kind in
+                        Text(strings(Self.kindKey(kind))).tag(kind)
+                    }
+                }.pickerStyle(.menu)
+            }
+        }
+        .textFieldStyle(.roundedBorder)
+        .padding(12)
+        #else
         HStack(alignment: field.multiline && !field.masked ? .top : .center, spacing: 8) {
             if let label {
                 Text(label)
@@ -68,6 +108,7 @@ struct FieldEditorRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        #endif
     }
 
     @ViewBuilder private var valueEditor: some View {
@@ -82,7 +123,7 @@ struct FieldEditorRow: View {
                 .frame(minHeight: 80, maxHeight: 160)
                 .overlay(
                     RoundedRectangle(cornerRadius: 5)
-                        .strokeBorder(Color(nsColor: .separatorColor))
+                        .strokeBorder(Color.zannSeparator)
                 )
         } else {
             TextField(placeholder, text: $value)

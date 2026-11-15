@@ -400,7 +400,7 @@ impl SyncRemote for HttpSyncRemote {
 }
 
 fn client_builder(no_proxy: bool) -> Result<reqwest::Client, RemoteError> {
-    let mut builder = reqwest::Client::builder()
+    let mut builder = crate::http::client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .retry(reqwest::retry::never())
         .referer(false);

@@ -24,12 +24,7 @@ private struct TestHostApp: App {
 struct ZannApp: App {
     @NSApplicationDelegateAdaptor(ApplicationLifecycle.self) private var lifecycle
     @StateObject private var dock = DockVisibility()
-    @StateObject private var model = AppModel(
-        opening: AppModel.openDefaultCore,
-        preferences: AppModel.defaultPreferencesFile,
-        systemLanguage: Locale.preferredLanguages.first ?? Locale.current.identifier,
-        openBrowser: { NSWorkspace.shared.open($0) }
-    )
+    @StateObject private var model = MacComposition.makeModel()
     // Security observers must outlive a closed vault window while the app
     // remains in the menu bar (idle lock and clear-on-exit included).
     @State private var lockTriggers: LockTriggers?
@@ -110,7 +105,7 @@ struct RootView: View {
         case .connect:
             if let connect = model.connect {
                 ConnectView(connect: connect)
-            } else { ProgressView(model.strings("common.loading")) }
+            }
         case .master(let mode):
             MasterPasswordView(mode: mode)
         case .vault:

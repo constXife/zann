@@ -39,7 +39,7 @@ final class AppModelTests: XCTestCase {
             }
             return (core, keystore)
         }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en",
-        openBrowser: { _ in })
+        browser: .loopback(open: { _ in }))
     }
 
     private func unlockedModel(
@@ -170,7 +170,7 @@ final class AppModelTests: XCTestCase {
             let core = EnrollmentRequiredCore(unsafeFromRawPointer: real.uniffiClonePointer())
             let model = AppModel(opening: { (core, MemoryKeystore()) },
                 preferences: { PreferencesFile(url: root.appendingPathComponent("preferences.json")) },
-                systemLanguage: "en", openBrowser: { _ in })
+                systemLanguage: "en", browser: .loopback(open: { _ in }))
             model.startConnecting()
             await model.connected(.init(storageID: "pending-test-account", hasPersonalKeys: existing))
             XCTAssertEqual(model.screen, .master(.create))
@@ -358,55 +358,9 @@ final class AppModelTests: XCTestCase {
             )
             return (core, keystore)
         }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en",
-        openBrowser: { _ in })
+        browser: .loopback(open: { _ in }))
         guard case .failed = model.screen else {
             return XCTFail("expected the failure screen, got \(model.screen)")
         }
-    }
-}
-
-/// A keystore that always "passes" Touch ID, unless `cancelLoads` makes it
-/// behave like a dismissed prompt.
-final class MemoryKeystore: DeviceKeystore {
-    private var dwk: Data?
-    private(set) var promptReason = ""
-    var cancelLoads = false
-    var biometricsAvailable = true
-    private(set) var loadCalls = 0
-
-    var holdsKey: Bool { dwk != nil }
-
-    func setPromptReason(_ reason: String) { promptReason = reason }
-
-    func status() -> PlatformKeystoreStatus {
-        PlatformKeystoreStatus(
-            supported: true, biometricsAvailable: biometricsAvailable, reason: nil, message: nil
-        )
-    }
-
-    func storeDwk(dwk: Data) throws { self.dwk = dwk }
-
-    func loadDwk() throws -> Data? {
-        loadCalls += 1
-        if cancelLoads { throw PlatformStoreError.Cancelled }
-        return dwk
-    }
-
-    func deleteDwk() throws { dwk = nil }
-}
-
-final class MemorySecretStore: PlatformSecretStore {
-    private var values: [String: String] = [:]
-
-    func put(service: String, account: String, secret: String) throws {
-        values["\(service)/\(account)"] = secret
-    }
-
-    func get(service: String, account: String) throws -> String? {
-        values["\(service)/\(account)"]
-    }
-
-    func delete(service: String, account: String) throws {
-        values["\(service)/\(account)"] = nil
     }
 }

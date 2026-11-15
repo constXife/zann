@@ -16,7 +16,11 @@ struct ItemDetailFieldRow: View {
     @Environment(\.openURL) private var openURL
     @State private var openFailed = false
     private static let mask = maskedValue()
+    #if os(iOS)
+    private static let accessoryWidth: CGFloat = 44
+    #else
     private static let accessoryWidth: CGFloat = 22
+    #endif
 
     var body: some View {
         Group {
@@ -51,6 +55,7 @@ struct ItemDetailFieldRow: View {
                     strings: strings, copyFeedback: copyFeedback,
                     accessoryWidth: Self.accessoryWidth, onCopy: onCopy
                 )
+                .accessibilityIdentifier("detail.totp.\(field.key)")
             } else {
                 CopyValueButton(
                     value: shown, fieldLabel: label,
@@ -59,14 +64,17 @@ struct ItemDetailFieldRow: View {
                     strings: strings, copyFeedback: copyFeedback,
                     onCopy: { onCopy(field.value) }
                 )
+                .accessibilityIdentifier("detail.copy.\(field.key)")
                 if field.masked {
                     Button(action: onToggleReveal) {
                         Image(systemName: revealed ? "eye.slash" : "eye")
+                            .frame(width: Self.accessoryWidth)
+                            .appleTouchTarget()
                     }
                     .buttonStyle(.borderless)
                     .help(revealHelp)
                     .accessibilityLabel(revealHelp)
-                    .frame(width: Self.accessoryWidth)
+                    .accessibilityIdentifier("detail.reveal.\(field.key)")
                 }
             }
             if let websiteURL {
@@ -74,11 +82,12 @@ struct ItemDetailFieldRow: View {
                     openURL(websiteURL) { accepted in openFailed = !accepted }
                 } label: {
                     Image(systemName: "arrow.up.right.square")
+                        .frame(width: Self.accessoryWidth)
+                        .appleTouchTarget()
                 }
                 .buttonStyle(.borderless)
                 .help(strings("items.openWebsite"))
                 .accessibilityLabel(strings("items.openWebsite"))
-                .frame(width: Self.accessoryWidth)
             }
         }
     }

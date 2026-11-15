@@ -25,6 +25,7 @@ struct CopyValueButton: View {
                     .foregroundStyle(copied ? Color.accentColor : Color.secondary)
                     .accessibilityHidden(true)
             }
+            .appleTouchTarget()
         }
         .buttonStyle(CopySurfaceStyle(copied: copied))
         .help(copied ? copyFeedback : copyLabel)

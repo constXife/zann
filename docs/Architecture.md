@@ -65,7 +65,52 @@ blake3 NEON objects). The macOS app in `apps/apple` (XcodeGen spec `project.yml`
 `.xcodeproj` is generated) links ZannCoreKit and supplies Keychain
 implementations of `PlatformKeystore` and `PlatformSecretStore` to
 `create_core`. The `apple` CI job builds the package, runs its binding tests on
-macOS, links them for both iOS slices, then builds and tests the app.
+macOS, links them for both iOS slices, then tests the macOS app and the mobile
+app's unit/UI suites on an iPhone and an iPad simulator. The `ZannMobile`
+target (#273/#274) reuses common connect/unlock models, uses scoped Keychain and
+LocalAuthentication ports and a native system web session. Its adaptive vault
+workspace (#275) keeps context/list/detail routes and scroll bookmarks outside
+the layout branches; shared Apple models retain selection and Rust-owned
+editor drafts. Device preference controls, item fields and reveal state are
+shared with macOS. Native columns and touch/keyboard adaptation stay in SwiftUI.
+The XCFramework build generates deployment settings from `Package.swift` for
+the mobile app. Mobile tests use an explicit XCTest-only iOS 17 floor; the app
+remains on iOS 16. A profile guard prevents a mobile Release build from using
+debug bindings, and CI builds release slices without the test fixture.
+
+The shared client's iOS HTTP dependency selects `native-tls` at compile time,
+so discovery, authentication, OIDC, sync and secret reads use Apple's
+Security.framework trust evaluation, including explicitly trusted device CA
+profiles. Other targets retain Rustls with native roots. iOS does not use the
+Unix certificate-file probe in `rustls-native-certs`; no CA bundle is embedded
+and certificate/hostname verification stays enabled. Apple's native backend
+currently supports TLS 1.2; the shared `zann-client::http` builder enforces a
+TLS 1.2 minimum for every production HTTP transport. TLS 1.3 on iOS would
+require a platform-verifier integration.
+
+Apple platform composition lives outside `AppModel`: the common
+`apps/apple/Zann/Composition` opener receives explicit storage and platform
+ports, and `Platform/macOS/MacComposition.swift` alone starts desktop browser
+IPC. macOS retains its existing Application Support/bundle-identifier root and
+Keychain namespaces. The mobile composition contract (#272) uses only the
+configured App Group container's `Library/Application Support/Zann` root for
+the database, Config v2, locks and snapshots; preferences sit beside the database.
+An unavailable container is an error, never a second private root. The DWK
+service and vault Keychain group are explicit identities shared with a future
+provider; app auth tokens require a distinct app-only group, excluded from the
+provider's entitlements. `project.yml` supplies mobile identity settings to
+generated Info.plist and entitlements. The provider's independent unlock and
+cross-process concurrency contract remains #277; sharing a root alone does not
+establish it.
+
+`zann-client::oidc` owns explicit `Loopback` and `Application` callback
+transports. The Apple system web-session adapter forwards the OS callback URI;
+exact redirect/state checks, PKCE, bounded provider requests and session commit
+remain in the Rust owner. `zann-ffi::session::oidc` projects one consumable login
+and never exports provider tokens or verifiers. Mobile background invalidation
+and the native privacy cover prevent late unlock results from restoring a
+visible session; clipboard expiration uses the native OS alongside owned-write
+checks. See `apps/apple/README.md` for IdP registration and device verification.
 
 `zann-flows::connect` is active: COSMIC consumes its reducer directly and Apple
 uses its pure UniFFI projection. The reducer owns method/registration selection,

@@ -3,12 +3,6 @@ import LocalAuthentication
 import Security
 import ZannCoreKit
 
-/// The keystore the app composes the core with: the core's port, plus the
-/// wording of the Touch ID sheet, which follows the app's language.
-protocol DeviceKeystore: PlatformKeystore {
-    func setPromptReason(_ reason: String)
-}
-
 /// Keeps the device wrapping key that arms remembered unlock (#146). The key
 /// sits in the data protection keychain under a `.biometryCurrentSet` access
 /// control, so macOS releases it only after Touch ID and drops it when the
@@ -18,13 +12,15 @@ protocol DeviceKeystore: PlatformKeystore {
 /// anywhere weaker.
 final class KeychainKeystore: DeviceKeystore {
     private let service: String
+    private let scope: KeychainScope
     private let account = "device-wrapping-key"
     private let lock = NSLock()
-    private var promptReason: String
+    private var promptReason: String?
+    private var activeContext: LAContext?
 
-    init(service: String, promptReason: String) {
+    init(service: String, scope: KeychainScope) {
+        self.scope = scope
         self.service = service
-        self.promptReason = promptReason
     }
 
     /// The Touch ID sheet's reason, in the current language.
@@ -32,10 +28,15 @@ final class KeychainKeystore: DeviceKeystore {
         lock.withLock { promptReason = reason }
     }
 
+    func cancelUnlock() {
+        let context = lock.withLock { activeContext }
+        context?.invalidate()
+    }
+
     /// Never prompts: it reads this process's own entitlements, and
     /// LocalAuthentication only evaluates.
     func status() -> PlatformKeystoreStatus {
-        guard Keychain.dataProtectionAvailable() else {
+        guard Keychain.dataProtectionAvailable(scope: scope) else {
             return PlatformKeystoreStatus(
                 supported: false, biometricsAvailable: false, reason: .unavailable,
                 message: "this build is not signed with an Apple team"
@@ -63,7 +64,7 @@ final class KeychainKeystore: DeviceKeystore {
         let current = status()
         guard current.supported else { throw PlatformStoreError.Unsupported }
         guard current.biometricsAvailable else {
-            throw PlatformStoreError.Unavailable(message: current.message ?? "Touch ID is not available")
+            throw PlatformStoreError.Unavailable(message: current.message ?? "Biometric authentication is not available")
         }
         var error: Unmanaged<CFError>?
         guard let access = SecAccessControlCreateWithFlags(
@@ -76,22 +77,35 @@ final class KeychainKeystore: DeviceKeystore {
         try deleteDwk()
         try Keychain.add(
             service: service, account: account, data: dwk,
-            protection: [kSecAttrAccessControl: access], dataProtection: true
+            protection: [kSecAttrAccessControl: access], dataProtection: true, scope: scope
         )
     }
 
     /// Presents Touch ID; the core calls this off the main thread.
     func loadDwk() throws -> Data? {
         let context = LAContext()
-        context.localizedReason = lock.withLock { promptReason }
+        context.localizedReason = try lock.withLock {
+            guard let promptReason, !promptReason.isEmpty else {
+                throw PlatformStoreError.Unavailable(message: "Biometric prompt is not configured")
+            }
+            guard activeContext == nil else {
+                throw PlatformStoreError.Unavailable(message: "Biometric unlock is already in progress")
+            }
+            activeContext = context
+            return promptReason
+        }
+        defer {
+            lock.withLock { activeContext = nil }
+            context.invalidate()
+        }
         return try Keychain.get(
-            service: service, account: account, dataProtection: true,
+            service: service, account: account, dataProtection: true, scope: scope,
             extra: [kSecUseAuthenticationContext: context]
         )
     }
 
     func deleteDwk() throws {
-        try Keychain.delete(service: service, account: account, dataProtection: true)
+        try Keychain.delete(service: service, account: account, dataProtection: true, scope: scope)
     }
 }
 
@@ -99,115 +113,24 @@ final class KeychainKeystore: DeviceKeystore {
 /// core calls this from background threads, so it must never need user
 /// presence.
 final class KeychainSecretStore: PlatformSecretStore {
+    private let scope: KeychainScope
+    init(scope: KeychainScope) { self.scope = scope }
     func put(service: String, account: String, secret: String) throws {
         try Keychain.put(
             service: service, account: account, data: Data(secret.utf8),
-            accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            accessible: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly, scope: scope
         )
     }
 
     func get(service: String, account: String) throws -> String? {
-        try Keychain.get(service: service, account: account)
-            .map { String(decoding: $0, as: UTF8.self) }
+        guard let data = try Keychain.get(service: service, account: account, scope: scope) else { return nil }
+        guard let value = String(data: data, encoding: .utf8) else {
+            throw PlatformStoreError.Unavailable(message: "Keychain credential is not valid UTF-8")
+        }
+        return value
     }
 
     func delete(service: String, account: String) throws {
-        try Keychain.delete(service: service, account: account)
-    }
-}
-
-/// Generic-password items: `put` replaces, `get` maps a missing item to `nil`
-/// and `delete` treats a missing item as success, as the port contracts ask.
-/// `dataProtection` selects the data protection keychain, which access
-/// controls need; a build without its entitlement gets `Unsupported`.
-private enum Keychain {
-    static func put(service: String, account: String, data: Data, accessible: CFString) throws {
-        let query = itemQuery(service: service, account: account, dataProtection: false)
-        let attributes: [CFString: Any] = [kSecValueData: data, kSecAttrAccessible: accessible]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
-        if status == errSecItemNotFound {
-            try add(
-                service: service, account: account, data: data,
-                protection: [kSecAttrAccessible: accessible], dataProtection: false
-            )
-        } else {
-            try check(status)
-        }
-    }
-
-    static func add(
-        service: String, account: String, data: Data,
-        protection: [CFString: Any], dataProtection: Bool
-    ) throws {
-        var query = itemQuery(service: service, account: account, dataProtection: dataProtection)
-        query[kSecValueData] = data
-        query.merge(protection) { _, new in new }
-        try check(SecItemAdd(query as CFDictionary, nil))
-    }
-
-    static func get(
-        service: String, account: String, dataProtection: Bool = false,
-        extra: [CFString: Any] = [:]
-    ) throws -> Data? {
-        var query = itemQuery(service: service, account: account, dataProtection: dataProtection)
-        query[kSecReturnData] = true
-        query[kSecMatchLimit] = kSecMatchLimitOne
-        query.merge(extra) { _, new in new }
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound {
-            return nil
-        }
-        try check(status)
-        guard let data = result as? Data else {
-            throw PlatformStoreError.Unavailable(message: "keychain item holds no data")
-        }
-        return data
-    }
-
-    static func delete(service: String, account: String, dataProtection: Bool = false) throws {
-        let query = itemQuery(service: service, account: account, dataProtection: dataProtection)
-        let status = SecItemDelete(query as CFDictionary)
-        if status != errSecItemNotFound {
-            try check(status)
-        }
-    }
-
-    /// Whether this build carries the keychain access group the data
-    /// protection keychain needs. Read from the process's own signature: a
-    /// keychain query for a missing item answers "not found" before it checks
-    /// the entitlement, so it cannot tell.
-    static func dataProtectionAvailable() -> Bool {
-        guard let task = SecTaskCreateFromSelf(nil) else { return false }
-        let groups = SecTaskCopyValueForEntitlement(task, "keychain-access-groups" as CFString, nil)
-        return (groups as? [String])?.isEmpty == false
-    }
-
-    private static func itemQuery(
-        service: String, account: String, dataProtection: Bool
-    ) -> [CFString: Any] {
-        var query: [CFString: Any] = [
-            kSecClass: kSecClassGenericPassword,
-            kSecAttrService: service,
-            kSecAttrAccount: account,
-        ]
-        if dataProtection {
-            query[kSecUseDataProtectionKeychain] = true
-        }
-        return query
-    }
-
-    private static func check(_ status: OSStatus) throws {
-        switch status {
-        case errSecSuccess:
-            return
-        case errSecUserCanceled:
-            throw PlatformStoreError.Cancelled
-        case errSecMissingEntitlement:
-            throw PlatformStoreError.Unsupported
-        default:
-            let message = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
-            throw PlatformStoreError.Unavailable(message: message)
-        }
+        try Keychain.delete(service: service, account: account, scope: scope)
     }
 }

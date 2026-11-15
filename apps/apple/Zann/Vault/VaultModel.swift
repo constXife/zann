@@ -192,9 +192,9 @@ final class VaultModel: ObservableObject {
         let core = core
         guard let wanted = storageID else { return }
         let generation = contextGeneration
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try core.storageSyncState(storageId: wanted) }
-        }.value
+        }
         guard wanted == storageID, generation == contextGeneration, !switching else { return }
         if case .success(let state) = result { applySyncState(state) }
     }
@@ -282,7 +282,7 @@ final class VaultModel: ObservableObject {
             schedule.finished(ticket: ticket)
         }
         let core = core
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { () -> Synced in
                 if let wantedStorage {
                     let state = try core.storageSyncState(storageId: wantedStorage)
@@ -301,7 +301,7 @@ final class VaultModel: ObservableObject {
                 }
                 return .completed(changed: outcome.changesCommitted > 0)
             }
-        }.value
+        }
         await relay.finish()
         guard syncRunID == runID, syncingStorageID == storageID else { return }
         switch result {
@@ -341,36 +341,41 @@ final class VaultModel: ObservableObject {
     /// Reload the context on screen, never the vault a sync started from.
     /// If navigation supersedes this read, its completion drains the refresh.
     private func refreshSyncedContents(reloadDetail: Bool = true) async {
-        guard !refreshingSync, let refresh = syncRefreshContext, !switching else { return }
+        guard !refreshingSync, !switching else { return }
         refreshingSync = true
         defer { refreshingSync = false }
-        let wanted = refresh.storageID
-        guard wanted == storageID, contextReady else {
-            syncRefreshContext = nil
-            return
-        }
-        let generation = contextGeneration
-        let revision = listGeneration
-        let core = core
-        let shown = trimmedQuery
-        let loaded = items.count
-        let result = await Task.detached(priority: .userInitiated) {
-            Result { try VaultContextLoader.load(core, query: shown, keeping: loaded) }
-        }.value
-        guard generation == contextGeneration, !switching else { return }
-        syncRefreshContext = nil
-        switch result {
-        case .success(let contents):
-            if revision == listGeneration, shown == trimmedQuery {
-                apply(contents)
-                if reloadDetail, let selectedItemID { loadDetail(selectedItemID) }
-            } else {
-                // Search/pagination owns the newer list. Its revision must not
-                // prevent the first committed server/vault context appearing.
-                applyContext(contents)
-                categories = scope.map { categoryViews(counts: counts, scope: $0) } ?? []
+        while let refresh = syncRefreshContext {
+            guard !switching else { return }
+            guard refresh.storageID == storageID, contextReady else {
+                syncRefreshContext = nil
+                return
             }
-        case .failure(let failure): syncError = strings.message(for: failure)
+            // Consume before awaiting so a newer committed notice stays queued.
+            syncRefreshContext = nil
+            let generation = contextGeneration
+            let revision = listGeneration
+            let core = core
+            let shown = trimmedQuery
+            let loaded = items.count
+            let result = await BlockingCore.run {
+                Result { try VaultContextLoader.load(core, query: shown, keeping: loaded) }
+            }
+            guard generation == contextGeneration else { continue }
+            guard !switching else { return }
+            switch result {
+            case .success(let contents):
+                if revision == listGeneration, shown == trimmedQuery {
+                    apply(contents)
+                    if reloadDetail, let selectedItemID { loadDetail(selectedItemID) }
+                } else {
+                    // Keep the first catalog usable, then read for the latest
+                    // list revision instead of losing the committed update.
+                    applyContext(contents)
+                    categories = scope.map { categoryViews(counts: counts, scope: $0) } ?? []
+                    syncRefreshContext = SyncRefresh(storageID: storageID)
+                }
+            case .failure(let failure): syncError = strings.message(for: failure)
+            }
         }
     }
 
@@ -421,7 +426,7 @@ final class VaultModel: ObservableObject {
             Task { await refreshSyncedContents() }
         }
         let core = core
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { () -> Contents in
                 let previous = core.currentVaultId()
                 _ = try core.setCurrentVault(id: id)
@@ -432,7 +437,7 @@ final class VaultModel: ObservableObject {
                     throw error
                 }
             }
-        }.value
+        }
         switch result {
         case .success(let contents):
             error = nil
@@ -465,9 +470,9 @@ final class VaultModel: ObservableObject {
             Task { await refreshSyncedContents() }
         }
         let core = core
-        let outcome = await Task.detached(priority: .userInitiated) {
+        let outcome = await BlockingCore.run {
             VaultContextLoader.select(core, storage: target)
-        }.value
+        }
         switch outcome {
         case .refused(let failure):
             error = strings.message(for: failure)
@@ -523,9 +528,9 @@ final class VaultModel: ObservableObject {
         let core = core
         let wanted = storageID
         let token = selection
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try core.itemGet(id: id) }
-        }.value
+        }
         guard wanted == storageID, token == selection, !switching else { return }
         open { try ItemEditorModel.edit(try result.get()) }
     }
@@ -561,9 +566,9 @@ final class VaultModel: ObservableObject {
         let loaded = items.count
         let wanted = storageID
         let generation = contextGeneration
-        let result = await Task.detached(priority: .userInitiated) {
+        let result = await BlockingCore.run {
             Result { try VaultContextLoader.load(core, query: query, keeping: loaded) }
-        }.value
+        }
         guard wanted == storageID, generation == contextGeneration, !switching else { return false }
         switch result {
         case .success(let contents):
@@ -708,9 +713,9 @@ final class VaultModel: ObservableObject {
         search = Task { [weak self] in
             if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
             guard !Task.isCancelled else { return }
-            let result = await Task.detached(priority: .userInitiated) {
+            let result = await BlockingCore.run {
                 Result { try VaultContextLoader.page(core, query: wanted, cursor: nil, limit: itemsPageLimit) }
-            }.value
+            }
             guard let self, !Task.isCancelled else { return }
             self.search = nil
             self.searching = false
@@ -739,9 +744,9 @@ final class VaultModel: ObservableObject {
         let query = appliedQuery
         let core = core
         Task { [weak self] in
-            let result = await Task.detached(priority: .userInitiated) {
+            let result = await BlockingCore.run {
                 Result { try VaultContextLoader.page(core, query: query, cursor: cursor, limit: itemsPageLimit) }
-            }.value
+            }
             guard let self, generation == self.listGeneration else { return }
             self.loadingMore = false
             switch result {

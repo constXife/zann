@@ -1,0 +1,2 @@
+// Copy to Mobile.Local.xcconfig (ignored) and set your own Apple team.
+DEVELOPMENT_TEAM = ABCDE12345

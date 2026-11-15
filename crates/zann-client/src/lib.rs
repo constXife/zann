@@ -9,6 +9,8 @@ pub mod credentials;
 #[cfg(feature = "delivery")]
 pub mod delivery;
 #[cfg(feature = "remote")]
+mod http;
+#[cfg(feature = "remote")]
 #[allow(dead_code)]
 mod identity;
 #[cfg(feature = "app")]

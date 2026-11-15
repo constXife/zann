@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>$(ZANN_APP_GROUP)</string>
+    </array>
+    <key>keychain-access-groups</key>
+    <array>
+        <!-- Keep the OS default private; adapters must still select explicitly. -->
+        <string>$(ZANN_TOKEN_KEYCHAIN_ACCESS_GROUP)</string>
+        <string>$(ZANN_VAULT_KEYCHAIN_ACCESS_GROUP)</string>
+    </array>
+</dict>
+</plist>

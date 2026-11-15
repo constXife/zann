@@ -106,6 +106,45 @@ clients SHOULD use platform-native controls inside the same semantic regions.
 | Desktop medium | Sidebar visible | List + detail (split) | Primary area | Right rail visible | Top |
 | Desktop wide | Sidebar visible | List + detail (split) | Primary area | Right rail persistent | Top |
 
+## Apple mobile workspace (#275)
+
+- iPhone, compact iPad windows and accessibility Dynamic Type use a native
+  navigation stack: vault context -> searchable item list -> selected detail.
+  Back returns to the preceding region without clearing the selected item.
+- Regular iPad windows of at least 900 points use sidebar/list/detail columns.
+  This native container threshold reserves usable column widths; it does not
+  change category, filtering or item-selection policy in the shared core.
+- Storage and vault pickers precede categories/folders in the context region.
+  The list owns search and pagination. Create/edit, sync status, lock and
+  in-app settings are touch controls with at least 44-point hit regions.
+- One navigation state retains the compact route and first visible list item
+  while switching between columns and stack. Vault/item selection and the
+  editor draft remain in the existing shared Apple models. Opening settings or
+  rotating must not reconstruct those models or save/discard the draft.
+- The mobile editor is a full-screen form, centered at a comfortable width on
+  iPad, with scrolling fields and reachable Save/Cancel above the software
+  keyboard. It stays outside the adaptive column/stack branch. Connect/unlock
+  forms scroll within safe areas and do not impose desktop minimum widths.
+- Large text places labels above detail/editor values. Standard font metrics
+  and wrapping are preserved; touch targets and screen-reader names do not
+  depend on hover or a hardware keyboard. A masked value's accessibility value
+  is the shared fixed mask, until an explicit reveal.
+- Reveal/copy feedback resets on selection, focus loss, layout geometry change
+  and lock. Editor values survive geometry changes; only their temporary
+  reveal state resets. Auto-hide uses the configured shared device preference.
+- Mobile settings reuse the same device preference controls and persistence
+  as macOS. Desktop-only window, Dock and browser IPC controls stay on macOS.
+- Trash navigation uses shared category projections. The current local FFI
+  exposes no trash/restore mutation command; mobile does not add deletion
+  semantics to its layout layer.
+
+UI verification captures both families in portrait/landscape, scrolled lists,
+masked detail, editor drafts with a keyboard, accessibility text and settings.
+The Debug-only UI fixture uses a fresh temporary synthetic replica and the
+existing test ports; Release excludes it. CI retains screenshot attachments
+on successful runs as well as failures. Actual screenshot inspection and a
+VoiceOver/device pass remain acceptance work when no local iOS runtime exists.
+
 ## Transitions and Context Preservation
 
 - MUST: Keep selected vault and item when resizing/rotating.

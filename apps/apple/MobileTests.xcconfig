@@ -1,0 +1,4 @@
+#include "ZannCoreKit/Generated/BuildSettings.xcconfig"
+// Current Xcode's XCTest/XCUIAutomation frameworks require iOS 17.
+// This changes test runners only; the application floor remains package-owned.
+IPHONEOS_DEPLOYMENT_TARGET = 17.0

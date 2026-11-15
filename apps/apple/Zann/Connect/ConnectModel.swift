@@ -18,11 +18,12 @@ final class ConnectModel: ObservableObject {
     var methods: [AuthMethodFfi] { snapshot.methods }
     var registrationAvailable: Bool { snapshot.registrationAvailable }
     var serverName: String? { snapshot.serverName }
+    var canReopenBrowser: Bool { authorization.canReopen }
 
     private let flow: ConnectFlowFfi
     private let session: RemoteSession
     private let strings: Strings
-    private let openBrowser: (URL) -> Void
+    private let authorization: BrowserAuthorization
     private let copyBrowserUrl: (String) -> Void
     private let connected: (Connected) -> Void
     private var connection: PreparedConnectionFfi?
@@ -30,14 +31,14 @@ final class ConnectModel: ObservableObject {
     private var browser: OidcLoginFfi?
     private var operation: (FlowOperationFfi, SessionOperationFfi)?
 
-    init(session: RemoteSession, strings: Strings, openBrowser: @escaping (URL) -> Void,
+    init(session: RemoteSession, strings: Strings, browser: BrowserAuthorization,
          copyBrowserUrl: @escaping (String) -> Void, connected: @escaping (Connected) -> Void) {
         let flow = ConnectFlowFfi()
         self.flow = flow
         self.copyBrowserUrl = copyBrowserUrl
         self.session = session
         self.strings = strings
-        self.openBrowser = openBrowser
+        self.authorization = browser
         self.connected = connected
         self.snapshot = flow.snapshot()
     }
@@ -76,13 +77,13 @@ final class ConnectModel: ObservableObject {
         for effect in effects {
             switch effect {
             case .cancel(let id):
-                if operation?.0 == id { operation?.1.cancel(); operation = nil; browser = nil }
+                if operation?.0 == id { operation?.1.cancel(); authorization.cancel(); operation = nil; browser = nil }
             case .resetConnection:
                 connection = nil; challenge = nil; browser = nil
             case .openBrowser(let id, let value):
                 // The canonical OIDC owner validates the authorization URL.
                 if let url = URL(string: value) {
-                    openBrowser(url)
+                    authorization.reopen(url)
                 } else {
                     let message = strings.message(for: CoreError.InvalidArgument("invalid browser URL"))
                     _ = consume(flow.complete(completion: .failed(id: id, step: .oidcFinish, message: message)))
@@ -146,17 +147,24 @@ final class ConnectModel: ObservableObject {
             guard let connection else { await fail(id, .oidcStart, CoreError.InvalidArgument("missing prepared connection")); return }
             guard let operation = await newOperation(id, .oidcStart, timeout) else { return }
             let session = session
-            await run(id, .oidcStart, { try session.beginOidcLogin(connection: connection, operation: operation) }) { login in
+            let callback: OidcCallbackFfi
+            do { callback = try authorization.callback() }
+            catch { await fail(id, .oidcStart, error); return }
+            await run(id, .oidcStart, { try session.beginOidcLogin(connection: connection, operation: operation, callback: callback) }) { login in
                 self.browser = login
                 return .oidcStarted(id: id, url: login.authorizationUrl())
             }
         case .finishOidc(let id):
             guard flow.accepts(id: id, step: .oidcFinish) else { return }
             guard let browser, let connection else { await fail(id, .oidcFinish, CoreError.InvalidArgument("missing browser login")); return }
-            let session = session
-            await run(id, .oidcFinish, { try session.personalVaultStatus(access: browser.finish()).personalKeyEnvelopesPresent }) {
-                .oidcFinished(id: id, storageId: connection.storageId(), hasPersonalKeys: $0)
-            }
+            do {
+                let access = try await authorization.finish(browser)
+                guard flow.accepts(id: id, step: .oidcFinish) else { return }
+                let session = session
+                await run(id, .oidcFinish, { try session.personalVaultStatus(access: access).personalKeyEnvelopesPresent }) {
+                    .oidcFinished(id: id, storageId: connection.storageId(), hasPersonalKeys: $0)
+                }
+            } catch { await fail(id, .oidcFinish, error) }
         default:
             preconditionFailure("only work effects reach the executor")
         }
@@ -176,7 +184,7 @@ final class ConnectModel: ObservableObject {
                         _ work: @escaping () throws -> T,
                         _ complete: (T) -> ConnectCompletionFfi) async {
         guard flow.accepts(id: id, step: step) else { return }
-        let result = await Task.detached(priority: .userInitiated) { Result(catching: work) }.value
+        let result = await BlockingCore.run { Result(catching: work) }
         guard flow.accepts(id: id, step: step) else { return }
         switch result {
         case .success(let value): await perform(flow.complete(completion: complete(value)))

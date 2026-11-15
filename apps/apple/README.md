@@ -70,6 +70,200 @@ ZANN_REMOTE_URL=http://127.0.0.1:18081 cargo test -p zann-ffi --test remote_sync
 `project.yml` is the source of the Xcode project; `Zann.xcodeproj` is
 generated and ignored, so parallel branches never conflict on `.pbxproj`.
 
+## iPhone and iPad target (#273)
+
+Build the debug XCFramework with `--all-platforms` and generate the project as
+above, then select the `ZannMobile` scheme. One application supports both device families;
+its source list contains common models, connect/unlock and item detail UI, not
+AppKit, Carbon, desktop pairing or the daemon lifecycle. There are no production
+fake secret adapters or automatic fixture activation.
+
+`project.yml` defines the mobile bundle/App Group/DWK service/Keychain group
+identities once. XcodeGen generates the ignored `Mobile/Info.plist`; Xcode
+expands the same settings into that plist and `Mobile/ZannMobile.entitlements`.
+`ZannCoreKit/build-xcframework.sh` generates `Generated/BuildSettings.xcconfig`
+from `Package.swift`, so the application and Rust slices share the iOS 16 floor.
+Test runners alone use the iOS 17 XCTest floor in `MobileTests.xcconfig`.
+
+Run the app, shared composition tests, synthetic-replica smoke test and launch
+UI test on both device families using installed simulator runtimes:
+
+```bash
+bash apps/apple/test-mobile.sh
+```
+
+The script selects one iPhone and the iPad mini (A17 Pro) profile from the
+newest installed iOS runtime. It creates that exact mini simulator if needed,
+runs both destinations serially with a separate Xcode invocation and result
+bundle for each, and errors when the required runtime/profile is unavailable.
+This keeps the reference tablet aligned with the physical mini.
+It never downloads a runtime or substitutes another test platform. The Apple
+CI job runs it after macOS tests and retains mobile `.xcresult` bundles on every run.
+Blocking FFI effects use the shared `BlockingCore.run` Dispatch adapter so a
+network, storage or native-prompt wait cannot occupy Swift's cooperative pool.
+Operation admission and cancellation remain with the existing flow/core ports;
+CI tests run with a single cooperative worker to check forward progress.
+Test ports live in `DebugSupport/` and are compiled for tests and the explicit
+Debug UI-fixture host only; Release excludes their definitions. The replica
+fixture comes from the existing Rust `test-support` debug binding.
+The Debug unit-test host opens an empty scene so tests own every temporary
+core; this host is excluded from Release.
+
+`MobileWorkspaceTests` explicitly passes `--mobile-ui-fixture` to launch a
+fresh temporary replica and `--mobile-ui-large-text` for accessibility text.
+Neither argument activates test code in Release. The UI tests capture
+portrait/landscape navigation, scroll retention, masked detail, editor drafts
+with the software keyboard, settings and onboarding. CI exports the retained
+attachments as `mobile-ui-captures`; inspect those images before accepting the
+layout on both families. Local execution still requires an installed runtime.
+
+The local reference tablet is iPad mini (A17 Pro). The iPadOS 27.2 simulator
+passes the mobile suite, including keyboard/rotation draft retention,
+portrait/landscape scroll retention and accessibility text in the editor and
+settings. These simulator checks do not replace signed-device acceptance on
+the physical mini running iPadOS 27.0.1.
+
+For real-device HTTPS acceptance, run only `LiveConnectionTests` with
+`TEST_RUNNER_ZANN_LIVE_SERVER` set to the intended HTTPS server. Its native
+URLSession request checks system CA trust before the actual application's
+connect probe. It uses no fixture, passwords or vault mutations. iOS uses the
+system TLS backend for every shared-core HTTP client, so a private CA must be
+installed and explicitly trusted on the
+device. Apple's native TLS backend currently negotiates TLS 1.2.
+
+`LiveConnectionTests/testInteractiveSignInAndInitialSync` additionally requires
+`TEST_RUNNER_ZANN_LIVE_INTERACTIVE=1` and `TEST_RUNNER_ZANN_LIVE_ISSUER`.
+It opens the configured OIDC provider, while the device owner supplies
+credentials, master-password unlock and biometrics. It waits for a successful
+first sync, runs a manual sync and verifies that the success timestamp changes.
+Run this test individually on the paired device with
+`-collect-test-diagnostics never`; it does not create or edit vault records.
+
+Signed-device acceptance on iPad mini (A17 Pro), iPadOS 27.0.1, passed on
+2026-11-15 before the account/device key separation: system CA trust, Rauthy OIDC sign-in, initial record synchronization,
+Touch ID unlock after relaunch and manual sync with a new success timestamp.
+The integrated account/device key model requires fresh signed-device acceptance.
+Bidirectional edit propagation, offline behavior and the remaining lifecycle
+scenarios below still require separate device acceptance.
+
+## Adaptive workspace (#275)
+
+iPhone and narrow iPad windows use full-screen context/list/detail navigation.
+At regular widths of 900 points or more, iPad shows three native columns;
+accessibility text uses the stack. Context, selection, list bookmarks and
+the shared Rust editor draft survive that switch. Editing is a full-screen,
+scrolling form with Save/Cancel reachable above the keyboard. Settings reuse
+the macOS language, lock, clipboard, reveal and biometric preference controls.
+The layout contract is in `docs/ux/Layout-Responsive-Spec.md`.
+
+For a signed device build, copy `Mobile.Local.example.xcconfig` to
+`Mobile.Local.xcconfig`, set your Apple team, and register/enable the target's
+App Group and both Keychain access groups in Xcode. Select your connected
+iPhone/iPad and build `ZannMobile`. The local file is ignored; do not reuse the
+macOS signing override, which selects different entitlements.
+
+Before any Release build, regenerate bindings without test-support:
+
+```bash
+apps/apple/ZannCoreKit/build-xcframework.sh release --all-platforms
+xcodebuild build -project apps/apple/Zann.xcodeproj -scheme ZannMobile \
+  -configuration Release -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO
+```
+
+The mobile build phase rejects a Debug/Release mismatch with the generated
+Rust profile. CI also rejects fixture exports in release bindings and builds
+both device and simulator Release artifacts. The workspace preserves host
+build-tool symbols to avoid [Rust's Mach-O stripping bug](https://github.com/rust-lang/rust/issues/157750)
+on macOS 27; shipped Rust libraries keep their normal release profile.
+Regenerate `debug` bindings before returning to app tests. An unsigned build
+does not validate entitlements; signed acceptance requires a configured team.
+
+## Storage and mobile composition (#272)
+
+macOS keeps `Application Support/<app bundle identifier>/local.sqlite`, its
+existing bundle-identifier DWK service and the core-owned token namespaces.
+The platform composition resolves that root once for both core and preferences.
+The Rust native opener canonicalizes the database parent and owns Config v2,
+lock files and snapshots below that same root. No data is relocated.
+
+`MobileIdentity` requires four explicit target-configured values: App Group
+identifier, DWK service, vault Keychain access group and app-only token Keychain
+access group. App and future provider must use the same App Group, DWK service
+and vault group; the provider must not receive the app's token group entitlement.
+DWK account naming stays in the platform keystore; token service/account naming
+stays in the Rust credential owner. No identity comes from the extension's bundle ID.
+
+`MobileComposition` resolves only the requested App Group container, using
+`FileManager.containerURL(forSecurityApplicationGroupIdentifier:)` when the
+mobile target supplies the resolver. Its permanent relative client root is
+`Library/Application Support/Zann/`, containing `local.sqlite` and
+`preferences.json`. An unavailable container, unresolved identity setting or
+invalid root is an error, without a private-container fallback. Token and vault
+groups must differ; the token group cannot be the shared App Group itself.
+
+The mobile target supplies configuration and App Group entitlements. Its
+Keychain adapters apply the exact access group to
+every Keychain add/read/update/delete and let missing entitlements fail closed.
+The common opener never starts desktop IPC. Cross-process provider access,
+independent unlock and grant revocation remain #277; a shared directory alone
+does not establish their authorization or migration contract.
+
+`CompositionTests` uses temporary roots and in-memory ports to verify root and
+namespace selection, error propagation and the absence of desktop IPC.
+
+## Mobile authentication and lifecycle (#274)
+
+The iOS composition opens the configured App Group replica with the shared
+Keychain ports. The DWK uses `WhenPasscodeSetThisDeviceOnly` plus
+`biometryCurrentSet`; tokens use the distinct app-only group and
+`AfterFirstUnlockThisDeviceOnly`. Actual Keychain operations enforce each
+entitlement; iOS does not use macOS's `SecTask` API or substitute another store.
+The prompt reason comes from the shared language catalogue, and an active
+`LAContext` is invalidated when backgrounding cancels an unlock.
+
+Password registration/login, TOFU challenges, device-password setup/unlock and account-key enrollment
+and credential-aware logout use the existing Rust application facade. Logout
+locks locally first and retains the offline replica. The mobile workspace
+exposes manual sync and remembered biometric unlock alongside read/search/copy.
+The mobile unlock screen also offers server sign-in again; backing out returns
+to offline unlock without deleting the replica.
+
+For OIDC, register the exact generated `ZannOIDCRedirectURI` with the existing
+**public/native IdP client** using Authorization Code + PKCE S256. The default
+is `com.rlyeh.zann.mobile:/oidc/callback`; it derives from
+`ZANN_OIDC_CALLBACK_SCHEME` in `project.yml`. Keep the desktop loopback redirect
+policy for desktop clients. Do not add a client secret to the app or relax
+redirect/TLS rules. The Zann server's issuer/client ID configuration and HTTP
+API are unchanged; the IdP registration needs this additional redirect URI.
+
+`ASWebAuthenticationSession` receives the authorization URL and returns only
+its OS-delivered callback URI. Rust checks the exact redirect, unique query
+fields and state before exchanging the code with the same URI and verifier.
+Provider/Zann tokens and the PKCE verifier never enter Swift. The callback URI
+is transient and is never logged or persisted. The prepared login is consumed
+once; cancellation/deadline stops provider I/O, while the existing session owner
+retains its durable dispatch/commit rules. The system sheet uses the remaining
+Rust operation deadline and is dismissed on cancellation/backgrounding.
+
+UIKit installs an opaque window cover synchronously on loss of activity and
+resets transient reveal/password view state. Background invalidation happens
+before awaiting key cleanup. A late KDF/biometric result cannot reopen the UI;
+the core is closed again after it finishes. A bounded OS background execution
+lease gives cleanup time; auth recovery still tolerates process death.
+
+Mobile clipboard writes are local-only and carry the configured native
+expiration date, which works while the app is suspended. Generation/change-count
+checks protect a newer clipboard from old timers or foreground reconciliation.
+Configured clear-on-lock/exit effects run before suspension, without depending
+on a termination callback.
+
+Shared security tests cover clipboard ownership and the background/unlock race
+using temporary replicas and in-memory ports; Rust tests cover callback/state,
+PKCE exchange and cancellation. Device-only acceptance still requires a signed
+iPhone and iPad: password and OIDC-only servers, cancel/retry, Face ID/Touch ID,
+biometric enrollment changes, protected-data unavailability, app-switcher
+redaction, background/kill/relaunch and clipboard replacement across suspension.
+
 ## Signing and Touch ID
 
 Builds are ad-hoc signed by default (`Signing.xcconfig`), which is all CI and

@@ -16,6 +16,23 @@ a focused security review.
 
 The current surface covers:
 
+- Apple path/credential-port composition and blocking-FFI execution in `apps/apple/Zann/Composition/**`,
+  desktop service activation in `apps/apple/Zann/Platform/macOS/MacComposition.swift`,
+  and native secret adapters in `apps/apple/Zann/Keychain*.swift`;
+- Apple auth/unlock invalidation in `apps/apple/Zann/{AppModel.swift,Connect/**}`,
+  owned clipboard delivery in `apps/apple/Zann/Platform/Clipboard*.swift`,
+  and mobile system web-session/privacy lifecycle in `apps/apple/Mobile/**`;
+- Apple transient reveal state in `apps/apple/Zann/Platform/FieldRevealState.swift`,
+  security preference controls in `apps/apple/Zann/DevicePreferenceViews.swift`,
+  and masked field editing/copying in `apps/apple/Zann/Vault/{ItemDetailView,ItemEditorView,FieldEditorRow,ItemDetailFieldRow,CopyValueButton}.swift`;
+- compile-time isolation and temporary-replica activation of Apple UI-test
+  ports in `apps/apple/DebugSupport/**`;
+- OIDC callback transport, redirect/state/PKCE admission and provider request
+  cancellation in `crates/zann-client/src/oidc{.rs,/**}` and its opaque FFI
+  projection in `crates/zann-ffi/src/session/oidc.rs`;
+- mobile identity/signing configuration in `apps/apple/{project.yml,Mobile.xcconfig,Mobile/**}`
+  and fixture/profile selection in `apps/apple/ZannCoreKit/{build-xcframework.sh,check-build-profile.sh}`;
+
 - website origin parsing, PSL/equivalent-domain matching, login rules and fill
   admission in `crates/zann-autofill/**`, including the vendored data and pins;
 - local IPC authorization, replay protection, Noise/signature binding,

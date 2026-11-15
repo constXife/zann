@@ -70,10 +70,8 @@ platform_version() {
 package_json=$(swift package dump-package --package-path "$package_dir")
 export MACOSX_DEPLOYMENT_TARGET
 MACOSX_DEPLOYMENT_TARGET=$(platform_version macos)
-if [[ ${#targets[@]} -gt 1 ]]; then
-  export IPHONEOS_DEPLOYMENT_TARGET
-  IPHONEOS_DEPLOYMENT_TARGET=$(platform_version ios)
-fi
+export IPHONEOS_DEPLOYMENT_TARGET
+IPHONEOS_DEPLOYMENT_TARGET=$(platform_version ios)
 
 target_dir=$(cargo metadata --format-version 1 --no-deps | jq -r '.target_directory')
 
@@ -88,6 +86,12 @@ done
 
 rm -rf "$generated"
 mkdir -p "$generated/Swift" "$generated/headers"
+cat > "$generated/BuildSettings.xcconfig" <<EOF
+// Generated from Package.swift and the requested Rust build profile.
+MACOSX_DEPLOYMENT_TARGET = $MACOSX_DEPLOYMENT_TARGET
+IPHONEOS_DEPLOYMENT_TARGET = $IPHONEOS_DEPLOYMENT_TARGET
+ZANN_CORE_BUILD_PROFILE = $profile
+EOF
 bindings=$(mktemp -d)
 trap 'rm -rf "$bindings"' EXIT
 

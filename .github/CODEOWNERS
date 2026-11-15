@@ -1,4 +1,25 @@
 # Audit-surface owners
+/apps/apple/Zann/Composition/ @constXife
+/apps/apple/Zann/Platform/macOS/MacComposition.swift @constXife
+/apps/apple/Zann/KeychainStores.swift @constXife
+/apps/apple/Zann/Keychain.swift @constXife
+/apps/apple/Zann/AppModel.swift @constXife
+/apps/apple/Zann/Connect/ @constXife
+/apps/apple/Zann/Platform/Clipboard.swift @constXife
+/apps/apple/Zann/Platform/ClipboardController.swift @constXife
+/apps/apple/Zann/DevicePreferenceViews.swift @constXife
+/apps/apple/Zann/Platform/FieldRevealState.swift @constXife
+/apps/apple/Zann/Vault/ItemDetailView.swift @constXife
+/apps/apple/Zann/Vault/ItemEditorView.swift @constXife
+/apps/apple/Zann/Vault/FieldEditorRow.swift @constXife
+/apps/apple/Zann/Vault/ItemDetailFieldRow.swift @constXife
+/apps/apple/Zann/Vault/CopyValueButton.swift @constXife
+/apps/apple/DebugSupport/ @constXife
+/apps/apple/project.yml @constXife
+/apps/apple/Mobile.xcconfig @constXife
+/apps/apple/Mobile/ @constXife
+/apps/apple/ZannCoreKit/build-xcframework.sh @constXife
+/apps/apple/ZannCoreKit/check-build-profile.sh @constXife
 /crates/zann-ui-core/src/generator/ @constXife
 /crates/zann-ffi/src/generator.rs @constXife
 /crates/zann-autofill/ @constXife

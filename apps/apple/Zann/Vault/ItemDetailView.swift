@@ -60,10 +60,11 @@ private struct ItemDetailContent: View {
     let preferences: DevicePreferencesFfi
     let revealAll: Bool
     let selectionGeneration: Int
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dynamicTypeSize) private var textSize
 
     @State private var stateGeneration: Int?
-    @State private var revealTasks: [Int: Task<Void, Never>] = [:]
-    @State private var revealed: Set<Int> = []
+    @StateObject private var reveal = FieldRevealState()
     @State private var copied: Int?
     @State private var copyFeedbackTask: Task<Void, Never>?
     /// Below this width a label beside its value leaves the value too little
@@ -92,12 +93,12 @@ private struct ItemDetailContent: View {
                             ItemDetailFieldRow(
                                 field: field,
                                 label: strings.fieldLabel(field.labelKey),
-                                compact: compact,
-                                revealed: (stateGeneration == selectionGeneration && revealed.contains(index)) || revealAll,
+                                compact: compact || textSize.isAccessibilitySize,
+                                revealed: (stateGeneration == selectionGeneration && reveal.revealed.contains(index)) || revealAll,
                                 copied: stateGeneration == selectionGeneration && copied == index,
                                 strings: strings,
                                 copyFeedback: copyFeedback,
-                                revealHelp: strings(stateGeneration == selectionGeneration && revealed.contains(index) ? "common.hide" : "common.reveal"),
+                                revealHelp: strings(stateGeneration == selectionGeneration && reveal.revealed.contains(index) ? "common.hide" : "common.reveal"),
                                 onCopy: { copy($0, index: index) },
                                 onToggleReveal: { toggleReveal(index) }
                             )
@@ -106,11 +107,11 @@ private struct ItemDetailContent: View {
                     .id(detail.id)
                     .background(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color(nsColor: .controlBackgroundColor))
+                            .fill(Color.zannPanelBackground)
                     )
                     .overlay(
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .strokeBorder(Color(nsColor: .separatorColor))
+                            .strokeBorder(Color.zannSeparator)
                     )
                     .onGeometryChange(for: Bool.self) { proxy in
                         proxy.size.width < Self.compactWidth
@@ -122,16 +123,16 @@ private struct ItemDetailContent: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .onChange(of: selectionGeneration) { _ in resetInteractions() }
+        .onChange(of: scenePhase) { if $0 != .active { resetInteractions() } }
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { _ in resetInteractions() }
         .onDisappear { resetInteractions() }
     }
 
     private func resetInteractions() {
         stateGeneration = selectionGeneration
-        revealed.removeAll()
+        reveal.reset()
         copied = nil
         copyFeedbackTask?.cancel()
-        for task in revealTasks.values { task.cancel() }
-        revealTasks.removeAll()
     }
 
     private var copyFeedback: String {
@@ -166,20 +167,6 @@ private struct ItemDetailContent: View {
     /// The eye button holds for `auto_hide_reveal_seconds`, then masks again.
     private func toggleReveal(_ index: Int) {
         if stateGeneration != selectionGeneration { resetInteractions() }
-        revealTasks[index]?.cancel()
-        guard revealed.insert(index).inserted else {
-            revealed.remove(index)
-            return
-        }
-        let seconds = preferences.autoHideRevealSeconds
-        guard seconds > 0 else { return }
-        let generation = selectionGeneration
-        let expectedGeneration = $stateGeneration
-        let revealedFields = $revealed
-        revealTasks[index] = Task {
-            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
-            guard !Task.isCancelled, expectedGeneration.wrappedValue == generation else { return }
-            revealedFields.wrappedValue.remove(index)
-        }
+        reveal.toggle(index, seconds: preferences.autoHideRevealSeconds)
     }
 }

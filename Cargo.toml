@@ -22,3 +22,9 @@ exclude = [
   "tools/mock-server",
 ]
 resolver = "2"
+
+# Cargo's debuginfo stripping can produce host proc-macro dylibs rejected by
+# macOS 27's loader (rust-lang/rust#157750). Preserve these build tools;
+# shipped libraries retain their normal release profile.
+[profile.release.build-override]
+strip = "none"

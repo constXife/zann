@@ -35,7 +35,7 @@ final class ConnectTests: XCTestCase {
             self.cores[name] = core
             return (core, keystore)
         }, preferences: { PreferencesFile(url: preferences) }, systemLanguage: "en",
-        openBrowser: { _ in })
+        browser: .loopback(open: { _ in }))
     }
 
     private func enrollFreshDevice(_ model: AppModel, accountPassword: String, existing: Bool) async {

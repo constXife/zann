@@ -1,5 +1,6 @@
 import SwiftUI
-import ZannCoreKit
+// UniFFI 0.28's Rust Arc handles predate Swift Sendable annotations.
+@preconcurrency import ZannCoreKit
 
 /// The core validates and commits the replacement; the form only confirms it.
 struct UnlockPasswordSettings: View {
@@ -48,7 +49,12 @@ struct UnlockPasswordSettings: View {
         }
         .textFieldStyle(.roundedBorder)
         .padding(24)
+
+        #if os(iOS)
+        .frame(maxWidth: 420)
+        #else
         .frame(width: 420)
+        #endif
         .onDisappear { clear(); message = nil }
     }
 
@@ -64,7 +70,7 @@ struct UnlockPasswordSettings: View {
         Task {
             defer { saving = false }
             do {
-                try await Task.detached { try core.changeUnlockPassword(current: old, replacement: new) }.value
+                try await BlockingCore.run { Result { try core.changeUnlockPassword(current: old, replacement: new) } }.get()
                 message = strings("unlock.passwordChanged")
             } catch {
                 message = strings.message(for: error)

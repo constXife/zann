@@ -1,6 +1,10 @@
 # XcodeGen spec for the Apple shell. Zann.xcodeproj is generated from this
 # file (`xcodegen --spec apps/apple/project.yml`) and is not committed.
 name: Zann
+fileGroups:
+  - Signing.xcconfig
+  - Mobile.xcconfig
+  - MobileTests.xcconfig
 options:
   createIntermediateGroups: true
 packages:
@@ -40,6 +44,7 @@ targets:
     deploymentTarget: "14.0"
     sources:
       - ZannTests
+      - DebugSupport
     dependencies:
       # ZannCoreKit comes from the host app; linking it here too would load a
       # second copy of the Rust core into the test process.
@@ -51,4 +56,146 @@ targets:
         SWIFT_VERSION: "5.0"
         CODE_SIGN_IDENTITY: "-"
         CODE_SIGN_STYLE: Manual
+        ARCHS: arm64
+  ZannMobile:
+    type: application
+    platform: iOS
+    info:
+      path: Mobile/Info.plist
+      properties:
+        CFBundleDisplayName: Zann
+        ZannAppGroup: $(ZANN_APP_GROUP)
+        ZannVaultKeychainService: $(ZANN_VAULT_KEYCHAIN_SERVICE)
+        ZannVaultKeychainAccessGroup: $(ZANN_VAULT_KEYCHAIN_ACCESS_GROUP)
+        ZannTokenKeychainAccessGroup: $(ZANN_TOKEN_KEYCHAIN_ACCESS_GROUP)
+        ZannOIDCRedirectURI: $(ZANN_OIDC_REDIRECT_URI)
+        CFBundleURLTypes:
+          - CFBundleURLName: $(PRODUCT_BUNDLE_IDENTIFIER).oidc
+            CFBundleURLSchemes: [$(ZANN_OIDC_CALLBACK_SCHEME)]
+        NSFaceIDUsageDescription: Unlock your encrypted Zann vault with Face ID.
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    sources:
+      - Mobile
+      - DebugSupport
+      - Zann/Composition
+      - Zann/PreferencesFile.swift
+      - Zann/WelcomeIntro.swift
+      - Zann/WelcomeView.swift
+      - Zann/AppModel.swift
+      - Zann/CoreErrorMessage.swift
+      - Zann/Strings.swift
+      - Zann/DevicePreferenceViews.swift
+      - Zann/RecoveryModel.swift
+      - Zann/RecoveryView.swift
+      - Zann/UnlockPasswordSettings.swift
+      - Zann/MasterPasswordView.swift
+      - Zann/KeychainStores.swift
+      - Zann/Keychain.swift
+      - Zann/Connect
+      - Zann/Platform/ClipboardController.swift
+      - Zann/Platform/Colors.swift
+      - Zann/Platform/MobileNavigation.swift
+      - Zann/Platform/FieldRevealState.swift
+      - Zann/Platform/TouchTarget.swift
+      - path: Zann/Vault
+        includes:
+          - VaultModel.swift
+          - ItemEditorModel.swift
+          - ItemEditorView.swift
+          - ItemEditorLocation.swift
+          - FieldEditorRow.swift
+          - GeneratorView.swift
+          - ItemDetailLoader.swift
+          - VaultContextLoader.swift
+          - SyncCommitRelay.swift
+          - SyncRecoveryActions.swift
+          - SyncIndicatorButton.swift
+          - VaultContextHeader.swift
+          - ItemDetailView.swift
+          - ItemDetailFieldRow.swift
+          - CopyValueButton.swift
+          - TotpValue.swift
+          - Symbols.swift
+    configFiles:
+      Debug: Mobile.xcconfig
+      Release: Mobile.xcconfig
+    dependencies:
+      - package: ZannCoreKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rlyeh.zann.mobile
+        PRODUCT_NAME: ZannMobile
+        MARKETING_VERSION: 0.1.0
+        CURRENT_PROJECT_VERSION: 1
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: false
+        SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD: false
+        SWIFT_VERSION: "5.0"
+        ARCHS: arm64
+        ZANN_APP_GROUP: group.com.rlyeh.zann.mobile
+        ZANN_VAULT_KEYCHAIN_SERVICE: com.rlyeh.zann.mobile.unlock
+        ZANN_VAULT_KEYCHAIN_ACCESS_GROUP: $(AppIdentifierPrefix)com.rlyeh.zann.mobile.vault
+        ZANN_TOKEN_KEYCHAIN_ACCESS_GROUP: $(AppIdentifierPrefix)com.rlyeh.zann.mobile
+        ZANN_OIDC_CALLBACK_SCHEME: $(PRODUCT_BUNDLE_IDENTIFIER)
+        ZANN_OIDC_REDIRECT_URI: $(ZANN_OIDC_CALLBACK_SCHEME):/oidc/callback
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: $(inherited) DEBUG ZANN_UI_FIXTURE_HOST
+    preBuildScripts:
+      - name: Verify Rust build profile
+        script: bash "$SRCROOT/ZannCoreKit/check-build-profile.sh"
+        basedOnDependencyAnalysis: false
+    scheme:
+      testTargets:
+        - ZannMobileTests
+        - ZannMobileUITests
+  ZannMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - MobileTests
+      - DebugSupport
+      - ZannTests/CompositionTests.swift
+      - ZannTests/MobileSecurityTests.swift
+      - ZannTests/MobileNavigationTests.swift
+      - ZannTests/ItemDetailLoaderTests.swift
+      - ZannTests/VaultModelTests.swift
+    configFiles:
+      Debug: MobileTests.xcconfig
+      Release: MobileTests.xcconfig
+    dependencies:
+      - target: ZannMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rlyeh.zann.mobile.tests
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_VERSION: "5.0"
+        ARCHS: arm64
+  ZannMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - MobileUITests
+    configFiles:
+      Debug: MobileTests.xcconfig
+      Release: MobileTests.xcconfig
+    dependencies:
+      - target: ZannMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rlyeh.zann.mobile.uitests
+        GENERATE_INFOPLIST_FILE: true
+        SWIFT_VERSION: "5.0"
         ARCHS: arm64

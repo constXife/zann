@@ -117,7 +117,7 @@ private final class BootstrapCore: UXDelayedCore {
         let core = try XCTUnwrap(core)
         let app = AppModel(opening: { (core, MemoryKeystore()) },
             preferences: { PreferencesFile(url: self.directory.appendingPathComponent("prefs.json")) },
-            systemLanguage: "en", openBrowser: { _ in })
+            systemLanguage: "en", browser: .loopback(open: { _ in }))
         app.startConnecting()
         await app.connected(.init(storageID: try XCTUnwrap(core.currentStorageId()), hasPersonalKeys: true))
         let unlock = Task { await app.submit(password: "fixture master password", mode: .unlock) }
@@ -151,7 +151,7 @@ private final class BootstrapCore: UXDelayedCore {
         _ = try bootstrap.lock()
         let app = AppModel(opening: { (bootstrap, MemoryKeystore()) },
             preferences: { PreferencesFile(url: self.directory.appendingPathComponent("bootstrap.json")) },
-            systemLanguage: "en", openBrowser: { _ in })
+            systemLanguage: "en", browser: .loopback(open: { _ in }))
         await app.submit(password: "fixture master password", mode: .unlock)
         await fulfillment(of: [started], timeout: 2)
         XCTAssertEqual(app.screen, .vault)
