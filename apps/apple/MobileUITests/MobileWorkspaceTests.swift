@@ -102,19 +102,27 @@ final class MobileWorkspaceTests: XCTestCase {
         let app = launchFixture()
         app.buttons["workspace.settings"].tap()
         let snapshot = app.buttons["maintenance.snapshot"]
-        for _ in 0..<8 where !snapshot.isHittable { app.swipeUp() }
-        XCTAssertTrue(snapshot.isHittable)
+        for _ in 0..<8 where !fullyVisible(snapshot, in: app) { app.swipeUp() }
+        XCTAssertTrue(fullyVisible(snapshot, in: app))
+        let rows = app.staticTexts.matching(identifier: "maintenance.snapshotResult")
+        XCTAssertTrue(rows.firstMatch.waitForExistence(timeout: 10))
+        let previousCount = rows.count
         snapshot.tap()
-        XCTAssertTrue(app.staticTexts["maintenance.snapshotResult"].firstMatch.waitForExistence(timeout: 10))
+        // An existing automatic snapshot does not prove the manual one ended.
+        expectation(for: NSPredicate { _, _ in rows.count == previousCount + 1 }, evaluatedWith: app)
+        waitForExpectations(timeout: 10)
         let verify = app.buttons["maintenance.verify"]
-        for _ in 0..<4 where !verify.isHittable { app.swipeUp() }
+        for _ in 0..<4 where !fullyVisible(verify, in: app) { app.swipeUp() }
+        XCTAssertTrue(fullyVisible(verify, in: app))
+        XCTAssertTrue(verify.isEnabled)
         verify.tap()
         let result = app.staticTexts["maintenance.verifyResult"]
         XCTAssertTrue(result.waitForExistence(timeout: 10))
         XCTAssertEqual(result.label, "Verification completed")
         capture(app, "maintenance-verification")
         let export = app.buttons["maintenance.export"]
-        for _ in 0..<8 where !export.isHittable { app.swipeDown() }
+        for _ in 0..<8 where !fullyVisible(export, in: app) { app.swipeDown() }
+        XCTAssertTrue(fullyVisible(export, in: app))
         export.tap()
         let warning = app.alerts["Plain JSON Export"]
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
@@ -157,6 +165,11 @@ final class MobileWorkspaceTests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["workspace.create"].waitForExistence(timeout: 15))
         return app
+    }
+
+    private func fullyVisible(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        // isHittable can be true for a sliver clipped at the sheet's edge.
+        element.isHittable && app.windows.firstMatch.frame.insetBy(dx: 0, dy: 44).contains(element.frame)
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
