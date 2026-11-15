@@ -1,6 +1,10 @@
 import XCTest
 import ZannCoreKit
+#if os(iOS)
+@testable import ZannMobile
+#else
 @testable import Zann
+#endif
 
 /// The shared fixture creates and enrolls an independent synthetic account key.
 func seedStorageContext(core: CoreFacade) throws -> String {

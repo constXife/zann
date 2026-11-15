@@ -117,7 +117,7 @@ fn retention_drops_whatever_has_aged_out() {
 #[test]
 fn a_vault_with_no_snapshots_is_always_due() {
     let root = temp_root();
-    assert!(is_due(&root, Duration::from_secs(3600)));
+    assert!(is_due(&root, Duration::from_secs(3600)).expect("due check"));
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -129,7 +129,7 @@ async fn a_recent_snapshot_means_nothing_is_due() {
         .await
         .expect("snapshot");
 
-    assert!(!is_due(&root, Duration::from_secs(3600)));
+    assert!(!is_due(&root, Duration::from_secs(3600)).expect("due check"));
     assert!(
         create_if_due(
             &pool,
@@ -144,6 +144,25 @@ async fn a_recent_snapshot_means_nothing_is_due() {
     );
 
     let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test]
+async fn automatic_snapshot_reports_listing_failure_instead_of_skipping() {
+    let root = temp_root();
+    let pool = seeded_pool(&root).await;
+    std::fs::write(snapshots_dir(&root), b"not a directory").expect("block snapshot directory");
+    let error = create_if_due(
+        &pool,
+        &root,
+        Duration::from_secs(3600),
+        &RetentionPolicy::default(),
+    )
+    .await
+    .expect_err("listing failure must reach the native caller");
+    assert_eq!(error.kind, "snapshot_list_failed");
+    assert!(std::error::Error::source(&error).is_some());
+    pool.close().await;
+    std::fs::remove_dir_all(root).expect("cleanup");
 }
 
 /// Marker rows, so a restore can be seen to have actually moved the data

@@ -98,6 +98,35 @@ final class MobileWorkspaceTests: XCTestCase {
         capture(app, "list-scrolled-landscape")
     }
 
+    func testMaintenanceSnapshotVerifyAndExportCancellation() {
+        let app = launchFixture()
+        app.buttons["workspace.settings"].tap()
+        let snapshot = app.buttons["maintenance.snapshot"]
+        for _ in 0..<8 where !snapshot.isHittable { app.swipeUp() }
+        XCTAssertTrue(snapshot.isHittable)
+        snapshot.tap()
+        XCTAssertTrue(app.staticTexts["maintenance.snapshotResult"].firstMatch.waitForExistence(timeout: 10))
+        let verify = app.buttons["maintenance.verify"]
+        for _ in 0..<4 where !verify.isHittable { app.swipeUp() }
+        verify.tap()
+        let result = app.staticTexts["maintenance.verifyResult"]
+        XCTAssertTrue(result.waitForExistence(timeout: 10))
+        XCTAssertEqual(result.label, "Verification completed")
+        capture(app, "maintenance-verification")
+        let export = app.buttons["maintenance.export"]
+        for _ in 0..<8 where !export.isHittable { app.swipeDown() }
+        export.tap()
+        let warning = app.alerts["Plain JSON Export"]
+        XCTAssertTrue(warning.waitForExistence(timeout: 5))
+        warning.buttons["Export JSON"].tap()
+        let cancel = app.buttons["Cancel"].firstMatch
+        XCTAssertTrue(cancel.waitForExistence(timeout: 10))
+        capture(app, "maintenance-files-export")
+        cancel.tap()
+        XCTAssertTrue(export.waitForExistence(timeout: 5))
+        XCTAssertTrue(export.isEnabled)
+    }
+
     func testConnectAndUnlockFormsWithSoftwareKeyboard() {
         let app = XCUIApplication()
         app.launchArguments += ["--mobile-ui-large-text"]

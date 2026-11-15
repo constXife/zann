@@ -818,5 +818,14 @@
   "keyboard": {
     "capsLock": "Caps Lock is on",
     "unavailable": "Keyboard status unavailable"
+  },
+  "maintenance": {
+    "snapshotCreate": "Create encrypted snapshot",
+    "snapshotHelp": "Local encrypted snapshots include pending changes. Zann checks for a daily snapshot at launch and when returning to the foreground, removing older snapshots automatically. Snapshots require their original device unlock password.",
+    "verifyTitle": "Integrity verification",
+    "verifyAction": "Verify local data",
+    "verifyOK": "Verification completed",
+    "verifyProblems": "Verification found problems",
+    "verifyCounts": "{items} of {checked} items readable · {skipped} vaults skipped"
   }
 }

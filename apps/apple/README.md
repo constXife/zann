@@ -185,6 +185,15 @@ on macOS 27; shipped Rust libraries keep their normal release profile.
 Regenerate `debug` bindings before returning to app tests. An unsigned build
 does not validate entitlements; signed acceptance requires a configured team.
 
+## Offline use, maintenance and release gate (#276)
+
+Stage 1 maintenance, offline/foreground regression coverage and the remaining
+signed-device release gate are tracked in
+[device-validation.md](device-validation.md). Settings now exposes the canonical
+JSON export, encrypted snapshots and integrity verification on both Apple
+platforms. Automatic snapshots run at launch and foreground opportunities;
+foreground sync and post-edit debounce retain canonical scheduler admission.
+
 ## Storage and mobile composition (#272)
 
 macOS keeps `Application Support/<app bundle identifier>/local.sqlite`, its

@@ -21,9 +21,6 @@ use crate::i18n::{t, t_args};
 /// How many items a single `items_list` call pages in.
 pub const PAGE_LIMIT: u32 = 200;
 
-/// How stale the newest snapshot may get before start-up takes another.
-const SNAPSHOT_MAX_AGE_HOURS: u32 = 24;
-
 pub type Facade = Arc<dyn LocalVaultService>;
 
 /// A page of items plus the totals the nav bar badges need.
@@ -44,7 +41,9 @@ pub fn open_at(location: &DatabaseLocation) -> Result<(Facade, AppStatus), Strin
     // without needing the key. Deliberately not fatal: failing to take a
     // snapshot is a reason to tell someone later, never a reason to refuse to
     // open the vault.
-    if let Err(err) = facade.snapshot_create_if_due(SNAPSHOT_MAX_AGE_HOURS, None) {
+    if let Err(err) =
+        facade.snapshot_create_if_due(zann_client::app::local::AUTO_SNAPSHOT_MAX_AGE_HOURS, None)
+    {
         eprintln!("zann: could not take a snapshot: {err}");
     }
 

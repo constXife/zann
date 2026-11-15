@@ -6,6 +6,11 @@ use std::time::Instant;
 
 use zann_client::app::local::{AutoSyncSchedule, AutoSyncTicket};
 
+#[uniffi::export]
+pub fn auto_snapshot_max_age_hours() -> u32 {
+    zann_client::app::local::AUTO_SNAPSHOT_MAX_AGE_HOURS
+}
+
 /// Admission for one sync; hand it back to `finished`.
 #[derive(uniffi::Object)]
 pub struct AutoSyncTicketFfi(AutoSyncTicket);
@@ -34,6 +39,10 @@ impl AutoSyncScheduleFfi {
 
     pub fn locked(&self) {
         self.with(AutoSyncSchedule::locked);
+    }
+
+    pub fn foregrounded(&self) {
+        self.with(|schedule| schedule.foregrounded(Instant::now()));
     }
 
     /// A local write committed.

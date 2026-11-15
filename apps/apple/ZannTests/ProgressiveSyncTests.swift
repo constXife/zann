@@ -1,6 +1,10 @@
 import XCTest
 import ZannCoreKit
+#if os(iOS)
+@testable import ZannMobile
+#else
 @testable import Zann
+#endif
 
 /// Holds the network between durable catalog/page publications.
 private final class ProgressiveCore: UXDelayedCore {

@@ -238,18 +238,16 @@ pub async fn create(
 
 /// Whether the newest snapshot is older than `max_age`, i.e. whether one is due.
 /// A vault with no snapshots at all is always due.
-pub fn is_due(root: &Path, max_age: Duration) -> bool {
-    let Ok(snapshots) = list(root) else {
-        return false;
-    };
+pub fn is_due(root: &Path, max_age: Duration) -> Result<bool, SnapshotError> {
+    let snapshots = list(root)?;
     let Some(newest) = snapshots.first() else {
-        return true;
+        return Ok(true);
     };
-    let Ok(created) = chrono::DateTime::parse_from_rfc3339(&newest.created_at) else {
-        return true;
-    };
+    let created = chrono::DateTime::parse_from_rfc3339(&newest.created_at)
+        .map_err(|err| SnapshotError::source("snapshot_timestamp_invalid", err))?;
     let age = chrono::Utc::now().signed_duration_since(created.with_timezone(&chrono::Utc));
-    age.to_std().map(|age| age >= max_age).unwrap_or(false)
+    // A future-dated snapshot has not aged out yet.
+    Ok(age.to_std().is_ok_and(|age| age >= max_age))
 }
 
 /// Take a snapshot only if the newest one has aged out. Returns `None` when one
@@ -264,7 +262,7 @@ pub async fn create_if_due(
     max_age: Duration,
     policy: &RetentionPolicy,
 ) -> Result<Option<Snapshot>, SnapshotError> {
-    if !is_due(root, max_age) {
+    if !is_due(root, max_age)? {
         return Ok(None);
     }
     create(pool, root, policy).await.map(Some)
