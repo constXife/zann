@@ -127,11 +127,14 @@ final class MobileWorkspaceTests: XCTestCase {
         let warning = app.alerts["Plain JSON Export"]
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
         warning.buttons["Export JSON"].tap()
-        let cancel = app.buttons["Cancel"].firstMatch
+        // The system picker exposes Cancel as Other on some runtimes.
+        let cancel = app.descendants(matching: .any).matching(identifier: "Cancel").firstMatch
         XCTAssertTrue(cancel.waitForExistence(timeout: 10))
         capture(app, "maintenance-files-export")
         cancel.tap()
-        XCTAssertTrue(export.waitForExistence(timeout: 5))
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: cancel)
+        expectation(for: NSPredicate { _, _ in self.fullyVisible(export, in: app) }, evaluatedWith: app)
+        waitForExpectations(timeout: 5)
         XCTAssertTrue(export.isEnabled)
     }
 
