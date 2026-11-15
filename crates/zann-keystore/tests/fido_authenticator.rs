@@ -24,18 +24,24 @@ fn enrols_derives_and_detects_the_authenticator() {
     let salt: [u8; 32] = rand::random();
     let authenticator = fido::CtapHidAuthenticator;
     let credential = authenticator.create_credential(salt).expect("touch 1");
-    let enrolled_key = authenticator.derive_dwk(&credential).expect("touch 2");
+    let enrolled_key = authenticator
+        .derive_dwk(&credential, zann_keystore::HardwareVerification::Presence)
+        .expect("touch 2");
     assert!(!credential.credential_id.is_empty());
 
     eprintln!("touch the key to derive");
-    let first = authenticator.derive_dwk(&credential).expect("derive");
+    let first = authenticator
+        .derive_dwk(&credential, zann_keystore::HardwareVerification::Presence)
+        .expect("derive");
     assert!(
         first == enrolled_key,
         "enrolment must hand back the same key a later unlock derives"
     );
 
     eprintln!("touch the key to derive again");
-    let second = authenticator.derive_dwk(&credential).expect("derive again");
+    let second = authenticator
+        .derive_dwk(&credential, zann_keystore::HardwareVerification::Presence)
+        .expect("derive again");
     assert!(first == second, "the DWK must be reproducible");
 
     // These presence probes require no touch.
@@ -61,7 +67,7 @@ fn enrols_derives_and_detects_the_authenticator() {
         salt: rand::random(),
     };
     let derived = authenticator
-        .derive_dwk(&other_salt)
+        .derive_dwk(&other_salt, zann_keystore::HardwareVerification::Presence)
         .expect("derive with another salt");
     assert!(
         first != derived,

@@ -254,3 +254,19 @@ passkeys. Vault `v1` envelopes, sync checkpoints and keyring transitions are
 unchanged. Regression coverage includes standard RFC/W3C/CTAP vectors and two
 independent offline credential copies; live provider and export qualification
 remain #292–#294, #297 and #298.
+
+### Plaintext export step-up (#297)
+
+`zann-client::app::local::export`, `zann-client-sqlite::local_vault::{export,export_file}`,
+`maintenance::private_output` and `zann-ffi::export` own the proof-to-publication
+boundary. A fresh local factor mints one opaque 120-second permit tied to the
+current root, keyring, context generation, policy and cancellable operation.
+The default policy accepts the device password, an enrolled hardware key with
+presence/PIN, or an available enrolled biometric key with a fresh OS prompt.
+Strict policy requires password plus hardware/biometrics and explicitly refuses
+last-factor removal. Missing or malformed policy metadata fails closed.
+
+Review proof replay/expiry, cancellation during prompts and SQLite waits, lock
+and key eviction, strict factor removal, redacted PIN/password errors, and atomic
+0600 publication with failed-output cleanup. Shells show the plaintext warning
+and local challenge before any export file or destination picker is opened.

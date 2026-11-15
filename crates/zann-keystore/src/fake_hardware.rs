@@ -1,7 +1,9 @@
 //! Deterministic test double, opt-in via `test-support`. Never a production backend.
 use std::sync::Mutex;
 
-use crate::{AuthenticatorInfo, FidoError, HardwareAuthenticator, HardwareCredential};
+use crate::{
+    AuthenticatorInfo, FidoError, HardwareAuthenticator, HardwareCredential, HardwareVerification,
+};
 
 pub struct FakeHardwareAuthenticator {
     state: Mutex<State>,
@@ -14,6 +16,7 @@ struct State {
     next_create_error: Option<FidoError>,
     next_derive_error: Option<FidoError>,
     touches: usize,
+    pin: Option<zeroize::Zeroizing<String>>,
 }
 
 impl FakeHardwareAuthenticator {
@@ -27,6 +30,7 @@ impl FakeHardwareAuthenticator {
                 next_create_error: None,
                 next_derive_error: None,
                 touches: 0,
+                pin: None,
             }),
         }
     }
@@ -55,6 +59,10 @@ impl FakeHardwareAuthenticator {
 
     pub fn touch_requests(&self) -> usize {
         self.state.lock().expect("fake state poisoned").touches
+    }
+
+    pub fn require_pin(&self, pin: String) {
+        self.state.lock().expect("fake state poisoned").pin = Some(zeroize::Zeroizing::new(pin));
     }
 }
 
@@ -92,7 +100,11 @@ impl HardwareAuthenticator for FakeHardwareAuthenticator {
         })
     }
 
-    fn derive_dwk(&self, credential: &HardwareCredential) -> Result<[u8; 32], FidoError> {
+    fn derive_dwk(
+        &self,
+        credential: &HardwareCredential,
+        verification: HardwareVerification<'_>,
+    ) -> Result<[u8; 32], FidoError> {
         let mut state = self.state.lock().expect("fake state poisoned");
         let token = state.token.ok_or(FidoError::NoDevice)?;
         if !state
@@ -103,6 +115,12 @@ impl HardwareAuthenticator for FakeHardwareAuthenticator {
             return Err(FidoError::NotEnrolled);
         }
         state.touches += 1;
+        if let Some(expected) = &state.pin {
+            if !matches!(verification, HardwareVerification::Pin(value) if value == expected.as_str())
+            {
+                return Err(FidoError::InvalidPin);
+            }
+        }
         if let Some(error) = state.next_derive_error.take() {
             return Err(error);
         }

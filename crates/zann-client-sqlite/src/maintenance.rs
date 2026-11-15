@@ -1,6 +1,7 @@
 //! Local maintenance implementations behind the application local-vault port.
 
 pub mod backup;
+pub(crate) mod private_output;
 pub mod secure_file;
 pub mod snapshot;
 pub mod verify;

@@ -32,13 +32,20 @@ fn two_touches_then_one_touch_unlock_and_silent_presence() {
         assert!(store.connected_hardware_key(&auth).is_some());
     }
     assert_eq!(auth.touch_requests(), 2, "polling must not ask for a touch");
-    let recovered = store.unlock_with_hardware_key(&auth).unwrap();
+    let recovered = store
+        .unlock_with_hardware_key(&auth, crate::HardwareVerification::Presence)
+        .unwrap();
     assert!(recovered == [7; 32]);
     assert_eq!(auth.touch_requests(), 3);
     // Persistence contains enough public metadata to re-derive the same DWK.
     let reopened: RememberedUnlock =
         serde_json::from_str(&serde_json::to_string(&store).unwrap()).unwrap();
-    assert!(reopened.unlock_with_hardware_key(&auth).unwrap() == [7; 32]);
+    assert!(
+        reopened
+            .unlock_with_hardware_key(&auth, crate::HardwareVerification::Presence)
+            .unwrap()
+            == [7; 32]
+    );
 }
 
 #[test]
@@ -68,7 +75,10 @@ fn absent_wrong_and_swapped_tokens_fail_closed() {
     auth.connect(2);
     assert!(store.connected_hardware_key(&auth).is_none());
     assert_eq!(
-        store.unlock_with_hardware_key(&auth).unwrap_err().kind(),
+        store
+            .unlock_with_hardware_key(&auth, crate::HardwareVerification::Presence)
+            .unwrap_err()
+            .kind(),
         "hardware_key_not_enrolled"
     );
     assert_eq!(
@@ -82,7 +92,10 @@ fn absent_wrong_and_swapped_tokens_fail_closed() {
     auth.disconnect();
     assert!(store.connected_hardware_key(&auth).is_none());
     assert_eq!(
-        store.unlock_with_hardware_key(&auth).unwrap_err().kind(),
+        store
+            .unlock_with_hardware_key(&auth, crate::HardwareVerification::Presence)
+            .unwrap_err()
+            .kind(),
         "hardware_key_absent"
     );
     assert!(matches!(auth.status(), Err(FidoError::NoDevice)));
@@ -110,8 +123,22 @@ fn credential_and_salt_both_bind_derivation() {
     let second = auth.create_credential([1; 32]).unwrap();
     let mut different_salt = first.clone();
     different_salt.salt = [2; 32];
-    let key = auth.derive_dwk(&first).unwrap();
-    assert!(key == auth.derive_dwk(&first).unwrap());
-    assert!(key != auth.derive_dwk(&second).unwrap());
-    assert!(key != auth.derive_dwk(&different_salt).unwrap());
+    let key = auth
+        .derive_dwk(&first, crate::HardwareVerification::Presence)
+        .unwrap();
+    assert!(
+        key == auth
+            .derive_dwk(&first, crate::HardwareVerification::Presence)
+            .unwrap()
+    );
+    assert!(
+        key != auth
+            .derive_dwk(&second, crate::HardwareVerification::Presence)
+            .unwrap()
+    );
+    assert!(
+        key != auth
+            .derive_dwk(&different_salt, crate::HardwareVerification::Presence)
+            .unwrap()
+    );
 }

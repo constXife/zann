@@ -31,7 +31,9 @@ impl RememberedUnlock {
     ) -> Result<HardwareKeyEntry, UnlockError> {
         use base64::Engine;
         let PendingHardwareKey { credential, label } = pending;
-        let dwk = zeroize::Zeroizing::new(authenticator.derive_dwk(&credential)?);
+        let dwk = zeroize::Zeroizing::new(
+            authenticator.derive_dwk(&credential, crate::HardwareVerification::Presence)?,
+        );
         let entry = HardwareKeyEntry {
             label: if label.trim().is_empty() {
                 "Hardware key".to_string()
@@ -70,6 +72,7 @@ impl RememberedUnlock {
     pub fn unlock_with_hardware_key(
         &self,
         authenticator: &dyn crate::HardwareAuthenticator,
+        verification: crate::HardwareVerification<'_>,
     ) -> Result<[u8; 32], UnlockError> {
         if self.hardware_keys.is_empty() {
             return Err(UnlockError::NotRemembered);
@@ -82,7 +85,8 @@ impl RememberedUnlock {
         let entry = self
             .connected_hardware_key(authenticator)
             .ok_or(UnlockError::HardwareKey(crate::FidoError::NotEnrolled))?;
-        let dwk = zeroize::Zeroizing::new(authenticator.derive_dwk(&credential(entry)?)?);
+        let dwk =
+            zeroize::Zeroizing::new(authenticator.derive_dwk(&credential(entry)?, verification)?);
         unwrap(&dwk, &entry.wrapped_master_key)
     }
 }

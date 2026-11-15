@@ -129,6 +129,8 @@ impl ValidatedRecovery {
                 query("DELETE FROM metadata WHERE key = 'device_keyring'")
                     .execute(&mut *tx)
                     .await?;
+                query("UPDATE metadata SET value = 'any_configured_factor' WHERE key = 'export_step_up_policy'")
+                    .execute(&mut *tx).await?;
             }
         }
         let id = Uuid::now_v7();

@@ -27,6 +27,7 @@ const SOURCE_URL: &str = "https://github.com/constxife/zann";
 
 pub struct State {
     password: password::State,
+    export: export::State,
     browser_pairings: Option<zann_daemon::PairingSettings>,
     browser_code: Option<browser::ActiveCode>,
     section: SettingsSection,
@@ -111,7 +112,7 @@ pub enum Message {
     UseKeystore,
     Forget,
     Export,
-    Exported(Result<BackupExportReport, String>),
+    ExportStepUp(export::Message),
     ChooseApplePasswords,
     ApplePrepared(Result<Option<AppleSelection>, String>),
     ImportApplePasswords,
@@ -170,6 +171,7 @@ impl State {
     pub fn new(preferences: DevicePreferences, close_to_tray: bool, data_root: PathBuf) -> Self {
         Self {
             password: password::State::default(),
+            export: export::State::default(),
             browser_pairings: None,
             browser_code: None,
             section: SettingsSection::General,
@@ -250,7 +252,10 @@ impl State {
                 )
             }
             Message::Browser(message) => return self.update_browser(message, session),
-            Message::Select(section) => self.section = section,
+            Message::Select(section) => {
+                self.export.cancel();
+                self.section = section;
+            }
             Message::Set(change) => return Outcome::Changed(change),
             Message::Loaded(Ok(loaded)) => {
                 self.remembered = Some(loaded.remembered);
@@ -338,26 +343,18 @@ impl State {
                 }));
             }
             Message::Export => {
-                if self.busy {
-                    return Outcome::None;
+                if !self.busy {
+                    return Outcome::Task(
+                        self.export.open(session, None).map(Message::ExportStepUp),
+                    );
                 }
-                let facade = session.facade();
-                self.busy = true;
-                self.error = None;
-                self.exported = None;
-                return Outcome::Task(cosmic::task::future(async move {
-                    Message::Exported(off_thread(move || local::export_backup(&facade)).await)
-                }));
             }
-
-            Message::Exported(Ok(report)) => {
-                self.busy = false;
-                self.exported = Some(report);
-            }
-
-            Message::Exported(Err(err)) => {
-                self.busy = false;
-                self.error = Some(err);
+            Message::ExportStepUp(message) => {
+                let (task, report) = self.export.update(message, session);
+                if let Some(report) = report {
+                    self.exported = Some(report);
+                }
+                return Outcome::Task(task.map(Message::ExportStepUp));
             }
 
             Message::ChooseApplePasswords => {
@@ -690,6 +687,7 @@ impl State {
             Message::AddServer => return Outcome::AddServer,
             Message::Open(target) => return Outcome::Open(target),
             Message::Close => {
+                self.export.cancel();
                 if !self.refresh_vault_on_close {
                     return Outcome::Close { page: None };
                 }
@@ -723,3 +721,5 @@ mod browser;
 mod device_unlock;
 mod password;
 mod view;
+
+mod export;

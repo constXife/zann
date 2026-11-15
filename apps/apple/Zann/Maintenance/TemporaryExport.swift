@@ -8,7 +8,7 @@ struct TemporaryExport: Identifiable {
     let directory: URL
     var file: URL { directory.appendingPathComponent("zann-backup.json") }
 
-    static func prepare(core: CoreFacade, root: URL) throws -> TemporaryExport {
+    static func prepare(core: CoreFacade, root: URL, authorization: ExportAuthorizationFfi) throws -> TemporaryExport {
         let manager = FileManager.default
         var attributes: [FileAttributeKey: Any] = [.posixPermissions: 0o700]
         #if os(iOS)
@@ -18,7 +18,7 @@ struct TemporaryExport: Identifiable {
         let export = TemporaryExport(directory: root.appendingPathComponent(UUID().uuidString))
         try manager.createDirectory(at: export.directory, withIntermediateDirectories: false, attributes: attributes)
         do {
-            _ = try core.backupExportFile(path: export.file.path)
+            _ = try core.backupExportFile(path: export.file.path, authorization: authorization)
             var excluded = export.directory
             var values = URLResourceValues()
             values.isExcludedFromBackup = true

@@ -44,16 +44,19 @@ struct MaintenanceSections: View {
         Button(strings("settings.backups.exportAction")) { confirmExport = true }
         .accessibilityIdentifier("maintenance.export")
         .disabled(!unlocked || maintenance.busy)
-        // Presentation needs a concrete row in the Form's view hierarchy.
-        .alert(strings("settings.backups.plainWarningTitle"), isPresented: $confirmExport) {
-            Button(strings("settings.backups.exportAction")) { Task { await maintenance.prepareExport() } }
-            Button(strings("common.cancel"), role: .cancel) {}
-        } message: { Text(strings("settings.backups.plainWarningDesc")) }
-        .sheet(item: .constant(maintenance.export)) { artifact in
-            BackupExportPicker(file: artifact.file, finished: { failure in
-                maintenance.finishExport(id: artifact.id, failure: failure)
-            })
-            .onDisappear { maintenance.finishExport(id: artifact.id) }
+        .sheet(isPresented: $confirmExport) {
+            if let artifact = maintenance.export {
+                BackupExportPicker(file: artifact.file, finished: { failure in
+                    maintenance.finishExport(id: artifact.id, failure: failure)
+                    confirmExport = false
+                })
+                .onDisappear { maintenance.finishExport(id: artifact.id) }
+            } else {
+                ExportConfirmation(core: maintenance.core, strings: strings, policyChange: false) { authorization, operation, _ in
+                    await maintenance.prepareExport(authorization: authorization, operation: operation)
+                    return maintenance.failure
+                }
+            }
         }
     }
 }

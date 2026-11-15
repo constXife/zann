@@ -86,6 +86,15 @@ fn connect(core: &LocalVault, url: &str, login: &Value) {
         .unwrap();
     core.remote_sync(None, None).unwrap();
 }
+fn export_authorization(core: &LocalVault) -> zann_client::app::local::ExportAuthorization {
+    core.authorize_export(
+        zann_client::app::local::ExportStepUp::device_password(
+            "test device unlock password".into(),
+        ),
+        account_replicas::operation(),
+    )
+    .unwrap()
+}
 fn normalized(path: &Path) -> Vec<Value> {
     let backup: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     let names: BTreeMap<_, _> = backup["vaults"]
@@ -138,7 +147,7 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
         }
         core.remote_sync(None, None).unwrap();
         let backup = root.path().join("backup.json");
-        assert_eq!(core.backup_export_file(backup.display().to_string()).unwrap().items_count,6);
+        assert_eq!(core.backup_export_file(backup.display().to_string(), export_authorization(&core)).unwrap().items_count,6);
 
         let mut document: Value = serde_json::from_slice(&std::fs::read(&backup).unwrap()).unwrap();
         // Cross the per-vault 16 x 64 push budget: success must drain all changes.
@@ -183,11 +192,11 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
         assert_eq!(core.pending_change_count(storage.clone()).unwrap(),0);
         assert!(core.verify().unwrap().problems.is_empty());
         assert_eq!(core.backup_import_file(backup.display().to_string(),document["storages"][0]["id"].as_str().unwrap().into(),options()).unwrap().skipped_existing,1031);
-        let restored = root.path().join("restored.json");core.backup_export_file(restored.display().to_string()).unwrap();
+        let restored = root.path().join("restored.json");core.backup_export_file(restored.display().to_string(), export_authorization(&core)).unwrap();
         assert_eq!(normalized(&restored),expected);
         // A second device pulls from the real server: this catches metadata lost in push or pull.
         let second = tempdir();let other = open(second.path());connect(&other,&url,&login);
-        let pulled = second.path().join("pulled.json");other.backup_export_file(pulled.display().to_string()).unwrap();
+        let pulled = second.path().join("pulled.json");other.backup_export_file(pulled.display().to_string(), export_authorization(&other)).unwrap();
         assert_eq!(normalized(&pulled),expected);
         assert!(other.verify().unwrap().problems.is_empty());
     }).await.unwrap();

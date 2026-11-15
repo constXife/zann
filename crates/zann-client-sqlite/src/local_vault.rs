@@ -39,6 +39,7 @@ pub struct LocalVault {
     /// across a query.
     pool: Mutex<zann_db::ExistingSqliteDatabase>,
     recovery: Mutex<Option<recovery::PreparedRecovery>>,
+    export_authorization: Mutex<Option<export::AuthorizedExport>>,
     identity_probe: Mutex<zann_db::ExistingSqliteDatabase>,
     /// Kept as an exact native path so the pool can be opened again after a restore.
     database_path: PathBuf,
@@ -283,7 +284,13 @@ impl LocalVault {
     }
 
     fn save_remembered(&self, remembered: &RememberedUnlockStore) -> LocalResult<()> {
-        remembered.save(&self.root).map_err(unlock_error)
+        remembered.save(&self.root).map_err(unlock_error)?;
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
+        self.export_authorization
+            .lock()
+            .expect("export authorization")
+            .take();
+        Ok(())
     }
 }
 
@@ -345,6 +352,7 @@ impl LocalVault {
             runtime,
             pool: Mutex::new(database),
             recovery: Mutex::new(None),
+            export_authorization: Mutex::new(None),
             identity_probe: Mutex::new(probe),
             database_path,
             context_gate: RwLock::new(()),
@@ -459,6 +467,8 @@ impl From<Retention> for crate::maintenance::RetentionPolicy {
 }
 
 mod enrollment;
+mod export;
+mod export_file;
 mod in_flight;
 mod ports;
 pub use ports::*;
@@ -625,8 +635,29 @@ impl LocalVaultService for LocalVault {
     ) -> LocalResult<ApplePasswordsImportReport> {
         LocalVault::apple_passwords_import_file(self, path, options)
     }
-    fn backup_export_file(&self, path: String) -> LocalResult<BackupExportReport> {
-        LocalVault::backup_export_file(self, path)
+    fn export_security(&self) -> LocalResult<ExportSecurity> {
+        LocalVault::export_security(self)
+    }
+    fn authorize_export(
+        &self,
+        proof: ExportStepUp,
+        operation: SessionOperation,
+    ) -> LocalResult<ExportAuthorization> {
+        LocalVault::authorize_export(self, proof, operation)
+    }
+    fn set_export_policy(
+        &self,
+        policy: ExportPolicy,
+        authorization: ExportAuthorization,
+    ) -> LocalResult<()> {
+        LocalVault::set_export_policy(self, policy, authorization)
+    }
+    fn backup_export_file(
+        &self,
+        path: String,
+        authorization: ExportAuthorization,
+    ) -> LocalResult<BackupExportReport> {
+        LocalVault::backup_export_file(self, path, authorization)
     }
     fn verify(&self) -> LocalResult<VerifyReport> {
         LocalVault::verify(self)

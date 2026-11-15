@@ -11,8 +11,20 @@ use zann_client_sqlite::local_vault::open_vault as create_core;
 use std::fs;
 use std::path::PathBuf;
 
-use uuid::Uuid;
-use zann_client::app::local::{BackupImportOptions, ItemsFilter, Page};
+use zann_client::app::local::{
+    BackupImportOptions, ExportAuthorization, ExportStepUp, ItemsFilter, Page,
+};
+use zann_client::app::SessionOperation;
+fn authorize(
+    core: &zann_client_sqlite::local_vault::LocalVault,
+    password: &str,
+) -> ExportAuthorization {
+    core.authorize_export(
+        ExportStepUp::device_password(password.into()),
+        SessionOperation::new(std::time::Instant::now() + std::time::Duration::from_secs(120)).0,
+    )
+    .unwrap()
+}
 
 fn db_url(root: &std::path::Path) -> String {
     format!("sqlite://{}", root.join("local.sqlite").display())
@@ -22,14 +34,17 @@ fn db_url(root: &std::path::Path) -> String {
 fn exports_a_vault_to_an_explicit_path() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture("synthetic-device-password".into())
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/api".into(), "token".into(), "s3cr3t".into())
         .expect("create item");
 
     let target = root.join("export.json");
     let report = core
-        .backup_export_file(target.display().to_string())
+        .backup_export_file(
+            target.display().to_string(),
+            authorize(&core, "synthetic-device-password"),
+        )
         .expect("export");
 
     assert_eq!(report.items_count, 1);
@@ -48,12 +63,14 @@ fn exports_a_vault_to_an_explicit_path() {
 fn an_empty_path_falls_back_to_the_vault_directory() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture("synthetic-device-password".into())
         .expect("initialize master password");
     core.debug_create_kv_item("secrets/api".into(), "token".into(), "s3cr3t".into())
         .expect("create item");
 
-    let report = core.backup_export_file(String::new()).expect("export");
+    let report = core
+        .backup_export_file(String::new(), authorize(&core, "synthetic-device-password"))
+        .expect("export");
 
     let written = PathBuf::from(&report.path);
     assert!(written.exists(), "no file at the reported path");
@@ -72,8 +89,11 @@ fn importing_requires_an_explicit_server_destination() {
     core.seed_offline_fixture("correct horse battery".into())
         .expect("fixture");
     let path = root.join("backup.json");
-    core.backup_export_file(path.display().to_string())
-        .expect("export");
+    core.backup_export_file(
+        path.display().to_string(),
+        authorize(&core, "correct horse battery"),
+    )
+    .expect("export");
     core.backup_import_file(
         path.display().to_string(),
         uuid::Uuid::now_v7().to_string(),
@@ -88,7 +108,7 @@ fn importing_requires_an_explicit_server_destination() {
 fn an_empty_import_path_is_rejected_rather_than_guessed() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture("synthetic-device-password".into())
         .expect("initialize master password");
 
     let err = core
@@ -107,11 +127,12 @@ fn an_empty_import_path_is_rejected_rather_than_guessed() {
 fn exporting_a_locked_vault_fails() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture("synthetic-device-password".into())
         .expect("initialize master password");
+    let proof = authorize(&core, "synthetic-device-password");
     core.lock().expect("lock");
 
-    core.backup_export_file(root.join("nope.json").display().to_string())
+    core.backup_export_file(root.join("nope.json").display().to_string(), proof)
         .expect_err("a locked vault must not export");
 }
 
@@ -119,7 +140,7 @@ fn exporting_a_locked_vault_fails() {
 fn apple_passwords_preflight_and_import_keep_distinct_duplicate_titles() {
     let root = CanonicalTempDir::new();
     let core = create_core(db_url(&root)).expect("create core");
-    core.seed_offline_fixture(format!("pw-{}", Uuid::now_v7()))
+    core.seed_offline_fixture("synthetic-device-password".into())
         .expect("initialize master password");
     let csv = root.join("Passwords.csv");
     fs::write(
@@ -221,7 +242,10 @@ fn legacy_unknown_metadata_is_readable_but_never_exported_as_empty_attributes() 
     core.item_get(id)
         .expect("offline ciphertext remains readable");
     let error = core
-        .backup_export_file(root.join("refused.json").display().to_string())
+        .backup_export_file(
+            root.join("refused.json").display().to_string(),
+            authorize(&core, "fixture password"),
+        )
         .unwrap_err();
     assert!(
         matches!(error, zann_client::app::local::LocalError::Backup { kind, .. } if kind == "backup_metadata_refresh_required")

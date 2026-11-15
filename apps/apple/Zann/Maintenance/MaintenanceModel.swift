@@ -10,7 +10,8 @@ final class MaintenanceModel: ObservableObject {
     @Published private(set) var snapshots: [SnapshotFfi] = []
     @Published private(set) var verification: VerifyReportFfi?
     @Published private(set) var export: TemporaryExport?
-    private let core: CoreFacade
+    let core: CoreFacade
+    private var exportOperation: SessionOperationFfi?
     private let exportRoot: URL
     private var generation = 0
     private var sensitiveOperationsAllowed = false
@@ -69,7 +70,7 @@ final class MaintenanceModel: ObservableObject {
         }
     }
 
-    func prepareExport() async {
+    func prepareExport(authorization: ExportAuthorizationFfi, operation: SessionOperationFfi) async {
         guard !busy, sensitiveOperationsAllowed, export == nil else { return }
         busy = true
         failure = nil
@@ -77,7 +78,9 @@ final class MaintenanceModel: ObservableObject {
         defer { busy = false }
         let core = core
         let root = exportRoot
-        let result = await BlockingCore.run { Result { try TemporaryExport.prepare(core: core, root: root) } }
+        exportOperation = operation
+        defer { exportOperation = nil }
+        let result = await BlockingCore.run { Result { try TemporaryExport.prepare(core: core, root: root, authorization: authorization) } }
         switch result {
         case .success(let artifact):
             if epoch == generation { export = artifact }
@@ -107,6 +110,7 @@ final class MaintenanceModel: ObservableObject {
 
     /// Leaving Settings also invalidates work that has not opened a picker yet.
     func dismissed() {
+        exportOperation?.cancel()
         generation += 1
         verification = nil
         clearExport()

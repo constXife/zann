@@ -124,9 +124,11 @@ final class MobileWorkspaceTests: XCTestCase {
         for _ in 0..<8 where !fullyVisible(export, in: app) { app.swipeDown() }
         XCTAssertTrue(fullyVisible(export, in: app))
         export.tap()
-        let warning = app.alerts["Plain JSON Export"]
-        XCTAssertTrue(warning.waitForExistence(timeout: 5))
-        warning.buttons["Export JSON"].tap()
+        let confirmationPassword = app.secureTextFields["export.password"]
+        XCTAssertTrue(confirmationPassword.waitForExistence(timeout: 5))
+        confirmationPassword.tap()
+        confirmationPassword.typeText("synthetic mobile UI fixture")
+        app.buttons["export.confirm"].tap()
         let save = app.descendants(matching: .any).matching(identifier: "Save").firstMatch
         // A fresh CI simulator can take over 10 seconds to cold-start Files.
         XCTAssertTrue(save.waitForExistence(timeout: 30))
