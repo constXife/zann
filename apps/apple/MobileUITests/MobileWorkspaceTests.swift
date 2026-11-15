@@ -47,7 +47,7 @@ final class MobileWorkspaceTests: XCTestCase {
         name.tap()
         name.typeText(" edited")
         let changedTitle = name.value as? String
-        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         capture(app, "editor-keyboard-landscape")
         XCUIDevice.shared.orientation = .portrait
         XCTAssertTrue(name.waitForExistence(timeout: 5))
@@ -107,7 +107,7 @@ final class MobileWorkspaceTests: XCTestCase {
         XCTAssertTrue(server.waitForExistence(timeout: 5))
         server.tap()
         server.typeText("https://example.test")
-        XCTAssertTrue(app.keyboards.firstMatch.exists)
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 5))
         capture(app, "connect-accessibility-text-keyboard")
         app.terminate()
 
@@ -117,7 +117,7 @@ final class MobileWorkspaceTests: XCTestCase {
         XCTAssertTrue(password.waitForExistence(timeout: 5))
         password.tap()
         password.typeText("synthetic mobile UI fixture")
-        XCTAssertTrue(fixture.keyboards.firstMatch.exists)
+        XCTAssertTrue(fixture.keyboards.firstMatch.waitForExistence(timeout: 5))
         capture(fixture, "unlock-keyboard")
     }
 
