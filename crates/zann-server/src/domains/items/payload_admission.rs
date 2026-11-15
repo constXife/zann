@@ -25,14 +25,19 @@ pub(crate) fn admit(
     item_id: Uuid,
     ciphertext: &[u8],
 ) -> Result<(), ServiceError> {
-    decrypt_payload(key, vault_id, item_id, ciphertext)
-        .map(|_| ())
-        .map_err(|error| match error {
+    let payload =
+        decrypt_payload(key, vault_id, item_id, ciphertext).map_err(|error| match error {
             VaultCryptoError::UnsupportedPayloadVersion(_) => {
                 ServiceError::Conflict("unsupported_payload_version")
             }
             _ => ServiceError::Internal(error.as_code()),
-        })
+        })?;
+    zann_core::item_policy::admit_item_type(
+        &payload.type_id,
+        zann_core::VaultKind::Shared,
+        VaultEncryptionType::Server,
+    )
+    .map_err(|_| ServiceError::Conflict("passkey_personal_only"))
 }
 
 #[cfg(test)]
@@ -82,5 +87,25 @@ mod tests {
         )
         .expect("current fixture");
         assert!(admit(&key, vault, item, &current).is_ok());
+    }
+
+    #[test]
+    fn shared_passkey_payloads_are_refused_including_history_admission() {
+        let key = SecretKey::generate();
+        let vault = Uuid::now_v7();
+        let item = Uuid::now_v7();
+        let payload = zann_crypto::EncryptedPayload::new("passkey");
+        let ciphertext = zann_crypto::encrypt_payload(&key, vault, item, &payload)
+            .expect("encrypt shared fixture");
+        assert!(matches!(
+            admit(&key, vault, item, &ciphertext),
+            Err(ServiceError::Conflict("passkey_personal_only"))
+        ));
+        assert_eq!(
+            super::super::contract::validate_server_typed_payload(&payload, "passkey")
+                .expect_err("shared passkey must be refused")
+                .code(),
+            "passkey_personal_only"
+        );
     }
 }

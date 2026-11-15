@@ -52,6 +52,7 @@ pub fn project_item_fields(payload_json: &str) -> Result<Vec<ItemDetailField>, P
 pub fn project_payload_fields(mut payload: EncryptedPayload) -> Vec<ItemDetailField> {
     let mut fields: Vec<_> = std::mem::take(&mut payload.fields)
         .into_iter()
+        .filter(|(key, _)| crate::item_policy::ceremony_field_visible(&payload.type_id, key))
         .map(|(key, mut field)| {
             let meta = field.meta.as_ref();
             let is_otp = matches!(field.kind, FieldKind::Otp);

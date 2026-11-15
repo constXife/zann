@@ -181,7 +181,9 @@ impl Category {
     }
 
     fn create_action(&self) -> Option<CategoryCreateAction> {
-        if self.is_trash() {
+        if self.is_trash()
+            || zann_core::item_policy::ceremony_managed(create_type_for(Some(&self.id)))
+        {
             return None;
         }
         let type_id = create_type_for(Some(&self.id)).to_string();
@@ -329,7 +331,9 @@ mod tests {
     fn empty_category_actions_create_matching_items_and_have_translated_labels() {
         for category in &schema().categories {
             let view = category.to_view(&ItemCounts::default(), VaultScope::Personal);
-            if category.is_trash() {
+            if category.is_trash()
+                || zann_core::item_policy::ceremony_managed(create_type_for(Some(&category.id)))
+            {
                 assert!(view.create_action.is_none());
                 continue;
             }

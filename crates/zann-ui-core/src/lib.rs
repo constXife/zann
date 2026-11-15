@@ -19,6 +19,7 @@ pub mod i18n;
 pub mod item;
 pub mod item_detail;
 pub mod item_editor;
+pub mod item_policy;
 pub mod login_list;
 pub mod password;
 pub mod server_url;

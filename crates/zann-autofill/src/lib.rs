@@ -5,6 +5,7 @@ mod error;
 mod matcher;
 mod origin;
 mod policy;
+mod rp_id;
 mod rules;
 
 pub use error::AutofillError;
@@ -14,4 +15,5 @@ pub use policy::{
     authorize_credential_context, authorize_fill, validate_frame_context, FillContext, FillDenied,
     UserGesture,
 };
+pub use rp_id::{CrossOriginPermission, RpId};
 pub use rules::{MatchMode, MatchRules, MATCH_RULES_KEY};

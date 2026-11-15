@@ -6,6 +6,8 @@
 #![allow(clippy::similar_names)]
 
 pub mod crypto;
+#[cfg(feature = "passkey")]
+pub mod es256;
 #[cfg(feature = "ipc-pairing")]
 pub mod ipc_pairing;
 pub mod ipc_signatures;

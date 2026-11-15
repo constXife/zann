@@ -2,6 +2,10 @@ use std::fmt;
 
 #[derive(thiserror::Error)]
 pub enum AutofillError {
+    #[error("invalid WebAuthn RP ID or origin binding")]
+    RpId,
+    #[error("WebAuthn origin context is not admitted")]
+    RpContext(#[source] crate::FillDenied),
     #[error("URL exceeds the autofill size bound")]
     UrlSize,
     #[error("invalid autofill URL")]

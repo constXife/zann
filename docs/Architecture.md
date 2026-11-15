@@ -19,6 +19,13 @@ enrollment and purpose-bound account envelopes are specified by
 The versioned runtime delivery profile and generation publication contract are
 specified by [`ADR 0005`](adr/0005-runtime-secret-delivery-profiles.md).
 
+`zann-passkey` is a headless core capability over `zann-core`,
+`zann-autofill` and feature-gated ES256 in `zann-crypto`. It owns pure passkey
+ceremonies and immutable assertions; persistence keeps the existing Item model.
+Personal-only eligibility belongs to `zann-core::item_policy`, and native
+read/list projection stays in `zann-ui-core`. Browser/OS provider activation is
+tracked separately in #293/#294; see ADR 0006 and the capability map.
+
 ## Goals
 
 - One implementation of every security- or consistency-sensitive capability.
