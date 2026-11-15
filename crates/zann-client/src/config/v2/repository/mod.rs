@@ -15,6 +15,7 @@ impl ConfigRepository {
         credential_store: &dyn CredentialStore,
         legacy_credentials: &dyn LegacyCredentialSource,
     ) -> Result<ConfigSnapshot, ConfigError> {
+        self.validate_existing_replica_format()?;
         ensure_config_root(self.paths.root())?;
         if validate_regular_file_if_exists(&self.paths.credential_transaction_journal())? {
             let _recovery = self.reconcile_credentials(credential_store)?;
@@ -172,4 +173,6 @@ mod generation;
 mod intent_recovery;
 mod locks;
 mod login_commit;
+#[cfg(feature = "remote")]
+mod replica;
 mod restore;

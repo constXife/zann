@@ -236,7 +236,8 @@ impl ConfigRepository {
                         == Some(intent.endpoint.server_id.as_str())
                     && connection.metadata.server_fingerprint.as_deref()
                         == Some(intent.endpoint.server_fingerprint.as_str())
-                    && connection.metadata.storage_id == intent.endpoint.storage_id;
+                    && connection.profile_storage_id(&intent.profile_name)
+                        == intent.endpoint.storage_id.as_deref();
                 let mut expected_credentials = intent.source.credentials.clone();
                 expected_credentials.insert(
                     CredentialKind::Access,
@@ -280,7 +281,8 @@ impl ConfigRepository {
                         == Some(intent.endpoint.server_id.as_str())
                     && connection.metadata.server_fingerprint.as_deref()
                         == Some(intent.endpoint.server_fingerprint.as_str())
-                    && connection.metadata.storage_id == intent.endpoint.storage_id;
+                    && connection.profile_storage_id(&intent.profile_name)
+                        == intent.endpoint.storage_id.as_deref();
                 let mut expected_credentials = intent.source.credentials.clone();
                 expected_credentials.insert(
                     CredentialKind::Access,

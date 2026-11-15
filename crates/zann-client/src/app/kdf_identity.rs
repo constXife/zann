@@ -36,9 +36,9 @@ impl AppClient {
             .and_then(|p| p.account_subject())
             .ok_or(ConfigError::IdentityChanged)?;
         Ok((
-            metadata
-                .storage_id
-                .clone()
+            connection
+                .profile_storage_id(target.profile_name())
+                .map(str::to_owned)
                 .ok_or(ConfigError::IdentityChanged)?,
             metadata
                 .server_id
@@ -55,35 +55,28 @@ impl AppClient {
         let snapshot = self.repository.snapshot()?;
         let mut accounts = Vec::new();
         for (id, connection) in &snapshot.config().connections {
-            if let Some(storage_id) = &connection.metadata().storage_id {
-                let account_name = connection
-                    .active_credential()
-                    .and_then(|profile| {
-                        snapshot
-                            .config()
-                            .account_identities
-                            .get(&crate::config::v2::identity_slot(id, profile))
-                    })
+            for (profile_name, profile) in connection.credential_profiles() {
+                let (Some(storage_id), Some(subject)) =
+                    (profile.storage_id(), profile.account_subject())
+                else {
+                    continue;
+                };
+                let server = connection
+                    .metadata()
+                    .server_id
+                    .clone()
+                    .ok_or(ConfigError::IdentityChanged)?;
+                let account_name = snapshot
+                    .config()
+                    .account_identities
+                    .get(&crate::config::v2::identity_slot(id, profile_name))
                     .and_then(|identity| identity.email.clone());
-                let key_binding = connection
-                    .active_credential()
-                    .and_then(|name| connection.credential_profiles().get(name))
-                    .and_then(|profile| profile.account_subject())
-                    .map(|subject| {
-                        connection
-                            .metadata()
-                            .server_id
-                            .clone()
-                            .map(|server| (server, subject.to_owned()))
-                            .ok_or(ConfigError::IdentityChanged)
-                    })
-                    .transpose()?;
                 accounts.push(super::local::AccountLocation {
-                    storage_id: storage_id.clone(),
+                    storage_id: storage_id.to_owned(),
                     name: connection.metadata().name.clone(),
                     server_url: connection.metadata().address.clone(),
                     account_name,
-                    key_binding,
+                    key_binding: Some((server, subject.to_owned())),
                 });
             }
         }

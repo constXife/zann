@@ -193,7 +193,7 @@ credentials are passed unchanged; new-password rules share one owner.
 A recovery confirmation is scoped to one exact preview token, local generation,
 data version and keyring value. Snapshot failure, cancellation, stale data or an
 unconfirmed unsent-data warning must preserve local records. SQLite writer
-reservation and source validation precede Config connection removal/remembered
+reservation and source validation precede Config account-profile removal/remembered
 unlock disarm; local deletion and instance UUID rotation commit atomically.
 Ordinary pool TEMP triggers reject writes from stale database instances, even on
 reconnected pool connections. Recovery is native-only and sends nothing remotely.
@@ -207,3 +207,17 @@ handles, and late unlock result rejection. Shared idle/focus policy applies whil
 account/recovery screens hold an unlocked root. Trusted OS authentication sheets
 must not cancel their own unlock, and startup remembered-unlock must not repeat
 on every lock.
+
+## Account-scoped replicas (ADR 0011)
+
+Review `zann-client::config::v2::{replica,profile,anchor,generation_model}`,
+`repository::{connections,credential_remove,auth_intent}`, `app::connections`,
+`zann-client-sqlite::{target_binding,local_vault::recovery}` and SQLite migration
+0007 together. Endpoint trust has one normalized owner; replica storage and key
+fingerprints belong to exact profiles. Pending `expected_account_subject` is only
+a reconnect constraint. Authenticated `/me`, exact-source credential journals and
+Config generation leases must precede selected-UUID cache claim release. Adding,
+logging out or removing another profile must not redirect keys, data, tokens or
+in-flight operations. Check old primary/backup/journal refusal before database
+migrations and credential I/O, and shared Add/Reconnect effects through native/FFI
+consumers. No personal plaintext or account key crosses the server boundary.

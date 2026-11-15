@@ -132,10 +132,6 @@ pub struct ConnectionMetadata {
     pub server_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_fingerprint: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expected_master_key_fp: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub storage_id: Option<String>,
 }
 
 impl ConnectionMetadata {
@@ -146,8 +142,6 @@ impl ConnectionMetadata {
             needs_salt_update: false,
             server_id: None,
             server_fingerprint: None,
-            expected_master_key_fp: None,
-            storage_id: None,
         }
     }
 }

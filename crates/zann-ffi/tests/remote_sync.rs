@@ -23,7 +23,7 @@ fn server_url() -> Option<String> {
 fn connect(core: &CoreFacade, url: &str) -> Arc<PreparedConnectionFfi> {
     let session = core.remote_session().expect("remote session");
     match session
-        .prepare_connection(url.to_string(), "Remote".into(), "default".into())
+        .prepare_connection(url.to_string(), "Remote".into(), None)
         .expect("prepare connection")
     {
         PrepareConnectionOutcomeFfi::Ready { connection } => connection,

@@ -27,3 +27,6 @@ mod hardware_unlock;
 
 #[path = "local_vault/ports.rs"]
 mod ports;
+
+#[path = "local_vault/replica_cutover.rs"]
+mod replica_cutover;

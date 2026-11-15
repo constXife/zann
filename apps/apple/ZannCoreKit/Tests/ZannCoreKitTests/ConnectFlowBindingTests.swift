@@ -3,7 +3,7 @@ import XCTest
 
 final class ConnectFlowBindingTests: XCTestCase {
     func testTypedConnectEffectsAndCompletionsCrossTheBinding() throws {
-        let flow = ConnectFlowFfi()
+        let flow = ConnectFlowFfi(reconnectStorage: nil)
         let effects = flow.dispatch(action: .probe(url: "https://fixture.example.test"))
         guard case .probe(let id, let url, let name, let profile)? = effects.last else {
             return XCTFail("typed probe effect")

@@ -13,13 +13,12 @@ pub enum ConnectionRemoval {
     /// previous generation restorable; a later credential reconcile deletes
     /// them, exactly as after a logout.
     Removed { cleanup_deferred: bool },
-    /// No connection was configured for this endpoint and name.
+    /// No connection was configured for this endpoint.
     AlreadyAbsent,
 }
 
 impl AppClient {
-    /// Forgets the connection that `prepare_connection` keys by this endpoint
-    /// and name: its pinned server identity, credential profiles and stored
+    /// Forgets the canonical trust owner for this normalized endpoint: its pinned server identity, credential profiles and stored
     /// credentials. This is the explicit recovery from
     /// [`SessionErrorKind::ServerIdentityChanged`]; the next
     /// `prepare_connection` then pins whatever server answers, as on first
@@ -28,16 +27,18 @@ impl AppClient {
     ///
     /// Repeating the call after it succeeded returns
     /// [`ConnectionRemoval::AlreadyAbsent`].
-    pub fn remove_connection(
-        &self,
-        endpoint: &str,
-        connection_name: &str,
-    ) -> Result<ConnectionRemoval, SessionError> {
+    pub fn remove_connection(&self, endpoint: &str) -> Result<ConnectionRemoval, SessionError> {
         let snapshot = self
             .repository
             .snapshot()
             .map_err(connection_removal_error)?;
-        let connection_id = ConnectionId::deterministic(connection_name, endpoint);
+        let Some(connection_id) = snapshot
+            .config()
+            .connection_for_address(endpoint)
+            .map_err(connection_removal_error)?
+        else {
+            return Ok(ConnectionRemoval::AlreadyAbsent);
+        };
         self.remove_pinned_connection(&snapshot, connection_id)
     }
 
@@ -54,37 +55,25 @@ impl AppClient {
             .map_err(|kind| SessionError::for_app(SessionOperationId::new(), kind))
     }
 
-    /// Forgets the connection that syncs `storage_id`, the one
-    /// [`Self::configured_target`] resolves for it, exactly as
-    /// [`Self::remove_connection`] does. It is the same recovery for a shell
-    /// that knows the storage it syncs rather than the address it typed.
-    ///
-    /// Returns the forgotten address, so the shell can offer to connect there
-    /// again, or `None` when no connection syncs this storage (also after a
-    /// repeated call).
+    /// Disconnect exactly one account replica. Retain the endpoint trust record,
+    /// other profiles, keyring entries and cached data. Return its address once.
     pub fn remove_storage_connection(
         &self,
         storage_id: &str,
     ) -> Result<Option<String>, SessionError> {
-        let snapshot = self
-            .repository
-            .snapshot()
+        let plan = self
+            .prepare_account_removal(storage_id)
             .map_err(connection_removal_error)?;
-        let Some(connection_id) = storage_connection(snapshot.config(), storage_id)
-            .map_err(|kind| SessionError::for_app(SessionOperationId::new(), kind))?
-        else {
+        let Some((connection, _)) = plan.profile.as_ref() else {
             return Ok(None);
         };
-        let address = snapshot.config().connections[&connection_id]
+        let address = plan.snapshot.config().connections[connection]
             .metadata()
             .address
             .clone();
-        Ok(
-            match self.remove_pinned_connection(&snapshot, connection_id)? {
-                ConnectionRemoval::Removed { .. } => Some(address),
-                ConnectionRemoval::AlreadyAbsent => None,
-            },
-        )
+        self.commit_account_removal(plan)
+            .map_err(connection_removal_error)?;
+        Ok(Some(address))
     }
 
     fn remove_pinned_connection(
@@ -110,11 +99,11 @@ impl AppClient {
 }
 
 fn connection_removal_error(error: ConfigError) -> SessionError {
-    let kind = match error {
+    let kind = match &error {
         ConfigError::RevisionConflict { .. } => SessionErrorKind::ConcurrentSessionChange,
-        error => crate::session::local_config_error_kind(&error),
+        error => crate::session::local_config_error_kind(error),
     };
-    SessionError::for_app(SessionOperationId::new(), kind)
+    SessionError::for_app(SessionOperationId::new(), kind).with_source(error)
 }
 
 /// The one connection whose pinned storage is `storage_id`. Two connections
@@ -123,54 +112,46 @@ pub(super) fn storage_connection(
     config: &crate::config::ConfigV2,
     storage_id: &str,
 ) -> Result<Option<ConnectionId>, SessionErrorKind> {
-    let mut matches = config
-        .connections
-        .iter()
-        .filter(|(_, connection)| connection.metadata().storage_id.as_deref() == Some(storage_id));
-    let selected = matches.next().map(|(id, _)| id.clone());
-    if matches.next().is_some() {
-        return Err(SessionErrorKind::Configuration);
-    }
-    Ok(selected)
+    config
+        .replica_profile(storage_id)
+        .map(|profile| profile.map(|(id, _)| id))
+        .map_err(|_| SessionErrorKind::Configuration)
 }
 
-/// An exact Config source for explicitly forgetting one local connection.
-/// The native recovery snapshot is saved before this plan is committed.
-pub struct ConnectionRemovalPlan {
+/// Exact Config source for removing one account profile while retaining endpoint trust.
+pub struct AccountRemovalPlan {
     root: std::path::PathBuf,
     snapshot: crate::config::ConfigSnapshot,
-    connection: Option<ConnectionId>,
+    profile: Option<(ConnectionId, String)>,
 }
-impl ConnectionRemovalPlan {
+impl AccountRemovalPlan {
     pub fn is_configured(&self) -> bool {
-        self.connection.is_some()
+        self.profile.is_some()
     }
 }
 impl AppClient {
-    pub fn prepare_storage_connection_removal(
+    pub fn prepare_account_removal(
         &self,
         storage: &str,
-    ) -> Result<ConnectionRemovalPlan, ConfigError> {
+    ) -> Result<AccountRemovalPlan, ConfigError> {
         let snapshot = self.repository.snapshot()?;
-        let connection = storage_connection(snapshot.config(), storage)
-            .map_err(|_| ConfigError::IdentityChanged)?;
-        Ok(ConnectionRemovalPlan {
+        let profile = snapshot.config().replica_profile(storage)?;
+        Ok(AccountRemovalPlan {
             root: self.paths.root().to_path_buf(),
             snapshot,
-            connection,
+            profile,
         })
     }
-    pub fn commit_storage_connection_removal(
-        &self,
-        plan: ConnectionRemovalPlan,
-    ) -> Result<(), ConfigError> {
+    pub fn commit_account_removal(&self, plan: AccountRemovalPlan) -> Result<(), ConfigError> {
         if plan.root != self.paths.root() {
             return Err(ConfigError::IdentityChanged);
         }
-        if let Some(connection) = plan.connection {
-            self.repository.remove_connection(
+        if let Some((connection, profile)) = plan.profile {
+            self.repository.remove_credential_profile(
                 plan.snapshot.revision(),
                 &connection,
+                profile,
+                crate::config::ActiveCredentialAfterRemoval::Clear,
                 self.credential_store.as_ref(),
             )?;
         } else if self.repository.snapshot()?.revision() != plan.snapshot.revision() {

@@ -789,159 +789,8 @@ impl fmt::Display for SessionErrorKind {
     }
 }
 
-/// Redacted session failure. It contains no path, credential id or reflected body.
-pub struct SessionError {
-    operation_id: SessionOperationId,
-    kind: SessionErrorKind,
-    status: Option<u16>,
-    server_code: Option<&'static str>,
-    completion: OperationCompletion,
-    cleanup_deferred: bool,
-    local_revoke_confirmed: bool,
-}
-
-impl SessionError {
-    fn new(operation: &SessionOperation, kind: SessionErrorKind) -> Self {
-        Self {
-            operation_id: operation.operation_id,
-            kind,
-            status: None,
-            server_code: None,
-            completion: operation.completion(),
-            cleanup_deferred: false,
-            local_revoke_confirmed: false,
-        }
-    }
-
-    fn from_auth(operation: &SessionOperation, failure: &AuthFailure) -> Self {
-        let mut error = Self::new(operation, failure.kind.session_error_kind());
-        error.status = failure.status;
-        error.server_code = failure.server_code;
-        error
-    }
-
-    #[cfg(any(feature = "app", all(test, feature = "sync")))]
-    pub(crate) fn for_app(operation_id: SessionOperationId, kind: SessionErrorKind) -> Self {
-        Self {
-            operation_id,
-            kind,
-            status: None,
-            server_code: None,
-            completion: OperationCompletion::OnTime,
-            cleanup_deferred: false,
-            local_revoke_confirmed: false,
-        }
-    }
-
-    #[cfg(feature = "app")]
-    pub(crate) fn from_http_for_app(
-        operation_id: SessionOperationId,
-        failure: &AuthHttpError,
-    ) -> Self {
-        let kind = match failure.kind() {
-            AuthHttpErrorKind::InvalidEndpoint | AuthHttpErrorKind::Protocol => {
-                SessionErrorKind::Protocol
-            }
-            AuthHttpErrorKind::InsecureTransport => SessionErrorKind::InsecureTransport,
-            AuthHttpErrorKind::Timeout | AuthHttpErrorKind::Unavailable => {
-                SessionErrorKind::TransportUnavailable
-            }
-            AuthHttpErrorKind::AmbiguousOutcome => SessionErrorKind::SessionLostRemoteUnknown,
-            AuthHttpErrorKind::BodyTooLarge => SessionErrorKind::Protocol,
-            AuthHttpErrorKind::SessionExpired => SessionErrorKind::SessionExpired,
-            AuthHttpErrorKind::Rejected => SessionErrorKind::TransportRejected,
-            AuthHttpErrorKind::Server => SessionErrorKind::TransportUnavailable,
-        };
-        let mut error = Self::for_app(operation_id, kind);
-        error.status = failure.status();
-        error.server_code = failure.server_code();
-        error
-    }
-
-    fn terminal(
-        operation: &SessionOperation,
-        kind: SessionErrorKind,
-        status: Option<u16>,
-        server_code: Option<&'static str>,
-        cleanup_deferred: bool,
-        local_revoke_confirmed: bool,
-    ) -> Self {
-        Self {
-            operation_id: operation.operation_id,
-            kind,
-            status,
-            server_code,
-            completion: operation.completion(),
-            cleanup_deferred,
-            local_revoke_confirmed,
-        }
-    }
-
-    #[must_use]
-    pub fn operation_id(&self) -> SessionOperationId {
-        self.operation_id
-    }
-
-    #[must_use]
-    pub fn kind(&self) -> SessionErrorKind {
-        self.kind
-    }
-
-    #[must_use]
-    pub fn status(&self) -> Option<u16> {
-        self.status
-    }
-
-    #[must_use]
-    pub fn server_code(&self) -> Option<&'static str> {
-        self.server_code
-    }
-
-    #[must_use]
-    pub fn completion(&self) -> OperationCompletion {
-        self.completion
-    }
-
-    #[must_use]
-    pub fn cleanup_deferred(&self) -> bool {
-        self.cleanup_deferred
-    }
-
-    #[must_use]
-    pub fn local_revoke_confirmed(&self) -> bool {
-        self.local_revoke_confirmed
-    }
-}
-
-impl fmt::Debug for SessionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("SessionError")
-            .field("operation_id", &self.operation_id)
-            .field("kind", &self.kind)
-            .field("status", &self.status)
-            .field("server_code", &self.server_code)
-            .field("completion", &self.completion)
-            .field("cleanup_deferred", &self.cleanup_deferred)
-            .field("local_revoke_confirmed", &self.local_revoke_confirmed)
-            .finish()
-    }
-}
-
-impl fmt::Display for SessionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "session:{}:{}", self.operation_id, self.kind)?;
-        if let Some(status) = self.status {
-            write!(formatter, ":status_{status}")?;
-        }
-        if let Some(code) = self.server_code {
-            write!(formatter, ":{code}")?;
-        }
-        Ok(())
-    }
-}
-
-impl std::error::Error for SessionError {}
+mod error;
+pub use error::SessionError;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RemoteLogoutStatus {
@@ -1622,8 +1471,9 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        let (recovered, _) = recovered
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let (recovered, _) = recovered.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let cleanup_deferred = outcome_has_warnings(&recovered);
 
         let repository = self.inner.repository.clone();
@@ -1635,8 +1485,9 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        let anchor = anchor
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let anchor = anchor.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let (locks, port, verified) = match self
             .verified_login_auth_port(locks, &anchor, operation)
             .await
@@ -1785,7 +1636,6 @@ impl TokenManager {
                     anchor.address(),
                     Some(anchor.server_id().to_string()),
                     Some(anchor.server_fingerprint().to_string()),
-                    storage_id.clone(),
                 ),
             },
             IdentityCommit::InitializeOrMatch(authenticated_identity),
@@ -1889,16 +1739,18 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        let (recovered, _) = recovered
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let (recovered, _) = recovered.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let cleanup_deferred = outcome_has_warnings(&recovered);
 
         let repository = self.inner.repository.clone();
         let (locks, snapshot) = run_with_locks(locks, move || repository.snapshot())
             .await
             .map_err(|_| SessionError::new(operation, SessionErrorKind::Internal))?;
-        let snapshot = snapshot
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let snapshot = snapshot.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         if let Some(bound) = bound_legacy_session(
             snapshot.config(),
             &request.connection_name,
@@ -1993,9 +1845,11 @@ impl TokenManager {
                 request.storage_id.as_deref(),
             )
         });
-        let existing_storage_id = existing
-            .as_ref()
-            .and_then(|(_, connection)| connection.metadata().storage_id.clone());
+        let existing_storage_id = existing.as_ref().and_then(|(_, connection)| {
+            connection
+                .profile_storage_id(&request.profile_name)
+                .map(str::to_owned)
+        });
         let (connection_id, commit_target) = match existing {
             None => (
                 ConnectionId::deterministic(&request.connection_name, verified.address()),
@@ -2027,7 +1881,6 @@ impl TokenManager {
                     metadata.address.clone(),
                     metadata.server_id.clone(),
                     metadata.server_fingerprint.clone(),
-                    metadata.storage_id.clone(),
                 );
                 let target = if metadata.server_fingerprint.is_none() {
                     AuthenticatedConnectionTarget::PinExisting {
@@ -2069,7 +1922,9 @@ impl TokenManager {
         })
         .await
         .map_err(|_| SessionError::new(operation, SessionErrorKind::Internal))?
-        .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        .map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let committed_storage_id = committed
             .storage_id()
             .map(str::to_string)
@@ -2087,7 +1942,9 @@ impl TokenManager {
         })
         .await
         .map_err(|_| SessionError::new(operation, SessionErrorKind::Internal))?
-        .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        .map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         Ok(imported_session_access(
             operation,
             target,
@@ -2138,8 +1995,9 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        recovered
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        recovered.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let repository = self.inner.repository.clone();
         let connection_id = request.target.connection_id.clone();
         let profile_name = request.target.profile_name.clone();
@@ -2149,8 +2007,9 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        let anchor = anchor
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let anchor = anchor.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let (locks, port, verified) = match self
             .verified_login_auth_port(locks, &anchor, operation)
             .await
@@ -2304,8 +2163,9 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        let (recovered, _) = recovered
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let (recovered, _) = recovered.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let cleanup_deferred = outcome_has_warnings(&recovered);
 
         let repository = self.inner.repository.clone();
@@ -2317,8 +2177,9 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        let anchor = anchor
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let anchor = anchor.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let (locks, port, verified) = match self
             .verified_login_auth_port(locks, &anchor, operation)
             .await
@@ -2399,10 +2260,10 @@ impl TokenManager {
             Ok(permit) => permit,
             Err(error) => {
                 drop(locks);
-                return Err(SessionError::new(
-                    operation,
-                    config_error_kind(&error, operation),
-                ));
+                return Err(
+                    SessionError::new(operation, config_error_kind(&error, operation))
+                        .with_source(error),
+                );
             }
         };
         if let Some(kind) = operation.pre_dispatch_error() {
@@ -3185,8 +3046,9 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        let (reconciled, _disposition) = reconciled
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let (reconciled, _disposition) = reconciled.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let cleanup_deferred = outcome_has_warnings(&reconciled);
 
         if let Some(kind) = operation.pre_dispatch_error() {
@@ -3201,8 +3063,9 @@ impl TokenManager {
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
-        let anchor = anchor
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        let anchor = anchor.map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         Ok((locks, anchor, cleanup_deferred))
     }
 
@@ -3555,7 +3418,8 @@ impl TokenManager {
                     None,
                     cleanup_deferred,
                     false,
-                ))
+                )
+                .with_source(commit_error))
             }
             Ok((
                 outcome,
@@ -3584,7 +3448,8 @@ impl TokenManager {
                     None,
                     cleanup_deferred,
                     false,
-                ))
+                )
+                .with_source(commit_error))
             }
             Ok((_, AuthOperationRecoveryDisposition::SourceRevoked)) | Err(_) => {
                 drop(locks);
@@ -3595,7 +3460,8 @@ impl TokenManager {
                     None,
                     cleanup_deferred,
                     false,
-                ))
+                )
+                .with_source(commit_error))
             }
         }
     }
@@ -4071,10 +3937,13 @@ fn existing_legacy_connection<'a>(
         return Some((deterministic, connection));
     }
     if let Some(storage_id) = storage_id {
-        if let Some((connection_id, connection)) = config
-            .connections
-            .iter()
-            .find(|(_, connection)| connection.metadata().storage_id.as_deref() == Some(storage_id))
+        if let Some((connection_id, connection)) =
+            config.connections.iter().find(|(_, connection)| {
+                connection
+                    .credential_profiles()
+                    .values()
+                    .any(|p| p.storage_id() == Some(storage_id))
+            })
         {
             return Some((connection_id.clone(), connection));
         }
@@ -4101,7 +3970,7 @@ fn bound_legacy_session(
     Some(BoundLegacySession {
         connection_id,
         endpoint: connection.metadata().address.clone(),
-        storage_id: connection.metadata().storage_id.clone(),
+        storage_id: profile.storage_id().map(str::to_owned),
         server_fingerprint: connection
             .metadata()
             .server_fingerprint
@@ -4253,7 +4122,9 @@ async fn acquire_lock(
     let pending = run_blocking(move || kind.pending_at(&root))
         .await
         .map_err(|kind| SessionError::new(operation, kind))?
-        .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+        .map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
     let mut pending = pending;
     loop {
         if let Some(kind) = operation.pre_dispatch_error() {
@@ -4262,7 +4133,10 @@ async fn acquire_lock(
         let attempt = run_blocking(move || pending.try_acquire())
             .await
             .map_err(|kind| SessionError::new(operation, kind))?
-            .map_err(|error| SessionError::new(operation, config_error_kind(&error, operation)))?;
+            .map_err(|error| {
+                SessionError::new(operation, config_error_kind(&error, operation))
+                    .with_source(error)
+            })?;
         match attempt {
             LockAttempt::Acquired(guard) => return Ok(guard),
             LockAttempt::WouldBlock(next) => pending = next,
@@ -6362,7 +6236,7 @@ mod tests {
             .get(&connection_id)
             .expect("imported connection exists");
         assert_eq!(
-            connection.metadata().storage_id.as_deref(),
+            connection.profile_storage_id("default"),
             Some(storage_id.as_str())
         );
         let profile = connection
@@ -6420,8 +6294,7 @@ mod tests {
                                     "refresh_token": "legacy-refresh"
                                 }}
                             }},
-                            "current_token": "default",
-                            "storage_id": "{storage_id}"
+                            "current_token": "default"
                         }}
                     }}
                 }}"#

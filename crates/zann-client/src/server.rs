@@ -97,6 +97,7 @@ impl ServerProbe {
                 metadata.name.clone(),
                 binding,
                 None,
+                None,
             )?;
         }
         Ok(ServerClient {

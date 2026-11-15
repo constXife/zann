@@ -31,9 +31,9 @@ final class ConnectModel: ObservableObject {
     private var browser: OidcLoginFfi?
     private var operation: (FlowOperationFfi, SessionOperationFfi)?
 
-    init(session: RemoteSession, strings: Strings, browser: BrowserAuthorization,
+    init(session: RemoteSession, strings: Strings, reconnectStorage: String? = nil, browser: BrowserAuthorization,
          copyBrowserUrl: @escaping (String) -> Void, connected: @escaping (Connected) -> Void) {
-        let flow = ConnectFlowFfi()
+        let flow = ConnectFlowFfi(reconnectStorage: reconnectStorage)
         self.flow = flow
         self.copyBrowserUrl = copyBrowserUrl
         self.session = session
@@ -107,11 +107,11 @@ final class ConnectModel: ObservableObject {
 
     private func execute(_ effect: ConnectEffectFfi) async {
         switch effect {
-        case .probe(let id, let endpoint, let connectionName, let profileName):
+        case .probe(let id, let endpoint, let connectionName, let storageId):
             guard flow.accepts(id: id, step: .probe) else { return }
             let session = session
             await run(id, .probe, {
-                try session.prepareConnection(endpoint: endpoint, connectionName: connectionName, profileName: profileName)
+                try session.prepareConnection(endpoint: endpoint, connectionName: connectionName, storageId: storageId)
             }) { outcome in
                 switch outcome {
                 case .ready(let connection):

@@ -13,11 +13,14 @@ pub struct ConnectFlowFfi(Mutex<flow::Connect>);
 #[uniffi::export]
 impl ConnectFlowFfi {
     #[uniffi::constructor]
-    pub fn new() -> Arc<Self> {
+    pub fn new(reconnect_storage: Option<String>) -> Arc<Self> {
         static NEXT_INSTANCE: AtomicU64 = AtomicU64::new(1);
-        Arc::new(Self(Mutex::new(flow::Connect::new(
-            NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed),
-        ))))
+        let instance = NEXT_INSTANCE.fetch_add(1, Ordering::Relaxed);
+        let flow = match reconnect_storage {
+            Some(storage) => flow::Connect::reconnect(instance, storage),
+            None => flow::Connect::new(instance),
+        };
+        Arc::new(Self(Mutex::new(flow)))
     }
 
     pub fn snapshot(&self) -> ConnectSnapshotFfi {

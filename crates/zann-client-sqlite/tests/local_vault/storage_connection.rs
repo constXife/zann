@@ -64,10 +64,9 @@ fn a_server_storage_without_a_connection_is_not_synced() {
         .expect_err("no server to sync with");
 }
 
-/// A new connection to an address takes over the storage the database keeps
-/// there: the factory finds it by address and releases it, as often as asked.
+/// Replica selection is exact even when two subjects share the endpoint.
 #[test]
-fn the_storage_kept_for_an_address_is_found_and_released() {
+fn replicas_at_one_endpoint_are_found_only_by_exact_uuid() {
     use std::sync::Arc;
     use zann_client::app::{AppSyncStoreFactory, ClientPaths};
     use zann_client_sqlite::SqliteSyncStoreFactory;
@@ -84,32 +83,45 @@ fn the_storage_kept_for_an_address_is_found_and_released() {
     let pool = runtime
         .block_on(zann_db::connect_sqlite_file_with_max(&location, 1))
         .expect("connect");
-    let address = "https://zann.example.test/";
+    let address = "https://zann.example.test";
     let remote = zann_db::local::LocalStorage {
         id: Uuid::now_v7(),
         kind: zann_core::StorageKind::Remote,
         name: "Remote".to_string(),
         server_url: Some(address.to_string()),
         server_name: None,
-        server_fingerprint: None,
-        account_subject: None,
+        server_fingerprint: Some("test-pin".into()),
+        account_subject: Some(Uuid::now_v7().to_string()),
         personal_vaults_enabled: true,
-        auth_method: None,
+        auth_method: Some(zann_core::AuthMethod::Password),
     };
     runtime
         .block_on(zann_db::local::LocalStorageRepo::new(&pool).upsert(&remote))
         .expect("insert a server storage");
+    let mut other = remote.clone();
+    other.id = Uuid::now_v7();
+    other.account_subject = Some(Uuid::now_v7().to_string());
+    runtime
+        .block_on(zann_db::local::LocalStorageRepo::new(&pool).upsert(&other))
+        .expect("second subject on same endpoint");
     runtime.block_on(pool.close());
 
     let factory = Arc::new(SqliteSyncStoreFactory::new(&db_path).expect("factory"));
     let paths = ClientPaths::with_local_db(root.path(), &db_path);
-    let at = |address: &str| {
+    let at = |id| {
         runtime
-            .block_on(Arc::clone(&factory).storage_at(paths.clone(), address.to_string()))
-            .expect("look up storage")
+            .block_on(Arc::clone(&factory).replica_at(paths.clone(), id))
+            .expect("exact replica")
     };
-    assert_eq!(at(address), Some(remote.id));
-    assert_eq!(at("https://other.example.test/"), None);
+    assert_eq!(
+        at(remote.id).unwrap().account_subject,
+        remote.account_subject.clone().unwrap()
+    );
+    assert_eq!(
+        at(other.id).unwrap().account_subject,
+        other.account_subject.unwrap()
+    );
+    assert!(at(Uuid::now_v7()).is_none());
     for storage_id in [remote.id, remote.id, Uuid::now_v7()] {
         runtime
             .block_on(Arc::clone(&factory).release_storage(paths.clone(), storage_id))

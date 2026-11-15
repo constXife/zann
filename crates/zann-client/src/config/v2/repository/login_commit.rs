@@ -190,7 +190,8 @@ impl ConfigRepository {
             && connection.metadata.server_id.as_deref() == Some(permit.anchor.server_id.as_str())
             && connection.metadata.server_fingerprint.as_deref()
                 == Some(permit.anchor.server_fingerprint.as_str())
-            && connection.metadata.storage_id == permit.anchor.storage_id
+            && connection.profile_storage_id(&permit.anchor.profile_name)
+                == permit.anchor.storage_id.as_deref()
             && connection.active_credential.as_deref() == Some(permit.anchor.profile_name.as_str())
             && config
                 .clients

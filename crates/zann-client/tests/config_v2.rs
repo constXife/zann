@@ -623,7 +623,6 @@ fn add_bound_test_connection(repo: &ConfigRepository) -> ConnectionId {
     let mut metadata = ConnectionMetadata::new("bound", "HTTPS://EXAMPLE.TEST:443");
     metadata.server_id = Some("server-1".to_string());
     metadata.server_fingerprint = Some("fingerprint-1".to_string());
-    metadata.storage_id = Some("storage-1".to_string());
     repo.upsert_connection(connection_id.clone(), metadata)
         .expect("insert bound test connection");
     connection_id
@@ -644,8 +643,6 @@ fn master_key_binding_fixture(
     let mut metadata = ConnectionMetadata::new("binding", "HTTPS://BINDING.TEST:443");
     metadata.server_id = Some("server-binding".to_string());
     metadata.server_fingerprint = Some("pin-binding".to_string());
-    metadata.storage_id = Some("storage-binding".to_string());
-    metadata.expected_master_key_fp = expected_master_key_fp.map(str::to_string);
     repo.upsert_connection(connection_id.clone(), metadata)
         .expect("insert binding connection");
     let store = FaultCredentialStore::default();
@@ -659,6 +656,15 @@ fn master_key_binding_fixture(
         &store,
     )
     .expect("insert binding profile");
+    let path = repo.paths().config();
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("config")).expect("JSON");
+    raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]["storage_id"] =
+        json!("storage-binding");
+    raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
+        ["expected_master_key_fp"] = json!(expected_master_key_fp);
+    fs::write(path, serde_json::to_vec_pretty(&raw).expect("JSON"))
+        .expect("write profile binding fixture");
     (temp, repo, connection_id, store)
 }
 
@@ -2052,7 +2058,7 @@ fn metadata_mutations_preserve_credentials_and_cannot_retarget_binding() {
         serde_json::to_value(snapshot.config().connections[&connection_id].credential_profiles())
             .expect("credential subtree");
 
-    for field in ["address", "server_fingerprint", "storage_id"] {
+    for field in ["address", "server_fingerprint"] {
         let before = fs::read(repo.paths().config()).expect("primary before retarget");
         let revision = repo.snapshot().expect("snapshot").revision();
         let error = repo
@@ -2062,7 +2068,6 @@ fn metadata_mutations_preserve_credentials_and_cannot_retarget_binding() {
                     "server_fingerprint" => {
                         metadata.server_fingerprint = Some("sha256:attacker".to_string())
                     }
-                    "storage_id" => metadata.storage_id = Some("attacker-storage".to_string()),
                     _ => unreachable!(),
                 }
                 Ok(())
@@ -2171,7 +2176,7 @@ fn canonical_url_aliases_share_one_trust_binding() {
 }
 
 #[test]
-fn legacy_aliases_are_backfilled_to_one_trust_binding_before_publish() {
+fn legacy_duplicate_endpoint_owners_are_refused_before_publish() {
     let temp = TempDir::new().expect("tempdir");
     write_legacy(
         &temp,
@@ -2181,21 +2186,15 @@ fn legacy_aliases_are_backfilled_to_one_trust_binding_before_publish() {
         }}"#,
     );
     let repo = repository(&temp);
-    let snapshot = repo
-        .initialize(
+    assert!(matches!(
+        repo.initialize(
             &client_id("cli"),
             &MemoryCredentials::default(),
-            &MemoryLegacyCredentials::default(),
-        )
-        .expect("migrate aliases");
-    assert_eq!(snapshot.config().connections.len(), 2);
-    for connection in snapshot.config().connections.values() {
-        assert_eq!(connection.metadata().server_id.as_deref(), Some("server"));
-        assert_eq!(
-            connection.metadata().server_fingerprint.as_deref(),
-            Some("sha256:pin")
-        );
-    }
+            &MemoryLegacyCredentials::default()
+        ),
+        Err(ConfigError::InvalidConfig { .. })
+    ));
+    assert!(!repo.paths().config().exists());
 }
 
 #[test]
@@ -3206,10 +3205,7 @@ fn master_key_fingerprint_bind_is_atomic_idempotent_and_canonical() {
     assert!(outcome.changed());
     assert_eq!(outcome.snapshot().revision(), anchor.source_revision() + 1);
     assert_eq!(
-        outcome.snapshot().config().connections[&connection_id]
-            .metadata()
-            .expected_master_key_fp
-            .as_deref(),
+        outcome.snapshot().config().connections[&connection_id].profile_key_fingerprint("profile"),
         Some("0123456789ab")
     );
     assert_eq!(
@@ -3312,8 +3308,8 @@ fn master_key_fingerprint_bind_rebases_unrelated_revisions_but_not_binding_chang
         .resolve_credential_profile_anchor(&connection_id, "profile")
         .expect("unbound anchor");
     rewrite_primary_json(&repo, |raw| {
-        raw["connections"][connection_id.as_str()]["metadata"]["expected_master_key_fp"] =
-            json!("222222222222");
+        raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
+            ["expected_master_key_fp"] = json!("222222222222");
     });
     assert!(matches!(
         repo.bind_expected_master_key_fingerprint_if_profile_matches(&anchor, "222222222222"),
@@ -3329,7 +3325,8 @@ fn master_key_fingerprint_bind_rebases_unrelated_revisions_but_not_binding_chang
             .resolve_credential_profile_anchor(&connection_id, "profile")
             .expect("bound anchor");
         rewrite_primary_json(&repo, |raw| {
-            raw["connections"][connection_id.as_str()]["metadata"]["expected_master_key_fp"] =
+            raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
+                ["expected_master_key_fp"] =
                 replacement.map_or(serde_json::Value::Null, |value| json!(value));
         });
         assert!(matches!(
@@ -3341,23 +3338,14 @@ fn master_key_fingerprint_bind_rebases_unrelated_revisions_but_not_binding_chang
         ));
     }
 
-    let (_temp, repo, connection_id, _store) =
+    let (_temp, repo, _connection_id, _store) =
         master_key_binding_fixture(Some("legacy-master-key-fingerprint"));
-    let anchor = repo
-        .resolve_credential_profile_anchor(&connection_id, "profile")
-        .expect("legacy binding remains parseable");
-    let primary_before = fs::read(repo.paths().config()).expect("legacy primary");
-    assert_eq!(
-        anchor.expected_master_key_fp(),
-        Some("legacy-master-key-fingerprint")
-    );
-    assert!(matches!(
-        repo.bind_expected_master_key_fingerprint_if_profile_matches(&anchor, "444444444444"),
-        Err(ConfigError::MasterKeyFingerprintRebindRequired { .. })
-    ));
-    assert_eq!(
-        fs::read(repo.paths().config()).expect("unchanged legacy primary"),
-        primary_before
+    assert!(
+        matches!(
+            repo.snapshot(),
+            Err(ConfigError::InvalidMasterKeyFingerprint)
+        ),
+        "the direct cutover admits only canonical fingerprints"
     );
 }
 
@@ -3403,8 +3391,8 @@ fn master_key_fingerprint_bind_checks_every_profile_and_endpoint_field() {
         "storage_id",
         |_, _| {},
         |raw, connection_id| {
-            raw["connections"][connection_id.as_str()]["metadata"]["storage_id"] =
-                json!("storage-other");
+            raw["connections"][connection_id.as_str()]["credential_profiles"]["profile"]
+                ["storage_id"] = json!("storage-other");
         },
     );
     assert_master_key_binding_anchor_conflict(
@@ -3543,8 +3531,7 @@ fn master_key_fingerprint_bind_honors_auth_and_credential_intent_barriers() {
     ));
     assert_eq!(
         repo.snapshot().expect("snapshot").config().connections[&connection_id]
-            .metadata()
-            .expected_master_key_fp,
+            .profile_key_fingerprint("profile"),
         None
     );
 }
@@ -3576,6 +3563,15 @@ fn profile_anchor_rebases_over_unrelated_state_and_preserves_active_selection() 
     )
     .expect("second profile");
 
+    let mut raw: serde_json::Value =
+        serde_json::from_slice(&fs::read(repo.paths().config()).unwrap()).unwrap();
+    raw["connections"][connection_id.as_str()]["credential_profiles"]["refreshing"]["storage_id"] =
+        json!("storage-1");
+    fs::write(
+        repo.paths().config(),
+        serde_json::to_vec_pretty(&raw).unwrap(),
+    )
+    .unwrap();
     let anchor = repo
         .resolve_credential_profile_anchor(&connection_id, "refreshing")
         .expect("profile anchor");

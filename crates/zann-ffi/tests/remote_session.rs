@@ -17,7 +17,7 @@ fn remote_session_projects_typed_session_errors() {
         session.prepare_connection(
             format!("http://127.0.0.1:{closed_port}"),
             "Remote".into(),
-            "default".into(),
+            None,
         ),
         Err(CoreError::Session {
             kind: SessionErrorKindFfi::TransportUnavailable,
@@ -44,7 +44,7 @@ fn forgetting_an_unknown_server_is_a_no_op() {
     for _ in 0..2 {
         assert_eq!(
             session
-                .remove_connection("https://zann.example".into(), "Remote".into())
+                .remove_connection("https://zann.example".into())
                 .expect("forget server"),
             ConnectionRemovalFfi::AlreadyAbsent
         );

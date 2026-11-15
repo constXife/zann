@@ -52,7 +52,9 @@ fn tempdir() -> tempfile::TempDir {
 }
 
 fn open(root: &Path) -> Arc<LocalVault> {
-    let credentials = Arc::new(Credentials::default());
+    open_with_credentials(root, Arc::new(Credentials::default()))
+}
+fn open_with_credentials(root: &Path, credentials: Arc<Credentials>) -> Arc<LocalVault> {
     LocalVault::open(
         zann_db::SqliteFileLocation::from_path(&root.join("local.sqlite")).unwrap(),
         LocalVaultPorts {
@@ -191,3 +193,5 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
     }).await.unwrap();
     server.abort();
 }
+
+mod account_replicas;

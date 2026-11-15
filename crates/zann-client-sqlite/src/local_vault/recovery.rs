@@ -34,7 +34,7 @@ pub(super) struct PreparedRecovery {
     preview: RecoveryPreview,
     generation: u64,
     source: RecoverySource,
-    connection: Option<zann_client::app::ConnectionRemovalPlan>,
+    connection: Option<zann_client::app::AccountRemovalPlan>,
 }
 pub(super) fn failure(code: &'static str) -> LocalError {
     LocalError::Unlock {
@@ -111,7 +111,7 @@ impl LocalVault {
             RecoveryScope::Device => None,
             RecoveryScope::Account(id) => Some(
                 self.app_client()?
-                    .prepare_storage_connection_removal(id)
+                    .prepare_account_removal(id)
                     .map_err(connection_error)?,
             ),
         };
@@ -209,7 +209,7 @@ impl LocalVault {
                 let recovery = plan.source.begin(&pool).await.map_err(storage_error)?;
                 if let Some(connection) = plan.connection {
                     client
-                        .commit_storage_connection_removal(connection)
+                        .commit_account_removal(connection)
                         .map_err(connection_error)?;
                 }
                 if device_reset {

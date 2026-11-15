@@ -9,11 +9,11 @@ fn probe(flow: &ConnectFlowFfi) -> FlowOperationFfi {
             id,
             url,
             connection_name,
-            profile_name,
+            storage_id,
         } => {
             assert_eq!(url, "https://example.test/");
             assert_eq!(connection_name, zann_flows::connect::CONNECTION_NAME);
-            assert_eq!(profile_name, zann_flows::connect::PROFILE_NAME);
+            assert!(storage_id.is_none());
             *id
         }
         _ => panic!("probe effect"),
@@ -29,7 +29,7 @@ fn info(methods: Vec<AuthMethodFfi>, registration_available: bool) -> ConnectSer
 
 #[test]
 fn trust_registration_and_success_cross_the_same_typed_boundary() {
-    let flow = ConnectFlowFfi::new();
+    let flow = ConnectFlowFfi::new(None);
     let id = probe(&flow);
     let wrong_step = flow.complete(ConnectCompletionFfi::Trusted {
         id,
@@ -112,7 +112,7 @@ fn trust_registration_and_success_cross_the_same_typed_boundary() {
 
 #[test]
 fn oidc_phase_back_and_stale_results_have_native_reducer_semantics() {
-    let flow = ConnectFlowFfi::new();
+    let flow = ConnectFlowFfi::new(None);
     let id = probe(&flow);
     let effects = flow.complete(ConnectCompletionFfi::Probed {
         id,
@@ -162,10 +162,10 @@ fn oidc_phase_back_and_stale_results_have_native_reducer_semantics() {
 
 #[test]
 fn cancelled_and_reopened_ffi_flows_reject_old_capability_results() {
-    let old = ConnectFlowFfi::new();
+    let old = ConnectFlowFfi::new(None);
     let id = probe(&old);
     old.dispatch(ConnectActionFfi::Cancel);
-    let reopened = ConnectFlowFfi::new();
+    let reopened = ConnectFlowFfi::new(None);
     let next = probe(&reopened);
     for flow in [&old, &reopened] {
         assert!(!flow.accepts(id, ConnectStepFfi::Probe));

@@ -2,7 +2,6 @@ use zann_core::AuthMethod;
 
 pub const LOGIN_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 pub const CONNECTION_NAME: &str = "Remote";
-pub const PROFILE_NAME: &str = "default";
 
 pub use crate::OperationId;
 
@@ -108,6 +107,7 @@ pub enum Effect {
     Probe {
         id: OperationId,
         url: String,
+        storage_id: Option<String>,
     },
     TrustFingerprint {
         id: OperationId,

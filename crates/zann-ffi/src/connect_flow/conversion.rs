@@ -152,11 +152,15 @@ impl From<&flow::Snapshot> for ConnectSnapshotFfi {
 impl From<flow::Effect> for ConnectEffectFfi {
     fn from(effect: flow::Effect) -> Self {
         match effect {
-            flow::Effect::Probe { id, url } => Self::Probe {
+            flow::Effect::Probe {
+                id,
+                url,
+                storage_id,
+            } => Self::Probe {
                 id: id.into(),
                 url,
                 connection_name: flow::CONNECTION_NAME.into(),
-                profile_name: flow::PROFILE_NAME.into(),
+                storage_id,
             },
             flow::Effect::TrustFingerprint { id } => Self::TrustFingerprint { id: id.into() },
             flow::Effect::Password {

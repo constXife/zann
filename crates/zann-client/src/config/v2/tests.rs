@@ -161,13 +161,11 @@ fn stored_binding(
     address: &str,
     server_id: Option<&str>,
     fingerprint: Option<&str>,
-    storage_id: Option<&str>,
 ) -> StoredConnectionBinding {
     StoredConnectionBinding::new(
         address,
         server_id.map(str::to_string),
         fingerprint.map(str::to_string),
-        storage_id.map(str::to_string),
     )
 }
 
@@ -255,7 +253,7 @@ fn authenticated_targets_publish_complete_generations_and_preserve_metadata() {
         connection.metadata.server_fingerprint.as_deref(),
         Some("pin-a")
     );
-    assert_eq!(connection.metadata.storage_id.as_deref(), Some("storage-a"));
+    assert_eq!(connection.profile_storage_id("first"), Some("storage-a"));
     assert_eq!(connection.active_credential(), Some("first"));
     assert_eq!(
         created.snapshot().config().clients[&client_id("desktop")].active_connection(),
@@ -265,17 +263,12 @@ fn authenticated_targets_publish_complete_generations_and_preserve_metadata() {
         &connection.credential_profiles()["first"].credentials()[&CredentialKind::Access];
     assert_eq!(store.value(first_id).as_deref(), Some("first-secret"));
 
-    let exact = stored_binding(
-        "https://auth.test",
-        Some("server-a"),
-        Some("pin-a"),
-        Some("storage-a"),
-    );
+    let exact = stored_binding("https://auth.test", Some("server-a"), Some("pin-a"));
     commit(
         &repo,
         1,
         endpoint("https://auth.test", "server-a", "pin-a"),
-        Some("storage-a"),
+        Some("storage-a-second"),
         AuthenticatedConnectionTarget::UseExisting {
             connection_id: connection_id.clone(),
             expected: exact,
@@ -291,7 +284,6 @@ fn authenticated_targets_publish_complete_generations_and_preserve_metadata() {
     let unpinned_id = ConnectionId::deterministic("unpinned", "https://unpinned.test");
     let mut unpinned = ConnectionMetadata::new("unpinned", "https://unpinned.test");
     unpinned.needs_salt_update = true;
-    unpinned.expected_master_key_fp = Some("master-key-fp".to_string());
     repo.upsert_connection(unpinned_id.clone(), unpinned)
         .expect("insert unpinned metadata");
     let pinned = commit(
@@ -301,7 +293,7 @@ fn authenticated_targets_publish_complete_generations_and_preserve_metadata() {
         Some("storage-b"),
         AuthenticatedConnectionTarget::PinExisting {
             connection_id: unpinned_id.clone(),
-            expected: stored_binding("https://unpinned.test", None, None, None),
+            expected: stored_binding("https://unpinned.test", None, None),
         },
         IdentityCommit::InitializeOrMatch(config_identity.clone()),
         "cli",
@@ -313,23 +305,18 @@ fn authenticated_targets_publish_complete_generations_and_preserve_metadata() {
     let pinned_metadata = pinned.snapshot().config().connections[&unpinned_id].metadata();
     assert!(pinned_metadata.needs_salt_update);
     assert_eq!(
-        pinned_metadata.expected_master_key_fp.as_deref(),
-        Some("master-key-fp")
+        pinned.snapshot().config().connections[&unpinned_id].profile_key_fingerprint("pinned"),
+        None
     );
 
     commit(
         &repo,
         4,
         endpoint("https://auth.test", "server-a", "pin-a-2"),
-        Some("storage-a"),
+        Some("storage-a-third"),
         AuthenticatedConnectionTarget::ReplaceFingerprint {
             connection_id: connection_id.clone(),
-            expected: stored_binding(
-                "https://auth.test",
-                Some("server-a"),
-                Some("pin-a"),
-                Some("storage-a"),
-            ),
+            expected: stored_binding("https://auth.test", Some("server-a"), Some("pin-a")),
         },
         IdentityCommit::InitializeOrMatch(config_identity.clone()),
         "desktop",
@@ -342,15 +329,10 @@ fn authenticated_targets_publish_complete_generations_and_preserve_metadata() {
         &repo,
         5,
         endpoint("https://new.test/base/", "server-a", "pin-a-3"),
-        Some("storage-a"),
+        Some("storage-a-fourth"),
         AuthenticatedConnectionTarget::RelocateEndpoint {
             connection_id: connection_id.clone(),
-            expected: stored_binding(
-                "https://auth.test",
-                Some("server-a"),
-                Some("pin-a-2"),
-                Some("storage-a"),
-            ),
+            expected: stored_binding("https://auth.test", Some("server-a"), Some("pin-a-2")),
         },
         IdentityCommit::InitializeOrMatch(config_identity),
         "desktop",
@@ -416,9 +398,7 @@ fn authenticated_storage_is_optional_and_outcome_reports_the_effective_binding()
     let connection_id = created.connection_id().clone();
     assert_eq!(created.storage_id(), None);
     assert_eq!(
-        created.snapshot().config().connections[&connection_id]
-            .metadata()
-            .storage_id,
+        created.snapshot().config().connections[&connection_id].profile_storage_id("third"),
         None
     );
 
@@ -426,7 +406,6 @@ fn authenticated_storage_is_optional_and_outcome_reports_the_effective_binding()
         "https://remote-only.test",
         Some("server-remote"),
         Some("pin-remote"),
-        None,
     );
     let still_without_storage = commit(
         &repo,
@@ -468,7 +447,6 @@ fn authenticated_storage_is_optional_and_outcome_reports_the_effective_binding()
         "https://remote-only.test",
         Some("server-remote"),
         Some("pin-remote"),
-        Some("storage-local"),
     );
     let preserved = commit(
         &repo,
@@ -481,17 +459,14 @@ fn authenticated_storage_is_optional_and_outcome_reports_the_effective_binding()
         },
         IdentityCommit::InitializeOrMatch(config_identity.clone()),
         "cli",
-        "fourth",
+        "third",
         "fourth-secret",
         &store,
     )
     .expect("None preserves an existing Some binding");
     assert_eq!(preserved.storage_id(), Some("storage-local"));
     assert_eq!(
-        preserved.snapshot().config().connections[&connection_id]
-            .metadata()
-            .storage_id
-            .as_deref(),
+        preserved.snapshot().config().connections[&connection_id].profile_storage_id("third"),
         Some("storage-local")
     );
 
@@ -508,12 +483,15 @@ fn authenticated_storage_is_optional_and_outcome_reports_the_effective_binding()
             },
             IdentityCommit::InitializeOrMatch(config_identity),
             "cli",
-            "replacement",
+            "third",
             "replacement-secret",
             &store,
         )
         .expect_err("Some cannot replace an existing storage binding"),
-        ConfigError::AuthenticatedBindingConflict { .. }
+        ConfigError::BindingChangeRequiresRebind {
+            field: "profile.storage_id",
+            ..
+        }
     ));
     assert_eq!(store.calls(), calls);
 }
@@ -581,12 +559,7 @@ fn authenticated_conflicts_fail_before_ports_and_leave_primary_unchanged() {
             Some("storage-one"),
             AuthenticatedConnectionTarget::UseExisting {
                 connection_id: created.connection_id().clone(),
-                expected: stored_binding(
-                    "https://wrong.test",
-                    Some("server-one"),
-                    Some("pin-one"),
-                    Some("storage-one"),
-                ),
+                expected: stored_binding("https://wrong.test", Some("server-one"), Some("pin-one")),
             },
             IdentityCommit::InitializeOrMatch(config_identity),
             "cli",
@@ -640,16 +613,11 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
         Some("storage-one"),
         AuthenticatedConnectionTarget::ReplaceFingerprint {
             connection_id: connection_id.clone(),
-            expected: stored_binding(
-                "https://known.test",
-                Some("server-one"),
-                Some("pin-one"),
-                Some("storage-one"),
-            ),
+            expected: stored_binding("https://known.test", Some("server-one"), Some("pin-one")),
         },
         IdentityCommit::InitializeOrMatch(base_identity.clone()),
         "desktop",
-        "second",
+        "first",
         "second-secret",
         &store,
     )
@@ -665,16 +633,11 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
         Some("storage-one"),
         AuthenticatedConnectionTarget::UseExisting {
             connection_id: connection_id.clone(),
-            expected: stored_binding(
-                "https://known.test",
-                Some("server-one"),
-                Some("pin-two"),
-                Some("storage-one"),
-            ),
+            expected: stored_binding("https://known.test", Some("server-one"), Some("pin-two")),
         },
         IdentityCommit::InitializeOrMatch(enriched.clone()),
         "desktop",
-        "second",
+        "first",
         "third-secret",
         &store,
     )
@@ -690,16 +653,11 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
             Some("storage-one"),
             AuthenticatedConnectionTarget::UseExisting {
                 connection_id: connection_id.clone(),
-                expected: stored_binding(
-                    "https://known.test",
-                    Some("server-one"),
-                    Some("pin-two"),
-                    Some("storage-one"),
-                ),
+                expected: stored_binding("https://known.test", Some("server-one"), Some("pin-two")),
             },
             IdentityCommit::InitializeOrMatch(conflict),
             "desktop",
-            "second",
+            "first",
             "conflict-secret",
             &store,
         )
@@ -716,19 +674,14 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
         Some("storage-one"),
         AuthenticatedConnectionTarget::UseExisting {
             connection_id: connection_id.clone(),
-            expected: stored_binding(
-                "https://known.test",
-                Some("server-one"),
-                Some("pin-two"),
-                Some("storage-one"),
-            ),
+            expected: stored_binding("https://known.test", Some("server-one"), Some("pin-two")),
         },
         IdentityCommit::ReplaceExact {
             expected: enriched,
             replacement: replacement.clone(),
         },
         "desktop",
-        "second",
+        "first",
         "replacement-secret",
         &store,
     )
@@ -738,7 +691,7 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
             .expect("snapshot")
             .config()
             .account_identities
-            .get(&identity_slot(&connection_id, "second")),
+            .get(&identity_slot(&connection_id, "first")),
         Some(&replacement)
     );
 
@@ -757,7 +710,7 @@ fn authenticated_known_host_identity_and_storage_are_exact_cas() {
             Some("storage-one"),
             AuthenticatedConnectionTarget::PinExisting {
                 connection_id: other_id,
-                expected: stored_binding("https://other.test", None, None, None),
+                expected: stored_binding("https://other.test", None, None),
             },
             IdentityCommit::InitializeOrMatch(replacement),
             "desktop",
@@ -880,7 +833,7 @@ fn seed_auth_intent_profile(repo: &ConfigRepository, store: &TestCredentialStore
 }
 
 #[test]
-fn authorized_generation_proves_a_single_profile_connection() {
+fn authorized_generation_is_stable_across_unrelated_profiles_and_connections() {
     let profile_temp = TempDir::new().expect("profile tempdir");
     let profile_repo = repository(&profile_temp);
     initialize(&profile_repo);
@@ -892,7 +845,6 @@ fn authorized_generation_proves_a_single_profile_connection() {
     let exact = profile_repo
         .authorized_target_generation_from_anchor(&exact_anchor)
         .expect("exact topology generation");
-    assert!(exact.single_profile_connection());
 
     let revision = profile_repo
         .snapshot()
@@ -914,11 +866,10 @@ fn authorized_generation_proves_a_single_profile_connection() {
     let multi_profile = profile_repo
         .authorized_target_generation_from_anchor(&multi_profile_anchor)
         .expect("multi-profile generation");
-    assert!(!multi_profile.single_profile_connection());
-    assert_ne!(
+    assert_eq!(
         exact.stable_target_fingerprint(),
         multi_profile.stable_target_fingerprint(),
-        "the stable proof must bind the topology decision"
+        "another profile must not change this account's stable binding"
     );
 
     let connection_temp = TempDir::new().expect("connection tempdir");
@@ -932,7 +883,6 @@ fn authorized_generation_proves_a_single_profile_connection() {
     let selected = connection_repo
         .authorized_target_generation_from_anchor(&selected_anchor)
         .expect("selected exact generation");
-    assert!(selected.single_profile_connection());
 
     let other = ConnectionId::deterministic("other", "https://other-topology.test");
     connection_repo
@@ -947,7 +897,6 @@ fn authorized_generation_proves_a_single_profile_connection() {
     let multi_connection = connection_repo
         .authorized_target_generation_from_anchor(&multi_connection_anchor)
         .expect("multi-connection generation");
-    assert!(multi_connection.single_profile_connection());
     assert_eq!(
         selected.stable_target_fingerprint(),
         multi_connection.stable_target_fingerprint(),
@@ -1597,11 +1546,11 @@ fn credential_anchor_and_auth_intent_protect_stable_profile_binding() {
         .connections
         .get_mut(committed.connection_id())
         .expect("bound connection");
-    bound_connection.metadata.expected_master_key_fp = Some("0123456789ab".to_string());
     let bound_profile = bound_connection
         .credential_profiles
         .get_mut("default")
         .expect("bound profile");
+    bound_profile.expected_master_key_fp = Some("0123456789ab".to_string());
     bound_profile.account_subject = Some(subject.to_string());
     bound_profile.auth_method = Some(AuthMethod::Password);
     bound.revision += 1;
@@ -2006,3 +1955,7 @@ fn removing_a_connection_fails_closed_on_a_stale_revision_or_missing_target() {
     assert!(after.config().connections.contains_key(&connection_id));
     assert_eq!(store.calls(), calls);
 }
+
+#[cfg(feature = "remote")]
+#[path = "tests/replicas.rs"]
+mod replicas;

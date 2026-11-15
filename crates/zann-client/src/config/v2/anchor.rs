@@ -34,8 +34,10 @@ pub(super) fn resolve_credential_profile_anchor_from_config(
         normalized_address,
         server_id: connection.metadata.server_id.clone(),
         server_fingerprint: connection.metadata.server_fingerprint.clone(),
-        storage_id: connection.metadata.storage_id.clone(),
-        expected_master_key_fp: connection.metadata.expected_master_key_fp.clone(),
+        storage_id: connection
+            .profile_storage_id(profile_name)
+            .map(str::to_owned),
+        expected_master_key_fp: profile.expected_master_key_fp.clone(),
         master_key_binding_observed: true,
         account_subject: profile.account_subject.clone(),
         auth_method: profile.auth_method,
@@ -90,7 +92,9 @@ pub(super) fn resolve_password_login_anchor_from_config(
         normalized_address,
         server_id,
         server_fingerprint,
-        storage_id: connection.metadata.storage_id.clone(),
+        storage_id: connection
+            .profile_storage_id(profile_name)
+            .map(str::to_owned),
         profile: connection.credential_profiles.get(profile_name).cloned(),
         active_profile: connection.active_credential.clone(),
         client_id: client_id.clone(),
@@ -145,7 +149,7 @@ pub(super) fn ensure_password_login_anchor_matches(
     {
         return Err(conflict("server_fingerprint"));
     }
-    if connection.metadata.storage_id != anchor.storage_id {
+    if connection.profile_storage_id(&anchor.profile_name) != anchor.storage_id.as_deref() {
         return Err(conflict("storage_id"));
     }
     if connection.credential_profiles.get(&anchor.profile_name) != anchor.profile.as_ref() {
@@ -245,13 +249,13 @@ pub(super) fn ensure_credential_profile_anchor_matches(
             "server_fingerprint",
         ));
     }
-    if connection.metadata.storage_id != anchor.storage_id {
-        return Err(credential_profile_anchor_conflict(anchor, "storage_id"));
-    }
     let profile = connection
         .credential_profiles
         .get(&anchor.profile_name)
         .ok_or_else(|| credential_profile_anchor_conflict(anchor, "profile"))?;
+    if connection.profile_storage_id(&anchor.profile_name) != anchor.storage_id.as_deref() {
+        return Err(credential_profile_anchor_conflict(anchor, "storage_id"));
+    }
     if profile.credentials != anchor.credentials {
         return Err(credential_profile_anchor_conflict(anchor, "credentials"));
     }
@@ -286,9 +290,21 @@ pub(super) fn apply_credential_bundle_replacement(
             connection_id: connection_id.clone(),
         }
     })?;
+    let previous = connection.credential_profiles.get(profile_name).cloned();
+    if previous
+        .as_ref()
+        .is_some_and(|profile| profile.expected_account_subject.is_some())
+    {
+        return Err(ConfigError::IdentityChanged);
+    }
     connection.credential_profiles.insert(
         profile_name.to_string(),
         CredentialProfile {
+            expected_account_subject: None,
+            storage_id: previous.as_ref().and_then(|p| p.storage_id.clone()),
+            expected_master_key_fp: previous
+                .as_ref()
+                .and_then(|p| p.expected_master_key_fp.clone()),
             account_subject: None,
             auth_method: None,
             access_expires_at,
@@ -356,6 +372,18 @@ pub(super) fn apply_password_login_candidate(
         });
     }
     validate_required_metadata("$.password_login.account_subject", account_subject)?;
+    if anchor
+        .profile
+        .as_ref()
+        .and_then(|profile| {
+            profile
+                .account_subject()
+                .or(profile.expected_account_subject.as_deref())
+        })
+        .is_some_and(|expected| expected != account_subject)
+    {
+        return Err(ConfigError::IdentityChanged);
+    }
     validate_required_metadata("$.password_login.access_expires_at", access_expires_at)?;
     apply_identity_commit(
         config,
@@ -385,6 +413,12 @@ pub(super) fn apply_password_login_candidate(
     connection.credential_profiles.insert(
         anchor.profile_name.clone(),
         CredentialProfile {
+            expected_account_subject: None,
+            storage_id: anchor.storage_id.clone(),
+            expected_master_key_fp: anchor
+                .profile
+                .as_ref()
+                .and_then(|p| p.expected_master_key_fp.clone()),
             account_subject: Some(account_subject.to_string()),
             auth_method: Some(AuthMethod::Password),
             access_expires_at: Some(access_expires_at.to_string()),

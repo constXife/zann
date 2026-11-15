@@ -3,6 +3,7 @@ use super::*;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SyncStoreErrorKind {
     MetadataRefreshRequired,
+    ReauthenticationRequired,
     NotFound,
     Busy,
     StaleCheckpoint,
@@ -16,19 +17,20 @@ pub enum SyncStoreErrorKind {
     Internal,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct SyncStoreError {
     pub(super) kind: SyncStoreErrorKind,
+    source: Option<Arc<dyn std::error::Error + Send + Sync>>,
 }
 
 impl SyncStoreError {
     #[must_use]
     pub const fn new(kind: SyncStoreErrorKind) -> Self {
-        Self { kind }
+        Self { kind, source: None }
     }
 
     #[must_use]
-    pub const fn kind(self) -> SyncStoreErrorKind {
+    pub const fn kind(&self) -> SyncStoreErrorKind {
         self.kind
     }
 }
@@ -39,10 +41,29 @@ impl fmt::Display for SyncStoreError {
     }
 }
 
-impl std::error::Error for SyncStoreError {}
+impl SyncStoreError {
+    pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
+        self.source = Some(Arc::new(source));
+        self
+    }
+}
+impl fmt::Debug for SyncStoreError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SyncStoreError")
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+impl std::error::Error for SyncStoreError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source.as_ref().map(|source| source.as_ref() as _)
+    }
+}
 
 pub(super) const fn sync_store_error_code(kind: SyncStoreErrorKind) -> &'static str {
     match kind {
+        SyncStoreErrorKind::ReauthenticationRequired => "reauthentication_required",
         SyncStoreErrorKind::MetadataRefreshRequired => "metadata_refresh_required",
         SyncStoreErrorKind::NotFound => "not_found",
         SyncStoreErrorKind::Busy => "busy",
@@ -138,4 +159,19 @@ pub trait SyncLocalStore: Send + Sync {
         self: Arc<Self>,
         reset: ProjectionReset,
     ) -> SyncStoreFuture<'static, ()>;
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::*;
+    #[test]
+    fn source_diagnostics_are_preserved_without_reflection() {
+        let error = SyncStoreError::new(SyncStoreErrorKind::Unavailable)
+            .with_source(std::io::Error::other("synthetic-private-diagnostic"));
+        assert!(!format!("{error:?} {error}").contains("synthetic-private"));
+        assert_eq!(
+            std::error::Error::source(&error).unwrap().to_string(),
+            "synthetic-private-diagnostic"
+        );
+    }
 }

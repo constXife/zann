@@ -233,9 +233,8 @@ impl ConfigRepository {
             .connections
             .get(&anchor.connection_id)
             .ok_or_else(|| credential_profile_anchor_conflict(anchor, "connection"))?
-            .metadata
-            .expected_master_key_fp
-            .clone();
+            .profile_key_fingerprint(&anchor.profile_name)
+            .map(str::to_owned);
         if current_fp != anchor.expected_master_key_fp {
             return Err(credential_profile_anchor_conflict(
                 anchor,
@@ -255,7 +254,9 @@ impl ConfigRepository {
                     .connections
                     .get_mut(&anchor.connection_id)
                     .expect("anchored connection was checked above")
-                    .metadata
+                    .credential_profiles
+                    .get_mut(&anchor.profile_name)
+                    .expect("anchored profile was checked above")
                     .expected_master_key_fp = Some(target_fp);
                 config.revision = config
                     .revision

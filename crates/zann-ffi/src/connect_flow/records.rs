@@ -97,7 +97,7 @@ pub enum ConnectEffectFfi {
         id: FlowOperationFfi,
         url: String,
         connection_name: String,
-        profile_name: String,
+        storage_id: Option<String>,
     },
     TrustFingerprint {
         id: FlowOperationFfi,

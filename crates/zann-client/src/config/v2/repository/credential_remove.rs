@@ -53,14 +53,33 @@ impl ConfigRepository {
             Some(write),
             credential_store,
             |config, credential_ids| {
+                if let Some((subject, _)) = &account_binding {
+                    if config
+                        .connections
+                        .get(&connection_id)
+                        .and_then(|connection| connection.credential_profiles.get(&profile_name))
+                        .and_then(|profile| {
+                            profile
+                                .account_subject()
+                                .or(profile.expected_account_subject.as_deref())
+                        })
+                        .is_some_and(|expected| expected != subject)
+                    {
+                        return Err(ConfigError::IdentityChanged);
+                    }
+                }
+                if let Some(profile) = config
+                    .connections
+                    .get_mut(&connection_id)
+                    .and_then(|c| c.credential_profiles.get_mut(&profile_name))
+                {
+                    if profile.expected_account_subject.is_some() && account_binding.is_none() {
+                        return Err(ConfigError::IdentityChanged);
+                    }
+                    profile.expected_account_subject = None;
+                }
                 apply_identity_commit(config, &connection_id, &profile_name, &identity)?;
-                apply_authenticated_connection_target(
-                    config,
-                    &connection_id,
-                    &target,
-                    &endpoint,
-                    storage_id.as_deref(),
-                )?;
+                apply_authenticated_connection_target(config, &connection_id, &target, &endpoint)?;
                 apply_credential_bundle_replacement(
                     config,
                     &connection_id,
@@ -87,6 +106,7 @@ impl ConfigRepository {
                     profile.account_subject = Some(account_subject.clone());
                     profile.auth_method = Some(*auth_method);
                 }
+                bind_profile_storage(config, &connection_id, &profile_name, storage_id.as_deref())?;
                 client_entry(config, &client_id).active_connection = Some(connection_id.clone());
                 Ok(())
             },
@@ -96,7 +116,11 @@ impl ConfigRepository {
             .config()
             .connections
             .get(&connection_id)
-            .and_then(|connection| connection.metadata.storage_id.clone());
+            .and_then(|connection| {
+                connection
+                    .profile_storage_id(&profile_name)
+                    .map(str::to_owned)
+            });
         debug_assert!(
             transaction
                 .snapshot()
@@ -133,6 +157,37 @@ impl ConfigRepository {
                 fallback,
                 MAX_LEGACY_NAME_LEN,
             )?;
+        }
+        // Reservations have no durable credentials to retire. Keep the same exact
+        // revision check and recheck emptiness under the Config write lock.
+        let source = self.snapshot()?;
+        if source
+            .config()
+            .connections
+            .get(connection_id)
+            .and_then(|connection| connection.credential_profiles.get(&profile_name))
+            .is_some_and(|profile| profile.credentials.is_empty())
+        {
+            let snapshot = self.mutate(Some(expected_revision), |config| {
+                let profile = config
+                    .connections
+                    .get(connection_id)
+                    .and_then(|connection| connection.credential_profiles.get(&profile_name))
+                    .ok_or(ConfigError::IdentityChanged)?;
+                if !profile.credentials.is_empty() {
+                    return Err(ConfigError::IdentityChanged);
+                }
+                apply_credential_profile_removal(
+                    config,
+                    connection_id,
+                    &profile_name,
+                    &active_after,
+                )
+            })?;
+            return Ok(CredentialTransactionOutcome {
+                snapshot,
+                warnings: Vec::new(),
+            });
         }
         self.execute_credential_transaction(
             expected_revision,
