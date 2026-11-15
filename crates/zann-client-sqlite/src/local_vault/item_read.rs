@@ -1,7 +1,7 @@
 //! Cancellable, read-only item loading for native presentation.
 use super::*;
 
-fn check_active(operation: &SessionOperation) -> LocalResult<()> {
+pub(super) fn check_active(operation: &SessionOperation) -> LocalResult<()> {
     if operation.is_cancelled() {
         Err(LocalError::Cancelled)
     } else if std::time::Instant::now() >= operation.deadline() {

@@ -13,6 +13,7 @@ fn passkey_projection_obeys_security_profile_despite_hostile_field_metadata() {
         "private_key": {"kind":"text","value":"sentinel-private-key","meta":{"masked":false,"copyable":true}},
         "credential_id": {"kind":"url","value":"https://sentinel-id.test","meta":{"masked":false}},
         "user_handle": {"kind":"text","value":"sentinel-user-handle"},
+        "exchange_metadata": {"kind":"text","value":"sentinel-login-password","meta":{"masked":false,"copyable":true}},
         "unknown": {"kind":"text","value":"sentinel-unknown"}
     });
     let payload = json!({"v":1,"typeId":"passkey","fields":fields}).to_string();
@@ -42,7 +43,12 @@ fn passkey_projection_obeys_security_profile_despite_hostile_field_metadata() {
     ))
     .unwrap();
     let profile = registry.profile("passkey").unwrap();
-    for key in ["private_key", "credential_id", "user_handle"] {
+    for key in [
+        "private_key",
+        "credential_id",
+        "user_handle",
+        "exchange_metadata",
+    ] {
         assert!(profile.never_log_fields.contains(&key.into()));
         assert!(!profile.exposable_public_attrs.contains(&key.into()));
         assert!(!profile.ui.copyable.contains(&key.into()));

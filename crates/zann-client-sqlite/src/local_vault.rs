@@ -706,3 +706,5 @@ mod transition_tests;
 
 #[cfg(test)]
 static MAINTENANCE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+mod passkey;

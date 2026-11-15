@@ -93,6 +93,20 @@ pub(super) fn validate(
         {
             return Err("invalid backup item location or revision".into());
         }
+        let (kind, _) = source_vaults
+            .get(&(storage, vault))
+            .ok_or("backup item vault is not in catalog")?;
+        zann_client::passkey_exchange::validate_payload(
+            &item.type_id,
+            &item.payload,
+            *kind,
+            if *kind == VaultKind::Personal {
+                zann_core::VaultEncryptionType::Client
+            } else {
+                zann_core::VaultEncryptionType::Server
+            },
+        )
+        .map_err(|_| "backup passkey validation failed".to_owned())?;
         let metadata = zann_core::ItemMetadata {
             tags: item.tags,
             favorite: item.favorite,

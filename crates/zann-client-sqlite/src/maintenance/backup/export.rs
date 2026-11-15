@@ -54,7 +54,16 @@ pub(crate) async fn export_to_writer<W: Write>(
                 kind: vault.kind.as_i32(),
                 is_default: vault.is_default,
             });
-            vault_queue.push_back((storage_id, vault.id));
+            vault_queue.push_back((
+                storage_id,
+                vault.id,
+                vault.kind,
+                if vault.key_wrap_type == zann_db::local::KeyWrapType::RemoteServer {
+                    zann_core::VaultEncryptionType::Server
+                } else {
+                    zann_core::VaultEncryptionType::Client
+                },
+            ));
         }
     }
 

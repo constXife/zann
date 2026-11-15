@@ -303,3 +303,48 @@ keys are stronger, and `zann-keystore` already speaks to them. Rejected on
 product grounds: passkeys are becoming the default sign-in for consumer accounts,
 and a password manager that cannot hold them is excluded from the case it exists
 to serve.
+
+## Stage 2: backup durability and external exchange (#292)
+
+The canonical owner is `zann-passkey::exchange`, projected through the native
+local application port and FFI. JSON shape validation (duplicates and node
+budget) is shared with Config v2 through `zann-core::bounded_json`; codecs have
+explicit byte, record, field and key bounds. No shell parses JSON, XML, PEM or
+COSE. Supported input formats are CXF 1.0 Proposed Standard with March 2026
+errata, Bitwarden unencrypted JSON and KeePassXC `.passkey`/plaintext XML entry
+attributes. Format selection is explicit; malformed or unsupported key formats
+never trigger another decoder.
+
+A credential's `created_at` is optional metadata: generated credentials carry
+it, while formats that omit it preserve unknown time by omitting that field.
+No import-time clock substitutes for a missing source date. Other absent human
+labels remain empty, without borrowing authority from login URLs or username
+fields. RP admission continues to use `zann-autofill::RpId` alone.
+
+Optional associated login metadata (username/password, URLs and notes) is kept
+in one bounded `exchange_metadata` field with `FieldKind::Password` inside the
+encrypted passkey payload. It is not ceremony state, is not public metadata and
+is never exposed by copy/reveal projections. The strict payload parser validates
+this optional field; assertions remain immutable. CXF emits accompanying
+`basic-auth`/`note` credentials and scope metadata. The standard extension
+`zann.app/PasskeyMetadata` preserves RP display names and exact optional creation
+times that CXF's required credential fields and integer item timestamps cannot
+represent. This extension never overrides RP IDs, key material or user handles.
+Unsupported FIDO2 cryptographic extensions fail closed rather than losing seeds.
+
+External import requires an explicit personal, Client-encrypted target and
+validates the complete input before mutations. Plain CXF export consumes the
+same fresh, one-use authorization as ordinary plaintext backup. Generic Item
+editing remains closed for passkeys. Canonical backup, snapshots and unlocked
+verify cover complete passkey payloads and strict semantic validation. Item
+crypto envelopes stay v1; no migration or compatibility reader is introduced.
+
+Per mechanism: shared JSON bounds remove the duplicate validator owner and
+permit cheap adversarial tests; optional creation metadata preserves source
+truth; encrypted associated metadata retains portability without widening UI
+redaction; standardized wire codecs preserve keys and retain explicit format
+admission; target/step-up gates reuse canonical vault and authorization owners;
+backup/snapshot/verify tests prove recovered keys can produce valid assertions.
+The costs are bounded plaintext decoding during explicit import/conversion,
+a private optional metadata field, and a provider metadata extension. Hardware
+provider activation and PRF/large-blob ceremonies remain outside this stage.

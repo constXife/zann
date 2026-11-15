@@ -31,3 +31,5 @@ pub use zann_crypto::secrets;
 pub use zann_crypto::secrets::*;
 pub use zann_crypto::vault_crypto;
 pub use zann_crypto::vault_crypto::*;
+
+pub mod bounded_json;

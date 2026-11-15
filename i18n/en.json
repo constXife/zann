@@ -877,5 +877,18 @@
     "verifyOK": "Verification completed",
     "verifyProblems": "Verification found problems",
     "verifyCounts": "{items} of {checked} items readable · {skipped} vaults skipped"
+  },
+  "passkeyExchange": {
+    "title": "Import or export passkeys",
+    "help": "Choose a personal vault in the current account. External files contain plaintext private keys; keep them private and delete them when finished.",
+    "target": "Personal vault",
+    "selectTarget": "Choose a personal vault",
+    "format": "Source format",
+    "choose": "Choose plaintext export file",
+    "import": "Import passkeys",
+    "export": "Export passkeys as plaintext CXF",
+    "preview": "{count} passkeys found; {ignored} unrelated records ignored.",
+    "result": "Imported {count}; {skipped} already present.",
+    "load": "Load personal vaults"
   }
 }

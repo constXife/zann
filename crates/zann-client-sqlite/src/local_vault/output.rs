@@ -1,7 +1,8 @@
 //! One private output publisher for every session-bound streaming export.
 use super::*;
-use crate::maintenance::{private_output::PrivateOutput, BackupError};
+use crate::maintenance::BackupError;
 use std::io::{self, Write};
+use zann_client::private_output::PrivateOutput;
 pub(super) trait OutputLease {
     fn check_output(&self, core: &LocalVault) -> LocalResult<()>;
 }

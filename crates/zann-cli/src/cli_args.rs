@@ -38,6 +38,8 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Command {
+    #[command(about = "Convert an existing plaintext passkey export to CXF, entirely offline")]
+    Passkey(crate::modules::passkey::Args),
     #[command(about = "Server metadata and diagnostics")]
     Server(ServerArgs),
     #[command(about = "Run a command with secrets injected as env vars")]

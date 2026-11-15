@@ -25,3 +25,6 @@ pub use crate::session::{SessionCancellationHandle, SessionOperation};
 
 /// When an unlocked shell syncs; the shell runs the timer and `remote_sync`.
 pub use crate::sync::{AutoSyncSchedule, AutoSyncTicket, AUTO_SYNC_DEBOUNCE, AUTO_SYNC_INTERVAL};
+
+mod passkey;
+pub use passkey::*;

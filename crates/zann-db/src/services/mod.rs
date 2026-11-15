@@ -680,3 +680,6 @@ mod storages;
 mod vaults;
 
 mod create_item;
+
+mod item_batch;
+pub use item_batch::PreparedItemBatch;

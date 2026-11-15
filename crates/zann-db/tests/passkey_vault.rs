@@ -54,6 +54,21 @@ async fn shared_passkey_creation_and_updates_leave_no_item_history_or_pending_ch
         })
         .await
         .unwrap();
+    let bounded = LocalVaultRepo::new(&pool)
+        .get_by_id_bounded(storage, vault)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(bounded.key_wrap_type, KeyWrapType::RemoteServer);
+    assert!(bounded.vault_key_enc.is_empty());
+    assert_eq!(
+        LocalVaultRepo::new(&pool)
+            .list_by_storage_bounded(storage)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
     let services = LocalServices::new(&pool, &key);
     let error = services
         .put_item(

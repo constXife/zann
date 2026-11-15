@@ -169,6 +169,7 @@ impl State {
         let spacing = theme::spacing();
         let mut column = widget::column::with_capacity(16)
             .push(self.encrypted_backup.view().map(Message::EncryptedBackup))
+            .push(self.passkeys.view().map(Message::Passkey))
             .push(widget::text::title3(t("settings.backups.exportTitle")))
             .spacing(spacing.space_s)
             .width(Length::Fill);

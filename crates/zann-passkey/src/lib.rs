@@ -8,6 +8,7 @@ mod ceremony;
 mod credential;
 mod encoding;
 mod error;
+pub mod exchange;
 
 pub use ceremony::*;
 pub use credential::{Credential, UserEntity, MAX_CREDENTIAL_ID_BYTES, MAX_USER_HANDLE_BYTES};

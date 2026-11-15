@@ -1,0 +1,63 @@
+{
+  "version": {
+    "major": 1,
+    "minor": 0
+  },
+  "exporterRpId": "example.com",
+  "exporterDisplayName": "Synthetic fixture",
+  "timestamp": 1794700800,
+  "accounts": [
+    {
+      "id": "Zml4dHVyZS1hY2NvdW50",
+      "username": "test",
+      "email": "test@example.com",
+      "collections": [],
+      "items": [
+        {
+          "id": "ABEiM0RVZneImaq7zN3u_w",
+          "title": "Fixture passkey",
+          "credentials": [
+            {
+              "type": "passkey",
+              "credentialId": "ABEiM0RVZneImaq7zN3u_w",
+              "rpId": "example.com",
+              "username": "test@example.com",
+              "userDisplayName": "Test",
+              "userHandle": "c3ludGhldGljLXVzZXItaGFuZGxl",
+              "key": "MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgya-p2EW6dRZrXCFXZ7HWk05Qw9s26JsSe4piKxIPZyGhRANCAARg_tS6JVqdMclh63TGNW1owEm4kjth-mzmaWIuYPKftnkD_hAIuLyZpBrp6VYovGTy8bIMLX6fUXejwpTURiKZ"
+            },
+            {
+              "type": "basic-auth",
+              "username": {
+                "fieldType": "string",
+                "value": "test@example.com"
+              },
+              "password": {
+                "fieldType": "concealed-string",
+                "value": "synthetic-login-secret"
+              }
+            },
+            {
+              "type": "note",
+              "content": {
+                "fieldType": "string",
+                "value": "Synthetic note"
+              }
+            }
+          ],
+          "creationAt": 1794700800,
+          "scope": {
+            "urls": [
+              "https://example.com/login"
+            ],
+            "androidApps": []
+          },
+          "favorite": true,
+          "tags": [
+            "synthetic"
+          ]
+        }
+      ]
+    }
+  ]
+}

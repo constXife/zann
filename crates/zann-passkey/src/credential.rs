@@ -27,7 +27,8 @@ pub struct Credential {
     pub(crate) id: Vec<u8>,
     pub(crate) user: UserEntity,
     pub(crate) key: Es256Key,
-    pub(crate) created_at: DateTime<Utc>,
+    pub(crate) created_at: Option<DateTime<Utc>>,
+    pub(crate) exchange_metadata: Option<FieldValue>,
 }
 
 impl Credential {
@@ -39,6 +40,14 @@ impl Credential {
     }
     pub fn user_handle(&self) -> &[u8] {
         &self.user.id
+    }
+    pub fn identity(&self) -> [u8; 32] {
+        let rp = self.rp_id.as_str().as_bytes();
+        let mut input = b"zann passkey identity v1".to_vec();
+        input.extend_from_slice(&(rp.len() as u32).to_le_bytes());
+        input.extend_from_slice(rp);
+        input.extend_from_slice(&self.id);
+        zann_crypto::es256::sha256(&input)
     }
     pub fn public_key(&self) -> [u8; 65] {
         self.key.public_key()
@@ -79,7 +88,6 @@ impl Credential {
                 URL_SAFE_NO_PAD.encode(self.key.to_pkcs8_der().map_err(PasskeyError::Crypto)?),
                 FieldKind::Password,
             ),
-            ("created_at", self.created_at.to_rfc3339(), FieldKind::Text),
             ("discoverable", "true".into(), FieldKind::Text),
         ] {
             payload.fields.insert(
@@ -91,13 +99,35 @@ impl Credential {
                 },
             );
         }
+        if let Some(created_at) = self.created_at {
+            payload.fields.insert(
+                "created_at".into(),
+                FieldValue {
+                    kind: FieldKind::Text,
+                    value: created_at.to_rfc3339(),
+                    meta: None,
+                },
+            );
+        }
+        if let Some(metadata) = &self.exchange_metadata {
+            payload.fields.insert(
+                crate::exchange::EXCHANGE_METADATA_FIELD.into(),
+                metadata.clone(),
+            );
+        }
         Ok(payload)
     }
 
     pub fn from_payload(payload: &EncryptedPayload) -> Result<Self, PasskeyError> {
         if payload.type_id != PASSKEY_TYPE_ID
             || payload.v != zann_core::PAYLOAD_VERSION
-            || payload.fields.len() != 10
+            || payload.fields.len()
+                != 9 + usize::from(payload.fields.contains_key("created_at"))
+                    + usize::from(
+                        payload
+                            .fields
+                            .contains_key(crate::exchange::EXCHANGE_METADATA_FIELD),
+                    )
             || payload.extra.is_some()
         {
             return Err(PasskeyError::Payload);
@@ -117,6 +147,7 @@ impl Credential {
             return Err(PasskeyError::Payload);
         }
         let key_bytes = decode(field("private_key", FieldKind::Password)?, MAX_PKCS8_BYTES)?;
+        crate::exchange::ExchangeMetadata::from_payload(payload)?;
         let credential = Self {
             rp_id: RpId::parse(field("rp_id", FieldKind::Text)?).map_err(PasskeyError::Origin)?,
             rp_name: field("rp_name", FieldKind::Text)?.into(),
@@ -132,10 +163,20 @@ impl Credential {
                 name: field("user_name", FieldKind::Text)?.into(),
                 display_name: field("user_display_name", FieldKind::Text)?.into(),
             },
+            exchange_metadata: payload
+                .fields
+                .get(crate::exchange::EXCHANGE_METADATA_FIELD)
+                .cloned(),
             key: Es256Key::from_pkcs8_der(&key_bytes).map_err(PasskeyError::Crypto)?,
-            created_at: DateTime::parse_from_rfc3339(field("created_at", FieldKind::Text)?)
-                .map_err(PasskeyError::Time)?
-                .with_timezone(&Utc),
+            created_at: payload
+                .fields
+                .get("created_at")
+                .map(|_| {
+                    DateTime::parse_from_rfc3339(field("created_at", FieldKind::Text)?)
+                        .map(|time| time.with_timezone(&Utc))
+                        .map_err(PasskeyError::Time)
+                })
+                .transpose()?,
         };
         credential.validate()?;
         Ok(credential)

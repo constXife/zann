@@ -29,6 +29,7 @@ pub struct State {
     password: password::State,
     export: export::State,
     encrypted_backup: encrypted_backup::State,
+    passkeys: passkey::State,
     browser_pairings: Option<zann_daemon::PairingSettings>,
     browser_code: Option<browser::ActiveCode>,
     section: SettingsSection,
@@ -115,6 +116,7 @@ pub enum Message {
     Export,
     ExportStepUp(export::Message),
     EncryptedBackup(encrypted_backup::Message),
+    Passkey(passkey::Message),
     ChooseApplePasswords,
     ApplePrepared(Result<Option<AppleSelection>, String>),
     ImportApplePasswords,
@@ -175,6 +177,7 @@ impl State {
             password: password::State::default(),
             export: export::State::default(),
             encrypted_backup: encrypted_backup::State::default(),
+            passkeys: passkey::State::default(),
             browser_pairings: None,
             browser_code: None,
             section: SettingsSection::General,
@@ -261,10 +264,26 @@ impl State {
                         .map(Message::EncryptedBackup),
                 )
             }
+            Message::Passkey(passkey::Message::Export) => {
+                if let Some(target) = self.passkeys.target() {
+                    return Outcome::Task(
+                        self.export
+                            .open_cxf(session, target)
+                            .map(Message::ExportStepUp),
+                    );
+                }
+            }
+            Message::Passkey(message) => {
+                if matches!(&message, passkey::Message::Imported(_, Ok(_))) {
+                    self.refresh_vault_on_close = true;
+                }
+                return Outcome::Task(self.passkeys.update(message, session).map(Message::Passkey));
+            }
             Message::Browser(message) => return self.update_browser(message, session),
             Message::Select(section) => {
                 self.export.cancel();
                 self.encrypted_backup.cancel();
+                self.passkeys.cancel();
                 self.section = section;
             }
             Message::Set(change) => return Outcome::Changed(change),
@@ -700,6 +719,7 @@ impl State {
             Message::Close => {
                 self.export.cancel();
                 self.encrypted_backup.cancel();
+                self.passkeys.cancel();
                 if !self.refresh_vault_on_close {
                     return Outcome::Close { page: None };
                 }
@@ -737,3 +757,5 @@ mod view;
 mod export;
 
 mod encrypted_backup;
+
+mod passkey;
