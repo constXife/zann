@@ -277,15 +277,18 @@ where
     }
 }
 
-pub fn read_backup_metadata(path: &Path) -> Result<PlainBackupMeta, anyhow::Error> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
+pub fn read_backup_metadata(input: &BackupInput) -> Result<PlainBackupMeta, anyhow::Error> {
+    let reader = BufReader::new(input.open()?);
     let mut deserializer = serde_json::Deserializer::from_reader(reader);
     let meta = PlainBackupMeta::deserialize(&mut deserializer)?;
+    deserializer.end()?;
     Ok(meta)
 }
 
-pub(super) fn stream_backup_items<F>(path: &Path, mut handler: F) -> Result<(), anyhow::Error>
+pub(super) fn stream_backup_items<F>(
+    input: &BackupInput,
+    mut handler: F,
+) -> Result<(), anyhow::Error>
 where
     F: FnMut(PlainBackupItem, usize) -> Result<(), String>,
 {
@@ -327,18 +330,18 @@ where
         }
     }
 
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
+    let reader = BufReader::new(input.open()?);
     let mut deserializer = serde_json::Deserializer::from_reader(reader);
     deserializer.deserialize_map(StreamVisitor {
         handler: &mut handler,
         index: 0,
     })?;
+    deserializer.end()?;
     Ok(())
 }
 
 pub async fn stream_backup_items_async<F, Fut>(
-    path: &Path,
+    input: &BackupInput,
     mut handler: F,
 ) -> Result<(), BackupError>
 where
@@ -346,9 +349,9 @@ where
     Fut: std::future::Future<Output = Result<(), BackupError>>,
 {
     let (tx, mut rx) = mpsc::channel(32);
-    let path = path.to_path_buf();
+    let input = input.clone();
     let handle = tokio::task::spawn_blocking(move || {
-        let parse_result = stream_backup_items(&path, |item, index| {
+        let parse_result = stream_backup_items(&input, |item, index| {
             tx.blocking_send(Ok((item, index)))
                 .map_err(|_| "channel_closed".to_string())
         });

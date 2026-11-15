@@ -26,6 +26,8 @@ mod connect_flow;
 pub use connect_flow::*;
 mod generator;
 pub use generator::*;
+mod encrypted_backup;
+pub use encrypted_backup::*;
 mod export;
 pub use export::*;
 mod platform;
@@ -410,8 +412,9 @@ pub fn create_core(
     secret_store: Arc<dyn PlatformSecretStore>,
 ) -> CoreResult<Arc<CoreFacade>> {
     let ports = native::LocalVaultPorts::with_platform_secrets(
-        platform::keystore(keystore),
+        platform::keystore(keystore.clone()),
         platform::secret_store(secret_store),
+        platform::backup_keys(keystore),
     );
     let inner = native::open_vault_at_path(Path::new(&db_path), ports)?;
     Ok(Arc::new(CoreFacade {

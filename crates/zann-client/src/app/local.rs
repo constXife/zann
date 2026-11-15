@@ -1,9 +1,13 @@
 //! Local vault application contract; implementations receive explicit native paths.
 
+mod backup_error;
 mod browser;
+mod encrypted_backup;
+pub use backup_error::*;
 mod error;
 mod export;
 pub use browser::*;
+pub use encrypted_backup::*;
 pub use export::*;
 mod model;
 mod port;

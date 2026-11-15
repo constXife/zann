@@ -9,22 +9,23 @@ use std::sync::Mutex;
 use zann_client::app::{SessionCancellationHandle, SessionOperationId};
 
 #[derive(Default)]
-pub(super) struct InFlightOperations(Mutex<Vec<(SessionOperationId, SessionCancellationHandle)>>);
+pub(super) struct InFlightOperations(Mutex<Vec<(uuid::Uuid, SessionCancellationHandle)>>);
 
 impl InFlightOperations {
     /// Tracks one operation until the returned guard drops.
     pub(super) fn register(
         &self,
-        operation_id: SessionOperationId,
+        _operation_id: SessionOperationId,
         cancel: SessionCancellationHandle,
     ) -> InFlightOperation<'_> {
+        let registration_id = uuid::Uuid::now_v7();
         self.0
             .lock()
             .expect("lock poisoned")
-            .push((operation_id, cancel));
+            .push((registration_id, cancel));
         InFlightOperation {
             operations: self,
-            operation_id,
+            registration_id,
         }
     }
 
@@ -42,7 +43,7 @@ impl InFlightOperations {
 
 pub(super) struct InFlightOperation<'a> {
     operations: &'a InFlightOperations,
-    operation_id: SessionOperationId,
+    registration_id: uuid::Uuid,
 }
 
 impl Drop for InFlightOperation<'_> {
@@ -51,7 +52,7 @@ impl Drop for InFlightOperation<'_> {
             .0
             .lock()
             .expect("lock poisoned")
-            .retain(|(id, _)| *id != self.operation_id);
+            .retain(|(id, _)| *id != self.registration_id);
     }
 }
 
@@ -91,5 +92,14 @@ mod tests {
 
         assert!(!finished_cancel.is_cancelled());
         assert!(syncs.0.lock().expect("lock poisoned").is_empty());
+    }
+    #[test]
+    fn dropping_a_nested_registration_does_not_unregister_the_outer_operation() {
+        let syncs = InFlightOperations::default();
+        let (operation, cancel) = operation();
+        let _outer = syncs.register(operation.operation_id(), cancel.clone());
+        drop(syncs.register(operation.operation_id(), cancel.clone()));
+        syncs.cancel_all();
+        assert!(cancel.is_cancelled());
     }
 }

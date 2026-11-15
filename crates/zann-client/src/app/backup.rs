@@ -130,7 +130,7 @@ pub struct BackupImportSession {
     storage_id: String,
     key: SecretKey,
     origin: AccountKeyOrigin,
-    operation: SessionOperation,
+    operation: Arc<SessionOperation>,
 }
 impl AppClient {
     pub fn backup_import_session(
@@ -138,7 +138,7 @@ impl AppClient {
         storage_id: &str,
         key: SecretKey,
         origin: AccountKeyOrigin,
-        operation: SessionOperation,
+        operation: Arc<SessionOperation>,
     ) -> Result<BackupImportSession, SessionError> {
         Ok(BackupImportSession {
             client: self.clone(),

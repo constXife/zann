@@ -87,6 +87,35 @@ pub trait LocalVaultService: Send + Sync {
         path: String,
         options: BackupImportOptions,
     ) -> LocalResult<ApplePasswordsImportReport>;
+    fn backup_capabilities(&self) -> LocalResult<BackupCapabilities>;
+    fn backup_begin(&self, operation: SessionOperation) -> LocalResult<BackupHandle>;
+    fn backup_add_recipient(
+        &self,
+        handle: BackupHandle,
+        recipient: BackupRecipient,
+    ) -> LocalResult<BackupRecipientSummary>;
+    fn backup_export_encrypted(
+        &self,
+        path: String,
+        handle: BackupHandle,
+    ) -> LocalResult<BackupExportReport>;
+    fn backup_encrypted_recipients(&self, path: String)
+        -> LocalResult<Vec<BackupRecipientSummary>>;
+    fn backup_open_encrypted(
+        &self,
+        path: String,
+        slot: u32,
+        recipient: BackupRecipient,
+        operation: SessionOperation,
+    ) -> LocalResult<BackupHandle>;
+    fn backup_inspect_encrypted(&self, handle: BackupHandle) -> LocalResult<BackupInspection>;
+    fn backup_import_encrypted(
+        &self,
+        handle: BackupHandle,
+        source_storage_id: String,
+        options: BackupImportOptions,
+    ) -> LocalResult<BackupImportReport>;
+    fn backup_cancel(&self, handle: BackupHandle) -> LocalResult<()>;
     fn export_security(&self) -> LocalResult<ExportSecurity>;
     fn authorize_export(
         &self,

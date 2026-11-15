@@ -5,11 +5,17 @@ struct MaintenanceSections: View {
     let unlocked: Bool
     let strings: Strings
     @State private var confirmExport = false
+    @State private var encryptedExport = false
+    @State private var encryptedRestore = false
 
     var body: some View {
         Section(strings("settings.tabs.backups")) {
             Text(strings("settings.backups.exportDesc"))
             exportAction
+            Button(strings("backup.encryptedTitle")) { encryptedExport = true }.disabled(!unlocked || maintenance.busy)
+                .sheet(isPresented: $encryptedExport) { EncryptedBackupView(model: maintenance.encrypted, restoring: false, strings: strings) }
+            Button(strings("backup.restoreTitle")) { encryptedRestore = true }.disabled(!unlocked || maintenance.busy)
+                .sheet(isPresented: $encryptedRestore) { EncryptedBackupView(model: maintenance.encrypted, restoring: true, strings: strings) }
             Button(strings("maintenance.snapshotCreate")) { Task { await maintenance.createSnapshot() } }
                 .accessibilityIdentifier("maintenance.snapshot")
                 .disabled(maintenance.busy)
@@ -21,6 +27,7 @@ struct MaintenanceSections: View {
                     .accessibilityIdentifier("maintenance.snapshotResult")
             }
         }
+        .onChange(of: unlocked) { value in if !value { encryptedExport = false; encryptedRestore = false; confirmExport = false } }
         Section(strings("maintenance.verifyTitle")) {
             Button(strings("maintenance.verifyAction")) { Task { await maintenance.verify() } }
                 .accessibilityIdentifier("maintenance.verify")

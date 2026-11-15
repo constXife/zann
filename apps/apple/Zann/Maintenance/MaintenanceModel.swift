@@ -11,6 +11,7 @@ final class MaintenanceModel: ObservableObject {
     @Published private(set) var verification: VerifyReportFfi?
     @Published private(set) var export: TemporaryExport?
     let core: CoreFacade
+    let encrypted: EncryptedBackupModel
     private var exportOperation: SessionOperationFfi?
     private let exportRoot: URL
     private var generation = 0
@@ -23,6 +24,7 @@ final class MaintenanceModel: ObservableObject {
     init(core: CoreFacade, exportRoot: URL) {
         self.core = core
         self.exportRoot = exportRoot
+        self.encrypted = EncryptedBackupModel(core: core, root: exportRoot.appendingPathComponent("encrypted"))
         let cleanup = Result { try TemporaryExport.purge(exportRoot) }
         if case .failure(let error) = cleanup { failure = error }
     }
@@ -110,6 +112,7 @@ final class MaintenanceModel: ObservableObject {
 
     /// Leaving Settings also invalidates work that has not opened a picker yet.
     func dismissed() {
+        encrypted.cancel()
         exportOperation?.cancel()
         generation += 1
         verification = nil

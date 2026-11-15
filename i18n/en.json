@@ -1,4 +1,26 @@
 {
+  "backup": {
+    "restart": "Start a new encrypted backup",
+    "encryptedTitle": "Create encrypted backup",
+    "restoreTitle": "Verify or restore encrypted backup",
+    "portableHelp": "Add a recovery passphrase or a security key. Biometrics alone cannot protect a portable backup. Pair one security key with a second backup key or a recovery passphrase.",
+    "recipient": "Unlock method",
+    "selectRecipient": "Choose an unlock method",
+    "passphrase": "Backup passphrase",
+    "hardwareHelp": "Connect the intended security key. Add each backup key separately, switching devices between additions. Creation and confirmation each require a touch.",
+    "builtInUV": "Use the security key’s built-in user verification",
+    "biometricHelp": "This biometric key works only on this device and may stop working when biometric enrollment changes. Keep a portable unlock method.",
+    "addRecipient": "Add unlock method",
+    "save": "Save encrypted backup",
+    "choose": "Choose encrypted backup",
+    "open": "Unlock and verify",
+    "verified": "Verified {count} items. Choose source and destination to restore.",
+    "source": "Source account in the backup",
+    "target": "Destination server account",
+    "selectStorage": "Choose an account",
+    "restore": "Restore verified backup",
+    "imported": "Restored {count} items"
+  },
   "export": {
     "securityTitle": "Export security",
     "policyHelp": "Plaintext export requires fresh confirmation. Strict mode requires both your device password and an enrolled security key or biometrics. Disable strict mode before removing your last second factor.",

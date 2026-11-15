@@ -7,6 +7,8 @@
 //! for the device wrapping key (DWK) stored under the stable `zann` / `dwk`
 //! identifiers.
 
+mod biometric_keys;
+pub use biometric_keys::*;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};

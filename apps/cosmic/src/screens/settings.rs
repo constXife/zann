@@ -28,6 +28,7 @@ const SOURCE_URL: &str = "https://github.com/constxife/zann";
 pub struct State {
     password: password::State,
     export: export::State,
+    encrypted_backup: encrypted_backup::State,
     browser_pairings: Option<zann_daemon::PairingSettings>,
     browser_code: Option<browser::ActiveCode>,
     section: SettingsSection,
@@ -113,6 +114,7 @@ pub enum Message {
     Forget,
     Export,
     ExportStepUp(export::Message),
+    EncryptedBackup(encrypted_backup::Message),
     ChooseApplePasswords,
     ApplePrepared(Result<Option<AppleSelection>, String>),
     ImportApplePasswords,
@@ -172,6 +174,7 @@ impl State {
         Self {
             password: password::State::default(),
             export: export::State::default(),
+            encrypted_backup: encrypted_backup::State::default(),
             browser_pairings: None,
             browser_code: None,
             section: SettingsSection::General,
@@ -251,9 +254,17 @@ impl State {
                         .map(Message::Password),
                 )
             }
+            Message::EncryptedBackup(message) => {
+                return Outcome::Task(
+                    self.encrypted_backup
+                        .update(message, session)
+                        .map(Message::EncryptedBackup),
+                )
+            }
             Message::Browser(message) => return self.update_browser(message, session),
             Message::Select(section) => {
                 self.export.cancel();
+                self.encrypted_backup.cancel();
                 self.section = section;
             }
             Message::Set(change) => return Outcome::Changed(change),
@@ -688,6 +699,7 @@ impl State {
             Message::Open(target) => return Outcome::Open(target),
             Message::Close => {
                 self.export.cancel();
+                self.encrypted_backup.cancel();
                 if !self.refresh_vault_on_close {
                     return Outcome::Close { page: None };
                 }
@@ -723,3 +735,5 @@ mod password;
 mod view;
 
 mod export;
+
+mod encrypted_backup;

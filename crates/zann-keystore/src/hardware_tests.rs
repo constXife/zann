@@ -119,8 +119,12 @@ fn first_touch_failure_or_abandonment_never_arms_unlock() {
 #[test]
 fn credential_and_salt_both_bind_derivation() {
     let auth = FakeHardwareAuthenticator::new(1);
-    let first = auth.create_credential([1; 32]).unwrap();
-    let second = auth.create_credential([1; 32]).unwrap();
+    let first = auth
+        .create_credential([1; 32], crate::HardwareVerification::Presence)
+        .unwrap();
+    let second = auth
+        .create_credential([1; 32], crate::HardwareVerification::Presence)
+        .unwrap();
     let mut different_salt = first.clone();
     different_salt.salt = [2; 32];
     let key = auth

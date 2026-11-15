@@ -78,6 +78,7 @@ fn injected_credential_ports_migrate_a_legacy_token_under_a_symlinked_container(
     std::os::unix::fs::symlink(&container, temp.join("container-link")).expect("symlink");
     let credentials = Arc::new(MemoryCredentials::default());
     let ports = LocalVaultPorts {
+        backup_keys: Arc::new(zann_keystore::UnsupportedBiometricKeys),
         keystore: Arc::new(UnsupportedKeystore),
         authenticator: Arc::new(UnsupportedAuthenticator),
         credentials: credentials.clone(),

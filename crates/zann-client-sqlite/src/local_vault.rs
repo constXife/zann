@@ -30,6 +30,7 @@ use zann_client::app::local::*;
 
 pub struct LocalVault {
     keystore: Arc<dyn Keystore>,
+    backup_keys: Arc<dyn zann_keystore::BiometricKeyStore>,
     authenticator: Arc<dyn HardwareAuthenticator>,
     credentials: Arc<dyn CredentialStore>,
     legacy_credentials: Arc<dyn LegacyCredentialSource>,
@@ -40,11 +41,12 @@ pub struct LocalVault {
     pool: Mutex<zann_db::ExistingSqliteDatabase>,
     recovery: Mutex<Option<recovery::PreparedRecovery>>,
     export_authorization: Mutex<Option<export::AuthorizedExport>>,
+    archive: Arc<Mutex<Option<encrypted_backup::ArchiveWork>>>,
     identity_probe: Mutex<zann_db::ExistingSqliteDatabase>,
     /// Kept as an exact native path so the pool can be opened again after a restore.
     database_path: PathBuf,
     context_gate: RwLock<()>,
-    context_generation: AtomicU64,
+    context_generation: Arc<AtomicU64>,
     storage_id: Mutex<Option<Uuid>>,
     vault_id: Mutex<Option<Uuid>>,
     device_key: Mutex<Option<Arc<SecretKey>>>,
@@ -313,6 +315,7 @@ impl LocalVault {
     pub fn open(location: SqliteFileLocation, ports: LocalVaultPorts) -> LocalResult<Arc<Self>> {
         let LocalVaultPorts {
             keystore,
+            backup_keys,
             authenticator,
             credentials,
             legacy_credentials,
@@ -346,6 +349,7 @@ impl LocalVault {
         let storage_id = resolve_storage_id(&runtime, database.pool())?;
         Ok(Arc::new(LocalVault {
             keystore,
+            backup_keys,
             authenticator,
             credentials,
             legacy_credentials,
@@ -353,10 +357,11 @@ impl LocalVault {
             pool: Mutex::new(database),
             recovery: Mutex::new(None),
             export_authorization: Mutex::new(None),
+            archive: Arc::new(Mutex::new(None)),
             identity_probe: Mutex::new(probe),
             database_path,
             context_gate: RwLock::new(()),
-            context_generation: AtomicU64::new(0),
+            context_generation: Arc::new(AtomicU64::new(0)),
             storage_id: Mutex::new(storage_id),
             vault_id: Mutex::new(None),
             device_key: Mutex::new(None),
@@ -466,10 +471,12 @@ impl From<Retention> for crate::maintenance::RetentionPolicy {
     }
 }
 
+mod encrypted_backup;
 mod enrollment;
 mod export;
 mod export_file;
 mod in_flight;
+mod output;
 mod ports;
 pub use ports::*;
 mod unlock;
@@ -494,270 +501,7 @@ mod item_read;
 mod selection;
 use selection::*;
 
-impl LocalVaultService for LocalVault {
-    fn browser_query(
-        &self,
-        context: BrowserContext,
-        cursor: Option<BrowserCursor>,
-        sink: &mut dyn FnMut(BrowserMatches) -> LocalResult<()>,
-    ) -> LocalResult<()> {
-        LocalVault::browser_query(self, context, cursor, sink)
-    }
-    fn browser_save(
-        &self,
-        context: BrowserContext,
-        scope: BrowserScope,
-        login: CapturedLogin,
-        sink: &mut dyn FnMut(String) -> LocalResult<()>,
-    ) -> LocalResult<()> {
-        LocalVault::browser_save(self, context, scope, login, sink)
-    }
-    fn browser_fill(
-        &self,
-        context: BrowserContext,
-        item_id: String,
-        sink: &mut dyn FnMut(&EncryptedPayload) -> LocalResult<()>,
-    ) -> LocalResult<()> {
-        LocalVault::browser_fill(self, context, item_id, sink)
-    }
-    #[cfg(debug_assertions)]
-    fn debug_create_kv_item(
-        &self,
-        path: String,
-        key: String,
-        value: String,
-    ) -> LocalResult<String> {
-        LocalVault::debug_create_kv_item(self, path, key, value)
-    }
-
-    fn core_info(&self) -> String {
-        LocalVault::core_info(self)
-    }
-    fn change_unlock_password(&self, current: String, replacement: String) -> LocalResult<()> {
-        LocalVault::change_unlock_password(self, current, replacement)
-    }
-    fn activate_connected_account(&self) -> LocalResult<bool> {
-        LocalVault::activate_connected_account(self)
-    }
-    fn enroll_account_key(&self, password: String) -> LocalResult<VaultStatus> {
-        LocalVault::enroll_account_key(self, password)
-    }
-    fn unlock(&self, password: String) -> LocalResult<VaultStatus> {
-        LocalVault::unlock(self, password)
-    }
-    fn remembered_unlock(&self) -> LocalResult<RememberedUnlock> {
-        LocalVault::remembered_unlock(self)
-    }
-    fn unlock_remembered(&self) -> LocalResult<VaultStatus> {
-        LocalVault::unlock_remembered(self)
-    }
-    fn idle_unlock_key_present(&self) -> LocalResult<bool> {
-        LocalVault::idle_unlock_key_present(self)
-    }
-    fn hardware_key_present(&self) -> LocalResult<bool> {
-        LocalVault::hardware_key_present(self)
-    }
-    fn enroll_hardware_key(
-        &self,
-        label: String,
-        on_credential_created: &dyn Fn(),
-    ) -> LocalResult<HardwareKey> {
-        LocalVault::enroll_hardware_key(self, label, on_credential_created)
-    }
-    fn remove_hardware_key(&self, credential_id: String) -> LocalResult<()> {
-        LocalVault::remove_hardware_key(self, credential_id)
-    }
-    fn remember_with_keystore(&self) -> LocalResult<()> {
-        LocalVault::remember_with_keystore(self)
-    }
-    fn forget_remembered(&self) -> LocalResult<()> {
-        LocalVault::forget_remembered(self)
-    }
-    fn lock(&self) -> LocalResult<VaultStatus> {
-        LocalVault::lock(self)
-    }
-    fn vault_status(&self) -> LocalResult<VaultStatus> {
-        LocalVault::vault_status(self)
-    }
-    fn current_vault_id(&self) -> Option<String> {
-        LocalVault::current_vault_id(self)
-    }
-    fn list_vaults(&self) -> LocalResult<Vec<VaultSummary>> {
-        LocalVault::list_vaults(self)
-    }
-    fn set_current_vault(&self, id: String) -> LocalResult<VaultStatus> {
-        LocalVault::set_current_vault(self, id)
-    }
-    fn items_list(&self, filter: ItemsFilter, page: Page) -> LocalResult<ItemPage> {
-        LocalVault::items_list(self, filter, page)
-    }
-    fn item_get(&self, id: String) -> LocalResult<ItemDetail> {
-        LocalVault::item_get(self, id)
-    }
-    fn item_read(
-        &self,
-        id: String,
-        operation: SessionOperation,
-    ) -> LocalResult<zann_core::ItemDetail> {
-        LocalVault::item_read(self, id, operation)
-    }
-
-    fn item_create(&self, create: ItemCreate) -> LocalResult<ItemDetail> {
-        LocalVault::item_create(self, create)
-    }
-    fn item_update(&self, id: String, update: ItemUpdate) -> LocalResult<ItemDetail> {
-        LocalVault::item_update(self, id, update)
-    }
-    fn item_history_list(&self, id: String, limit: u32) -> LocalResult<Vec<ItemHistorySummary>> {
-        LocalVault::item_history_list(self, id, limit)
-    }
-    fn item_history_get(&self, id: String, version: i64) -> LocalResult<ItemHistoryDetail> {
-        LocalVault::item_history_get(self, id, version)
-    }
-    fn item_history_restore(&self, id: String, version: i64) -> LocalResult<ItemDetail> {
-        LocalVault::item_history_restore(self, id, version)
-    }
-    fn backup_import_file(
-        &self,
-        path: String,
-        source_storage_id: String,
-        options: BackupImportOptions,
-    ) -> LocalResult<BackupImportReport> {
-        LocalVault::backup_import_file(self, path, source_storage_id, options)
-    }
-    fn apple_passwords_preflight_file(&self, path: String) -> LocalResult<ApplePasswordsPreflight> {
-        LocalVault::apple_passwords_preflight_file(self, path)
-    }
-    fn apple_passwords_import_file(
-        &self,
-        path: String,
-        options: BackupImportOptions,
-    ) -> LocalResult<ApplePasswordsImportReport> {
-        LocalVault::apple_passwords_import_file(self, path, options)
-    }
-    fn export_security(&self) -> LocalResult<ExportSecurity> {
-        LocalVault::export_security(self)
-    }
-    fn authorize_export(
-        &self,
-        proof: ExportStepUp,
-        operation: SessionOperation,
-    ) -> LocalResult<ExportAuthorization> {
-        LocalVault::authorize_export(self, proof, operation)
-    }
-    fn set_export_policy(
-        &self,
-        policy: ExportPolicy,
-        authorization: ExportAuthorization,
-    ) -> LocalResult<()> {
-        LocalVault::set_export_policy(self, policy, authorization)
-    }
-    fn backup_export_file(
-        &self,
-        path: String,
-        authorization: ExportAuthorization,
-    ) -> LocalResult<BackupExportReport> {
-        LocalVault::backup_export_file(self, path, authorization)
-    }
-    fn verify(&self) -> LocalResult<VerifyReport> {
-        LocalVault::verify(self)
-    }
-    fn snapshot_create(&self, retention: Option<Retention>) -> LocalResult<Snapshot> {
-        LocalVault::snapshot_create(self, retention)
-    }
-    fn snapshot_create_if_due(
-        &self,
-        max_age_hours: u32,
-        retention: Option<Retention>,
-    ) -> LocalResult<Option<Snapshot>> {
-        LocalVault::snapshot_create_if_due(self, max_age_hours, retention)
-    }
-    fn snapshot_list(&self) -> LocalResult<Vec<Snapshot>> {
-        LocalVault::snapshot_list(self)
-    }
-    fn snapshot_restore_target(&self) -> String {
-        LocalVault::snapshot_restore_target(self)
-    }
-    fn snapshot_restore(&self, path: String) -> LocalResult<SnapshotRestore> {
-        LocalVault::snapshot_restore(self, path)
-    }
-    fn list_storages(&self) -> LocalResult<Vec<StorageSummary>> {
-        LocalVault::list_storages(self)
-    }
-    fn set_current_storage(&self, id: String) -> LocalResult<()> {
-        LocalVault::set_current_storage(self, id)
-    }
-
-    fn current_storage_id(&self) -> Option<String> {
-        LocalVault::current_storage_id(self)
-    }
-    fn setup_accounts(&self) -> LocalResult<Vec<SetupAccount>> {
-        LocalVault::setup_accounts(self)
-    }
-    fn prepare_local_recovery(&self, scope: RecoveryScope) -> LocalResult<RecoveryPreview> {
-        LocalVault::prepare_local_recovery(self, scope)
-    }
-    fn cancel_local_recovery(&self, id: String) -> LocalResult<()> {
-        LocalVault::cancel_local_recovery(self, id)
-    }
-    fn confirm_local_recovery(
-        &self,
-        id: String,
-        discard_unsent: bool,
-    ) -> LocalResult<RecoveryOutcome> {
-        LocalVault::confirm_local_recovery(self, id, discard_unsent)
-    }
-    fn app_status(&self) -> LocalResult<AppStatus> {
-        LocalVault::app_status(self)
-    }
-    fn initialize_master_password(&self, password: String) -> LocalResult<VaultStatus> {
-        LocalVault::initialize_master_password(self, password)
-    }
-    fn remote_sync(
-        &self,
-        storage_id: Option<String>,
-        progress: Option<&LocalSyncObserver>,
-    ) -> LocalResult<LocalSyncOutcome> {
-        LocalVault::remote_sync(self, storage_id, progress)
-    }
-    fn sync_reset(&self, storage_id: Option<String>) -> LocalResult<()> {
-        LocalVault::sync_reset(self, storage_id)
-    }
-    fn storage_sync_state(&self, storage_id: String) -> LocalResult<StorageSyncState> {
-        LocalVault::storage_sync_state(self, storage_id)
-    }
-    fn pending_change_count(&self, storage_id: String) -> LocalResult<u64> {
-        LocalVault::pending_change_count(self, storage_id)
-    }
-    fn forget_server(&self, storage_id: String) -> LocalResult<Option<String>> {
-        LocalVault::forget_server(self, storage_id)
-    }
-    #[allow(clippy::too_many_arguments)]
-    fn import_legacy_account(
-        &self,
-        endpoint: String,
-        connection_name: String,
-        profile_name: String,
-        storage_id: Option<String>,
-        access_token: String,
-        refresh_token: String,
-        access_expires_at: Option<String>,
-    ) -> LocalResult<()> {
-        LocalVault::import_legacy_account(
-            self,
-            endpoint,
-            connection_name,
-            profile_name,
-            storage_id,
-            access_token,
-            refresh_token,
-            access_expires_at,
-        )
-    }
-    fn remote_client(&self) -> LocalResult<AppClient> {
-        self.app_client()
-    }
-}
+mod service;
 
 /// Prepare the explicitly selected native database before remote session setup.
 pub async fn initialize_database(location: &SqliteFileLocation) -> LocalResult<()> {
