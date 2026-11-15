@@ -127,12 +127,11 @@ final class MobileWorkspaceTests: XCTestCase {
         let warning = app.alerts["Plain JSON Export"]
         XCTAssertTrue(warning.waitForExistence(timeout: 5))
         warning.buttons["Export JSON"].tap()
-        // The system picker exposes Cancel as Other on some runtimes.
-        let cancel = app.descendants(matching: .any).matching(identifier: "Cancel").firstMatch
-        XCTAssertTrue(cancel.waitForExistence(timeout: 10))
+        let save = app.descendants(matching: .any).matching(identifier: "Save").firstMatch
+        XCTAssertTrue(save.waitForExistence(timeout: 10))
         capture(app, "maintenance-files-export")
-        cancel.tap()
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: cancel)
+        cancelExport(in: app, save: save)
+        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: save)
         expectation(for: NSPredicate { _, _ in self.fullyVisible(export, in: app) }, evaluatedWith: app)
         waitForExpectations(timeout: 5)
         XCTAssertTrue(export.isEnabled)
@@ -173,6 +172,21 @@ final class MobileWorkspaceTests: XCTestCase {
     private func fullyVisible(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
         // isHittable can be true for a sliver clipped at the sheet's edge.
         element.isHittable && app.windows.firstMatch.frame.insetBy(dx: 0, dy: 44).contains(element.frame)
+    }
+
+    private func cancelExport(in app: XCUIApplication, save: XCUIElement) {
+        if UIDevice.current.userInterfaceIdiom == .pad {
+            // The tablet picker supports explicit cancellation; dragging changes its detent.
+            let cancel = app.buttons["Cancel"].firstMatch
+            XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+            cancel.tap()
+        } else {
+            // Phone picker Cancel AX proxies can overlap Files' search controls.
+            let window = app.windows.firstMatch
+            let top = window.coordinate(withNormalizedOffset: .zero).withOffset(
+                CGVector(dx: window.frame.width / 2, dy: save.frame.minY - window.frame.minY - 8))
+            top.press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.95)))
+        }
     }
 
     private func capture(_ app: XCUIApplication, _ name: String) {
