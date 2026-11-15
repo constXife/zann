@@ -240,7 +240,7 @@ final class ConnectTests: XCTestCase {
         XCTAssertNil(try core.forgetServer(storageId: storage))
 
         await vault.sync()
-        XCTAssertEqual(vault.disconnected, .init(serverURL: kept, pendingChanges: 0))
+        XCTAssertEqual(vault.disconnected, .init(storageID: storage, serverURL: kept, pendingChanges: 0))
         XCTAssertNotNil(vault.syncError, "a vault nothing syncs says so")
         XCTAssertNil(vault.staleServer)
         XCTAssertEqual(vault.visibleItems.map(\.path), ["Kept/Local"])
@@ -250,7 +250,7 @@ final class ConnectTests: XCTestCase {
         await vault.saveEditor()
         XCTAssertEqual(try core.pendingChangeCount(storageId: storage), 1)
         await vault.sync()
-        XCTAssertEqual(vault.disconnected, .init(serverURL: kept, pendingChanges: 1))
+        XCTAssertEqual(vault.disconnected, .init(storageID: storage, serverURL: kept, pendingChanges: 1))
         XCTAssertEqual(vault.indicator?.state, .disconnected)
         XCTAssertEqual(vault.indicator?.action, .reconnect)
 
