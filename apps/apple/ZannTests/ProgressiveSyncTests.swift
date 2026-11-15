@@ -12,6 +12,7 @@ private final class ProgressiveCore: UXDelayedCore {
     var onCatalogRead: (() -> Void)?
     var pageReadGate: DispatchSemaphore?
     var onPageRead: (() -> Void)?
+    var onPagePublished: (() -> Void)?
     private let stateLock = NSLock()
     private var stage = 0
     private var relay: SyncCommitRelay?
@@ -72,6 +73,7 @@ private final class ProgressiveCore: UXDelayedCore {
         try wait(catalogGate)
         publish(2)
         progress?.committed(update: .init(storageId: id, phase: .page, pagesCommitted: 1, changesCommitted: 1))
+        onPagePublished?()
         try wait(pageGate)
         if failAfterPage { throw CoreError.Service("later page failed") }
         publish(3)
@@ -156,6 +158,8 @@ private final class ProgressiveCore: UXDelayedCore {
         let model = VaultModel(core: core, contents: try VaultModel.load(core), strings: Strings(language: "en"))
         let queryRead = DispatchSemaphore(value: 0)
         let syncRead = DispatchSemaphore(value: 0)
+        let pagePublished = expectation(description: "producer published the first page notice")
+        core.onPagePublished = { pagePublished.fulfill() }
         defer { queryRead.signal(); syncRead.signal(); core.release() }
         let sync = Task { await model.sync() }
         try await until { model.storageID != nil }
@@ -165,6 +169,7 @@ private final class ProgressiveCore: UXDelayedCore {
         try await until { !model.searching }
 
         // No earlier catalog/page projection may consume the search barrier.
+        await fulfillment(of: [pagePublished], timeout: 3)
         let relay = try XCTUnwrap(core.publishedProgress)
         await relay.finish()
         XCTAssertEqual(model.searchedQuery, "First")
