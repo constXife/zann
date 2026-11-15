@@ -357,3 +357,21 @@ pub(super) fn consume_authenticated_known_hosts(
     }
     Ok(())
 }
+
+impl ConfigV2 {
+    /// Read-only trust admission before an imported bearer reaches the endpoint.
+    #[cfg(feature = "session")]
+    pub(crate) fn verify_import_trust(
+        &self,
+        connection: &ConnectionId,
+        endpoint: &VerifiedEndpointBinding,
+    ) -> Result<(), ConfigError> {
+        ensure_authenticated_known_host_fingerprint(
+            self,
+            connection,
+            endpoint.address(),
+            Some(endpoint.server_fingerprint()),
+        )?;
+        ensure_authenticated_endpoint_unique(self, Some(connection), endpoint)
+    }
+}

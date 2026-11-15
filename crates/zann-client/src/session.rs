@@ -791,6 +791,8 @@ impl fmt::Display for SessionErrorKind {
 
 mod error;
 pub use error::SessionError;
+mod import_binding;
+use import_binding::{bound_import_session, import_connection};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RemoteLogoutStatus {
@@ -1751,16 +1753,18 @@ impl TokenManager {
         let snapshot = snapshot.map_err(|error| {
             SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
         })?;
-        if let Some(bound) = bound_legacy_session(
+        if let Some(bound) = bound_import_session(
             snapshot.config(),
-            &request.connection_name,
             &request.endpoint,
             request.storage_id.as_deref(),
             &request.profile_name,
-        ) {
+        )
+        .map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })? {
             let target = SessionTarget::new(bound.connection_id, request.profile_name.clone())
                 .map_err(|_| SessionError::new(operation, SessionErrorKind::Configuration))?;
-            let storage_id = bound.storage_id.or(request.storage_id.clone());
+            let storage_id = bound.storage_id;
             let (locks, authorized_target_generation) = self
                 .generation_from_snapshot(locks, snapshot, &target, operation)
                 .await?;
@@ -1806,45 +1810,14 @@ impl TokenManager {
         };
         let verified = probe?;
 
-        let identity = port
-            .me(access.expose_secret())
-            .await
-            .map_err(|failure| SessionError::from_auth(operation, &failure))?;
-        if identity.email.is_empty()
-            || identity.email.trim() != identity.email
-            || identity.email.len() > LOGIN_EMAIL_MAX_BYTES
-        {
-            return Err(SessionError::new(operation, SessionErrorKind::Protocol));
-        }
-        let prelogin = port
-            .prelogin(&identity.email)
-            .await
-            .map_err(|failure| SessionError::from_auth(operation, &failure))?;
-        let authenticated_identity =
-            match password_login_identity_from_prelogin(prelogin, Some(identity.email.clone())) {
-                Ok(identity) => identity,
-                Err(kind) => return Err(SessionError::new(operation, kind)),
-            };
-        let account_subject = identity.user_id.to_string();
-        let auth_method = match &identity.source {
-            zann_core::AuthSource::Oidc { .. } => AuthMethod::Oidc,
-            _ => AuthMethod::Password,
-        };
-
-        let existing = existing_legacy_connection(
+        let existing = import_connection(
             snapshot.config(),
-            &request.connection_name,
             verified.address(),
             request.storage_id.as_deref(),
         )
-        .or_else(|| {
-            existing_legacy_connection(
-                snapshot.config(),
-                &request.connection_name,
-                &request.endpoint,
-                request.storage_id.as_deref(),
-            )
-        });
+        .map_err(|error| {
+            SessionError::new(operation, config_error_kind(&error, operation)).with_source(error)
+        })?;
         let existing_storage_id = existing.as_ref().and_then(|(_, connection)| {
             connection
                 .profile_storage_id(&request.profile_name)
@@ -1899,6 +1872,39 @@ impl TokenManager {
         let target = SessionTarget::new(connection_id, request.profile_name.clone())
             .map_err(|_| SessionError::new(operation, SessionErrorKind::Configuration))?;
         let commit_storage_id = request.storage_id.clone().or(existing_storage_id);
+        snapshot
+            .config()
+            .verify_import_trust(target.connection_id(), &verified.binding)
+            .map_err(|error| {
+                SessionError::new(operation, config_error_kind(&error, operation))
+                    .with_source(error)
+            })?;
+
+        let identity = port
+            .me(access.expose_secret())
+            .await
+            .map_err(|failure| SessionError::from_auth(operation, &failure))?;
+        if identity.email.is_empty()
+            || identity.email.trim() != identity.email
+            || identity.email.len() > LOGIN_EMAIL_MAX_BYTES
+        {
+            return Err(SessionError::new(operation, SessionErrorKind::Protocol));
+        }
+        let prelogin = port
+            .prelogin(&identity.email)
+            .await
+            .map_err(|failure| SessionError::from_auth(operation, &failure))?;
+        let authenticated_identity =
+            match password_login_identity_from_prelogin(prelogin, Some(identity.email.clone())) {
+                Ok(identity) => identity,
+                Err(kind) => return Err(SessionError::new(operation, kind)),
+            };
+        let account_subject = identity.user_id.to_string();
+        let auth_method = match &identity.source {
+            zann_core::AuthSource::Oidc { .. } => AuthMethod::Oidc,
+            _ => AuthMethod::Password,
+        };
+
         let expires_at = request
             .access_expires_at
             .map(|expires| expires.to_rfc3339_opts(SecondsFormat::Secs, true));
@@ -3915,70 +3921,6 @@ fn checked_expiry(now: DateTime<Utc>, expires_in: u64) -> Option<DateTime<Utc>> 
 fn copy_secret(secret: &CredentialSecret) -> Result<CredentialSecret, SessionErrorKind> {
     CredentialSecret::new(secret.expose_secret().to_string())
         .map_err(|_| SessionErrorKind::Internal)
-}
-
-struct BoundLegacySession {
-    connection_id: ConnectionId,
-    endpoint: String,
-    storage_id: Option<String>,
-    server_fingerprint: String,
-    account_subject: String,
-    auth_method: AuthMethod,
-}
-
-fn existing_legacy_connection<'a>(
-    config: &'a ConfigV2,
-    connection_name: &str,
-    endpoint: &str,
-    storage_id: Option<&str>,
-) -> Option<(ConnectionId, &'a ConnectionConfig)> {
-    let deterministic = ConnectionId::deterministic(connection_name, endpoint);
-    if let Some(connection) = config.connections.get(&deterministic) {
-        return Some((deterministic, connection));
-    }
-    if let Some(storage_id) = storage_id {
-        if let Some((connection_id, connection)) =
-            config.connections.iter().find(|(_, connection)| {
-                connection
-                    .credential_profiles()
-                    .values()
-                    .any(|p| p.storage_id() == Some(storage_id))
-            })
-        {
-            return Some((connection_id.clone(), connection));
-        }
-    }
-    config
-        .connections
-        .iter()
-        .find_map(|(connection_id, connection)| {
-            (connection.metadata().name == connection_name)
-                .then(|| (connection_id.clone(), connection))
-        })
-}
-
-fn bound_legacy_session(
-    config: &ConfigV2,
-    connection_name: &str,
-    endpoint: &str,
-    storage_id: Option<&str>,
-    profile_name: &str,
-) -> Option<BoundLegacySession> {
-    let (connection_id, connection) =
-        existing_legacy_connection(config, connection_name, endpoint, storage_id)?;
-    let profile = connection.credential_profiles().get(profile_name)?;
-    Some(BoundLegacySession {
-        connection_id,
-        endpoint: connection.metadata().address.clone(),
-        storage_id: profile.storage_id().map(str::to_owned),
-        server_fingerprint: connection
-            .metadata()
-            .server_fingerprint
-            .clone()
-            .unwrap_or_default(),
-        account_subject: profile.account_subject()?.to_string(),
-        auth_method: profile.auth_method()?,
-    })
 }
 
 fn imported_expiry(access_expires_at: Option<DateTime<Utc>>) -> DateTime<Utc> {
@@ -6271,6 +6213,89 @@ mod tests {
         assert_eq!(port.me_calls(), 1);
         assert_eq!(port.prelogin_calls.load(Ordering::SeqCst), 1);
         assert_eq!(port.login_calls(), 0);
+        let before = std::fs::read(repository.paths().config()).expect("source Config");
+        let calls = store.calls();
+        let error = app
+            .import_session_tokens(
+                LegacySessionImport::new(
+                    ADDRESS,
+                    "different display name",
+                    PROFILE,
+                    Some(Uuid::now_v7().to_string()),
+                    secret("synthetic-access"),
+                    secret("synthetic-refresh"),
+                    None,
+                ),
+                operation(),
+            )
+            .await
+            .expect_err("an explicit replica cannot be replaced by the profile's old replica");
+        assert_eq!(error.kind(), SessionErrorKind::Configuration);
+        assert_eq!(store.calls(), calls);
+        assert_eq!(port.probe_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(port.me_calls(), 1);
+        assert_eq!(
+            std::fs::read(repository.paths().config()).expect("preserved Config"),
+            before
+        );
+        assert!(
+            import_connection(
+                repository.snapshot().expect("snapshot").config(),
+                "https://unconfigured.example.test",
+                None
+            )
+            .expect("lookup")
+            .is_none(),
+            "a shared display label is not an endpoint owner"
+        );
+        assert!(
+            bound_import_session(
+                repository.snapshot().expect("snapshot").config(),
+                "https://different.example.test",
+                Some(&storage_id),
+                PROFILE
+            )
+            .is_err(),
+            "an explicit replica cannot silently switch endpoints"
+        );
+        let changed = FakeAuthPort::new(
+            EndpointIdentity::for_test(ADDRESS, "server-id-test", "changed-pin", true, true),
+            success_behavior(),
+        );
+        let changed_app = AppSession::with_components_and_client(
+            paths,
+            store.clone(),
+            FakeAuthFactory::new(changed.clone()),
+            Arc::new(FixedClock(
+                DateTime::parse_from_rfc3339("2026-08-16T12:00:00Z")
+                    .expect("clock")
+                    .with_timezone(&Utc),
+            )),
+            Some(SessionClient::new(ClientId::new("test").expect("client"))),
+        );
+        let error = changed_app
+            .import_session_tokens(
+                LegacySessionImport::new(
+                    ADDRESS,
+                    "Desktop",
+                    "second",
+                    Some(Uuid::now_v7().to_string()),
+                    secret("synthetic-access"),
+                    secret("synthetic-refresh"),
+                    None,
+                ),
+                operation(),
+            )
+            .await
+            .expect_err("new profile must respect the shared endpoint pin before bearer dispatch");
+        assert_eq!(error.kind(), SessionErrorKind::TrustMismatch);
+        assert_eq!(changed.probe_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(changed.me_calls(), 0);
+        assert_eq!(store.calls(), calls);
+        assert_eq!(
+            std::fs::read(repository.paths().config()).expect("preserved Config"),
+            before
+        );
     }
 
     #[tokio::test]
