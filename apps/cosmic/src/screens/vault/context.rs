@@ -89,7 +89,15 @@ impl State {
                     Ok((context, page)) => {
                         self.apply_context(context);
                         match page {
-                            Ok(page) => self.replace_page(page),
+                            Ok(page) => {
+                                if self.awaiting_first_sync()
+                                    && !self.progress.running
+                                    && self.progress.failure.is_none()
+                                {
+                                    self.progress.awaiting_first = false;
+                                }
+                                self.replace_page(page);
+                            }
                             Err(error) => {
                                 self.clear_context_items();
                                 self.list_error = Some(error);

@@ -10,6 +10,43 @@ pub trait ItemLike {
     fn is_deleted(&self) -> bool;
 }
 
+/// Decode a domain-only item title for display. Paths, URLs and free text keep
+/// their original spelling; this never changes stored identity or URL matching.
+pub fn display_item_title(title: &str) -> String {
+    if !title.split('.').any(|label| label.starts_with("xn--"))
+        || title
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '/' | ':' | '@' | '?' | '#'))
+    {
+        return title.to_string();
+    }
+    let (unicode, validity) = idna::domain_to_unicode(title);
+    if validity.is_ok() {
+        unicode
+    } else {
+        title.to_string()
+    }
+}
+
+#[cfg(test)]
+mod title_tests {
+    use super::display_item_title;
+
+    #[test]
+    fn domain_titles_are_readable_without_changing_other_item_names() {
+        assert_eq!(display_item_title("xn--e1afmkfd.xn--p1ai"), "пример.рф");
+        for name in [
+            "GitHub",
+            "work/xn--e1afmkfd.xn--p1ai",
+            "xn--.test",
+            "xn-- example",
+            "https://xn--e1afmkfd.xn--p1ai",
+        ] {
+            assert_eq!(display_item_title(name), name);
+        }
+    }
+}
+
 /// Owned item view, for callers that have no type of their own to adapt
 /// (tests, ad-hoc conversions).
 #[derive(Debug, Clone, PartialEq, Eq)]

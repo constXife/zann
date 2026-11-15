@@ -17,6 +17,9 @@ use cosmic::iced::{Alignment, Length};
 use cosmic::prelude::*;
 use cosmic::{widget, Element};
 
+/// Native reading and editing surfaces remain legible on wide displays.
+pub(super) const DETAIL_CONTENT_MAX: f32 = 800.0;
+
 /// The screens that accumulate state are boxed so that switching screens stays
 /// a pointer-sized move.
 pub enum Screen {

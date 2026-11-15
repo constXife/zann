@@ -3,6 +3,7 @@ use super::*;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ListEmptyState {
     Loading,
+    FirstSync,
     NoSearchResults,
     EmptyCategory,
     Failed,
@@ -12,6 +13,8 @@ impl State {
     pub fn empty_state(&self) -> Option<ListEmptyState> {
         if !self.visible().is_empty() {
             None
+        } else if self.awaiting_first_sync() {
+            Some(ListEmptyState::FirstSync)
         } else if self.searching || self.busy {
             Some(ListEmptyState::Loading)
         } else if self.list_error.is_some() {
@@ -76,8 +79,14 @@ impl State {
             (None, None, Some(detail)) => {
                 let header = widget::row::with_capacity(3)
                     .push(
-                        widget::container(widget::text::title4(detail.title.clone()))
-                            .width(Length::Fill),
+                        widget::container(widget::tooltip(
+                            widget::text::title4(zann_ui_core::item::display_item_title(
+                                &detail.title,
+                            )),
+                            widget::text::body(detail.title.clone()),
+                            widget::tooltip::Position::Bottom,
+                        ))
+                        .width(Length::Fill),
                     )
                     .push(
                         widget::button::standard(t("items.historyOpen"))
@@ -101,6 +110,8 @@ impl State {
                     )
                     .spacing(spacing.space_s)
                     .padding(spacing.space_s)
+                    .width(Length::Fill)
+                    .max_width(super::super::DETAIL_CONTENT_MAX)
                     .into()
             }
             (None, None, None) => {
@@ -137,22 +148,42 @@ impl State {
             .width(Length::Fill);
 
         let mut create = widget::button::suggested(t("common.create"));
-        if !self.busy && !self.searching && self.editor.is_none() && self.history.is_none() {
+        if self.can_create() {
             create = create.on_press(Message::OpenCreate);
         }
-        let toolbar = widget::row::with_capacity(2)
+        let mut toolbar = widget::row::with_capacity(2)
             .push(
                 widget::container(widget::text::title4(self.selected_category_label()))
                     .width(Length::Fill),
             )
-            .push(create)
             .spacing(spacing.space_s)
             .align_y(Alignment::Center)
+            .height(Length::Fixed(36.0))
             .width(Length::Fill);
+        // An empty category has its own specific CTA; Trash never creates items.
+        if self.empty_create_action().is_some()
+            && self.empty_state() != Some(ListEmptyState::EmptyCategory)
+        {
+            toolbar = toolbar.push(create);
+        }
 
         let list: Element<'_, Message> = if let Some(state) = self.empty_state() {
             let mut content = widget::column::with_capacity(2).spacing(spacing.space_s);
             match state {
+                ListEmptyState::FirstSync => {
+                    content = content.push(widget::text::title4(t("sync.firstSyncTitle")));
+                    if let Some(error) = &self.progress.failure {
+                        content = content.push(widget::text::body(error.clone())).push(
+                            widget::button::standard(t("common.retry")).on_press_maybe(
+                                (!self.progress.running).then_some(Message::SyncNow),
+                            ),
+                        );
+                    } else {
+                        content = content
+                            .push(widget::progress_bar::indeterminate_circular().size(24.0))
+                            .push(widget::text::body(t("sync.firstSyncBody")));
+                    }
+                }
                 ListEmptyState::Loading => {
                     content = content
                         .push(widget::progress_bar::indeterminate_circular().size(24.0))
@@ -170,10 +201,7 @@ impl State {
                     content = content.push(widget::text::body(t("workspace.emptyBody")));
                     if let Some(action) = self.empty_create_action() {
                         let button = widget::button::suggested(t(&action.label_key))
-                            .on_press_maybe(
-                                (!self.busy && self.editor.is_none() && self.history.is_none())
-                                    .then_some(Message::OpenCreate),
-                            );
+                            .on_press_maybe(self.can_create().then_some(Message::OpenCreate));
                         content = content.push(button);
                     }
                 }
@@ -196,7 +224,9 @@ impl State {
             column.into_element()
         };
 
-        let list_status = if self.searching || self.busy {
+        let list_status = if visible.is_empty() && !self.searching && !self.busy {
+            String::new()
+        } else if self.searching || self.busy {
             t("common.loading")
         } else if self.items.len() >= ITEM_CACHE_LIMIT && self.next_cursor.is_some() {
             t_args(
@@ -252,8 +282,9 @@ impl State {
             );
         }
 
+        // Keep loading/status feedback from resizing the list viewport.
         content
-            .push(footer)
+            .push(widget::container(footer).height(Length::Fixed(24.0)))
             .spacing(spacing.space_s)
             .padding(spacing.space_s)
             .into()
@@ -273,7 +304,11 @@ fn item_row(item: &ItemSummary) -> Element<'_, Message> {
     let spacing = theme::spacing();
     // The title names the item; the caption says who or where it is for
     // and where it lives.
-    let mut text = widget::column::with_capacity(2).push(widget::text::body(item.title.clone()));
+    let mut text = widget::column::with_capacity(2).push(widget::tooltip(
+        widget::text::body(zann_ui_core::item::display_item_title(&item.title)),
+        widget::text::body(item.title.clone()),
+        widget::tooltip::Position::Bottom,
+    ));
     let subtitle = item.subtitle.as_ref().map(|subtitle| subtitle.as_str());
     if let Some(caption) = zann_ui_core::item_caption(subtitle, &item.path) {
         text = text.push(widget::text::caption(caption));

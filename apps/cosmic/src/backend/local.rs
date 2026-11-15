@@ -142,21 +142,20 @@ pub fn sync_state(facade: &Facade, storage_id: String) -> Result<StorageSyncStat
 }
 
 pub fn sync(facade: &Facade, storage_id: Option<String>) -> Result<LocalSyncOutcome, SyncFailure> {
-    if let Some(storage_id) = storage_id.clone() {
-        syncs(facade, storage_id)?;
-    }
-    facade
-        .remote_sync(storage_id, None)
-        .map_err(SyncFailure::from)
+    sync_observed(facade, storage_id, None)
 }
 
-/// The first sync of a newly connected server; the core then moves the
-/// still-empty session to that server's personal vault.
-pub fn sync_new_server(facade: &Facade, storage_id: String) -> Result<(), String> {
+pub fn sync_observed(
+    facade: &Facade,
+    storage_id: Option<String>,
+    progress: Option<&zann_client::app::local::LocalSyncObserver>,
+) -> Result<LocalSyncOutcome, SyncFailure> {
+    if let Some(id) = &storage_id {
+        syncs(facade, id.clone())?;
+    }
     facade
-        .remote_sync(Some(storage_id), None)
-        .map(|_| ())
-        .map_err(|err| err.to_string())
+        .remote_sync(storage_id, progress)
+        .map_err(SyncFailure::from)
 }
 
 /// Local changes in this storage that no server has confirmed yet.
@@ -190,6 +189,24 @@ pub fn items(
     cursor: Option<String>,
     query: Option<String>,
 ) -> Result<ItemsPage, String> {
+    items_page(facade, cursor, query, PAGE_LIMIT)
+}
+
+/// Keep the loaded window when committed sync pages refresh the current list.
+pub fn refresh_items(
+    facade: &Facade,
+    query: Option<String>,
+    keeping: u32,
+) -> Result<ItemsPage, String> {
+    items_page(facade, None, query, keeping.max(PAGE_LIMIT))
+}
+
+fn items_page(
+    facade: &Facade,
+    cursor: Option<String>,
+    query: Option<String>,
+    limit: u32,
+) -> Result<ItemsPage, String> {
     let page = facade
         .items_list(
             ItemsFilter {
@@ -198,10 +215,7 @@ pub fn items(
                 // to be part of the page.
                 include_deleted: true,
             },
-            Page {
-                limit: PAGE_LIMIT,
-                cursor,
-            },
+            Page { limit, cursor },
         )
         .map_err(|err| err.to_string())?;
     Ok(ItemsPage {

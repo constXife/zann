@@ -8404,6 +8404,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "xkbcommon 0.8.0",
  "zann-client",
  "zann-client-sqlite",
  "zann-core",
@@ -8504,6 +8505,7 @@ version = "0.1.0"
 dependencies = [
  "data-encoding",
  "getrandom 0.2.17",
+ "idna",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

@@ -14,6 +14,8 @@ use zann_ui_core::{DevicePreferences, ItemCounts};
 mod card_effects;
 #[path = "flows/card_selection.rs"]
 mod card_selection;
+#[path = "flows/first_sync.rs"]
+mod first_sync;
 #[path = "flows/list_states.rs"]
 mod list_states;
 #[path = "flows/sync_navigation.rs"]
@@ -487,19 +489,13 @@ fn master_hands_the_open_vault_to_the_shell() {
         master::Outcome::None
     ));
     let opened = state.update(
-        master::Message::Opened(
-            second_operation,
-            Ok(master::OpenResult::Vault {
-                page,
-                synced: Some(Err("offline".to_string())),
-            }),
-        ),
+        master::Message::Opened(second_operation, Ok(master::OpenResult::Vault { page })),
         &session,
     );
     match opened {
-        master::Outcome::Opened { page, synced } => {
+        master::Outcome::Opened { page, sync_after } => {
             assert_eq!(page.total, 2);
-            assert_eq!(synced, Some(Err("offline".to_string())));
+            assert_eq!(sync_after, None);
         }
         _ => panic!("a successful unlock hands the page over"),
     }
@@ -753,7 +749,9 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
     let ignored = vault.update(
         vault::Message::AutoSynced {
             ticket: stale,
-            storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
+            storage_id: Some(
+                local::current_storage_id(&session.facade()).expect("selected storage"),
+            ),
             list_generation: 0,
             result: Ok(sync_outcome(true)),
         },
@@ -767,15 +765,18 @@ fn a_sync_from_before_a_lock_never_reaches_the_next_vault() {
     vault.update(
         vault::Message::AutoSynced {
             ticket: current,
-            storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
+            storage_id: Some(
+                local::current_storage_id(&session.facade()).expect("selected storage"),
+            ),
             list_generation: 0,
             result: Ok(sync_outcome(true)),
         },
         &session,
     );
     vault.update(
-        vault::Message::SyncedWorkspaceLoaded {
-            storage_id: local::current_storage_id(&session.facade()).unwrap(),
+        vault::Message::ProgressWorkspaceLoaded {
+            run: vault.sync_run_id(),
+            context_request: vault.context_request_id(),
             list_generation: 0,
             result: Ok((local::vault_context(&session.facade()).unwrap(), empty)),
         },
@@ -801,7 +802,9 @@ fn a_sync_started_under_an_older_search_keeps_the_newer_list() {
     vault.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: local::current_storage_id(&session.facade()).expect("selected storage"),
+            storage_id: Some(
+                local::current_storage_id(&session.facade()).expect("selected storage"),
+            ),
             list_generation: 0,
             result: Ok(sync_outcome(true)),
         },
@@ -959,7 +962,7 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
     vault.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: storage.to_string(),
+            storage_id: Some(storage.to_string()),
             list_generation: 0,
             result: Err(local::SyncFailure::IdentityChanged),
         },
@@ -996,7 +999,7 @@ fn a_scheduled_sync_refused_for_a_changed_identity_leads_to_the_settings_recover
         vault.update(
             vault::Message::AutoSynced {
                 ticket,
-                storage_id: storage.to_string(),
+                storage_id: Some(storage.to_string()),
                 list_generation: 0,
                 result,
             },
@@ -1114,7 +1117,7 @@ fn the_sync_error_on_screen_can_be_copied() {
     vault.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: local::current_storage_id(&session.facade()).unwrap(),
+            storage_id: Some(local::current_storage_id(&session.facade()).unwrap()),
             list_generation: 0,
             result: Err(local::SyncFailure::Other("sync db_error".to_string())),
         },
@@ -1151,7 +1154,7 @@ fn a_storage_without_its_connection_leads_to_connecting_its_server_again() {
     vault.update(
         vault::Message::AutoSynced {
             ticket,
-            storage_id: storage.to_string(),
+            storage_id: Some(storage.to_string()),
             list_generation: 0,
             result: Err(gone.clone()),
         },

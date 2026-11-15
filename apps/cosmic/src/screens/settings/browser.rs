@@ -112,7 +112,7 @@ impl State {
             for paired in &settings.paired {
                 section = section.add(
                     widget::settings::item::builder(paired.name.clone())
-                        .description(paired.public_key.clone())
+                        .description(t("browser.connected"))
                         .control(widget::button::destructive(t("browser.revoke")).on_press(
                             super::Message::Browser(Message::Revoke(paired.public_key.clone())),
                         )),

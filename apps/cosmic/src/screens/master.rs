@@ -37,10 +37,7 @@ pub struct State {
 #[derive(Clone)]
 pub enum OpenResult {
     AccountKeyRequired,
-    Vault {
-        page: ItemsPage,
-        synced: Option<Result<(), String>>,
-    },
+    Vault { page: ItemsPage },
 }
 
 #[derive(Clone)]
@@ -73,7 +70,7 @@ pub enum Outcome {
     Recovery,
     Opened {
         page: ItemsPage,
-        synced: Option<Result<(), String>>,
+        sync_after: Option<String>,
     },
 }
 
@@ -227,26 +224,22 @@ impl State {
                             {
                                 return Ok(OpenResult::AccountKeyRequired);
                             }
-                            // A vault that came from a server starts empty, so
-                            // pull it first. A failed sync is worth reporting
-                            // but must not keep the vault shut.
-                            let synced =
-                                storage.map(|storage| local::sync_new_server(&facade, storage));
-                            local::items(&facade, None, None)
-                                .map(|page| OpenResult::Vault { page, synced })
+                            local::items(&facade, None, None).map(|page| OpenResult::Vault { page })
                         })
                         .await,
                     )
                 }));
             }
 
-            Message::Opened(id, Ok(OpenResult::Vault { page, synced })) => {
+            Message::Opened(id, Ok(OpenResult::Vault { page })) => {
                 if !self.operations.finish(id) {
                     return Outcome::None;
                 }
                 self.busy = false;
-                self.sync_after = None;
-                return Outcome::Opened { page, synced };
+                return Outcome::Opened {
+                    page,
+                    sync_after: self.sync_after.take(),
+                };
             }
 
             Message::Opened(id, Ok(OpenResult::AccountKeyRequired)) => {
@@ -307,7 +300,6 @@ impl State {
                     {
                         return Ok(OpenResult::AccountKeyRequired);
                     }
-                    let synced = storage.map(|storage| local::sync_new_server(&facade, storage));
                     if facade.current_storage_id().is_none()
                         && !facade
                             .setup_accounts()
@@ -317,7 +309,7 @@ impl State {
                     {
                         return Ok(OpenResult::AccountKeyRequired);
                     }
-                    local::items(&facade, None, None).map(|page| OpenResult::Vault { page, synced })
+                    local::items(&facade, None, None).map(|page| OpenResult::Vault { page })
                 })
                 .await,
             )

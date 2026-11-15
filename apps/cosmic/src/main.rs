@@ -30,7 +30,7 @@ use zann_cosmic::i18n::t;
 use zann_cosmic::preferences::{self, Store};
 use zann_cosmic::screens::{self, accounts, connect, master, settings, vault, welcome, Screen};
 use zann_cosmic::session::Session;
-use zann_cosmic::tray;
+use zann_cosmic::{keyboard_status, tray};
 use zann_ui_core::{DevicePreferences, SettingsSection};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -83,6 +83,7 @@ struct App {
     /// The last secret copied and its generation, so expired timers cannot
     /// clear a newer copy.
     clipboard: (String, u64),
+    keyboard_status: keyboard_status::Status,
 }
 
 #[derive(Clone)]
@@ -112,6 +113,8 @@ enum Message {
     Unfocused,
     TemporaryReveal(bool),
     Activity,
+    KeyboardLayout(Result<String, String>),
+    KeyboardModifiers(keyboard::Modifiers),
     IdleCheck,
     IdlePresence(Result<bool, String>),
     ClipboardExpired(u64),
@@ -129,6 +132,7 @@ impl std::fmt::Debug for Message {
 /// lets libcosmic pair them with their keyboard shortcuts.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Action {
+    Edit,
     Lock,
     Settings,
     Quit,
@@ -139,6 +143,7 @@ impl menu::Action for Action {
 
     fn message(&self) -> Message {
         match self {
+            Self::Edit => Message::Vault(vault::Message::OpenEdit),
             Self::Lock => Message::Lock,
             Self::Settings => Message::OpenSettings,
             Self::Quit => Message::Quit,
@@ -221,6 +226,10 @@ impl cosmic::Application for App {
         self.header_menu()
     }
 
+    fn header_end(&self) -> Vec<Element<'_, Self::Message>> {
+        vec![self.keyboard_status.view()]
+    }
+
     fn init(core: Core, _flags: Self::Flags) -> (Self, Task<Self::Message>) {
         let (shell, preference_store, preferences, close_to_tray) =
             match Session::open().and_then(|(session, status)| {
@@ -269,6 +278,7 @@ impl cosmic::Application for App {
             tray_available: false,
             preference_store,
             clipboard: (String::new(), 0),
+            keyboard_status: keyboard_status::Status::default(),
         };
         app.set_header_title("zann".to_string());
         let mut task = match app.core.main_window_id() {
@@ -417,6 +427,13 @@ impl cosmic::Application for App {
             screen,
             shell_events,
             tray::subscription().map(Message::Tray),
+            keyboard_status::subscription().map(Message::KeyboardLayout),
+            event::listen_with(|event, _, _| match event {
+                Event::Keyboard(keyboard::Event::ModifiersChanged(modifiers)) => {
+                    Some(Message::KeyboardModifiers(modifiers))
+                }
+                _ => None,
+            }),
         ])
     }
 
@@ -452,6 +469,14 @@ impl cosmic::Application for App {
         // Effects and policies that leave a screen are the shell's, whoever
         // asked for them.
         match message {
+            Message::KeyboardLayout(value) => {
+                self.keyboard_status.layout_changed(value);
+                return Task::none();
+            }
+            Message::KeyboardModifiers(value) => {
+                self.keyboard_status.modifiers_changed(value);
+                return Task::none();
+            }
             Message::Copy(value) => return self.copy(value),
             Message::OpenUrl(url) => {
                 if let Err(err) = open::that_detached(&url) {
@@ -519,6 +544,7 @@ impl cosmic::Application for App {
                 return self.update_settings(settings::Message::Synced(storage_id, result));
             }
             Message::Unfocused => {
+                self.keyboard_status.unfocused();
                 if let Shell::Ready {
                     screen: Screen::Vault(vault) | Screen::Settings { vault, .. },
                     ..
@@ -639,6 +665,8 @@ impl cosmic::Application for App {
             | Message::TemporaryReveal(_)
             | Message::Activity
             | Message::ClipboardExpired(_)
+            | Message::KeyboardLayout(_)
+            | Message::KeyboardModifiers(_)
             | Message::ClipboardRead(_)
             | Message::Settings(_)
             | Message::Master(_)

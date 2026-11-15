@@ -20,6 +20,8 @@ use super::detail::Detail;
 use crate::i18n::{has, t};
 
 mod autofill;
+mod fields;
+use fields::field_row;
 use zann_ui_core::item_editor::MatchMode;
 
 const FIELD_KINDS: &[FieldKind] = &[
@@ -333,7 +335,8 @@ impl State {
             }))
             .push(widget::text::heading(t("create.customFields")))
             .spacing(spacing.space_s)
-            .width(Length::Fill);
+            .width(Length::Fill)
+            .max_width(super::DETAIL_CONTENT_MAX);
 
         for (index, field) in self.draft.fields.iter().enumerate() {
             if self.is_match_rules_field(&field.key) {
@@ -387,66 +390,6 @@ impl State {
 fn multiline_content(field: &DraftField) -> Option<widget::text_editor::Content> {
     (field.multiline() && !field.masked())
         .then(|| widget::text_editor::Content::with_text(&field.value.value))
-}
-
-fn field_row<'a>(
-    index: usize,
-    field: &'a DraftField,
-    revealed: bool,
-    multiline: Option<&'a widget::text_editor::Content>,
-) -> Element<'a, Message> {
-    let spacing = theme::spacing();
-    let selected_kind = FIELD_KINDS
-        .iter()
-        .position(|kind| *kind == field.value.kind);
-    let kind_labels: Vec<String> = FIELD_KINDS.iter().map(|kind| kind_label(*kind)).collect();
-    let key = widget::text_input::text_input(t("create.fieldKeyPlaceholder"), &field.key)
-        .on_input(move |value| Message::FieldKey(index, value))
-        .width(Length::Fixed(170.0));
-    let value: Element<'_, Message> = if field.masked() {
-        widget::text_input::secure_input(
-            t("create.fieldValuePlaceholder"),
-            &field.value.value,
-            Some(Message::ToggleReveal(index)),
-            !revealed,
-        )
-        .on_input(move |value| Message::FieldValue(index, value))
-        .width(Length::Fill)
-        .into()
-    } else if let Some(content) = multiline {
-        widget::text_editor(content)
-            .on_action(move |action| Message::Multiline(index, action))
-            .height(Length::Fixed(120.0))
-            .into()
-    } else {
-        widget::text_input::text_input(t("create.fieldValuePlaceholder"), &field.value.value)
-            .on_input(move |value| Message::FieldValue(index, value))
-            .width(Length::Fill)
-            .into()
-    };
-
-    let mut row = widget::row::with_capacity(5)
-        .push(key)
-        .push(
-            widget::dropdown(kind_labels, selected_kind, move |kind| {
-                Message::FieldKind(index, FIELD_KINDS[kind])
-            })
-            .width(Length::Fixed(130.0)),
-        )
-        .push(value);
-    if field.value.kind == FieldKind::Password {
-        row = row.push(
-            widget::button::standard(t("create.generateSecret"))
-                .on_press(Message::OpenGenerator(index)),
-        );
-    }
-    row.push(
-        widget::button::icon(widget::icon::from_name("edit-delete-symbolic"))
-            .on_press(Message::RemoveField(index)),
-    )
-    .spacing(spacing.space_xs)
-    .align_y(Alignment::Center)
-    .into()
 }
 
 fn type_label(type_id: &str) -> String {

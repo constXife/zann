@@ -709,6 +709,8 @@ impl State {
     }
 }
 
+mod accounts;
 mod browser;
+mod device_unlock;
 mod password;
 mod view;

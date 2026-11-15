@@ -31,7 +31,7 @@ fn category_icon(schema_icon: &str) -> &'static str {
         "grid" => "view-grid-symbolic",
         "key" => "dialog-password-symbolic",
         "doc" => "text-x-generic-symbolic",
-        "card" => "credit-card-symbolic",
+        "card" => "payment-card-symbolic",
         "person" => "contact-new-symbolic",
         "network" => "network-server-symbolic",
         "server" => "computer-symbolic",
@@ -54,7 +54,7 @@ fn item_icon(type_id: &str) -> &'static str {
     match type_id {
         "login" => "dialog-password-symbolic",
         "note" => "text-x-generic-symbolic",
-        "card" => "credit-card-symbolic",
+        "card" => "payment-card-symbolic",
         "identity" => "contact-new-symbolic",
         "api" => "network-server-symbolic",
         _ => "view-list-symbolic",
@@ -120,6 +120,7 @@ pub struct State {
     /// Only the latest armed auto-sync timer counts.
     sync_timer: u64,
     sync: sync_status::SyncView,
+    progress: sync_progress::ProgressView,
     workspace: context::Workspace,
 }
 
@@ -180,7 +181,7 @@ pub enum Message {
     /// Network completion for an explicit source storage and list revision.
     AutoSynced {
         ticket: AutoSyncTicket,
-        storage_id: String,
+        storage_id: Option<String>,
         list_generation: u64,
         result: Result<zann_client::app::local::LocalSyncOutcome, local::SyncFailure>,
     },
@@ -194,9 +195,14 @@ pub enum Message {
         request: u64,
         result: Result<local::StorageSyncState, String>,
     },
-    SyncedWorkspaceLoaded {
+    SyncCommitted {
+        run: u64,
         storage_id: String,
+    },
+    ProgressWorkspaceLoaded {
+        run: u64,
         list_generation: u64,
+        context_request: u64,
         result: Result<(local::VaultContext, ItemsPage), String>,
     },
     SyncNow,
@@ -255,6 +261,7 @@ impl State {
             drag: None,
             sync_timer: 0,
             sync: sync_status::SyncView::new(sync_error),
+            progress: sync_progress::ProgressView::default(),
             workspace: context::Workspace::new(),
         };
         state.apply_page(page, true);
@@ -531,9 +538,10 @@ impl State {
                 }
             }
 
-            message @ (Message::SyncDue(_)
-            | Message::AutoSynced { .. }
-            | Message::SyncedWorkspaceLoaded { .. }) => {
+            message @ (Message::SyncCommitted { .. } | Message::ProgressWorkspaceLoaded { .. }) => {
+                return self.update_sync_progress(message, session);
+            }
+            message @ (Message::SyncDue(_) | Message::AutoSynced { .. }) => {
                 return self.update_auto_sync(message, session)
             }
 
@@ -652,8 +660,10 @@ impl zann_ui_core::ItemLike for ItemSummaryView<'_> {
     }
 }
 
+mod admission;
 mod auto_sync;
 mod editing;
+mod sync_progress;
 mod sync_status;
 
 mod search;

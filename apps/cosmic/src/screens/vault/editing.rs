@@ -2,6 +2,27 @@
 use super::*;
 
 impl State {
+    pub(super) fn refresh_history(&self, session: &Session) -> Task<Message> {
+        let Some(history) = self
+            .history
+            .as_ref()
+            .filter(|history| !history.is_loading() && !history.is_restoring())
+        else {
+            return Task::none();
+        };
+        let item_id = history.item_id().to_string();
+        let generation = self.editing_generation;
+        let facade = session.facade();
+        cosmic::task::future(async move {
+            Message::HistoryResponse(
+                generation,
+                history::Message::EntriesRefreshed(
+                    off_thread(move || local::item_history(&facade, item_id)).await,
+                ),
+            )
+        })
+    }
+
     pub(super) fn update_editing(&mut self, message: Message, session: &Session) -> Outcome {
         match &message {
             Message::Saved(id, _) if *id != self.editing_generation || self.editor.is_none() => {
@@ -17,7 +38,7 @@ impl State {
         let generation = self.editing_generation;
         match message {
             Message::OpenCreate => {
-                if self.busy || self.searching || self.editor.is_some() || self.history.is_some() {
+                if !self.can_create() {
                     return Outcome::None;
                 }
                 match editor::State::create(self.preferred_create_type()) {
@@ -31,10 +52,7 @@ impl State {
             }
 
             Message::OpenEdit => {
-                if self.busy || self.searching || self.editor.is_some() || self.history.is_some() {
-                    return Outcome::None;
-                }
-                if !self.detail_ready() {
+                if !self.can_edit() {
                     return Outcome::None;
                 }
                 if let Some(detail) = self.detail.as_ref() {
@@ -136,7 +154,7 @@ impl State {
                             }));
                         }
                     }
-                    history::Outcome::LoadVersion(version) => {
+                    history::Outcome::LoadVersion { version, request } => {
                         let item_id = history.item_id().to_string();
                         let facade = session.facade();
                         return Outcome::Task(cosmic::task::future(async move {
@@ -144,6 +162,7 @@ impl State {
                                 generation,
                                 history::Message::VersionLoaded {
                                     version,
+                                    request,
                                     result: off_thread(move || {
                                         local::item_history_get(&facade, item_id, version)
                                     })

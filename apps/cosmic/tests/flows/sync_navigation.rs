@@ -197,8 +197,9 @@ fn navigation_during_sync_scopes_feedback_to_the_source_even_after_returning() {
     switched(&mut state, &session, a.clone(), page);
     assert!(state.sync_error().unwrap().contains("offline A"));
     state.update(
-        vault::Message::SyncedWorkspaceLoaded {
-            storage_id: a_id,
+        vault::Message::ProgressWorkspaceLoaded {
+            run: state.sync_run_id(),
+            context_request: state.context_request_id(),
             list_generation: 0,
             result: Ok((a, list_states::empty_page())),
         },
@@ -283,8 +284,9 @@ fn a_successful_sync_cannot_replace_the_vault_selected_during_network_work() {
     *result = Ok(sync_outcome(true));
     state.update(finished, &session);
     state.update(
-        vault::Message::SyncedWorkspaceLoaded {
-            storage_id: storage,
+        vault::Message::ProgressWorkspaceLoaded {
+            run: state.sync_run_id(),
+            context_request: state.context_request_id(),
             list_generation: 0,
             result: Ok((original, page)),
         },
