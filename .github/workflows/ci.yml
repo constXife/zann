@@ -526,7 +526,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.apple == 'true' || needs.changes.outputs.ci == 'true'
     runs-on: macos-latest
-    timeout-minutes: 30
+    # Cold Rust builds, macOS tests, both mobile families and Release slices
+    # exceed 30 minutes on the hosted Apple runner.
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@v4
