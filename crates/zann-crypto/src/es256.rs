@@ -89,7 +89,7 @@ impl Es256Key {
     pub fn public_key(&self) -> [u8; 65] {
         self.0
             .verifying_key()
-            .to_encoded_point(false)
+            .to_sec1_point(false)
             .as_bytes()
             .try_into()
             .expect("P-256 uncompressed points have 65 bytes")
