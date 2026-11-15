@@ -41,6 +41,7 @@ final class VaultModel: ObservableObject {
     /// Mac's config. Its unsent changes wait until the user connects to
     /// `serverURL` again with the same account, which takes the vault over.
     struct Disconnected: Equatable {
+        let storageID: String
         let serverURL: String?
         let pendingChanges: UInt64
     }
@@ -196,7 +197,7 @@ final class VaultModel: ObservableObject {
             Result { try core.storageSyncState(storageId: wanted) }
         }
         guard wanted == storageID, generation == contextGeneration, !switching else { return }
-        if case .success(let state) = result { applySyncState(state) }
+        if case .success(let state) = result { applySyncState(state, storageID: wanted) }
     }
 
     /// Syncs whenever the core's schedule says so until `stopAutoSync`. A tick
@@ -287,7 +288,7 @@ final class VaultModel: ObservableObject {
                 if let wantedStorage {
                     let state = try core.storageSyncState(storageId: wantedStorage)
                     if state.link == .disconnected {
-                        return .disconnected(Disconnected(serverURL: state.serverUrl, pendingChanges: state.pendingChanges))
+                        return .disconnected(Disconnected(storageID: wantedStorage, serverURL: state.serverUrl, pendingChanges: state.pendingChanges))
                     }
                 } else if try !core.appStatus().serverConnected { return .noServer }
                 let outcome: SyncOutcomeFfi
@@ -617,11 +618,11 @@ final class VaultModel: ObservableObject {
         }
     }
 
-    private func applySyncState(_ state: StorageSyncStateFfi) {
+    private func applySyncState(_ state: StorageSyncStateFfi, storageID: String) {
         syncState = state
         canSync = true
         disconnected = state.link == .disconnected
-            ? Disconnected(serverURL: state.serverUrl, pendingChanges: state.pendingChanges) : nil
+            ? Disconnected(storageID: storageID, serverURL: state.serverUrl, pendingChanges: state.pendingChanges) : nil
     }
 
     /// Shows `contents` in place of everything loaded. A search started for
@@ -634,7 +635,11 @@ final class VaultModel: ObservableObject {
         storageID = contents.storage?.id
         syncState = contents.syncState
         canSync = contents.syncState != nil || contents.serverConnected
-        if let state = contents.syncState { applySyncState(state) }
+        if let state = contents.syncState, let storage = contents.storage {
+            applySyncState(state, storageID: storage.id)
+        } else {
+            disconnected = nil
+        }
         contextReady = true
         scope = contents.vault?.scope
     }
