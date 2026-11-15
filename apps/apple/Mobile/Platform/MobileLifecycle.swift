@@ -9,6 +9,7 @@ final class MobileLifecycle: ObservableObject {
     @Published private(set) var visibilityEpoch = 0
     private let model: AppModel
     private let webAuthentication: WebAuthentication
+    private let activity: MobileUserActivity
     private weak var window: UIWindow?
     private var cover: UIView?
     private var observers: [AnyCancellable] = []
@@ -19,6 +20,7 @@ final class MobileLifecycle: ObservableObject {
     init(model: AppModel, webAuthentication: WebAuthentication) {
         self.model = model
         self.webAuthentication = webAuthentication
+        self.activity = MobileUserActivity { [weak model] in model?.noteActivity() }
         let notifications = NotificationCenter.default
         observers = [
             notifications.publisher(for: UIApplication.willResignActiveNotification)
@@ -41,6 +43,7 @@ final class MobileLifecycle: ObservableObject {
     func attach(_ window: UIWindow) {
         self.window = window
         webAuthentication.window = window
+        activity.attach(to: window)
         installCover()
         if UIApplication.shared.applicationState == .active { resume() }
     }

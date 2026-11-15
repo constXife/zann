@@ -9,7 +9,6 @@ struct MobileRootView: View {
             .id(lifecycle.visibilityEpoch)
             .environmentObject(model)
             .background(WindowAttachment { lifecycle.attach($0) })
-            .simultaneousGesture(DragGesture(minimumDistance: 0).onChanged { _ in model.noteActivity() })
     }
 
     @ViewBuilder private var screen: some View {
