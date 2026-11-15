@@ -132,8 +132,10 @@ final class MobileWorkspaceTests: XCTestCase {
 
     private func capture(_ app: XCUIApplication, _ name: String) {
         let landscape = XCUIDevice.shared.orientation.isLandscape
+        let window = app.windows.firstMatch
         expectation(for: NSPredicate { _, _ in
-            let size = app.windows.firstMatch.frame.size
+            guard app.state == .runningForeground, window.exists else { return false }
+            let size = window.frame.size
             return (size.width > size.height) == landscape
         }, evaluatedWith: app)
         waitForExpectations(timeout: 5)
