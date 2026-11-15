@@ -10,6 +10,8 @@ private final class ProgressiveCore: UXDelayedCore {
     var failAfterPage = false
     var catalogReadGate: DispatchSemaphore?
     var onCatalogRead: (() -> Void)?
+    var pageReadGate: DispatchSemaphore?
+    var onPageRead: (() -> Void)?
     private let stateLock = NSLock()
     private var stage = 0
     var fixtureStorageID: String? { super.currentStorageId() }
@@ -45,6 +47,11 @@ private final class ProgressiveCore: UXDelayedCore {
         let stage = currentStage()
         let actual = try super.itemsList(filter: filter, page: page)
         let available = stage < 2 ? [] : stage == 2 ? actual.items.filter { $0.title == "First" } : actual.items
+        if let gate = pageReadGate {
+            pageReadGate = nil
+            onPageRead?()
+            try wait(gate)
+        }
         return ItemPage(items: available, nextCursor: nil, totalCount: UInt64(available.count),
             counts: .init(all: UInt64(available.count), trash: 0, byType: []))
     }
@@ -87,12 +94,12 @@ private final class ProgressiveCore: UXDelayedCore {
         core?.release(); core = nil
         try? FileManager.default.removeItem(at: directory)
     }
-    private func until(_ predicate: () -> Bool) async throws {
+    private func until(file: StaticString = #filePath, line: UInt = #line, _ predicate: () -> Bool) async throws {
         for _ in 0..<300 {
             if predicate() { return }
             try await Task.sleep(nanoseconds: 10_000_000)
         }
-        XCTFail("progress did not reach the UI before the remaining sync was released")
+        XCTFail("progress did not reach the UI before the remaining sync was released", file: file, line: line)
     }
 
     func testCatalogAndPagesAppearBeforeSyncFinishesAndSearchStaysUsable() async throws {
@@ -136,6 +143,41 @@ private final class ProgressiveCore: UXDelayedCore {
         XCTAssertEqual(model.visibleItems.map(\.title), ["First"])
         XCTAssertTrue(try XCTUnwrap(model.syncError).contains("later page failed"))
         XCTAssertFalse(model.syncing)
+    }
+
+    func testSearchCompletionCannotDiscardACommittedPageRefresh() async throws {
+        let model = VaultModel(core: core, contents: try VaultModel.load(core), strings: Strings(language: "en"))
+        let queryRead = DispatchSemaphore(value: 0)
+        let syncRead = DispatchSemaphore(value: 0)
+        defer { queryRead.signal(); syncRead.signal(); core.release() }
+        let sync = Task { await model.sync() }
+        try await until { model.storageID != nil }
+        core.catalogGate.signal()
+        try await until { model.visibleItems.count == 1 }
+        model.query = "First"
+        try await until { !model.searching }
+
+        let queryCaptured = expectation(description: "search captured the old page")
+        core.pageReadGate = queryRead
+        core.onPageRead = { queryCaptured.fulfill() }
+        model.query = ""
+        await fulfillment(of: [queryCaptured], timeout: 3)
+
+        let syncCaptured = expectation(description: "committed refresh captured the search revision")
+        core.catalogReadGate = syncRead
+        core.onCatalogRead = { syncCaptured.fulfill() }
+        core.pageGate.signal()
+        await fulfillment(of: [syncCaptured], timeout: 3)
+        queryRead.signal()
+        try await until { !model.searching }
+        XCTAssertEqual(model.visibleItems.map(\.title), ["First"])
+        syncRead.signal()
+
+        try await until { model.visibleItems.count == 2 }
+        XCTAssertTrue(model.syncing, "committed pages must appear before sync finishes")
+        core.finishGate.signal()
+        await sync.value
+        XCTAssertNil(model.syncError)
     }
 
     func testSearchRevisionCannotDiscardTheFirstCatalog() async throws {

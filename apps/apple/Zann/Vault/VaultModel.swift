@@ -341,36 +341,41 @@ final class VaultModel: ObservableObject {
     /// Reload the context on screen, never the vault a sync started from.
     /// If navigation supersedes this read, its completion drains the refresh.
     private func refreshSyncedContents(reloadDetail: Bool = true) async {
-        guard !refreshingSync, let refresh = syncRefreshContext, !switching else { return }
+        guard !refreshingSync, !switching else { return }
         refreshingSync = true
         defer { refreshingSync = false }
-        let wanted = refresh.storageID
-        guard wanted == storageID, contextReady else {
-            syncRefreshContext = nil
-            return
-        }
-        let generation = contextGeneration
-        let revision = listGeneration
-        let core = core
-        let shown = trimmedQuery
-        let loaded = items.count
-        let result = await Task.detached(priority: .userInitiated) {
-            Result { try VaultContextLoader.load(core, query: shown, keeping: loaded) }
-        }.value
-        guard generation == contextGeneration, !switching else { return }
-        syncRefreshContext = nil
-        switch result {
-        case .success(let contents):
-            if revision == listGeneration, shown == trimmedQuery {
-                apply(contents)
-                if reloadDetail, let selectedItemID { loadDetail(selectedItemID) }
-            } else {
-                // Search/pagination owns the newer list. Its revision must not
-                // prevent the first committed server/vault context appearing.
-                applyContext(contents)
-                categories = scope.map { categoryViews(counts: counts, scope: $0) } ?? []
+        while let refresh = syncRefreshContext {
+            guard !switching else { return }
+            guard refresh.storageID == storageID, contextReady else {
+                syncRefreshContext = nil
+                return
             }
-        case .failure(let failure): syncError = strings.message(for: failure)
+            // Consume before awaiting so a newer committed notice stays queued.
+            syncRefreshContext = nil
+            let generation = contextGeneration
+            let revision = listGeneration
+            let core = core
+            let shown = trimmedQuery
+            let loaded = items.count
+            let result = await Task.detached(priority: .userInitiated) {
+                Result { try VaultContextLoader.load(core, query: shown, keeping: loaded) }
+            }.value
+            guard generation == contextGeneration else { continue }
+            guard !switching else { return }
+            switch result {
+            case .success(let contents):
+                if revision == listGeneration, shown == trimmedQuery {
+                    apply(contents)
+                    if reloadDetail, let selectedItemID { loadDetail(selectedItemID) }
+                } else {
+                    // Keep the first catalog usable, then read for the latest
+                    // list revision instead of losing the committed update.
+                    applyContext(contents)
+                    categories = scope.map { categoryViews(counts: counts, scope: $0) } ?? []
+                    syncRefreshContext = SyncRefresh(storageID: storageID)
+                }
+            case .failure(let failure): syncError = strings.message(for: failure)
+            }
         }
     }
 
