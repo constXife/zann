@@ -69,6 +69,7 @@ impl LocalVault {
                 "fixture-server".into(),
                 "fixture-account".into(),
                 &master_key,
+                zann_client::app::AccountKeyOrigin::AccountPassword,
             )
             .map_err(unlock::keyring_error)?;
         self.commit_device_unlock(Some(&keyring), &candidate)?;
@@ -100,6 +101,7 @@ impl LocalVault {
                 "synthetic-additional-server".into(),
                 id.to_string(),
                 &target_key,
+                zann_client::app::AccountKeyOrigin::AccountPassword,
             )
             .map_err(unlock::keyring_error)?;
         let vaults = self

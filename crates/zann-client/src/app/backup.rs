@@ -24,6 +24,7 @@ impl AppClient {
         &self,
         target: SessionTarget,
         vaults: &[BackupVaultSpec],
+        origin: AccountKeyOrigin,
         operation: SessionOperation,
     ) -> Result<(), SyncError> {
         use crate::sync::{SyncErrorKind, SyncStage};
@@ -40,6 +41,12 @@ impl AppClient {
             .access(&target, operation.detached_copy())
             .await
             .map_err(crate::sync::map_session_error)?;
+        origin
+            .admit_policy(access.personal_vaults_enabled())
+            .map_err(|source| {
+                error(SyncErrorKind::AccountKeyEnrollmentRequired)
+                    .with_source(std::io::Error::other(source))
+            })?;
         let remote =
             HttpSyncRemote::new().map_err(|_| error(SyncErrorKind::TransportUnavailable))?;
         let timeout = || {
@@ -122,6 +129,7 @@ pub struct BackupImportSession {
     target: SessionTarget,
     storage_id: String,
     key: SecretKey,
+    origin: AccountKeyOrigin,
     operation: SessionOperation,
 }
 impl AppClient {
@@ -129,6 +137,7 @@ impl AppClient {
         &self,
         storage_id: &str,
         key: SecretKey,
+        origin: AccountKeyOrigin,
         operation: SessionOperation,
     ) -> Result<BackupImportSession, SessionError> {
         Ok(BackupImportSession {
@@ -136,6 +145,7 @@ impl AppClient {
             target: self.configured_target(Some(storage_id))?,
             storage_id: storage_id.into(),
             key,
+            origin,
             operation,
         })
     }
@@ -155,13 +165,19 @@ impl BackupImportSession {
             .sync(
                 self.target.clone(),
                 SecretKey::from_bytes(*self.key.as_bytes()),
+                self.origin,
                 self.operation.detached_copy(),
             )
             .await
     }
     pub async fn prepare_vaults(&self, vaults: &[BackupVaultSpec]) -> Result<(), SyncError> {
         self.client
-            .prepare_backup_vaults(self.target.clone(), vaults, self.operation.detached_copy())
+            .prepare_backup_vaults(
+                self.target.clone(),
+                vaults,
+                self.origin,
+                self.operation.detached_copy(),
+            )
             .await
     }
 }

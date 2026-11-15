@@ -36,6 +36,7 @@ pub(super) fn apply_identity_commit(
 ) -> Result<(), ConfigError> {
     let slot = identity_slot(connection, profile);
     match commit {
+        IdentityCommit::NotRequired { .. } => {}
         IdentityCommit::InitializeOrMatch(observed) => {
             match config.account_identities.get_mut(&slot) {
                 None => {

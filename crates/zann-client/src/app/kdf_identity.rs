@@ -58,8 +58,8 @@ impl AppClient {
             Err(error) => return Err(error),
         };
         let mut accounts = Vec::new();
-        for (id, connection) in &snapshot.config().connections {
-            for (profile_name, profile) in connection.credential_profiles() {
+        for connection in snapshot.config().connections.values() {
+            for profile in connection.credential_profiles().values() {
                 let (Some(storage_id), Some(subject)) =
                     (profile.storage_id(), profile.account_subject())
                 else {
@@ -70,11 +70,7 @@ impl AppClient {
                     .server_id
                     .clone()
                     .ok_or(ConfigError::IdentityChanged)?;
-                let account_name = snapshot
-                    .config()
-                    .account_identities
-                    .get(&crate::config::v2::identity_slot(id, profile_name))
-                    .and_then(|identity| identity.email.clone());
+                let account_name = profile.account_email().map(str::to_owned);
                 accounts.push(super::local::AccountLocation {
                     storage_id: storage_id.to_owned(),
                     name: connection.metadata().name.clone(),

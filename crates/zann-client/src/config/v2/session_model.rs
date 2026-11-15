@@ -206,11 +206,25 @@ pub(crate) enum AuthenticatedConnectionTarget {
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[allow(dead_code)]
 pub(crate) enum IdentityCommit {
+    /// Authenticated shared-only policy requires no account KDF; retain an existing identity.
+    NotRequired {
+        email: String,
+    },
     InitializeOrMatch(ConfigIdentity),
     ReplaceExact {
         expected: ConfigIdentity,
         replacement: ConfigIdentity,
     },
+}
+
+impl IdentityCommit {
+    pub(super) fn account_email(&self) -> Option<&str> {
+        match self {
+            Self::NotRequired { email } => Some(email),
+            Self::InitializeOrMatch(identity) => identity.email.as_deref(),
+            Self::ReplaceExact { replacement, .. } => replacement.email.as_deref(),
+        }
+    }
 }
 
 #[allow(dead_code)]

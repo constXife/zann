@@ -791,6 +791,7 @@ impl fmt::Display for SessionErrorKind {
 
 mod error;
 pub use error::SessionError;
+mod account_identity;
 mod import_binding;
 use import_binding::{bound_import_session, import_connection};
 
@@ -1594,23 +1595,21 @@ impl TokenManager {
             drop(locks);
             return Err(SessionError::new(&operation, SessionErrorKind::Protocol));
         }
-        let prelogin = match port.prelogin(&identity.email).await {
-            Ok(prelogin) => prelogin,
-            Err(failure) => {
+        let authenticated_identity = match account_identity::for_enrollment(
+            port.as_ref(),
+            &identity.email,
+            verified.personal_vaults_enabled,
+            &operation,
+        )
+        .await
+        {
+            Ok(identity) => identity,
+            Err(error) => {
                 let _ = port.logout(refresh.expose_secret()).await;
                 drop(locks);
-                return Err(SessionError::from_auth(&operation, &failure));
+                return Err(error);
             }
         };
-        let authenticated_identity =
-            match password_login_identity_from_prelogin(prelogin, Some(identity.email.clone())) {
-                Ok(identity) => identity,
-                Err(kind) => {
-                    let _ = port.logout(refresh.expose_secret()).await;
-                    drop(locks);
-                    return Err(SessionError::new(&operation, kind));
-                }
-            };
         let account_subject = identity.user_id.to_string();
         let access_copy = match copy_secret(&access) {
             Ok(access) => access,
@@ -1640,7 +1639,7 @@ impl TokenManager {
                     Some(anchor.server_fingerprint().to_string()),
                 ),
             },
-            IdentityCommit::InitializeOrMatch(authenticated_identity),
+            authenticated_identity,
             anchor.client_id().clone(),
             anchor.profile_name(),
             CredentialBundle::new(Some(access_copy), Some(refresh_copy), None)
@@ -1890,15 +1889,13 @@ impl TokenManager {
         {
             return Err(SessionError::new(operation, SessionErrorKind::Protocol));
         }
-        let prelogin = port
-            .prelogin(&identity.email)
-            .await
-            .map_err(|failure| SessionError::from_auth(operation, &failure))?;
-        let authenticated_identity =
-            match password_login_identity_from_prelogin(prelogin, Some(identity.email.clone())) {
-                Ok(identity) => identity,
-                Err(kind) => return Err(SessionError::new(operation, kind)),
-            };
+        let authenticated_identity = account_identity::for_enrollment(
+            port.as_ref(),
+            &identity.email,
+            verified.personal_vaults_enabled,
+            operation,
+        )
+        .await?;
         let account_subject = identity.user_id.to_string();
         let auth_method = match &identity.source {
             zann_core::AuthSource::Oidc { .. } => AuthMethod::Oidc,
@@ -1912,7 +1909,7 @@ impl TokenManager {
             verified.binding.clone(),
             commit_storage_id.clone(),
             commit_target,
-            IdentityCommit::InitializeOrMatch(authenticated_identity),
+            authenticated_identity,
             client.client_id.clone(),
             request.profile_name.clone(),
             CredentialBundle::new(Some(access), Some(refresh), None)
@@ -5616,6 +5613,30 @@ mod tests {
         assert_eq!(port.login_calls(), 1);
         assert_eq!(port.me_calls(), 1);
         assert_eq!(port.logout_calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn shared_only_oidc_enrolls_without_account_kdf_or_prelogin_request() {
+        let harness = oidc_harness();
+        let mut endpoint = harness.identity();
+        endpoint.personal_vaults_enabled = false;
+        let port = FakeAuthPort::new(endpoint, success_behavior());
+        port.set_prelogin_results(Vec::new());
+        let access = harness
+            .login_app(port.clone())
+            .oidc_login(oidc_request(&harness.target), harness.operation())
+            .await
+            .unwrap();
+        assert!(!access.personal_vaults_enabled());
+        assert_eq!(port.prelogin_calls.load(Ordering::SeqCst), 0);
+        assert!(harness
+            .repository
+            .snapshot()
+            .unwrap()
+            .config()
+            .account_identities
+            .is_empty());
+        assert_eq!(access.auth_method(), Some(AuthMethod::Oidc));
     }
 
     #[tokio::test]

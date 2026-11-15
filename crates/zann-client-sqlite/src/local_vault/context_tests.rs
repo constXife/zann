@@ -47,6 +47,7 @@ fn fixture_with_password(password: String) -> (tempfile::TempDir, Arc<LocalVault
             "second-server".into(),
             "second-subject".into(),
             &remote_key,
+            zann_client::app::AccountKeyOrigin::AccountPassword,
         )
         .expect("enroll fixture");
     core.commit_device_unlock(Some(&keyring), &candidate)

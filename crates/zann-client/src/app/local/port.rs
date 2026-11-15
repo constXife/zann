@@ -73,9 +73,12 @@ pub trait LocalVaultService: Send + Sync {
     fn item_history_list(&self, id: String, limit: u32) -> LocalResult<Vec<ItemHistorySummary>>;
     fn item_history_get(&self, id: String, version: i64) -> LocalResult<ItemHistoryDetail>;
     fn item_history_restore(&self, id: String, version: i64) -> LocalResult<ItemDetail>;
+    /// Import exactly one explicitly identified backup storage into the selected destination.
+    /// Source UUID belongs to the file; destination UUID belongs to this client root.
     fn backup_import_file(
         &self,
         path: String,
+        source_storage_id: String,
         options: BackupImportOptions,
     ) -> LocalResult<BackupImportReport>;
     fn apple_passwords_preflight_file(&self, path: String) -> LocalResult<ApplePasswordsPreflight>;

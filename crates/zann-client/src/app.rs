@@ -29,8 +29,8 @@ pub use crate::session::{
     SessionOperationId, SessionTarget, SessionTargetError,
 };
 pub use crate::sync::{
-    AccountKeyCheck, SyncError, SyncErrorKind, SyncOutcome, SyncOutcomeStatus, SyncProgress,
-    SyncProgressPhase, SyncProgressSink, SyncStage,
+    AccountKeyCheck, AccountKeyOrigin, SyncError, SyncErrorKind, SyncOutcome, SyncOutcomeStatus,
+    SyncProgress, SyncProgressPhase, SyncProgressSink, SyncStage,
 };
 use crate::sync::{SyncEngine, SyncFuture};
 
@@ -440,6 +440,7 @@ impl AppClient {
         &self,
         target: SessionTarget,
         master_key: SecretKey,
+        origin: AccountKeyOrigin,
         operation: SessionOperation,
     ) -> SyncFuture<'static, SyncOutcome> {
         let operation_id = operation.operation_id();
@@ -458,9 +459,9 @@ impl AppClient {
         Box::pin(async move {
             ensure_operation_dispatchable(&operation)?;
             let local = client
-                .proven_sync_store(&target, &master_key, permit, &operation)
+                .proven_sync_store(&target, &master_key, origin, permit, &operation)
                 .await?;
-            let engine = SyncEngine::new(client.session.clone(), local);
+            let engine = SyncEngine::new(client.session.clone(), local, origin);
             let engine = match &client.sync_progress {
                 Some(progress) => engine.with_progress(Arc::clone(progress)),
                 None => engine,
@@ -1114,11 +1115,21 @@ mod tests {
         assert_eq!(format!("{first_client:?}"), "AppClient { .. }");
 
         let (first_operation, _) = operation_after(Duration::from_secs(30));
-        let first = first_client.sync(target(), SecretKey::from_bytes([7_u8; 32]), first_operation);
+        let first = first_client.sync(
+            target(),
+            SecretKey::from_bytes([7_u8; 32]),
+            AccountKeyOrigin::AccountPassword,
+            first_operation,
+        );
         let (busy_operation, _) = operation_after(Duration::from_secs(30));
         let busy_id = busy_operation.operation_id();
         let busy = second_client
-            .sync(target(), SecretKey::from_bytes([7_u8; 32]), busy_operation)
+            .sync(
+                target(),
+                SecretKey::from_bytes([7_u8; 32]),
+                AccountKeyOrigin::AccountPassword,
+                busy_operation,
+            )
             .await
             .expect_err("a second facade must fail before opening local state");
         assert_eq!(busy.operation_id(), busy_id);
@@ -1134,6 +1145,7 @@ mod tests {
             .sync(
                 target(),
                 SecretKey::from_bytes([7_u8; 32]),
+                AccountKeyOrigin::AccountPassword,
                 factory_operation,
             )
             .await
@@ -1149,6 +1161,7 @@ mod tests {
             .sync(
                 target(),
                 SecretKey::from_bytes([7_u8; 32]),
+                AccountKeyOrigin::AccountPassword,
                 expired_operation,
             )
             .await
@@ -1169,7 +1182,12 @@ mod tests {
         let app = client("pending", pending_factory.clone());
         let (operation, cancellation) = operation_after(Duration::from_secs(30));
         let operation_id = operation.operation_id();
-        let task = tokio::spawn(app.sync(target(), SecretKey::from_bytes([8_u8; 32]), operation));
+        let task = tokio::spawn(app.sync(
+            target(),
+            SecretKey::from_bytes([8_u8; 32]),
+            AccountKeyOrigin::AccountPassword,
+            operation,
+        ));
         tokio::time::timeout(Duration::from_secs(2), pending_factory.started.notified())
             .await
             .expect("factory open must begin");
@@ -1190,6 +1208,7 @@ mod tests {
             .sync(
                 target(),
                 SecretKey::from_bytes([9_u8; 32]),
+                AccountKeyOrigin::AccountPassword,
                 recovery_operation,
             )
             .await
@@ -1226,6 +1245,7 @@ mod tests {
             .sync(
                 target(),
                 SecretKey::from_bytes([10_u8; 32]),
+                AccountKeyOrigin::AccountPassword,
                 catalog_contender_operation,
             )
             .await
@@ -1257,6 +1277,7 @@ mod tests {
             .sync(
                 target(),
                 SecretKey::from_bytes([11_u8; 32]),
+                AccountKeyOrigin::AccountPassword,
                 pull_contender_operation,
             )
             .await
@@ -1347,6 +1368,7 @@ mod tests {
             .sync(
                 target(),
                 SecretKey::from_bytes([14_u8; 32]),
+                AccountKeyOrigin::AccountPassword,
                 contender_operation,
             )
             .await

@@ -129,7 +129,7 @@ impl LocalVault {
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
-        let key = self.account_key_for_target(&target)?;
+        let (key, _) = self.account_key_for_target(&target)?;
         let operation_key = SecretKey::from_bytes(*key.as_bytes());
         self.runtime
             .block_on(client.reset_sync(target, operation_key))

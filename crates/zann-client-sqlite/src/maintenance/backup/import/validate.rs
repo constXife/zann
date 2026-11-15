@@ -7,7 +7,7 @@ pub(super) struct ValidatedBackup {
     pub source_vaults: HashMap<(Uuid, Uuid), (VaultKind, String)>,
 }
 
-pub(super) fn validate(path: &Path) -> Result<ValidatedBackup, BackupError> {
+pub(super) fn validate(path: &Path, selected: Uuid) -> Result<ValidatedBackup, BackupError> {
     // Validation completes before any server or SQLite mutation. The bound also
     // limits a malicious single JSON value while the item array stays streamed.
     if std::fs::metadata(path).map_err(BackupError::source)?.len() > 50 * 1024 * 1024 {
@@ -43,6 +43,12 @@ pub(super) fn validate(path: &Path) -> Result<ValidatedBackup, BackupError> {
             "invalid backup storage catalog",
         ));
     }
+    if !source_storages.contains(&selected) {
+        return Err(BackupError::new(
+            "backup_source_missing",
+            "selected source storage is not in this backup",
+        ));
+    }
     let mut source_vaults = std::collections::HashMap::new();
     let mut specs = Vec::new();
     for vault in &meta.vaults {
@@ -63,11 +69,13 @@ pub(super) fn validate(path: &Path) -> Result<ValidatedBackup, BackupError> {
                 "invalid backup vault catalog",
             ));
         }
-        specs.push(BackupVaultSpec {
-            source_id,
-            name: vault.name.clone(),
-            kind,
-        });
+        if source_storage == selected {
+            specs.push(BackupVaultSpec {
+                source_id,
+                name: vault.name.clone(),
+                kind,
+            });
+        }
     }
     stream_backup_items(path, |item, _| {
         let storage = Uuid::parse_str(&item.storage_id).map_err(|e| e.to_string())?;
@@ -103,9 +111,10 @@ pub(super) fn validate(path: &Path) -> Result<ValidatedBackup, BackupError> {
         Ok(())
     })
     .map_err(BackupError::source)?;
+    source_vaults.retain(|(storage, _), _| *storage == selected);
     Ok(ValidatedBackup {
         specs,
-        source_storages,
+        source_storages: HashSet::from([selected]),
         source_vaults,
     })
 }

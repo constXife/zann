@@ -298,6 +298,7 @@ pub(super) fn build_provisional_legacy_config(
             connection.credential_profiles.insert(
                 profile_name.clone(),
                 CredentialProfile {
+                    account_email: None,
                     expected_account_subject: None,
                     storage_id: None,
                     expected_master_key_fp: None,

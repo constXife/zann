@@ -9,10 +9,10 @@ use zann_client::app::{
 use zann_client::config::ConfigRepository;
 use zann_client_sqlite::SqliteSyncStoreFactory;
 
-fn operation() -> SessionOperation {
+pub(super) fn operation() -> SessionOperation {
     SessionOperation::new(Instant::now() + Duration::from_secs(60)).0
 }
-fn client(root: &Path, credentials: Arc<Credentials>) -> AppClient {
+pub(super) fn client(root: &Path, credentials: Arc<Credentials>) -> AppClient {
     let app = AppClient::new(
         ClientPaths::new(root),
         credentials.clone(),
@@ -57,7 +57,7 @@ fn add_account(
     core.remote_sync(Some(storage.clone()), None).unwrap();
     storage
 }
-fn create_note(core: &LocalVault, marker: &str) {
+pub(super) fn create_note(core: &LocalVault, marker: &str) {
     core.item_create(ItemCreate {
         title: marker.into(),
         path: format!("accounts/{marker}"),
@@ -68,7 +68,7 @@ fn create_note(core: &LocalVault, marker: &str) {
     })
     .unwrap();
 }
-fn export(core: &LocalVault, root: &Path, name: &str) -> Vec<Value> {
+pub(super) fn export(core: &LocalVault, root: &Path, name: &str) -> Vec<Value> {
     let path = root.join(name);
     core.backup_export_file(path.display().to_string()).unwrap();
     normalized(&path)

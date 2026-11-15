@@ -11,6 +11,24 @@ use super::model::{CatalogSnapshot, SyncError, SyncErrorKind, SyncStage, VaultPl
 use super::transport::{HttpSyncRemote, SyncRemote};
 use crate::session::{AppSession, SessionOperation, SessionTarget};
 
+/// Purpose of a key held by the native device keyring. Never inferred from a catalog.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountKeyOrigin {
+    AccountPassword,
+    LocalCacheKey,
+}
+impl AccountKeyOrigin {
+    /// A cache key can never initialize or decrypt personal E2EE vaults.
+    pub fn admit_policy(self, personal_vaults_enabled: bool) -> Result<(), &'static str> {
+        if self == Self::LocalCacheKey && personal_vaults_enabled {
+            Err("personal vaults now require explicit account-key enrollment; export the readable cache and reconnect in a fresh client root")
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// What the account's personal vault key says about a master key.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AccountKeyCheck {

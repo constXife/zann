@@ -76,6 +76,7 @@ fn importing_requires_an_explicit_server_destination() {
         .expect("export");
     core.backup_import_file(
         path.display().to_string(),
+        uuid::Uuid::now_v7().to_string(),
         BackupImportOptions {
             target_storage_id: None,
         },
@@ -93,6 +94,7 @@ fn an_empty_import_path_is_rejected_rather_than_guessed() {
     let err = core
         .backup_import_file(
             "  ".to_string(),
+            uuid::Uuid::now_v7().to_string(),
             BackupImportOptions {
                 target_storage_id: None,
             },

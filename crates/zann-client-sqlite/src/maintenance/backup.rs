@@ -106,6 +106,23 @@ pub struct BackupError {
 }
 
 impl BackupError {
+    /// Preserve the canonical typed sync diagnosis across the backup adapter.
+    pub fn sync(error: zann_client::app::SyncError) -> Self {
+        let zann_client::app::local::LocalError::Sync {
+            kind,
+            message,
+            source,
+        } = error.into()
+        else {
+            unreachable!("SyncError conversion always produces LocalError::Sync")
+        };
+        Self {
+            kind,
+            message,
+            source,
+        }
+    }
+
     pub fn source(error: impl Into<Box<dyn std::error::Error + Send + Sync>>) -> Self {
         Self {
             kind: "backup_failed".into(),

@@ -48,7 +48,7 @@ does not authorize another temporary implementation.
 | KDF, encryption and payload integrity | `zann-crypto` | server and application services | reviewed algorithms, NFC password derivation, payload-version admission and verified key/rotation ciphertexts | implementations or algorithm wrappers in CLI, COSMIC, `zann-client`, `zann-ffi` or `zann-db` |
 | Database persistence | `zann-db` | local application/session services | repository transactions, migrations, streaming readers/writers | SQL and database rows in shells, flows, presentation or protocol |
 | Credential storage implementation | `zann-keystore` | `CredentialStore` adapter | platform keystore backends | direct keyring calls in shells; credentials in config or logs |
-| Device unlock password and account keyring | `zann-client::app::unlock` and `app::account_keys`; persistence adapter in `zann-client-sqlite` | native shells and FFI | independent password KEK, stable device root, bound account envelopes, verified CAS, canonical sync proof/lease | password-derived account keys at startup; shell crypto; separate snapshot key files |
+| Device unlock password and account keyring | `zann-client::app::unlock` and `app::account_keys`; persistence adapter in `zann-client-sqlite` | native shells and FFI | independent password KEK, stable device root, origin-bound personal/cache envelopes, authenticated shared-only enrollment, verified CAS, canonical sync proof/lease | password-derived account keys at startup; shell crypto; separate snapshot key files |
 | Device unlock ports and hardware enrollment | `zann-keystore` | `zann-client-sqlite::local_vault` via injected `Keystore` and `HardwareAuthenticator` | platform adapters; opt-in test fake | raw HID calls or unlock policy in shells |
 | Credential lifecycle and port | `zann-client::credentials` | remote auth and application session | injected `CredentialStore`, clock and revocation policy | token refresh/selection/serialization in CLI, COSMIC or FFI |
 | Account replica identity ([ADR 0011](../adr/0011-account-scoped-replica-bindings.md)) | `zann-client::config` and `app::connections` | native Connect, account selection, SQLite, FFI | profile-scoped storage/key fingerprint, canonical subject, exact generation lease, explicit Add/Reconnect | per-URL cache takeover, email/active-profile account inference, endpoint aliases for extra accounts |
@@ -380,7 +380,10 @@ keyring policy, and `zann-client-sqlite::local_vault` persists its encrypted
 record in SQLite metadata through `zann-db::local::MetadataRepo`. The device
 password never derives account keys. Snapshots include the keyring inside the
 same SQLite copy; restoring no longer writes an external Config identity.
-See [ADR 0010](../adr/0010-device-unlock-account-keys.md).
+See [ADR 0010](../adr/0010-device-unlock-account-keys.md) and [ADR 0012](../adr/0012-shared-only-account-cache-keys.md).
+Shared-only keys are random local cache keys. Their authenticated origin cannot
+initialize personal vault keys; enabling personal vaults requires explicit enrollment
+in a fresh root while the old cache remains readable/exportable.
 
 Scoped recovery first saves an encrypted SQLite snapshot without pruning prior
 recovery copies. A pinned preview connection supplies `PRAGMA data_version` and

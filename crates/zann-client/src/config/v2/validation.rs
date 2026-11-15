@@ -242,6 +242,15 @@ pub(super) fn validate_config(config: &ConfigV2) -> Result<(), ConfigError> {
                 MAX_PROFILES_TOTAL,
             )?;
             let profile_path = format!("{path}.credential_profiles.{profile_name}");
+            if let Some(email) = &profile.account_email {
+                validate_required_metadata(&format!("{profile_path}.account_email"), email)?;
+                if email.trim() != email || email.len() > 320 || profile.account_subject.is_none() {
+                    return Err(ConfigError::InvalidConfig {
+                        path: profile_path.clone(),
+                        reason: "account email requires an authenticated canonical identity".into(),
+                    });
+                }
+            }
             if let Some(storage) = &profile.storage_id {
                 validate_required_metadata(&format!("{profile_path}.storage_id"), storage)?;
                 if let Some(previous) =

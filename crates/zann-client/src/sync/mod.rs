@@ -17,7 +17,7 @@ mod wire;
 
 #[cfg(feature = "app")]
 pub(crate) use account_key::verify_with_session;
-pub use account_key::AccountKeyCheck;
+pub use account_key::{AccountKeyCheck, AccountKeyOrigin};
 #[cfg(feature = "app")]
 pub(crate) use engine::SyncEngine;
 pub use model::{

@@ -103,6 +103,7 @@ impl ConfigRepository {
                             connection_id: connection_id.clone(),
                             profile_name: profile_name.clone(),
                         })?;
+                    profile.account_email = identity.account_email().map(str::to_owned);
                     profile.account_subject = Some(account_subject.clone());
                     profile.auth_method = Some(*auth_method);
                 }

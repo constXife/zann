@@ -221,3 +221,12 @@ logging out or removing another profile must not redirect keys, data, tokens or
 in-flight operations. Check old primary/backup/journal refusal before database
 migrations and credential I/O, and shared Add/Reconnect effects through native/FFI
 consumers. No personal plaintext or account key crosses the server boundary.
+
+ADR 0012 adds authenticated `AccountKeyOrigin` to the existing account-envelope
+AAD, shared-only enrollment and sync admission. Review
+`crates/zann-client/src/app/account_keys/enrollment.rs`,
+`crates/zann-client/src/session/account_identity.rs` and
+`crates/zann-client/src/sync/engine/catalog.rs` with the existing keyring CAS and
+sync proof boundary. A random candidate is persisted before its Config fingerprint;
+local-cache purpose cannot publish personal keys. The explicit format/policy-change
+procedure is in `docs/operations/shared-cache-key-cutover.md`.

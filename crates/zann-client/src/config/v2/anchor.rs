@@ -305,6 +305,7 @@ pub(super) fn apply_credential_bundle_replacement(
             expected_master_key_fp: previous
                 .as_ref()
                 .and_then(|p| p.expected_master_key_fp.clone()),
+            account_email: None,
             account_subject: None,
             auth_method: None,
             access_expires_at,
@@ -419,6 +420,7 @@ pub(super) fn apply_password_login_candidate(
                 .profile
                 .as_ref()
                 .and_then(|p| p.expected_master_key_fp.clone()),
+            account_email: identity.email.clone(),
             account_subject: Some(account_subject.to_string()),
             auth_method: Some(AuthMethod::Password),
             access_expires_at: Some(access_expires_at.to_string()),
