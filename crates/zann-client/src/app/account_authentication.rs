@@ -50,7 +50,8 @@ impl AppClient {
         {
             // The current pin was verified by authentication under this exact
             // lease. A changed pin can reach here only after explicit trust.
-            if Some(replica.account_subject.as_str()) != access.account_subject()
+            if replica.storage_id != storage
+                || Some(replica.account_subject.as_str()) != access.account_subject()
                 || replica.address != access.endpoint()
             {
                 return Err(failure());

@@ -46,6 +46,9 @@ impl AppClient {
                 .await
                 .map_err(|e| failure().with_source(e))?
                 .ok_or_else(failure)?;
+            if replica.storage_id != storage {
+                return Err(failure());
+            }
             if crate::config::ConfigV2::canonical_address(endpoint)
                 .map_err(|e| failure().with_source(e))?
                 != replica.address
@@ -155,16 +158,16 @@ impl AppClient {
         }
         let expected_connection_pin =
             existing.and_then(|connection| connection.metadata().server_fingerprint.clone());
-        let old = expected_connection_pin
-            .as_deref()
-            .filter(|old| *old != verified.binding().server_fingerprint())
-            .or_else(|| {
-                replica
-                    .as_ref()
-                    .map(|replica| replica.server_fingerprint.as_str())
-                    .filter(|old| *old != verified.binding().server_fingerprint())
-            })
-            .map(str::to_owned);
+        // The canonical endpoint owner is the trust SSoT. A disconnected
+        // replica's old pin is consulted only before an endpoint pin is established.
+        let old = match expected_connection_pin.as_deref() {
+            Some(pin) => Some(pin),
+            None => replica
+                .as_ref()
+                .map(|replica| replica.server_fingerprint.as_str()),
+        }
+        .filter(|old| *old != verified.binding().server_fingerprint())
+        .map(str::to_owned);
         let expected_subject = replica.map(|replica| replica.account_subject);
         if let Some(old) = old {
             return Ok(PrepareConnectionOutcome::FingerprintChanged(Box::new(
