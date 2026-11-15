@@ -42,7 +42,7 @@ impl LocalVault {
         let target = client
             .configured_target(storage_id.as_deref())
             .map_err(|error| LocalError::Service(error.to_string()))?;
-        let master_key = self.account_key_for_target(&target)?;
+        let (master_key, origin) = self.account_key_for_target(&target)?;
         let (selection_before, generation) = {
             let _context = self.context_gate.read().expect("lock poisoned");
             (
@@ -51,7 +51,7 @@ impl LocalVault {
             )
         };
         let operation_key = SecretKey::from_bytes(*master_key.as_bytes());
-        let mut sync = client.sync(target, operation_key, operation);
+        let mut sync = client.sync(target.clone(), operation_key, origin, operation);
         loop {
             // Retain the same sync future across notices. Returning from
             // block_on lets selection and callbacks safely use blocking reads.

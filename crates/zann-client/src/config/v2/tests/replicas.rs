@@ -277,3 +277,62 @@ fn anonymous_reservation_reuses_the_atomic_slot_and_never_recycles_an_authentica
         Some(storage.as_str())
     );
 }
+
+#[test]
+fn replacing_a_token_clears_authenticated_email_with_subject() {
+    let temp = TempDir::new().unwrap();
+    let repo = repository(&temp);
+    initialize(&repo);
+    let store = TestCredentialStore::default();
+    let id = ConnectionId::deterministic("test", "https://accounts.test");
+    repo.pin_verified_connection(
+        0,
+        id.clone(),
+        "Test".into(),
+        &endpoint("https://accounts.test", "server", "pin"),
+        None,
+        None,
+    )
+    .unwrap();
+    let snapshot = repo.snapshot().unwrap();
+    let metadata = snapshot.config().connections[&id].metadata();
+    let subject = uuid::Uuid::now_v7().to_string();
+    repo.commit_authenticated_session(
+        snapshot.revision(),
+        AuthenticatedSessionCommit::new(
+            endpoint(&metadata.address, "server", "pin"),
+            Some(uuid::Uuid::now_v7().to_string()),
+            AuthenticatedConnectionTarget::UseExisting {
+                connection_id: id.clone(),
+                expected: StoredConnectionBinding::from_metadata(metadata),
+            },
+            IdentityCommit::NotRequired {
+                email: "canonical@example.test".into(),
+            },
+            client_id("desktop"),
+            "first",
+            bundle("synthetic-access"),
+        )
+        .with_account_binding(subject, AuthMethod::Oidc),
+        &store,
+    )
+    .unwrap();
+    let snapshot = repo.snapshot().unwrap();
+    assert_eq!(
+        snapshot.config().connections[&id].credential_profiles()["first"].account_email(),
+        Some("canonical@example.test")
+    );
+    let replaced = repo
+        .replace_credential_bundle(
+            snapshot.revision(),
+            &id,
+            "first",
+            bundle("new-token"),
+            CredentialActivation::MakeActive,
+            &store,
+        )
+        .unwrap();
+    let profile = &replaced.snapshot().config().connections[&id].credential_profiles()["first"];
+    assert!(profile.account_email().is_none());
+    assert!(profile.account_subject().is_none());
+}

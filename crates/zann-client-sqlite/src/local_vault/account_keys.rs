@@ -1,7 +1,7 @@
 //! One-time E2EE enrollment. Server authentication never supplies a personal key.
 use super::unlock::keyring_error;
 use super::*;
-use zann_client::app::SessionTarget;
+use zann_client::app::{AccountKeyOrigin, SessionTarget};
 
 impl LocalVault {
     pub fn activate_connected_account(&self) -> LocalResult<bool> {
@@ -29,7 +29,22 @@ impl LocalVault {
             .get(&storage)
             .is_some_and(|e| e.server_id == server && e.account_subject == subject)
         {
-            return Ok(false);
+            // No credential/config lease may be retained across authorization.
+            drop(lease);
+            let (operation, cancel) = SessionOperation::new(
+                std::time::Instant::now() + std::time::Duration::from_secs(60),
+            );
+            let _checking = self.syncs.register(operation.operation_id(), cancel);
+            if self
+                .runtime
+                .block_on(client.account_key_requirement(&target, operation))
+                .map_err(LocalError::from)?
+                == AccountKeyOrigin::AccountPassword
+            {
+                return Ok(false);
+            }
+            self.enroll_local_cache_key(&target, generation)?;
+            return Ok(true);
         }
         let id = Uuid::parse_str(&storage)
             .map_err(|_| LocalError::InvalidArgument("invalid storage id".into()))?;
@@ -93,7 +108,8 @@ impl LocalVault {
             .block_on(client.prepare_account_key(
                 &target,
                 account_key.clone(),
-                &identity,
+                AccountKeyOrigin::AccountPassword,
+                Some(&identity),
                 operation,
             ))
             .map_err(LocalError::from)?;
@@ -107,20 +123,45 @@ impl LocalVault {
                 "account changed during enrollment".into(),
             ));
         }
-        let id = Uuid::parse_str(&storage)
+        self.publish_account_key(
+            generation,
+            &root,
+            &enrollment,
+            &account_key,
+            AccountKeyOrigin::AccountPassword,
+        )
+    }
+
+    fn publish_account_key(
+        &self,
+        generation: u64,
+        root: &SecretKey,
+        enrollment: &zann_client::app::AccountKeyEnrollment,
+        account_key: &SecretKey,
+        origin: AccountKeyOrigin,
+    ) -> LocalResult<VaultStatus> {
+        let storage = &enrollment.storage_id;
+        let id = Uuid::parse_str(storage)
             .map_err(|_| LocalError::InvalidArgument("invalid storage id".into()))?;
         let pool = self.pool();
         let vaults = self
             .runtime
             .block_on(LocalVaultRepo::new(&pool).list_by_storage(id))
             .map_err(|err| LocalError::Service(err.to_string()))?;
-        self.verify_storage_keys(&account_key, &vaults)?;
+        self.verify_storage_keys(account_key, &vaults)?;
         let keyring = self.device_unlock()?;
         let mut candidate = keyring.clone();
         candidate
-            .insert_account(&root, storage.clone(), server, subject, &account_key)
+            .insert_account(
+                root,
+                storage.to_owned(),
+                enrollment.server_id.clone(),
+                enrollment.account_subject.clone(),
+                account_key,
+                origin,
+            )
             .map_err(keyring_error)?;
-        let keys = candidate.account_keys(&root).map_err(keyring_error)?;
+        let keys = candidate.account_keys(root).map_err(keyring_error)?;
         let vault = preferred_vault(&self.runtime, &pool, id, &vaults)?;
         let _context = self.context_gate.write().expect("lock poisoned");
         self.check_context_generation(generation)?;
@@ -133,10 +174,40 @@ impl LocalVault {
         Ok(VaultStatus { unlocked: true })
     }
 
+    fn enroll_local_cache_key(
+        &self,
+        target: &SessionTarget,
+        generation: u64,
+    ) -> LocalResult<VaultStatus> {
+        let root = self.root_key()?;
+        let key = Arc::new(SecretKey::generate());
+        let client = self.app_client()?;
+        let (operation, cancel) =
+            SessionOperation::new(std::time::Instant::now() + std::time::Duration::from_secs(60));
+        let _enrolling = self.syncs.register(operation.operation_id(), cancel);
+        let enrollment = self
+            .runtime
+            .block_on(client.prepare_account_key(
+                target,
+                key.clone(),
+                AccountKeyOrigin::LocalCacheKey,
+                None,
+                operation,
+            ))
+            .map_err(LocalError::from)?;
+        self.publish_account_key(
+            generation,
+            &root,
+            &enrollment,
+            &key,
+            AccountKeyOrigin::LocalCacheKey,
+        )
+    }
+
     pub(super) fn account_key_for_target(
         &self,
         target: &SessionTarget,
-    ) -> LocalResult<Arc<SecretKey>> {
+    ) -> LocalResult<(Arc<SecretKey>, AccountKeyOrigin)> {
         let (storage, server, subject) = self
             .app_client()?
             .account_key_binding(target)
@@ -152,6 +223,16 @@ impl LocalVault {
         }
         let id = Uuid::parse_str(&storage)
             .map_err(|_| LocalError::InvalidArgument("invalid storage id".into()))?;
-        self.account_key_for_storage(id)
+        let root = self.root_key()?;
+        let (verified, origin) = keyring
+            .account_key(&root, &storage)
+            .map_err(keyring_error)?;
+        let cached = self.account_key_for_storage(id)?;
+        if verified.as_bytes() != cached.as_bytes() {
+            return Err(LocalError::InvalidArgument(
+                "account key changed since device unlock".into(),
+            ));
+        }
+        Ok((cached, origin))
     }
 }

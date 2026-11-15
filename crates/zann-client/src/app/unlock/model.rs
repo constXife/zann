@@ -18,6 +18,7 @@ pub struct DeviceUnlock {
 pub struct AccountKeyEnvelope {
     pub server_id: String,
     pub account_subject: String,
+    pub origin: crate::sync::AccountKeyOrigin,
     pub ciphertext: String,
 }
 

@@ -610,9 +610,10 @@ impl LocalVaultService for LocalVault {
     fn backup_import_file(
         &self,
         path: String,
+        source_storage_id: String,
         options: BackupImportOptions,
     ) -> LocalResult<BackupImportReport> {
-        LocalVault::backup_import_file(self, path, options)
+        LocalVault::backup_import_file(self, path, source_storage_id, options)
     }
     fn apple_passwords_preflight_file(&self, path: String) -> LocalResult<ApplePasswordsPreflight> {
         LocalVault::apple_passwords_preflight_file(self, path)

@@ -26,6 +26,7 @@ pub enum SyncErrorKind {
     AccountBindingRequired,
     AccountBindingMismatch,
     ServerCapabilityMismatch,
+    AccountKeyEnrollmentRequired,
     AuthenticationBindingRequired,
     AuthenticationBindingMismatch,
     Timeout,

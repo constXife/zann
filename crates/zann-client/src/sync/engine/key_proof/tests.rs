@@ -389,7 +389,7 @@ async fn one_vault_key_the_key_cannot_open_is_a_mismatch() {
 async fn publishing_the_first_vault_key_proves_and_binds() {
     let vault = personal_vault(None);
     let vault_id = vault.0;
-    let device = Device::new(ACCOUNT_KEY, Remote::new(vec![vault]), true);
+    let device = Device::new(ACCOUNT_KEY, Remote::new(vec![vault.clone()]), true);
     device.sync().await.expect("first device publishes");
     assert!(device.bound());
     assert!(device.kept_nothing());
@@ -475,4 +475,17 @@ async fn a_failed_bind_fails_the_sync() {
         .await
         .expect_err("the bind refused");
     assert_eq!(error.stage(), SyncStage::ResolveTarget);
+}
+
+#[tokio::test]
+async fn cache_origin_cannot_publish_or_bind_a_personal_key_even_when_uninitialized() {
+    let vault = personal_vault(None);
+    let mut device = Device::new(ACCOUNT_KEY, Remote::new(vec![vault.clone()]), true);
+    device.engine.key_origin = crate::sync::AccountKeyOrigin::LocalCacheKey;
+    let error = device.sync().await.unwrap_err();
+    assert_eq!(error.kind(), SyncErrorKind::AccountKeyEnrollmentRequired);
+    assert_eq!(device.remote.publishes.load(Ordering::SeqCst), 0);
+    assert!(device.remote.envelope(vault.0).is_empty());
+    assert!(!device.bound());
+    assert!(device.kept_nothing());
 }

@@ -95,3 +95,7 @@ os-credentials = [
 [dev-dependencies]
 mockito = "1.4"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+[[example]]
+name = "regenerate_device_keyring"
+required-features = ["app"]

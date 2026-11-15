@@ -59,6 +59,7 @@ fn sync_error_kind_code(kind: SyncErrorKind) -> &'static str {
         SyncErrorKind::NoLocalTarget => "sync_no_target",
         SyncErrorKind::AccountBindingRequired => "sync_account_binding_required",
         SyncErrorKind::AccountBindingMismatch => "sync_account_binding_mismatch",
+        SyncErrorKind::AccountKeyEnrollmentRequired => "account_key_enrollment_required",
         SyncErrorKind::ServerCapabilityMismatch => "sync_server_capability_mismatch",
         SyncErrorKind::AuthenticationBindingRequired => "sync_authentication_binding_required",
         SyncErrorKind::AuthenticationBindingMismatch => "sync_authentication_binding_mismatch",
@@ -83,9 +84,13 @@ fn sync_error_kind_code(kind: SyncErrorKind) -> &'static str {
 
 impl From<SyncError> for LocalError {
     fn from(error: SyncError) -> Self {
-        let message = match error.status() {
-            Some(status) => format!("{error}, http status {status}"),
-            None => error.to_string(),
+        let message = if error.kind() == SyncErrorKind::AccountKeyEnrollmentRequired {
+            "Personal vaults require explicit account-key enrollment. Export the readable cache and reconnect in a fresh client root; the existing cache is unchanged.".to_owned()
+        } else {
+            match error.status() {
+                Some(status) => format!("{error}, http status {status}"),
+                None => error.to_string(),
+            }
         };
         LocalError::Sync {
             kind: sync_error_kind_code(error.kind()).to_string(),

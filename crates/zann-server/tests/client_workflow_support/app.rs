@@ -24,10 +24,23 @@ pub struct TestApp {
     _guard: support::TestGuard,
     pub(super) app: axum::Router,
     pub(crate) pool: zann_db::PgPool,
+    state: AppState,
     pub(crate) master_key: std::sync::Arc<SecretKey>,
 }
 
 impl TestApp {
+    pub async fn new_shared_only_with_smk() -> Self {
+        let guard = support::test_guard().await;
+        let pool = support::setup_shared_db().await;
+        Self::with_policy(pool, guard, false).await
+    }
+
+    pub fn router_with_personal_policy(&self, enabled: bool) -> axum::Router {
+        let mut state = self.state.clone();
+        state.config.server.personal_vaults_enabled = enabled;
+        build_router(state)
+    }
+
     pub fn router(&self) -> axum::Router {
         self.app.clone()
     }
@@ -52,12 +65,17 @@ impl TestApp {
     }
 
     async fn with_pool(pool: zann_db::PgPool, guard: support::TestGuard) -> Self {
+        Self::with_policy(pool, guard, true).await
+    }
+
+    async fn with_policy(pool: zann_db::PgPool, guard: support::TestGuard, personal: bool) -> Self {
         support::reset_db(&pool).await;
         let rules: Vec<PolicyRule> = support::load_policy_rules();
 
         let mut config = ServerConfig::default();
 
         support::tune_test_kdf(&mut config);
+        config.server.personal_vaults_enabled = personal;
         config.auth.mode = AuthMode::Internal;
         config.auth.internal.registration = InternalRegistration::Open;
 
@@ -85,9 +103,10 @@ impl TestApp {
             secret_default_policy,
         };
 
-        let app = build_router(state);
+        let app = build_router(state.clone());
         Self {
             _guard: guard,
+            state,
             app,
             pool,
             master_key,

@@ -42,6 +42,9 @@ pub struct CredentialProfile {
     pub(super) expected_master_key_fp: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) account_subject: Option<String>,
+    /// Canonical /me label, independent of optional account KDF material.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(super) account_email: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(super) auth_method: Option<AuthMethod>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -51,6 +54,9 @@ pub struct CredentialProfile {
 }
 
 impl CredentialProfile {
+    pub fn account_email(&self) -> Option<&str> {
+        self.account_email.as_deref()
+    }
     pub fn storage_id(&self) -> Option<&str> {
         self.storage_id.as_deref()
     }

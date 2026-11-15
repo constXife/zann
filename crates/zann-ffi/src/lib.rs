@@ -239,10 +239,11 @@ impl CoreFacade {
     pub fn backup_import_file(
         &self,
         path: String,
+        source_storage_id: String,
         options: BackupImportOptions,
     ) -> CoreResult<BackupImportReport> {
         self.inner
-            .backup_import_file(path, options.into())
+            .backup_import_file(path, source_storage_id, options.into())
             .map(|value| value.into())
             .map_err(Into::into)
     }

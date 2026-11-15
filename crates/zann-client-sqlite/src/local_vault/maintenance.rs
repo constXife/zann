@@ -6,12 +6,20 @@ impl LocalVault {
     pub fn backup_import_file(
         &self,
         path: String,
+        source_storage_id: String,
         options: BackupImportOptions,
     ) -> LocalResult<BackupImportReport> {
         let path = path.trim();
         if path.is_empty() {
             return Err(LocalError::InvalidArgument(
                 "backup path is empty".to_string(),
+            ));
+        }
+        let source_storage = Uuid::parse_str(&source_storage_id)
+            .map_err(crate::maintenance::backup::BackupError::source)?;
+        if source_storage.is_nil() || source_storage.to_string() != source_storage_id {
+            return Err(LocalError::InvalidArgument(
+                "select a canonical source storage UUID from the backup".into(),
             ));
         }
         let (operation, cancel) = SessionOperation::new(
@@ -29,18 +37,15 @@ impl LocalVault {
         let target = options.target_storage_id.ok_or_else(|| {
             LocalError::InvalidArgument("select a server storage to import into".into())
         })?;
-        let session = self.app_client()?.backup_import_session(
+        let client = self.app_client()?;
+        let account = client
+            .configured_target(Some(&target))
+            .map_err(LocalError::from)?;
+        let (key, origin) = self.account_key_for_target(&account)?;
+        let session = client.backup_import_session(
             &target,
-            SecretKey::from_bytes(
-                *self
-                    .account_key_for_target(
-                        &self
-                            .app_client()?
-                            .configured_target(Some(&target))
-                            .map_err(LocalError::from)?,
-                    )?
-                    .as_bytes(),
-            ),
+            SecretKey::from_bytes(*key.as_bytes()),
+            origin,
             operation,
         )?;
         let report = self
@@ -48,6 +53,7 @@ impl LocalVault {
             .block_on(crate::maintenance::backup::plain_import(
                 &ctx,
                 PathBuf::from(path),
+                source_storage,
                 &session,
             ))?;
         let key = self.account_key_for_storage(

@@ -12,6 +12,7 @@ fn password_rotation_preserves_independent_account_keys_and_root() {
             "server-a".into(),
             "subject-a".into(),
             &first,
+            crate::sync::AccountKeyOrigin::AccountPassword,
         )
         .expect("first");
     keyring
@@ -21,6 +22,7 @@ fn password_rotation_preserves_independent_account_keys_and_root() {
             "server-b".into(),
             "subject-b".into(),
             &second,
+            crate::sync::AccountKeyOrigin::LocalCacheKey,
         )
         .expect("second");
     let serialized = serde_json::to_vec(&keyring).expect("serialize");
@@ -64,6 +66,7 @@ fn swapped_account_envelopes_and_changed_bindings_are_rejected() {
             "server-a".into(),
             "subject-a".into(),
             &SecretKey::generate(),
+            crate::sync::AccountKeyOrigin::AccountPassword,
         )
         .expect("first");
     let mut swapped = keyring.clone();
@@ -111,6 +114,7 @@ fn frozen_device_keyring_opens_with_its_original_password_and_bindings() {
         password: String,
         expected_root_base64: String,
         expected_account_base64: String,
+        expected_cache_base64: String,
         keyring: DeviceUnlock,
     }
     let fixture: Fixture = serde_json::from_str(include_str!(
@@ -124,7 +128,51 @@ fn frozen_device_keyring_opens_with_its_original_password_and_bindings() {
     assert!(STANDARD.encode(root.as_bytes()) == fixture.expected_root_base64);
     let keys = keyring.account_keys(&root).expect("account AAD and key");
     assert!(
+        STANDARD.encode(keys["10000000-0000-4000-8000-000000000002"].as_bytes())
+            == fixture.expected_cache_base64
+    );
+    assert!(
         STANDARD.encode(keys["10000000-0000-4000-8000-000000000001"].as_bytes())
             == fixture.expected_account_base64
+    );
+}
+
+#[test]
+fn origin_is_mandatory_and_authenticated_and_cache_keys_cannot_be_personal_keys() {
+    let (mut keyring, root) = DeviceUnlock::create("synthetic unlock password").unwrap();
+    let storage = "10000000-0000-4000-8000-000000000001";
+    keyring
+        .insert_account(
+            &root,
+            storage.into(),
+            "server".into(),
+            "subject".into(),
+            &SecretKey::generate(),
+            crate::sync::AccountKeyOrigin::LocalCacheKey,
+        )
+        .unwrap();
+    let mut malformed = serde_json::to_value(&keyring).unwrap();
+    malformed["accounts"][storage]
+        .as_object_mut()
+        .unwrap()
+        .remove("origin");
+    assert!(DeviceUnlock::decode(&malformed.to_string()).is_err());
+    let mut malformed = serde_json::to_value(&keyring).unwrap();
+    malformed["accounts"][storage]["origin"] = "unknown_origin".into();
+    assert!(DeviceUnlock::decode(&malformed.to_string()).is_err());
+    keyring.accounts.get_mut(storage).unwrap().origin =
+        crate::sync::AccountKeyOrigin::AccountPassword;
+    assert!(
+        keyring.account_keys(&root).is_err(),
+        "purpose substitution changes AAD"
+    );
+    assert!(crate::sync::AccountKeyOrigin::LocalCacheKey
+        .admit_policy(true)
+        .is_err());
+    assert!(
+        crate::sync::AccountKeyOrigin::AccountPassword
+            .admit_policy(false)
+            .is_ok(),
+        "existing readable keys stay usable as caches"
     );
 }

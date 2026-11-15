@@ -13,7 +13,9 @@ of truth for ownership and allowed extension points. The machine-facing secret
 plane, rotation ownership and the scope of runtime delivery are specified by
 [`ADR 0004`](adr/0004-machine-secret-plane.md).
 Device unlock and independent account key custody are specified by
-[`ADR 0010`](adr/0010-device-unlock-account-keys.md).
+[`ADR 0010`](adr/0010-device-unlock-account-keys.md). Shared-only random cache-key
+enrollment and purpose-bound account envelopes are specified by
+[`ADR 0012`](adr/0012-shared-only-account-cache-keys.md).
 The versioned runtime delivery profile and generation publication contract are
 specified by [`ADR 0005`](adr/0005-runtime-secret-delivery-profiles.md).
 

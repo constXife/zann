@@ -18,7 +18,7 @@ pub enum DeviceUnlockError {
     Password(#[from] zann_core::unlock::NewPasswordError),
     #[error("cannot open the local keyring")]
     Crypto(#[from] CryptoError),
-    #[error("invalid keyring encoding")]
+    #[error("invalid or pre-origin keyring encoding; export with the previous build and reconnect/import into a fresh client root (ADR 0012); existing keyring is unchanged")]
     Encoding(#[from] serde_json::Error),
     #[error("{0}")]
     Invalid(&'static str),

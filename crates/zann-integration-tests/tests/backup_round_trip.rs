@@ -167,13 +167,13 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
         let invalid = root.path().join("invalid.json");
         let mut unsupported = document.clone(); unsupported["version"] = json!(99);
         std::fs::write(&invalid,serde_json::to_vec(&unsupported).unwrap()).unwrap();
-        assert!(core.backup_import_file(invalid.display().to_string(),options()).is_err());
+        assert!(core.backup_import_file(invalid.display().to_string(),document["storages"][0]["id"].as_str().unwrap().into(),options()).is_err());
         assert_eq!(core.list_vaults().unwrap().len(),1,"invalid backup must not create shared vaults");
         let mut malformed = document.clone(); malformed["items"][1]["path"] = json!("../invalid");
         std::fs::write(&invalid,serde_json::to_vec(&malformed).unwrap()).unwrap();
-        assert!(core.backup_import_file(invalid.display().to_string(),options()).is_err());
+        assert!(core.backup_import_file(invalid.display().to_string(),document["storages"][0]["id"].as_str().unwrap().into(),options()).is_err());
         assert_eq!(core.list_vaults().unwrap().len(),1);
-        let report = core.backup_import_file(backup.display().to_string(),options()).unwrap_or_else(|error| {
+        let report = core.backup_import_file(backup.display().to_string(),document["storages"][0]["id"].as_str().unwrap().into(),options()).unwrap_or_else(|error| {
             let mut cause: &dyn std::error::Error = &error;
             while let Some(next) = cause.source() { eprintln!("test import cause: {next}"); cause = next; }
             panic!("import failed: {error}");
@@ -182,7 +182,7 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
         assert_eq!(report.skipped_deleted,1);
         assert_eq!(core.pending_change_count(storage.clone()).unwrap(),0);
         assert!(core.verify().unwrap().problems.is_empty());
-        assert_eq!(core.backup_import_file(backup.display().to_string(),options()).unwrap().skipped_existing,1031);
+        assert_eq!(core.backup_import_file(backup.display().to_string(),document["storages"][0]["id"].as_str().unwrap().into(),options()).unwrap().skipped_existing,1031);
         let restored = root.path().join("restored.json");core.backup_export_file(restored.display().to_string()).unwrap();
         assert_eq!(normalized(&restored),expected);
         // A second device pulls from the real server: this catches metadata lost in push or pull.
@@ -195,3 +195,5 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
 }
 
 mod account_replicas;
+
+mod shared_cache_keys;

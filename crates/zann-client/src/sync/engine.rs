@@ -25,6 +25,7 @@ use crate::session::{
     SessionOperation, SessionTarget,
 };
 
+mod catalog;
 mod key_proof;
 
 const MAX_REQUEST_TIME: Duration = Duration::from_secs(30);
@@ -63,6 +64,7 @@ pub(crate) struct SyncEngine {
     local: Arc<dyn SyncLocalStore>,
     remote: Result<Arc<dyn SyncRemote>, RemoteErrorKind>,
     progress: Arc<dyn SyncProgressSink>,
+    key_origin: super::AccountKeyOrigin,
 }
 
 /// One target's authorized session, resolved local projection and fetched
@@ -77,11 +79,16 @@ struct OpenedCatalog<'a> {
 #[cfg_attr(not(feature = "app"), allow(dead_code))]
 impl SyncEngine {
     #[must_use]
-    pub(crate) fn new(session: AppSession, local: Arc<dyn SyncLocalStore>) -> Self {
+    pub(crate) fn new(
+        session: AppSession,
+        local: Arc<dyn SyncLocalStore>,
+        key_origin: super::AccountKeyOrigin,
+    ) -> Self {
         let remote = HttpSyncRemote::new()
             .map(|remote| Arc::new(remote) as Arc<dyn SyncRemote>)
             .map_err(RemoteError::kind);
         Self {
+            key_origin,
             authorizer: Arc::new(session),
             local,
             remote,
@@ -104,140 +111,6 @@ impl SyncEngine {
         operation: SessionOperation,
     ) -> SyncFuture<'a, SyncOutcome> {
         Box::pin(async move { self.pull_inner(target, operation).await })
-    }
-
-    /// Authorizes the target, resolves its local projection against the
-    /// session's bindings and fetches the server's catalog. Nothing local is
-    /// committed yet.
-    async fn open_catalog(
-        &self,
-        target: &SessionTarget,
-        operation: &SessionOperation,
-    ) -> Result<OpenedCatalog<'_>, SyncError> {
-        let operation_id = operation.operation_id();
-        self.ensure_dispatchable(operation, SyncStage::Authorization)?;
-        self.report(operation_id, SyncProgressPhase::Authorizing, 0, 0, 0, 0);
-        let access = self
-            .authorizer
-            .authorize(target, operation.detached_copy())
-            .await
-            .map_err(map_session_error)?;
-
-        let access_storage_id = access
-            .storage_id()
-            .and_then(|value| Uuid::parse_str(value).ok())
-            .filter(|value| !value.is_nil())
-            .ok_or_else(|| {
-                SyncError::new(
-                    operation_id,
-                    SyncErrorKind::NoLocalTarget,
-                    SyncStage::ResolveTarget,
-                )
-            })?;
-        let access_account_subject = access
-            .account_subject()
-            .filter(|subject| {
-                Uuid::parse_str(subject).is_ok_and(|parsed| parsed.to_string() == *subject)
-            })
-            .ok_or_else(|| {
-                SyncError::new(
-                    operation_id,
-                    SyncErrorKind::AccountBindingRequired,
-                    SyncStage::ResolveTarget,
-                )
-            })?;
-        let access_auth_method = access.auth_method().ok_or_else(|| {
-            SyncError::new(
-                operation_id,
-                SyncErrorKind::AuthenticationBindingRequired,
-                SyncStage::ResolveTarget,
-            )
-        })?;
-
-        self.ensure_dispatchable(operation, SyncStage::ResolveTarget)?;
-        let authorized_target_generation = access.authorized_target_generation();
-        let resolved = self
-            .local
-            .resolve_target(
-                target,
-                authorized_target_generation,
-                access.personal_vaults_enabled(),
-            )
-            .await
-            .map_err(|error| map_store_error(operation_id, SyncStage::ResolveTarget, error))?;
-        if resolved.storage_id() != access_storage_id
-            || resolved.binding().server_url() != access.endpoint()
-            || resolved.binding().server_fingerprint() != access.server_fingerprint()
-        {
-            return Err(SyncError::new(
-                operation_id,
-                SyncErrorKind::ConcurrentLocalChange,
-                SyncStage::ResolveTarget,
-            ));
-        }
-        if resolved.binding().account_subject() != Some(access_account_subject) {
-            return Err(SyncError::new(
-                operation_id,
-                SyncErrorKind::AccountBindingMismatch,
-                SyncStage::ResolveTarget,
-            ));
-        }
-        if resolved.binding().personal_vaults_enabled() != access.personal_vaults_enabled() {
-            return Err(SyncError::new(
-                operation_id,
-                SyncErrorKind::ServerCapabilityMismatch,
-                SyncStage::ResolveTarget,
-            ));
-        }
-        let local_auth_method = resolved.binding().auth_method().ok_or_else(|| {
-            SyncError::new(
-                operation_id,
-                SyncErrorKind::AuthenticationBindingRequired,
-                SyncStage::ResolveTarget,
-            )
-        })?;
-        if local_auth_method != access_auth_method {
-            return Err(SyncError::new(
-                operation_id,
-                SyncErrorKind::AuthenticationBindingMismatch,
-                SyncStage::ResolveTarget,
-            ));
-        }
-
-        self.ensure_dispatchable(operation, SyncStage::Catalog)?;
-        self.report(operation_id, SyncProgressPhase::Catalog, 0, 0, 0, 0);
-        let remote = self.remote.as_ref().map_err(|_| {
-            SyncError::new(
-                operation_id,
-                SyncErrorKind::TransportUnavailable,
-                SyncStage::Catalog,
-            )
-        })?;
-        let timeout = request_timeout(operation, SyncStage::Catalog)?;
-        let catalog = await_remote(
-            operation,
-            SyncStage::Catalog,
-            remote.fetch_catalog(&access, timeout),
-        )
-        .await?;
-        if !access.personal_vaults_enabled()
-            && catalog
-                .vaults()
-                .iter()
-                .any(|vault| vault.plane() == VaultPlane::PersonalClient)
-        {
-            return Err(SyncError::new(
-                operation_id,
-                SyncErrorKind::ServerCapabilityMismatch,
-                SyncStage::Catalog,
-            ));
-        }
-        Ok(OpenedCatalog {
-            remote,
-            access,
-            resolved,
-            catalog,
-        })
     }
 
     async fn pull_inner(
@@ -761,6 +634,7 @@ impl SyncEngine {
         Self {
             authorizer,
             local,
+            key_origin: super::AccountKeyOrigin::AccountPassword,
             remote: Ok(remote),
             progress: Arc::new(NoopProgress),
         }
@@ -2270,6 +2144,20 @@ mod tests {
             .await
             .expect_err("verified server capability mismatch must fail closed");
         assert_eq!(error.kind(), SyncErrorKind::ServerCapabilityMismatch);
+        assert_eq!(fixture.remote.catalog_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(fixture.store.reconcile_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn cache_origin_refuses_enabled_policy_before_catalog_or_local_resolution() {
+        let mut fixture = fixture_from_vaults(Vec::new());
+        fixture.engine.key_origin = super::super::AccountKeyOrigin::LocalCacheKey;
+        let error = fixture
+            .engine
+            .pull(&fixture.target, fixture.operation)
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), SyncErrorKind::AccountKeyEnrollmentRequired);
         assert_eq!(fixture.remote.catalog_calls.load(Ordering::SeqCst), 0);
         assert_eq!(fixture.store.reconcile_calls.load(Ordering::SeqCst), 0);
     }

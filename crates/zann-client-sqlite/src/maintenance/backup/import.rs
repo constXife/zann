@@ -7,6 +7,7 @@ mod validate;
 pub async fn plain_import(
     ctx: &BackupCtx,
     path: PathBuf,
+    source_storage_id: Uuid,
     session: &zann_client::app::BackupImportSession,
 ) -> Result<ImportReport, BackupError> {
     let storage_id = Uuid::parse_str(session.storage_id()).map_err(BackupError::source)?;
@@ -14,14 +15,14 @@ pub async fn plain_import(
         specs,
         source_storages,
         source_vaults,
-    } = validate::validate(&path)?;
-    ensure_complete(session.sync().await.map_err(BackupError::source)?)?;
+    } = validate::validate(&path, source_storage_id)?;
+    ensure_complete(session.sync().await.map_err(BackupError::sync)?)?;
     session
         .prepare_vaults(&specs)
         .await
-        .map_err(BackupError::source)?;
+        .map_err(BackupError::sync)?;
     // Only sync reconciles the new catalog into the local replica.
-    ensure_complete(session.sync().await.map_err(BackupError::source)?)?;
+    ensure_complete(session.sync().await.map_err(BackupError::sync)?)?;
     let vaults = LocalVaultRepo::new(&ctx.pool)
         .list_by_storage(storage_id)
         .await
@@ -63,16 +64,13 @@ pub async fn plain_import(
                     "backup import cancelled or expired",
                 ));
             }
-            if item.deleted_at.is_some() {
-                report.lock().expect("report lock poisoned").skipped_deleted += 1;
+            let source_storage = Uuid::parse_str(&item.storage_id).map_err(BackupError::source)?;
+            // Excluded accounts are not missing data and must not create any target vault.
+            if !source_storages.contains(&source_storage) {
                 return Ok(());
             }
-            let source_storage = Uuid::parse_str(&item.storage_id).map_err(BackupError::source)?;
-            if !source_storages.contains(&source_storage) {
-                report
-                    .lock()
-                    .expect("report lock poisoned")
-                    .skipped_missing_storage += 1;
+            if item.deleted_at.is_some() {
+                report.lock().expect("report lock poisoned").skipped_deleted += 1;
                 return Ok(());
             }
             let source_vault = Uuid::parse_str(&item.vault_id).map_err(BackupError::source)?;
@@ -119,7 +117,7 @@ pub async fn plain_import(
         .await
         .map_err(BackupError::source)?;
     while pending > 0 {
-        ensure_complete(session.sync().await.map_err(BackupError::source)?)?;
+        ensure_complete(session.sync().await.map_err(BackupError::sync)?)?;
         let remaining = PendingChangeRepo::new(&ctx.pool)
             .count_by_storage(storage_id)
             .await
