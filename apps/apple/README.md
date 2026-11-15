@@ -72,8 +72,8 @@ generated and ignored, so parallel branches never conflict on `.pbxproj`.
 
 ## iPhone and iPad target (#273)
 
-After building the debug XCFramework and generating the project as above,
-select the `ZannMobile` scheme. One application supports both device families;
+Build the debug XCFramework with `--all-platforms` and generate the project as
+above, then select the `ZannMobile` scheme. One application supports both device families;
 its source list contains common models, connect/unlock and item detail UI, not
 AppKit, Carbon, desktop pairing or the daemon lifecycle. There are no production
 fake secret adapters or automatic fixture activation.

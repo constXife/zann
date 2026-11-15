@@ -99,6 +99,40 @@ final class MobileSecurityTests: XCTestCase {
         // reported after locking, rather than silently skipping logout.
         XCTAssertNotNil(model.error)
     }
+
+    func testBackgroundDuringAccountEnrollmentRequiresDeviceUnlockFirst() async throws {
+        for existingKeys in [false, true] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let keystore = MemoryKeystore()
+            let real = try createCore(dbPath: directory.appendingPathComponent("local.sqlite").path,
+                                      keystore: keystore, secretStore: MemorySecretStore())
+            let core = EnrollmentPendingCore(unsafeFromRawPointer: real.uniffiClonePointer())
+            let model = AppModel(opening: { (core, keystore) }, preferences: {
+                PreferencesFile(url: directory.appendingPathComponent("preferences.json"))
+            }, systemLanguage: "en", browser: .loopback(open: { _ in }))
+            model.updatePreferences { $0.lockOnHidden = true }
+            model.startConnecting()
+            await model.connected(.init(storageID: "enrollment-fixture", hasPersonalKeys: existingKeys))
+            await model.submit(password: "device unlock fixture password", mode: .create)
+            let accountPhase: AppModel.MasterMode = existingKeys ? .accountUnlock : .accountCreate
+            XCTAssertEqual(model.screen, .master(accountPhase))
+            XCTAssertTrue(model.isUnlocked)
+
+            await model.secureForBackground().value
+            XCTAssertEqual(model.screen, .master(.unlock))
+            XCTAssertFalse(model.isUnlocked)
+            XCTAssertTrue(try real.appStatus().locked)
+
+            await model.submit(password: "device unlock fixture password", mode: .unlock)
+            XCTAssertEqual(model.screen, .master(accountPhase))
+            XCTAssertNil(model.error)
+        }
+    }
+}
+
+private final class EnrollmentPendingCore: CoreFacade {
+    override func activateConnectedAccount() throws -> Bool { false }
 }
 
 private final class CatalogPendingCore: CoreFacade {

@@ -435,7 +435,9 @@ final class AppModel: ObservableObject {
         if preferences.clipboardClearOnLock { Clipboard.clearOwned() }
         return Task {
             await pending?.value
-            _ = await closeCore(core)
+            if let status = await closeCore(core), case .master = screen {
+                showLockedDevice(status)
+            }
             pendingCoreWork = nil
             busy = false
         }
@@ -474,15 +476,21 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func closeCore(_ core: CoreFacade) async -> Bool {
-        let result = await Task.detached { Result { _ = try core.lock() } }.value
+    private func closeCore(_ core: CoreFacade) async -> AppStatusFfi? {
+        let result = await Task.detached {
+            Result { _ = try core.lock(); return try core.appStatus() }
+        }.value
         switch result {
-        case .success: return true
+        case .success(let status): return status
         case .failure(let failure):
             lastFailure = failure
             screen = .failed(message(for: failure))
-            return false
+            return nil
         }
+    }
+
+    private func showLockedDevice(_ status: AppStatusFfi) {
+        screen = .master(status.initialized ? .unlock : .create)
     }
 
     func lock() async {
@@ -500,7 +508,7 @@ final class AppModel: ObservableObject {
         }
         if keepConnecting {
             if let outcome = pendingConnection { pendingConnection = nil; await connected(outcome) }
-        } else { screen = .master(status.initialized ? .unlock : .create) }
+        } else { showLockedDevice(status) }
     }
 
     private func refreshUnlockState() {
