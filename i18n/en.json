@@ -456,7 +456,7 @@
       "remove": "Remove",
       "removeDesc": "Remove this server completely from the app.",
       "forgetServer": "Forget Server",
-      "forgetServerConfirm": "Forget {server}? Its saved sign-in is removed from this device, and you connect and sign in again. Items on this device stay.",
+      "forgetServerConfirm": "Forget {server}? Saved sign-ins for all accounts on this server will be removed from this device. Cached items stay. Reconnect each account afterwards.",
       "forgetServerPending": "Local changes not yet on the server: {count}. They stay on this device and are sent only after you reconnect to the same server and account.",
       "reconnect": "Connect Again",
       "addServer": "Add Server",

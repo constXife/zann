@@ -1576,15 +1576,14 @@ mod tests {
                 .expect("forget the storage's server"),
             Some(endpoint.clone())
         );
-        assert_eq!(
+        assert!(
             app.repository
                 .snapshot()
                 .expect("config snapshot")
                 .config()
                 .connections
-                .len(),
-            1,
-            "endpoint trust survives account disconnect"
+                .is_empty(),
+            "explicit whole-server recovery clears trust"
         );
         assert!(!app.syncs_storage(&storage_id).expect("forgotten storage"));
         assert_eq!(

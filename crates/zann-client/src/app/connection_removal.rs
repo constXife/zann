@@ -55,24 +55,29 @@ impl AppClient {
             .map_err(|kind| SessionError::for_app(SessionOperationId::new(), kind))
     }
 
-    /// Disconnect exactly one account replica. Retain the endpoint trust record,
-    /// other profiles, keyring entries and cached data. Return its address once.
+    /// Explicit whole-server trust recovery, selected by one storage UUID.
+    /// Removes all profiles on that endpoint; cached data and key envelopes stay.
+    /// Account-only removal uses `prepare_account_removal`/`commit_account_removal`.
     pub fn remove_storage_connection(
         &self,
         storage_id: &str,
     ) -> Result<Option<String>, SessionError> {
-        let plan = self
-            .prepare_account_removal(storage_id)
+        let snapshot = self
+            .repository
+            .snapshot()
             .map_err(connection_removal_error)?;
-        let Some((connection, _)) = plan.profile.as_ref() else {
+        let Some((connection, _)) = snapshot
+            .config()
+            .replica_profile(storage_id)
+            .map_err(connection_removal_error)?
+        else {
             return Ok(None);
         };
-        let address = plan.snapshot.config().connections[connection]
+        let address = snapshot.config().connections[&connection]
             .metadata()
             .address
             .clone();
-        self.commit_account_removal(plan)
-            .map_err(connection_removal_error)?;
+        self.remove_pinned_connection(&snapshot, connection)?;
         Ok(Some(address))
     }
 

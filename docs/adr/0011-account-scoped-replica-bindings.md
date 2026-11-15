@@ -84,7 +84,10 @@ only its key envelope and replica. The shared endpoint pin remains. After a shar
 pin change, other accounts retain their cache claims and receive the existing
 sign-in-required sync state until explicitly reauthenticated. Confirmation for
 one profile never silently releases another profile's projection. Explicit whole
-endpoint removal remains a separate capability.
+endpoint removal remains a separate capability: native “Forget Server” recovers
+from a changed server identity and confirms removal of every saved sign-in on
+that endpoint. It leaves offline replicas and envelopes intact for explicit
+reconnect; account-scoped recovery and logout must never invoke it.
 
 ## Direct Pre-GA cutover
 
