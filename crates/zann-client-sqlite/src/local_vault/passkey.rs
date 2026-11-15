@@ -192,65 +192,69 @@ async fn prepare_import(
         .begin_item_batch(storage, vault)
         .await
         .map_err(failure)?;
-    admit(&batch)?;
-    let rows = batch
-        .read_type(
-            "passkey",
-            exchange::MAX_EXCHANGE_ENTRIES,
-            exchange::MAX_EXCHANGE_BYTES,
-        )
-        .await
-        .map_err(failure)?;
-    let mut existing = BTreeMap::new();
-    for (_, payload) in rows {
-        super::item_read::check_active(operation)?;
-        let credential = Credential::from_payload(&payload).map_err(failure)?;
-        if existing.insert(credential.identity(), credential).is_some() {
-            return Err(reject("The target contains duplicate passkeys."));
-        }
-    }
-    let import_id = Uuid::now_v7();
-    let mut report = PasskeyImportReport {
-        imported: 0,
-        skipped_existing: 0,
-    };
-    for (entry_index, entry) in document.entries.iter().enumerate() {
-        for (index, credential) in entry.credentials.iter().enumerate() {
+    let result: LocalResult<PasskeyImportReport> = async {
+        admit(&batch)?;
+        let rows = batch
+            .read_type(
+                "passkey",
+                exchange::MAX_EXCHANGE_ENTRIES,
+                exchange::MAX_EXCHANGE_BYTES,
+            )
+            .await
+            .map_err(failure)?;
+        let mut existing = BTreeMap::new();
+        for (_, payload) in rows {
             super::item_read::check_active(operation)?;
-            if let Some(previous) = existing.get(&credential.identity()) {
-                if previous.public_key() != credential.public_key()
-                    || previous.user_handle() != credential.user_handle()
-                {
-                    return Err(reject(
-                        "A passkey identity conflicts with the target vault.",
-                    ));
-                }
-                report.skipped_existing += 1;
-                continue;
+            let credential = Credential::from_payload(&payload).map_err(failure)?;
+            if existing.insert(credential.identity(), credential).is_some() {
+                return Err(reject("The target contains duplicate passkeys."));
             }
-            let suffix = if entry.credentials.len() > 1 {
-                format!(" ({})", index + 1)
-            } else {
-                String::new()
-            };
-            let path = format!("Passkeys/{import_id}/{entry_index}/{}{suffix}", entry.title);
-            let payload = entry.payload(index).map_err(failure)?;
-            batch
-                .add(
-                    path,
-                    "passkey".into(),
-                    payload,
-                    zann_core::ItemMetadata {
-                        favorite: entry.favorite,
-                        tags: Some(entry.tags.clone()),
-                    },
-                )
-                .await
-                .map_err(failure)?;
-            report.imported += 1;
         }
+        let import_id = Uuid::now_v7();
+        let mut report = PasskeyImportReport {
+            imported: 0,
+            skipped_existing: 0,
+        };
+        for (entry_index, entry) in document.entries.iter().enumerate() {
+            for (index, credential) in entry.credentials.iter().enumerate() {
+                super::item_read::check_active(operation)?;
+                if let Some(previous) = existing.get(&credential.identity()) {
+                    if previous.public_key() != credential.public_key()
+                        || previous.user_handle() != credential.user_handle()
+                    {
+                        return Err(reject(
+                            "A passkey identity conflicts with the target vault.",
+                        ));
+                    }
+                    report.skipped_existing += 1;
+                    continue;
+                }
+                let suffix = if entry.credentials.len() > 1 {
+                    format!(" ({})", index + 1)
+                } else {
+                    String::new()
+                };
+                let path = format!("Passkeys/{import_id}/{entry_index}/{}{suffix}", entry.title);
+                let payload = entry.payload(index).map_err(failure)?;
+                batch
+                    .add(
+                        path,
+                        "passkey".into(),
+                        payload,
+                        zann_core::ItemMetadata {
+                            favorite: entry.favorite,
+                            tags: Some(entry.tags.clone()),
+                        },
+                    )
+                    .await
+                    .map_err(failure)?;
+                report.imported += 1;
+            }
+        }
+        Ok(report)
     }
-    Ok((batch, report))
+    .await;
+    finish_preparation(batch, result).await
 }
 async fn export_document(
     services: &LocalServices<'_>,
@@ -263,38 +267,53 @@ async fn export_document(
         .begin_item_batch(storage, vault)
         .await
         .map_err(failure)?;
-    admit(&batch)?;
-    let rows = batch
-        .read_type(
-            "passkey",
-            exchange::MAX_EXCHANGE_ENTRIES,
-            exchange::MAX_EXCHANGE_BYTES,
-        )
-        .await
-        .map_err(failure)?;
-    let mut document = ExchangeDocument::new();
-    for (item, payload) in rows {
-        super::item_read::check_active(operation)?;
-        if std::time::Instant::now() >= expires {
-            return Err(ExportError::AuthorizationExpired.into());
+    let result: LocalResult<ExchangeDocument> = async {
+        admit(&batch)?;
+        let rows = batch
+            .read_type(
+                "passkey",
+                exchange::MAX_EXCHANGE_ENTRIES,
+                exchange::MAX_EXCHANGE_BYTES,
+            )
+            .await
+            .map_err(failure)?;
+        let mut document = ExchangeDocument::new();
+        for (item, payload) in rows {
+            super::item_read::check_active(operation)?;
+            if std::time::Instant::now() >= expires {
+                return Err(ExportError::AuthorizationExpired.into());
+            }
+            let credential = Credential::from_payload(&payload).map_err(failure)?;
+            let metadata = ExchangeMetadata::from_payload(&payload).map_err(failure)?;
+            let title = metadata.title.as_ref().unwrap_or(&item.name).clone();
+            let item_metadata = item
+                .metadata
+                .ok_or_else(|| reject("Refresh item metadata before exporting."))?;
+            document.entries.push(ExchangeEntry {
+                id: item.id.as_bytes().to_vec(),
+                title,
+                credentials: vec![credential],
+                metadata,
+                favorite: item_metadata.favorite,
+                tags: item_metadata.tags.unwrap_or_default(),
+            });
         }
-        let credential = Credential::from_payload(&payload).map_err(failure)?;
-        let metadata = ExchangeMetadata::from_payload(&payload).map_err(failure)?;
-        let title = metadata.title.as_ref().unwrap_or(&item.name).clone();
-        let item_metadata = item
-            .metadata
-            .ok_or_else(|| reject("Refresh item metadata before exporting."))?;
-        document.entries.push(ExchangeEntry {
-            id: item.id.as_bytes().to_vec(),
-            title,
-            credentials: vec![credential],
-            metadata,
-            favorite: item_metadata.favorite,
-            tags: item_metadata.tags.unwrap_or_default(),
-        });
+        Ok(document)
     }
+    .await;
+    let (batch, document) = finish_preparation(batch, result).await?;
     batch.commit().await.map_err(failure)?;
     Ok(document)
+}
+
+async fn finish_preparation<T>(
+    batch: zann_db::services::PreparedItemBatch,
+    result: LocalResult<T>,
+) -> LocalResult<(zann_db::services::PreparedItemBatch, T)> {
+    match result {
+        Ok(value) => Ok((batch, value)),
+        Err(error) => Err(batch.rollback_for_error(error).await.map_err(failure)?),
+    }
 }
 
 #[cfg(test)]

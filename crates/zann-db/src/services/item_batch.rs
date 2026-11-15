@@ -1,7 +1,7 @@
 //! One SQLite write transaction for bounded, prevalidated local creation batches.
 use super::*;
 use crate::local::{KeyWrapType, LocalItem};
-use sqlx_core::{query::query, query_as::query_as, transaction::Transaction};
+use sqlx_core::{query_as::query_as, transaction::Transaction};
 use sqlx_sqlite::Sqlite;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
@@ -16,12 +16,14 @@ impl LocalServices<'_> {
         storage: Uuid,
         vault: Uuid,
     ) -> Result<PreparedItemBatch, Error> {
-        let mut transaction = self.pool.begin().await?;
-        query("UPDATE items_cache SET id=id WHERE 0")
-            .execute(&mut *transaction)
-            .await?;
+        let mut transaction = self
+            .pool
+            .begin_with("BEGIN IMMEDIATE")
+            .await
+            .map_err(|error| stage("begin write", error))?;
         let vault = LocalVaultRepo::get_by_id_in_bounded(&mut transaction, storage, vault)
-            .await?
+            .await
+            .map_err(|error| stage("vault lookup", error))?
             .ok_or_else(|| ServiceError::new("vault_not_found", "vault not found"))?;
         let key = if vault.kind == VaultKind::Shared {
             SecretKey::from_bytes(*self.master_key.as_bytes())
@@ -115,9 +117,44 @@ impl PreparedItemBatch {
         super::create_item::insert_created_item(&mut self.transaction, &item).await?;
         Ok(id)
     }
+    /// Preserve the original error while completing rollback before a retry.
+    /// Drop remains the cancellation path when the caller future is abandoned.
+    pub async fn rollback_for_error<E: Into<Error>>(self, original: E) -> Result<E, Error> {
+        match self.transaction.rollback().await {
+            Ok(()) => Ok(original),
+            Err(error) => Err(Box::new(RollbackFailure {
+                original: original.into(),
+                rollback: stage("rollback", error),
+            })),
+        }
+    }
     /// Caller must await the commit result once publication starts.
     pub async fn commit(self) -> Result<(), Error> {
-        self.transaction.commit().await?;
+        self.transaction
+            .commit()
+            .await
+            .map_err(|error| stage("commit", error))?;
         Ok(())
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("item batch {stage} failed: {source}")]
+struct StageError {
+    stage: &'static str,
+    #[source]
+    source: Error,
+}
+pub(super) fn stage(stage: &'static str, source: impl Into<Error>) -> Error {
+    Box::new(StageError {
+        stage,
+        source: source.into(),
+    })
+}
+#[derive(Debug, thiserror::Error)]
+#[error("item creation failed: {original}; rollback failed: {rollback}")]
+struct RollbackFailure {
+    #[source]
+    original: Error,
+    rollback: Error,
 }

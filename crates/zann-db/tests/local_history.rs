@@ -544,3 +544,53 @@ async fn item_creation_rolls_back_item_and_history_when_pending_write_fails() {
     assert_eq!(count.0, 0);
     pool.close().await;
 }
+
+#[tokio::test]
+async fn rejected_creation_releases_its_write_reservation_before_returning() {
+    let (pool, storage, vault, key) = setup_local().await;
+    let services = LocalServices::new(&pool, &key);
+    services
+        .put_item(
+            storage,
+            vault,
+            "duplicate".into(),
+            "login".into(),
+            login_payload("synthetic password"),
+        )
+        .await
+        .unwrap();
+    let uri = format!(
+        "sqlite://{}",
+        pool.connect_options().get_filename().display()
+    );
+    let other = connect_sqlite_with_max(&uri, 1).await.unwrap();
+    let mut connection = other.acquire().await.unwrap();
+    sqlx_core::query::query("PRAGMA busy_timeout=0")
+        .execute(&mut *connection)
+        .await
+        .unwrap();
+    for _ in 0..64 {
+        let error = services
+            .put_item(
+                storage,
+                vault,
+                "duplicate".into(),
+                "login".into(),
+                login_payload("synthetic password"),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind, "item_exists");
+        sqlx_core::query::query("BEGIN IMMEDIATE")
+            .execute(&mut *connection)
+            .await
+            .expect("failed creation must have finished rollback before returning");
+        sqlx_core::query::query("ROLLBACK")
+            .execute(&mut *connection)
+            .await
+            .unwrap();
+    }
+    drop(connection);
+    other.close().await;
+    pool.close().await;
+}
