@@ -22,7 +22,7 @@ private final class DelayedConnectSession: RemoteSession {
         }
         throw CoreError.Session(kind: .cancelled, message: "fixture cancelled")
     }
-    override func prepareConnection(endpoint: String, connectionName: String, profileName: String) throws -> PrepareConnectionOutcomeFfi {
+    override func prepareConnection(endpoint: String, connectionName: String, storageId: String?) throws -> PrepareConnectionOutcomeFfi {
         onProbe?()
         if let gate, gate.wait(timeout: .now() + 5) != .success {
             throw CoreError.Service("fixture probe gate timed out")

@@ -364,7 +364,7 @@ final class ConnectTests: XCTestCase {
         )
         let session = try core.remoteSession()
         guard case .ready(let connection) = try session.prepareConnection(
-            endpoint: url, connectionName: "Remote", profileName: "default"
+            endpoint: url, connectionName: "Remote", storageId: nil
         ) else { return XCTFail("a fresh database has no pinned fingerprint") }
         _ = try session.passwordRegister(
             connection: connection, email: email, password: password, fullName: nil,
