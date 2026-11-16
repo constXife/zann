@@ -42,10 +42,15 @@ private final class PartialExportCore: CoreFacade {
         try? FileManager.default.removeItem(at: root)
     }
 
+    private func authorizeExport() throws -> (ExportAuthorizationFfi, SessionOperationFfi) {
+        let operation = try SessionOperationFfi(timeoutMs: 120_000)
+        let authorization = try core.authorizeExport(proof: .init(password: "maintenance fixture password", factor: .devicePassword, pin: nil), operation: operation)
+        return (authorization, operation)
+    }
+
     private func prepareExport(_ model: MaintenanceModel) async {
         do {
-            let operation = try SessionOperationFfi(timeoutMs: 120_000)
-            let authorization = try core.authorizeExport(proof: .init(password: "maintenance fixture password", factor: .devicePassword, pin: nil), operation: operation)
+            let (authorization, operation) = try authorizeExport()
             await model.prepareExport(authorization: authorization, operation: operation)
         } catch { XCTFail("Fixture authorization failed: \(describe(error))") }
     }
@@ -83,7 +88,9 @@ private final class PartialExportCore: CoreFacade {
             delayed.entered = { entered.fulfill() }
             delayed.gate = gate
             defer { gate.signal() }
-            let preparing = Task { await prepareExport(model) }
+            // Password KDF duration is independent of the export cleanup contract.
+            let (authorization, operation) = try authorizeExport()
+            let preparing = Task { await model.prepareExport(authorization: authorization, operation: operation) }
             await fulfillment(of: [entered], timeout: 3)
             if fail { model.invalidate() } else { model.dismissed() }
             gate.signal()
