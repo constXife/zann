@@ -2,6 +2,34 @@
 use super::*;
 
 impl LocalVaultService for LocalVault {
+    fn passkey_targets(&self) -> LocalResult<Vec<PasskeyTargetSummary>> {
+        LocalVault::passkey_targets(self)
+    }
+    fn passkey_preflight_file(
+        &self,
+        path: String,
+        format: PasskeyExchangeFormat,
+    ) -> LocalResult<PasskeyImportPreview> {
+        LocalVault::passkey_preflight_file(self, path, format)
+    }
+    fn passkey_import_file(
+        &self,
+        path: String,
+        format: PasskeyExchangeFormat,
+        target: PasskeyTarget,
+        operation: SessionOperation,
+    ) -> LocalResult<PasskeyImportReport> {
+        LocalVault::passkey_import_file(self, path, format, target, operation)
+    }
+    fn passkey_export_cxf(
+        &self,
+        path: String,
+        target: PasskeyTarget,
+        authorization: ExportAuthorization,
+    ) -> LocalResult<BackupExportReport> {
+        LocalVault::passkey_export_cxf(self, path, target, authorization)
+    }
+
     fn backup_capabilities(&self) -> LocalResult<BackupCapabilities> {
         LocalVault::backup_capabilities(self)
     }

@@ -148,52 +148,77 @@ pub async fn run(
             };
             report.vaults_checked += 1;
 
-            let items = item_repo
-                .list_by_vault(storage.id, vault.id, true)
-                .await
-                .map_err(|err| VerifyError::new("verify_failed", err.to_string()))?;
-
-            for item in items {
-                // A tombstone keeps no payload, so there is nothing to check
-                // and its absence is not a fault.
-                if item.payload_enc.is_empty() {
-                    continue;
+            let mut cursor = None;
+            loop {
+                let items = item_repo
+                    .list_by_vault_paged(storage.id, vault.id, true, 200, cursor)
+                    .await
+                    .map_err(|err| VerifyError::new("verify_failed", err.to_string()))?;
+                if items.is_empty() {
+                    break;
                 }
-                report.items_checked += 1;
+                cursor = items.last().map(|item| (item.updated_at, item.id));
+                for item in items {
+                    // A tombstone keeps no payload, so there is nothing to check
+                    // and its absence is not a fault.
+                    if item.payload_enc.is_empty() {
+                        continue;
+                    }
+                    report.items_checked += 1;
 
-                let checksum = core_crypto::payload_checksum(&item.payload_enc);
-                if checksum != item.checksum {
-                    report.problems.push(VerifyProblem {
-                        kind: "checksum_mismatch".to_string(),
-                        vault_id: Some(vault.id.to_string()),
-                        vault_name: Some(vault.name.clone()),
-                        item_id: Some(item.id.to_string()),
-                        item_path: Some(item.path.clone()),
-                        detail: format!("stored {}, computed {}", item.checksum, checksum),
+                    let checksum = core_crypto::payload_checksum(&item.payload_enc);
+                    if checksum != item.checksum {
+                        report.problems.push(VerifyProblem {
+                            kind: "checksum_mismatch".to_string(),
+                            vault_id: Some(vault.id.to_string()),
+                            vault_name: Some(vault.name.clone()),
+                            item_id: Some(item.id.to_string()),
+                            item_path: Some(item.path.clone()),
+                            detail: format!("stored {}, computed {}", item.checksum, checksum),
+                        });
+                        continue;
+                    }
+
+                    // The checksum only proves the bytes are the bytes. Decryption
+                    // proves they are still the item, under the right key.
+                    let result = core_crypto::decrypt_payload_bytes(
+                        &vault_key,
+                        vault.id,
+                        item.id,
+                        &item.payload_enc,
+                    )
+                    .map_err(|_| "decrypt_failed")
+                    .and_then(|bytes| {
+                        let bytes = zeroize::Zeroizing::new(bytes);
+                        let payload = zann_core::EncryptedPayload::from_bytes(&bytes)
+                            .map_err(|_| "payload_invalid")?;
+                        zann_client::passkey_exchange::validate_payload(
+                            &item.type_id,
+                            &payload,
+                            vault.kind,
+                            if vault.key_wrap_type == zann_db::local::KeyWrapType::RemoteServer {
+                                zann_core::VaultEncryptionType::Server
+                            } else {
+                                zann_core::VaultEncryptionType::Client
+                            },
+                        )
+                        .map_err(|_| "passkey_invalid")
                     });
-                    continue;
-                }
+                    if let Err(kind) = result {
+                        report.problems.push(VerifyProblem {
+                            kind: kind.into(),
+                            vault_id: Some(vault.id.to_string()),
+                            vault_name: Some(vault.name.clone()),
+                            item_id: Some(item.id.to_string()),
+                            item_path: Some(item.path.clone()),
+                            detail: "Stored item failed semantic or cryptographic validation."
+                                .into(),
+                        });
+                        continue;
+                    }
 
-                // The checksum only proves the bytes are the bytes. Decryption
-                // proves they are still the item, under the right key.
-                if let Err(err) = core_crypto::decrypt_payload_bytes(
-                    &vault_key,
-                    vault.id,
-                    item.id,
-                    &item.payload_enc,
-                ) {
-                    report.problems.push(VerifyProblem {
-                        kind: "decrypt_failed".to_string(),
-                        vault_id: Some(vault.id.to_string()),
-                        vault_name: Some(vault.name.clone()),
-                        item_id: Some(item.id.to_string()),
-                        item_path: Some(item.path.clone()),
-                        detail: err.to_string(),
-                    });
-                    continue;
+                    report.items_ok += 1;
                 }
-
-                report.items_ok += 1;
             }
         }
     }

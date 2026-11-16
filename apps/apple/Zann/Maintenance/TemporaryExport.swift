@@ -19,6 +19,11 @@ struct TemporaryExport: Identifiable {
             _ = try core.backupExportEncrypted(path: file.path, handle: handle)
         }
     }
+    static func prepareCxf(core: CoreFacade, root: URL, target: PasskeyTargetFfi, authorization: ExportAuthorizationFfi) throws -> TemporaryExport {
+        try prepare(root: root, filename: "zann-passkeys.cxf.json") { file in
+            _ = try core.passkeyExportCxf(path: file.path, target: target, authorization: authorization)
+        }
+    }
     private static func prepare(root: URL, filename: String, write: (URL) throws -> Void) throws -> TemporaryExport {
         let manager = FileManager.default
         var attributes: [FileAttributeKey: Any] = [.posixPermissions: 0o700]

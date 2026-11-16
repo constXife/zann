@@ -26,6 +26,7 @@ uuid = { version = "1", features = ["v7", "serde"], optional = true }
 zeroize = { version = "1", optional = true }
 
 zann-core = { path = "../zann-core", optional = true }
+zann-passkey = { path = "../zann-passkey", optional = true }
 zann-autofill = { path = "../zann-autofill", optional = true }
 zann-crypto = { path = "../zann-crypto", optional = true }
 zann-keystore = { path = "../zann-keystore", default-features = false, features = ["secret-store"], optional = true }
@@ -43,7 +44,8 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 default = ["remote"]
 native-messaging = ["dep:zeroize"]
 browser-ipc = ["dep:hex", "dep:serde", "dep:serde_json", "dep:thiserror", "dep:zeroize", "dep:zann-autofill", "dep:zann-crypto", "zann-crypto/ipc-transport", "zann-crypto/ipc-pairing", "dep:zann-core"]
-app = ["sync", "delivery", "browser-ipc"]
+app = ["sync", "delivery", "browser-ipc", "passkey-exchange"]
+passkey-exchange = ["dep:zann-passkey", "dep:zann-core", "dep:chrono", "dep:uuid", "dep:libc"]
 delivery = [
   "dep:serde",
   "dep:serde_yaml",
@@ -99,3 +101,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 [[example]]
 name = "regenerate_device_keyring"
 required-features = ["app"]
+
+[target.'cfg(unix)'.dependencies]
+libc = {version="0.2",optional=true}

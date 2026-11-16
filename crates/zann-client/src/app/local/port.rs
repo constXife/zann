@@ -87,6 +87,25 @@ pub trait LocalVaultService: Send + Sync {
         path: String,
         options: BackupImportOptions,
     ) -> LocalResult<ApplePasswordsImportReport>;
+    fn passkey_targets(&self) -> LocalResult<Vec<PasskeyTargetSummary>>;
+    fn passkey_preflight_file(
+        &self,
+        path: String,
+        format: PasskeyExchangeFormat,
+    ) -> LocalResult<PasskeyImportPreview>;
+    fn passkey_import_file(
+        &self,
+        path: String,
+        format: PasskeyExchangeFormat,
+        target: PasskeyTarget,
+        operation: SessionOperation,
+    ) -> LocalResult<PasskeyImportReport>;
+    fn passkey_export_cxf(
+        &self,
+        path: String,
+        target: PasskeyTarget,
+        authorization: ExportAuthorization,
+    ) -> LocalResult<BackupExportReport>;
     fn backup_capabilities(&self) -> LocalResult<BackupCapabilities>;
     fn backup_begin(&self, operation: SessionOperation) -> LocalResult<BackupHandle>;
     fn backup_add_recipient(

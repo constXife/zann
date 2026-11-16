@@ -30,3 +30,8 @@ pub mod sync;
 pub mod native_messaging;
 #[cfg(all(feature = "remote", feature = "config"))]
 pub mod server;
+
+#[cfg(feature = "passkey-exchange")]
+pub mod passkey_exchange;
+#[cfg(feature = "passkey-exchange")]
+pub mod private_output;

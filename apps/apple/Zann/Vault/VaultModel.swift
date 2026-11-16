@@ -574,6 +574,8 @@ final class VaultModel: ObservableObject {
 
     /// Replaces the list with its start for `query`, as many items as are
     /// loaded now; a failure shows its error and keeps the list.
+    func refreshLocalContents() async { _ = await reload(query: trimmedQuery) }
+
     private func reload(query: String) async -> Bool {
         let core = core
         let loaded = items.count

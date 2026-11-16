@@ -8,6 +8,7 @@ use zeroize::Zeroize;
 pub(super) struct State {
     security: Option<ExportSecurity>,
     target_policy: Option<ExportPolicy>,
+    cxf_target: Option<zann_client::app::local::PasskeyTarget>,
     visible: bool,
     factor: usize,
     password: String,
@@ -47,6 +48,15 @@ impl State {
         self.pin.zeroize();
         self.visible = false;
     }
+    pub(super) fn open_cxf(
+        &mut self,
+        session: &Session,
+        target: zann_client::app::local::PasskeyTarget,
+    ) -> Task<Message> {
+        let task = self.open(session, None);
+        self.cxf_target = Some(target);
+        task
+    }
     pub(super) fn open(
         &mut self,
         session: &Session,
@@ -57,6 +67,7 @@ impl State {
         self.security = None;
         self.error = None;
         self.target_policy = policy;
+        self.cxf_target = None;
         let generation = self.generation;
         let facade = session.facade();
         cosmic::task::future(async move {
@@ -135,26 +146,61 @@ impl State {
                 self.pending = Some(cancel);
                 let generation = self.generation;
                 let policy = self.target_policy;
+                let cxf_target = self.cxf_target.clone();
                 let facade = session.facade();
                 return (
                     cosmic::task::future(async move {
                         Message::Finished(
                             generation,
-                            off_thread(move || {
-                                let authorization = facade
-                                    .authorize_export(proof, operation)
-                                    .map_err(|e| e.to_string())?;
-                                match policy {
-                                    Some(policy) => facade
-                                        .set_export_policy(policy, authorization)
-                                        .map(|()| None)
-                                        .map_err(|e| e.to_string()),
-                                    None => facade
-                                        .backup_export_file(String::new(), authorization)
-                                        .map(Some)
-                                        .map_err(|e| e.to_string()),
+                            async {
+                                let auth_facade = facade.clone();
+                                let authorization = off_thread(move || {
+                                    auth_facade
+                                        .authorize_export(proof, operation)
+                                        .map_err(|e| e.to_string())
+                                })
+                                .await?;
+                                if let Some(target) = cxf_target {
+                                    let response = match file_chooser::save::Dialog::new()
+                                        .title(t("passkeyExchange.export"))
+                                        .file_name("zann-passkeys.cxf.json".into())
+                                        .save_file()
+                                        .await
+                                    {
+                                        Ok(response) => response,
+                                        Err(file_chooser::Error::Cancelled) => return Ok(None),
+                                        Err(error) => return Err(error.to_string()),
+                                    };
+                                    let path = response
+                                        .url()
+                                        .ok_or("The destination has no native path")?
+                                        .to_file_path()
+                                        .map_err(|()| "The destination has no native path")?;
+                                    off_thread(move || {
+                                        facade
+                                            .passkey_export_cxf(
+                                                path.display().to_string(),
+                                                target,
+                                                authorization,
+                                            )
+                                            .map(Some)
+                                            .map_err(|e| e.to_string())
+                                    })
+                                    .await
+                                } else {
+                                    off_thread(move || match policy {
+                                        Some(policy) => facade
+                                            .set_export_policy(policy, authorization)
+                                            .map(|()| None)
+                                            .map_err(|e| e.to_string()),
+                                        None => facade
+                                            .backup_export_file(String::new(), authorization)
+                                            .map(Some)
+                                            .map_err(|e| e.to_string()),
+                                    })
+                                    .await
                                 }
-                            })
+                            }
                             .await,
                         )
                     }),

@@ -28,7 +28,7 @@ pub(crate) async fn handle_command(
             let response = ctx.client.me(&ctx.access_token).await?;
             println!("{}", serde_json::to_string_pretty(&response)?);
         }
-        Command::Server(_) | Command::Run(_) | Command::Version => {}
+        Command::Server(_) | Command::Run(_) | Command::Passkey(_) | Command::Version => {}
         Command::Config(_) => {
             unreachable!()
         }

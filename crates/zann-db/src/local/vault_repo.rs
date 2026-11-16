@@ -202,17 +202,24 @@ impl<'a> LocalVaultRepo<'a> {
         storage_id: Uuid,
         vault_id: Uuid,
     ) -> Result<Option<LocalVault>, LocalProjectionReadError> {
+        let mut tx = self.pool.begin().await?;
+        let result = Self::get_by_id_in_bounded(&mut tx, storage_id, vault_id).await?;
+        tx.commit().await?;
+        Ok(result)
+    }
+    pub(crate) async fn get_by_id_in_bounded(
+        tx: &mut Transaction<'static, Sqlite>,
+        storage_id: Uuid,
+        vault_id: Uuid,
+    ) -> Result<Option<LocalVault>, LocalProjectionReadError> {
         if storage_id.is_nil() || vault_id.is_nil() {
             return Err(LocalProjectionReadError::InvalidInput);
         }
-        let mut tx = self.pool.begin().await?;
-        let preflight = bounded_vault_preflight(&mut tx, storage_id, Some(vault_id)).await?;
+        let preflight = bounded_vault_preflight(tx, storage_id, Some(vault_id)).await?;
         let Some(valid) = preflight else {
-            tx.commit().await?;
             return Ok(None);
         };
         if !valid {
-            tx.rollback().await?;
             return Err(LocalProjectionReadError::CorruptProjection);
         }
         let vault = query_as!(
@@ -235,9 +242,8 @@ impl<'a> LocalVaultRepo<'a> {
             storage_id,
             vault_id
         )
-        .fetch_optional(&mut *tx)
+        .fetch_optional(&mut **tx)
         .await?;
-        tx.commit().await?;
         Ok(vault)
     }
 
@@ -655,7 +661,7 @@ pub(crate) async fn bounded_vault_preflight(
                 AND CASE WHEN typeof(is_default) = 'integer'
                     THEN is_default IN (0, 1) ELSE 0 END
                 AND CASE WHEN typeof(vault_key_enc) = 'blob'
-                    THEN length(vault_key_enc) BETWEEN 1 AND ?4 ELSE 0 END
+                    THEN length(vault_key_enc) BETWEEN CASE WHEN key_wrap_type = 2 THEN 0 ELSE 1 END AND ?4 ELSE 0 END
                 AND CASE WHEN typeof(key_wrap_type) = 'integer'
                     THEN key_wrap_type IN (1, 2, 3) ELSE 0 END
                 AND (cache_key_fp IS NULL OR CASE WHEN typeof(cache_key_fp) = 'text'
@@ -717,7 +723,7 @@ pub(crate) async fn bounded_vault_preflight(
             AND CASE WHEN typeof(is_default) = 'integer'
                 THEN is_default IN (0, 1) ELSE 0 END
             AND CASE WHEN typeof(vault_key_enc) = 'blob'
-                THEN length(vault_key_enc) BETWEEN 1 AND ?4 ELSE 0 END
+                THEN length(vault_key_enc) BETWEEN CASE WHEN key_wrap_type = 2 THEN 0 ELSE 1 END AND ?4 ELSE 0 END
             AND CASE WHEN typeof(key_wrap_type) = 'integer'
                 THEN key_wrap_type IN (1, 2, 3) ELSE 0 END
             AND (cache_key_fp IS NULL OR CASE WHEN typeof(cache_key_fp) = 'text'

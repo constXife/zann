@@ -246,3 +246,5 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for local development instructions.
 MIT License - see [LICENSE](LICENSE)
 
 Copyright 2025 constXife
+
+See [Passkey backups and exchange](operations/passkey-exchange.md) for native transfer and offline CLI conversion.

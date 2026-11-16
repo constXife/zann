@@ -78,7 +78,7 @@ impl ExportStepUpFfi {
 #[derive(uniffi::Object)]
 pub struct ExportAuthorizationFfi(Mutex<Option<native::ExportAuthorization>>);
 impl ExportAuthorizationFfi {
-    fn take(&self) -> CoreResult<native::ExportAuthorization> {
+    pub(crate) fn take(&self) -> CoreResult<native::ExportAuthorization> {
         self.0
             .lock()
             .expect("authorization")

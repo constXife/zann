@@ -11,8 +11,8 @@ pub(super) fn default_backup_path(root: &Path) -> PathBuf {
 pub(super) struct ExportItemStreamer<'a> {
     ctx: &'a BackupCtx,
     item_repo: LocalItemRepo<'a>,
-    vaults: VecDeque<(Uuid, Uuid)>,
-    current_vault: Option<(Uuid, Uuid)>,
+    vaults: VecDeque<(Uuid, Uuid, VaultKind, zann_core::VaultEncryptionType)>,
+    current_vault: Option<(Uuid, Uuid, VaultKind, zann_core::VaultEncryptionType)>,
     cursor: Option<(chrono::DateTime<Utc>, Uuid)>,
     buffer: VecDeque<LocalItem>,
 }
@@ -36,7 +36,7 @@ impl<'a> ExportItemStreamer<'a> {
     pub(super) fn new(
         ctx: &'a BackupCtx,
         item_repo: LocalItemRepo<'a>,
-        vaults: VecDeque<(Uuid, Uuid)>,
+        vaults: VecDeque<(Uuid, Uuid, VaultKind, zann_core::VaultEncryptionType)>,
     ) -> Self {
         Self {
             ctx,
@@ -69,6 +69,16 @@ impl<'a> ExportItemStreamer<'a> {
                     )
                     .await
                     .map_err(|err| anyhow::anyhow!(err))?;
+                let (_, _, kind, encryption) = self
+                    .current_vault
+                    .ok_or_else(|| anyhow::anyhow!("backup vault missing"))?;
+                zann_client::passkey_exchange::validate_payload(
+                    &item.type_id,
+                    &payload,
+                    kind,
+                    encryption,
+                )
+                .map_err(anyhow::Error::from_boxed)?;
                 let backup_item = PlainBackupItem {
                     tags: metadata.tags.clone(),
                     favorite: metadata.favorite,
@@ -91,7 +101,7 @@ impl<'a> ExportItemStreamer<'a> {
                 self.cursor = None;
             }
 
-            let Some((storage_id, vault_id)) = self.current_vault else {
+            let Some((storage_id, vault_id, _, _)) = self.current_vault else {
                 return Ok(None);
             };
 

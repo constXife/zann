@@ -26,6 +26,9 @@ async fn main() -> anyhow::Result<()> {
         print_version();
         return Ok(());
     }
+    if let Command::Passkey(args) = &cli.command {
+        return crate::modules::passkey::convert(args);
+    }
     let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
         .ok_or_else(|| anyhow::anyhow!("home directory is not set"))?;
     let mut state = CliState::open(std::path::PathBuf::from(home).join(".zann"))?;

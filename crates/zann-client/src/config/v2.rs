@@ -1,4 +1,3 @@
-use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;

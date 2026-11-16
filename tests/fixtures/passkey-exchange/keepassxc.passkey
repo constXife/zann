@@ -1,0 +1,8 @@
+{
+  "relyingParty": "example.com",
+  "url": "https://example.com/login",
+  "username": "test@example.com",
+  "credentialId": "ABEiM0RVZneImaq7zN3u_w",
+  "userHandle": "c3ludGhldGljLXVzZXItaGFuZGxl",
+  "privateKey": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgya+p2EW6dRZrXCFX\nZ7HWk05Qw9s26JsSe4piKxIPZyGhRANCAARg/tS6JVqdMclh63TGNW1owEm4kjth\n+mzmaWIuYPKftnkD/hAIuLyZpBrp6VYovGTy8bIMLX6fUXejwpTURiKZ\n-----END PRIVATE KEY-----\n"
+}

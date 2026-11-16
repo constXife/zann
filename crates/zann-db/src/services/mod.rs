@@ -91,8 +91,10 @@ impl<'a> LocalServices<'a> {
     }
 
     fn validate_payload_size(payload: &EncryptedPayload) -> ServiceResult<()> {
-        let bytes = serde_json::to_vec(payload)
-            .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?;
+        let bytes = Zeroizing::new(
+            serde_json::to_vec(payload)
+                .map_err(|err| ServiceError::new("payload_encode_failed", err.to_string()))?,
+        );
         if bytes.len() > MAX_ITEM_PAYLOAD_BYTES {
             return Err(ServiceError::new(
                 "payload_too_large",
@@ -680,3 +682,6 @@ mod storages;
 mod vaults;
 
 mod create_item;
+
+mod item_batch;
+pub use item_batch::PreparedItemBatch;

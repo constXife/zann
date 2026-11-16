@@ -427,3 +427,6 @@ uniffi::setup_scaffolding!("zann_ffi");
 
 #[cfg(feature = "test-support")]
 mod test_support;
+
+mod passkey_exchange;
+pub use passkey_exchange::*;

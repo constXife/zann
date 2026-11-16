@@ -1,17 +1,21 @@
 import SwiftUI
 
 struct MaintenanceSections: View {
+    @EnvironmentObject private var app: AppModel
     @ObservedObject var maintenance: MaintenanceModel
     let unlocked: Bool
     let strings: Strings
     @State private var confirmExport = false
     @State private var encryptedExport = false
     @State private var encryptedRestore = false
+    @State private var passkeys = false
 
     var body: some View {
         Section(strings("settings.tabs.backups")) {
             Text(strings("settings.backups.exportDesc"))
             exportAction
+            Button(strings("passkeyExchange.title")) { passkeys = true }.disabled(!unlocked || maintenance.busy)
+                .sheet(isPresented: $passkeys, onDismiss: { Task { await app.vault?.refreshLocalContents() } }) { PasskeyExchangeView(model: maintenance.passkeys, core: maintenance.core, strings: strings) }
             Button(strings("backup.encryptedTitle")) { encryptedExport = true }.disabled(!unlocked || maintenance.busy)
                 .sheet(isPresented: $encryptedExport) { EncryptedBackupView(model: maintenance.encrypted, restoring: false, strings: strings) }
             Button(strings("backup.restoreTitle")) { encryptedRestore = true }.disabled(!unlocked || maintenance.busy)
@@ -27,7 +31,7 @@ struct MaintenanceSections: View {
                     .accessibilityIdentifier("maintenance.snapshotResult")
             }
         }
-        .onChange(of: unlocked) { value in if !value { encryptedExport = false; encryptedRestore = false; confirmExport = false } }
+        .onChange(of: unlocked) { value in if !value { encryptedExport = false; encryptedRestore = false; confirmExport = false; passkeys = false } }
         Section(strings("maintenance.verifyTitle")) {
             Button(strings("maintenance.verifyAction")) { Task { await maintenance.verify() } }
                 .accessibilityIdentifier("maintenance.verify")

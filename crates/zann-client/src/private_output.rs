@@ -5,7 +5,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub(crate) struct PrivateOutput {
+pub struct PrivateOutput {
     file: Option<File>,
     temporary: PathBuf,
     target: PathBuf,
@@ -13,7 +13,7 @@ pub(crate) struct PrivateOutput {
 }
 
 impl PrivateOutput {
-    pub(crate) fn create(target: &Path) -> io::Result<Self> {
+    pub fn create(target: &Path) -> io::Result<Self> {
         let parent = target
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -27,7 +27,14 @@ impl PrivateOutput {
         }
         directories.create(parent)?;
         let temporary = parent.join(format!(".zann-export-{}.tmp", uuid::Uuid::now_v7()));
-        let file = super::secure_file::create_new_private_file(&temporary)?;
+        let mut options = fs::OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options.open(&temporary)?;
         Ok(Self {
             file: Some(file),
             temporary,
@@ -37,14 +44,14 @@ impl PrivateOutput {
     }
 
     /// Sync and close before acquiring the short final authorization lease.
-    pub(crate) fn seal(&mut self) -> io::Result<()> {
+    pub fn seal(&mut self) -> io::Result<()> {
         if let Some(file) = self.file.take() {
             file.sync_all()?;
         }
         Ok(())
     }
 
-    pub(crate) fn publish(mut self) -> io::Result<()> {
+    pub fn publish(mut self) -> io::Result<()> {
         if self.file.is_some() {
             return Err(io::Error::other("export output is not sealed"));
         }

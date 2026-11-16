@@ -252,8 +252,38 @@ the generic detail/editor APIs. FFI and COSMIC consume the same policy. Local
 write encryption and server typed/history payload admission reject shared
 passkeys. Vault `v1` envelopes, sync checkpoints and keyring transitions are
 unchanged. Regression coverage includes standard RFC/W3C/CTAP vectors and two
-independent offline credential copies; live provider and export qualification
-remain #292–#294, #297 and #298.
+independent offline credential copies. Live browser/OS provider qualification
+remains #293–#294.
+
+## Passkey portability (#292)
+
+Review `zann-passkey::exchange`, `zann-client::{passkey_exchange,private_output}`,
+`zann-client-sqlite::local_vault::passkey`, canonical backup/verify validation,
+and `zann-db::services::{item_batch,create_item}` together. The same pure codecs
+serve native shells, FFI and the file-only offline CLI converter. Native CXF
+exports require the #297 permit; conversion operates on an explicitly chosen
+already-plaintext file and never opens an unlocked vault or server session.
+
+Imports require explicit personal/client-encrypted targets, validate the complete
+bounded document before writes and publish item/history/pending rows in one
+SQLite transaction. Duplicate RP/credential identities cannot replace a different
+public key or user handle. Cancellation or generation changes roll back prepared
+writes; after commit starts, await its outcome. No public item identifier is
+derived from a credential ID. The active-type index keeps scans bounded.
+
+Canonical `v1` passkey payloads may omit an unknown creation time and may carry
+one protected `exchange_metadata` field for associated login, URL and note data;
+that field is never copied/revealed by generic UI policy. The CXF namespaced
+extension preserves RP display names and exact/unknown creation times. No item
+ciphertext/KDF/AAD format changes. KeePass history, encrypted XML, nonzero counters,
+unsupported algorithms/extensions, ambiguous/duplicate fields and invalid points
+are refused. Source errors retain structured parser location/category while
+Display/Debug and the exposed source chain omit secret values.
+
+The synthetic RFC-key corpus covers all codecs, immutable valid assertions,
+plain/encrypted server restores and independent pulls, `VACUUM INTO` snapshot
+restoration, unlocked semantic verification, step-up replay, private publication,
+shared-target rejection, cancellation and all-or-nothing import.
 
 ### Plaintext export step-up (#297)
 

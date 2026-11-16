@@ -111,12 +111,13 @@ pub fn make_credential(
     // Credential identifiers are independent of the signing scalar.
     let id = zann_crypto::es256::credential_id().map_err(PasskeyError::Crypto)?;
     let credential = Credential {
+        exchange_metadata: None,
         rp_id: request.rp_id.clone(),
         rp_name: request.rp_name.into(),
         id: id.to_vec(),
         user: request.user,
         key,
-        created_at: request.created_at,
+        created_at: Some(request.created_at),
     };
     let mut auth_data = authenticator_data(request.rp_id, &request.context, true);
     auth_data.extend_from_slice(&[0; 16]); // none attestation: anonymous AAGUID
