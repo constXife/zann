@@ -12,11 +12,12 @@
   [ADR 0017](0017-portable-encrypted-backups.md) (Accepted),
   [#149](https://github.com/constXife/zann/issues/149) (historical portable-unlock discussion)
 
-This is a design proposal, not an implemented protocol or approval to change
-cryptographic formats. Product choices and acceptance blockers below remain open.
-The repository has no separate values manifest; the governing values are the
-trust separation, custody, canonical ownership, atomicity and bounded-work
-invariants in [AGENTS.md](../../AGENTS.md).
+The product direction below is confirmed; this ADR remains Proposed pending
+protocol review, provider qualification and the server-access recovery decision.
+It is not an implemented protocol or approval to change cryptographic formats.
+The repository has no separate values manifest; governing values are the trust
+separation, custody, canonical ownership, atomicity and bounded-work invariants
+in [AGENTS.md](../../AGENTS.md).
 
 ## Context and measured baseline
 
@@ -29,293 +30,307 @@ Inspected `main` at `7ec8e0798d4948b44c31ff1a045cc15276d70528`:
 - [Account enrollment](../../crates/zann-client/src/app/account_keys/enrollment.rs)
   associates personal vaults with a password-derived account key; shared-only
   accounts receive a random local cache key. These are distinct purposes.
-  [Sync proof](../../crates/zann-client/src/sync/account_key.rs) verifies the key
-  against published personal vault keys before binding its fingerprint.
+  [Sync proof](../../crates/zann-client/src/sync/account_key.rs) checks published
+  personal vault keys before binding an account-key fingerprint.
 - [Device unlock](../../crates/zann-client/src/app/unlock.rs) uses an independent
   local password and stable random root. The root wraps multiple account keys.
   [Account envelopes](../../crates/zann-client/src/app/unlock/accounts.rs) bind
   device, storage, server, subject and key origin; insertion refuses replacement.
 - The [existing recovery-kit service](../../crates/zann-server/src/domains/users/service.rs)
   generates a secret on the server and stores its password-style hash. It does
-  not wrap a personal account key; it is not E2EE recovery.
-- [#291](https://github.com/constXife/zann/issues/291) concerns passkeys **for other
-  sites**. The current desktop provider (#293/#305) supplies presence, not UV or
+  not wrap a personal account key; its existence does not establish E2EE recovery
+  or a complete lost-passkey server-login recovery flow.
+- [#291](https://github.com/constXife/zann/issues/291) concerns passkeys for other
+  sites. The current desktop provider (#293/#305) supplies presence, not UV or
   PRF. Neither it nor device-local hardware unlock implements this proposal.
 - ADR 0013 records rotation requirements, not an available rotation protocol.
   ADR 0017 archives recover data, not online account authorization.
 
-## Proposed product contract
+## Confirmed product direction
 
-The recommended target is a new-device login using an externally available,
-syncable passkey, followed by local personal-vault unlock without an account
-master password. Initial setup also creates a separate recovery key, saved
-outside Zann and outside the same passkey provider.
+1. **Account Encryption Password remains the default independent text root.**
+   It derives the personal account key through the existing Argon2id owner on a
+   fresh device. Passkey enrollment adds another wrapping method; it does not
+   remove the password or require rotation to a random account key. A future
+   long random printed Recovery Key can replace this text root only through a
+   separately reviewed transition. A recovery root must always remain available.
+2. **Choose the passkey mode at enrollment.** Offer `Auth + Vault Unlock` by
+   default when PRF is proven usable, and `Auth-only` when PRF is unsupported or
+   the user disables vault unlock. Both authenticate to the server; only the
+   former has an account-key grant. No grant is inferred from a credential name.
+3. **Full unlock requires user verification.** A touch-only hardware operation
+   cannot release the server-held account-key envelope. Require UV in registration
+   and authentication, enforced by RP verification, not by a caller-supplied flag.
+   Auth-only registration follows an explicit server authentication policy;
+   missing PRF alone must not reject an otherwise admitted credential or weaken
+   that policy. Full-unlock requirements never silently downgrade.
+4. **New-device experience:** server URL -> passkey/security-key ceremony ->
+   session and, for full-unlock credentials, local account-key unwrap -> configure
+   local device protection -> verified keyring enrollment and first sync. For
+   Auth-only, ask for the Account Encryption Password before local enrollment.
+5. **A bootstrap factor must be available before Zann unlock.** Hardware keys,
+   an external provider or a qualified phone-assisted ceremony are candidates.
+   Passkeys stored solely inside locked Zann cannot bootstrap it. Current Zann
+   provider UV/PRF limitations also prevent claiming self-hosted full unlock.
 
-Two product decisions still require confirmation before acceptance:
+## Proposed technical decision
 
-1. Whether passkey access must replace the account master password for personal
-   decryption, or whether the initial release is login-only. The recommendation
-   above is the former; login-only must be named honestly if chosen.
-2. Whether an external provider is the bootstrap requirement, or whether Zann
-   must also provide its own account passkey. A credential available only inside
-   a locked Zann vault is circular. A self-stored additional credential cannot be
-   the only bootstrap or recovery method; current provider UV/PRF support is also
-   insufficient. Self-hosted bootstrap requires a separate accepted design.
+### 1. Keep login, account encryption and device protection separate
 
-## Proposed decision
+WebAuthn creates an ordinary server session. It does not itself produce an account
+key. The Account Encryption Password or a verified PRF grant supplies that key
+locally. DeviceUnlock independently protects the multi-account root and cache.
+Neither the account password nor PRF output is sent as a server login password.
 
-### 1. Separate login, account decryption and device unlock
+On a new device, hold a recovered account key only in a bounded, cancellable,
+account-bound bootstrap operation until local protection is configured. Do not
+persist a usable unprotected SQLite cache or recreate a second keyring. Enroll
+through the existing proven keyring CAS, account fingerprint and sync proof.
+An existing locked root still needs its local factor: one account's passkey must
+not unwrap the root or expose other accounts. A general root-less vault session
+is not required by this onboarding proposal.
 
-WebAuthn proves possession/verification to the server and creates an ordinary
-Zann session. It does not itself reveal a vault key. A native client separately
-opens an opaque account-key grant using a PRF result. A local device factor
-opens the existing device root. These authorities never imply one another.
+Passkey auth returns the account's authenticated KDF identity for the text-root
+path. Do not invent a salt, derive an account key from an empty password, or
+interpret the authentication method as the encryption-key purpose. Shared-only
+accounts retain ADR 0012's random local cache-key policy.
 
-For an already enrolled device, current password/OS/hardware unlock remains a
-local offline operation. Passkey account access must also have an account-scoped
-session: obtaining one account key can expose only that account's replica,
-including its eligible cached data. It cannot unlock the device root, other
-accounts, root administration or root-wide export. Persisting into the device
-keyring requires the existing root capability and verified enrollment CAS.
-
-This requires extending the canonical local-session capability, not a second
-vault implementation. Locked-root account sessions, lock/cancel, account removal,
-cache policy and pending sync must be specified before enabling this path.
-Initial passkey access needs the server grant; offline PRF unlock is not promised.
-Shared-only accounts retain ADR 0012's local cache-key policy; WebAuthn login does
-not convert a cache key into a personal encryption key.
-
-### 2. Standard RP authentication with explicit deployment identity
+### 2. Standard RP authentication and explicit deployment identity
 
 The server auth domain owns registration, discoverable authentication, credential
-management and short-lived challenge state. Require fresh challenge validation,
-UV, correct type, RP hash, exact allowed origin, user handle/account binding,
-credential signature and active credential/account state. Use a maintained
-WebAuthn verifier, not the provider-side `zann-passkey` signer as a verifier.
-Evaluate [webauthn-rs](https://docs.rs/webauthn-rs/latest/webauthn_rs/) in the spike;
-library/feature selection is not settled by this ADR.
+management and bounded challenge state. Verify challenge, type, RP hash, exact
+allowed origin, user handle/account binding, signature, the selected UV policy
+and active credential/account state. Full unlock always requires UV; pin down the
+Auth-only UV policy before acceptance. Reuse ordinary device/session issuance in
+the same successful challenge-consumption transaction. Use a maintained WebAuthn verifier, not the
+provider-side `zann-passkey` signer. Evaluate
+[webauthn-rs](https://docs.rs/webauthn-rs/latest/webauthn_rs/) in the spike; exact
+library/features remain a review decision.
 
 Configure RP ID and exact browser/extension/native origins as deployment identity,
-never infer them from Host headers or page input. RP IDs lack ports; sharing a
-domain across independent deployments needs explicit policy. Domain/RP changes
-are credential re-enrollment events, not transparent aliases. Preserve the
-client's exact endpoint, server identity and fingerprint checks before secrets
-or proofs are sent. Email is a display/discovery hint, not account authority.
+never infer them from Host headers or page input. RP IDs lack ports; independent
+deployments sharing a domain need explicit policy. RP/domain changes require
+credential re-enrollment. Preserve exact endpoint, server identity and fingerprint
+checks before proofs are sent; email is a discovery hint, not account authority.
 
-Syncable credentials can have zero signature counters; verification must follow
-the standard's counter and backup rules, rather than require increments. Backup
-eligibility/state does not prove an independent recovery copy. A synchronized
-credential is one server credential: its devices cannot be revoked separately.
-See [WebAuthn credential backup state and counters](https://www.w3.org/TR/webauthn-3/#sctn-credential-backup).
+Apply standard counter/backup verification: syncable credentials can use zero
+counters, and backup state does not prove an independent recovery copy. Synced
+devices share a credential and cannot be individually revoked at the RP. See
+[WebAuthn credential backup state](https://www.w3.org/TR/webauthn-3/#sctn-credential-backup).
 
-### 3. Random account key with one independently wrapped grant per factor
+### 3. One independently verified account-key grant per full-unlock credential
 
-New passwordless personal accounts use a random account encryption key. Personal
-vault keys remain encrypted under that key using the canonical crypto owner.
-The server stores only public credential records and opaque grants. Each grant
-wraps the same account key under a credential-specific PRF-derived wrapping key.
-Public credential IDs and assertion signatures are never encryption key material.
+A grant wraps the current account key under a credential-specific PRF-derived
+wrapping key. The server stores the public credential and opaque grant; it never
+receives the PRF result, wrapping key or personal account key. Public credential
+IDs and authentication signatures are not encryption key material.
 
-Bind grant AAD and the derivation transcript to the server identity, canonical
-account subject, RP ID, credential ID, grant ID, purpose and account-key epoch.
-Persist the public PRF input descriptor with the grant; validate its bounded
-canonical encoding locally. Domain-separate account wrapping, recovery wrapping
-and all signing uses. `zann-crypto` owns the exact reviewed key schedule and
-ChaCha20-Poly1305 wrapping; new wraps must trial-decrypt and compare before commit.
+`zann-crypto` owns the reviewed derivation and ChaCha20-Poly1305 wrap. Bind the
+wrapping transcript/AAD to server identity, canonical subject, RP ID, credential
+ID, grant ID, purpose and account-key epoch. Trial-decrypt and compare every new
+wrap before publication. A full-unlock credential must prove actual PRF output;
+registration support flags alone are insufficient.
+
+The target login is one discoverable assertion, including PRF evaluation. Use a
+stable, public, versioned PRF input derived from the already trusted deployment/RP
+and unlock purpose; standard `eval` can apply to whichever credential is selected.
+After server verification identifies the subject and returns the matching grant,
+derive the wrapping key using that grant's complete bound context. Account/epoch
+binding belongs in this wrapping derivation and AAD; do not require an unknown
+credential-specific input before discoverable selection. Specify the exact input
+encoding/key schedule and qualify it on real providers before acceptance. Native
+CTAP hmac-secret must match WebAuthn PRF's input normalization and UV-dependent
+secret semantics; do not treat raw inputs/outputs as interchangeable by name.
 
 The [PRF extension](https://www.w3.org/TR/webauthn-3/#prf-extension) is optional;
-creation can report support without returning output. Probe an assertion and
-prove unwrap before marking a credential unlock-capable. Never serialize a whole
-browser credential to the server: `toJSON()` can include secret PRF results.
-Build an allowlisted authentication DTO and keep PRF output local.
+outputs can be absent at creation. Enrollment can require an additional assertion
+before enabling full unlock. A provider combination that cannot achieve the
+one-ceremony login target is not advertised as supporting that experience.
+Never send whole browser credential JSON to the server: `toJSON()` can include
+PRF results. Construct an allowlisted authentication DTO instead.
 
-Discoverable login may need two ceremonies: authenticate to identify the account,
-then evaluate that credential's PRF using the verified grant context. Optimize
-only when identity/context is already bound; do not assume email-less discovery
-provides credential-specific inputs in advance. Missing/changed PRF output is an
-explicit unsupported or failed-unlock state, never a password fallback or key reset.
+Expected unsupported PRF yields the explicitly authorized Auth-only path and a
+clear Account Encryption Password prompt. If an enrolled full-unlock grant is
+missing, corrupt or fails verification, retain that diagnostic and offer explicit
+password unlock; never silently reset the key, overwrite the grant, or disguise
+corruption as ordinary unsupported capability. Cancellation aborts the operation.
 
-Adding a wrap to today's password-derived account key does not remove its offline
-password-guess exposure. Existing-account conversion therefore requires ADR
-0013's verified rotation to a random key, with readable caches, pending writes
-and history preserved. No blind keyring replacement or reconnect-to-delete-data.
-Do not claim this conversion is implemented or create a second envelope version
-to evade ADR 0009. Changing serialized key origins/AAD invokes its breaking-change,
-golden-fixture and lossless export/import requirements.
+### 4. Trusted adapters, not server-served personal-key JavaScript
 
-### 4. Trusted adapters keep PRF material out of server-served pages
+Personal key handling stays in trusted installed client code. A server web page
+may perform login-only WebAuthn, but must not request the vault PRF, handle the
+Account Encryption Password/recovery secret or receive an account key.
 
-Personal key handling remains within trusted installed client code. A server
-web page may perform login-only WebAuthn, but must not request the vault PRF,
-handle the recovery secret or receive an account key. This preserves the existing
-personal-vault/server-console boundary, including under server compromise.
-
-For COSMIC, investigate a packaged extension-origin bootstrap page invoking the
-browser's native WebAuthn API, with an effective host grant for the RP and exact
-extension origin allowed by the server. Chromium currently checks effective
+For COSMIC, investigate a private packaged extension-origin page invoking native
+browser WebAuthn, with an effective host grant for the RP and exact extension
+origin allowed at the server. Chromium checks effective
 [extension RP host permissions](https://chromium.googlesource.com/chromium/src/+/ecf43dd2aa505fc586380559884f304e1846c32d/chrome/browser/webauthn/chrome_web_authentication_delegate.cc).
 This is a feasibility direction, not qualified Zann support. It needs locked-vault
 pairing through existing native management, the authenticated Noise channel,
-strict sender/operation binding and a non-embeddable private extension page.
-Do not reuse the website-injected provider shim or a global authentication proxy.
-No arbitrary page or content script gets a secret-return IPC operation.
+strict sender/operation binding and a non-embeddable extension page. No website
+injected shim, global proxy or arbitrary-page secret-return IPC endpoint.
 
-Apple uses an OS AuthenticationServices adapter; its
+Apple uses a native AuthenticationServices adapter; its
 [PRF APIs](https://developer.apple.com/documentation/authenticationservices/asauthorizationpublickeycredentialprfassertioninput-c.class)
-provide a native candidate. Android needs an independently qualified OS/provider
-adapter. Associated-domain requirements, API/OS floors and provider behavior are
-release gates; existing app minimum versions do not imply PRF support. Qualify
-actual sync/new-device unwrap, not just feature detection or two local assertions.
+provide a candidate. Android needs an independently qualified adapter. Record
+associated-domain requirements, exact OS/browser/provider/firmware versions and
+phone/hybrid PRF behavior. App minimum versions and brand names do not prove
+support. Qualify sync to a clean device and successful unwrap, not only local
+feature detection; provide explicit Auth-only support where PRF is unavailable.
 
-### 5. Independent recovery, generated locally
+### 5. Independent recovery has two separate jobs
 
-Generate a 256-bit random recovery secret in the trusted native client. The
-recovery card contains a version/checksum and non-secret account/server locator
-and trust information. Require explicit confirmation that it was saved outside
-Zann before passwordless enrollment completes. Never send the raw secret to the
-server, log it, place it in URLs/argv or persist plaintext without private modes.
+**Recover decryption:** the Account Encryption Password remains the first-release
+text root. In Auth-only mode it derives the account key locally using authenticated
+KDF parameters and existing personal-vault proof. Losing every passkey must not
+force a change of this encryption key or destroy readable local copies.
 
-The proposed construction derives separate recovery wrapping and recovery-proof
-keys. The server keeps a public challenge-verification key and an opaque wrap of
-the account key; it never receives the wrapping key or signing seed. A signed,
-single-use challenge yields only a short-lived recovery capability until a new
-tested passkey/grant and replacement recovery material are ready. Ed25519 is a
-candidate; reuse/extract the crypto primitive owner, not IPC identities/transcripts.
-The exact transcript, key schedule and authorization protocol require review
-before acceptance; this paragraph is not a bespoke wire specification.
+**Recover server authorization:** possession of the encryption password alone
+does not currently issue a server session. Before shipping a lost-all-passkeys
+claim, select and test an independent authorization path:
 
-Recovery completion atomically publishes the tested replacement grants, rotates
-the recovery verifier and revokes the selected old credentials and sessions under
-an expected generation. Account lookup, challenge issuance and wrong proofs must
-be enumeration/rate bounded. Acknowledged generation/read-back resolves a lost
-response; never blindly repeat an ambiguous recovery commit.
+- Retain a separate server password or deploy an explicit OIDC/admin recovery
+  policy, then locally unlock with the Account Encryption Password; or
+- Specify a client-generated independent Recovery Key with separate public
+  recovery-proof and key-wrapping purposes, enabling self-service server and
+  personal-data recovery. Never send its raw secret to the server.
 
-Ordinary enrollment/management also needs current account-key custody and fresh
-server authorization. A stolen session alone cannot replace the recovery verifier,
-publish an accepted personal-key manifest or remove the last proven recovery path.
-Define an authenticated account encryption manifest and generation proof; local
-successful unwrap alone is not a server-verifiable custody proof. Prevent grant
-substitution, cross-account replay and stale-manifest acceptance. A fresh device
-cannot detect every malicious-server rollback without an independent checkpoint;
-document that residual limit rather than claiming global rollback prevention.
+This product choice is still open. Do not silently reuse the encryption password
+as a server credential or advertise today's server-generated recovery kit as
+sufficient. Any future text-root replacement must be generated locally, saved
+outside Zann/the passkey provider and proven before removing the prior root.
+Its exact proof transcript, key schedule and replacement transaction need review.
 
-An unlocked device or independent second factor can enroll a tested replacement.
-Without any usable grant, recovery secret or unlocked copy, personal data is
-unrecoverable. Admin/email/OIDC account reset cannot decrypt it. Shared-vault
-authorization recovery remains server-policy controlled. Backup restore is a
-separate disaster-recovery workflow and does not mint a login session.
+An already unlocked device can authorize enrollment of a tested replacement
+passkey using fresh server authorization plus current account-key custody. A
+stolen session alone must not replace the accepted personal-key manifest, remove
+the text-root recovery path or add a usable decrypting grant. Specify the
+manifest/custody proof; local unwrap alone is not server-verifiable custody proof.
+Bind generation and purpose to prevent substitution and cross-account replay.
+A fresh device cannot detect every malicious-server rollback without an independent
+checkpoint; document that limit rather than claim global rollback prevention.
 
-Revocation stops future server access, not already copied keys or offline data.
-Account-key rewrap alone does not revoke previously learned vault keys. Suspected
-key compromise needs a separately specified vault-key rotation/re-encryption
-scope in ADR 0013; a lost-device action must state its actual guarantees.
+If no text root, usable grant, unlocked copy or independent backup survives,
+personal data is unrecoverable. Admin/email/OIDC reset cannot decrypt personal
+vaults. Shared-vault authorization recovery remains server-policy controlled.
+ADR 0017 backup restore recovers data, not an online login session.
+
+### 6. Revoke factors without overstating rotation guarantees
+
+Revocation atomically disables that credential's login and deletes its unlock
+grant, leaving other credentials and configured devices usable. Retrying a
+completed revocation is idempotent. It stops future server access, not already
+copied keys or offline plaintext; devices sharing one synced credential revoke
+together. Session handling and explicit revoke-existing-sessions options must
+have tested semantics.
+
+Initial enrollment wraps the existing account key; ADR 0013 rotation is not a
+prerequisite. Password change, account-key rotation and suspected compromise are
+separate operations. Before implementing them, specify epochs, unavailable
+factors' grant renewal, readable caches, pending writes and history under ADR
+0013. Updating a password-derived key cannot magically rewrap grants whose PRF
+is unavailable. Rewrapping the account key alone also does not revoke previously
+learned vault keys; compromise can require vault-key rotation/re-encryption.
+
+Retaining the password-derived root retains its offline password-guess exposure.
+That is an explicit cost of the confirmed recovery model, not a claim that adding
+passkeys makes the account cryptographically passwordless. Do not introduce
+random-root conversion or a new envelope version as part of initial enrollment.
+Any later serialized origin/AAD change invokes ADR 0009's breaking-change,
+golden-fixture and lossless export/import gates.
 
 ## State, ownership and resource contract
 
-The canonical flow is prepare -> trusted ceremony -> verify -> trial unwrap ->
-generation-checked publication -> read-back -> local enrollment. Registration of
-a new account first holds only a provisional capability: it cannot create a
-usable personal vault until both the passkey grant and recovery grant are proven.
-There is no cross-network/SQLite atomic transaction: persist secret-free operation
-intent and expected generations, reconcile remote outcome, then commit locally.
-Retain the old readable state until replacement is proven; bound abandoned
-provisional registrations and challenges by expiry and cleanup quotas.
+Flow: prepare -> trusted ceremony -> verify -> trial unwrap -> expected-generation
+publication -> read-back -> device protection/enrollment -> first sync. Auth-only
+substitutes explicit local password derivation/proof for PRF unwrap. Enrollment
+of a grant requires fresh authorization and current key custody. A new account's
+text-root setup must be complete before personal-vault initialization.
+
+There is no cross-network/SQLite atomic transaction. Reuse secret-free operation
+intent, exact generation leases, keyring CAS and remote read-back reconciliation.
+Retain old readable state until replacement is proven; never blindly replay an
+ambiguous authentication/grant commit or persist secrets in an intent record.
 
 Proposed limits: 16 active WebAuthn credentials per account, one unlock grant per
-credential plus one current recovery grant, 120-second single-use challenges,
-four pending challenges per known account/client binding, 64 KiB finish messages
-and 128 KiB manifests. Add explicit global/anonymous admission quotas and measured
-cleanup bounds before shipping; per-account limits alone do not prevent exhaustion.
-Do not scan all accounts or invoke providers in a loop to discover a match.
+full-unlock credential, 120-second single-use challenges, four pending challenges
+per known account/client binding, 64 KiB finish messages and 128 KiB manifests.
+Explicit global/anonymous admission quotas, cleanup budgets and provisional-account
+expiry remain acceptance requirements; per-account caps alone are insufficient.
+No all-account scans or repeated provider prompts for discovery.
 
-- `zann-server::domains::auth`: RP verification, bounded challenge/credential and
-  manifest transactions, scoped recovery authorization; reuse session issuance.
-- `zann-core::api`: common typed public contracts; `zann-crypto`: secret types,
-  derivation, authenticated wraps and reviewed proof primitives.
+- `zann-server::domains::auth`: RP verification, challenge/credential/grant
+  transactions, server recovery policy and ordinary session issuance.
+- `zann-core::api`: typed public contracts; `zann-crypto`: secret types, derivation,
+  authenticated wraps and any reviewed custody/recovery proof primitives.
 - `zann-client::app` / auth/session/config/sync: one orchestration owner for trust,
-  custody, account epochs and crash reconciliation. Preserve auth -> credentials
-  -> config lock order; no network or OS I/O while holding a config lock.
-- `zann-client-sqlite::local_vault`: scoped sessions, proven keyring CAS, cache
-  preservation. Extend this owner rather than adding another key database.
-- `zann-keystore` and thin browser/native adapters: provider capabilities and
-  typed ceremony results. `zann-flows` owns shared state/projections; FFI projects
-  them. Shells contain presentation and OS/browser calls, not recovery policy.
+  encryption methods, epochs and crash reconciliation. Preserve auth -> credentials
+  -> config lock order; no network/OS I/O under a config lock.
+- `zann-client-sqlite::local_vault`: bootstrap custody, device protection, proven
+  keyring CAS and cache preservation. No parallel key database.
+- `zann-keystore` and thin browser/native adapters: provider capability/results.
+  `zann-flows` owns shared state/projections; FFI projects them. Shells contain
+  UI/OS/browser calls, not encryption or recovery policy.
 
 ## System alignment and per-mechanism values review
 
-- **RP login — align on implementation:** keep personal keys out of auth;
-  reuse session/trust owners and atomic single-use challenge consumption with
-  session issuance. Apply the message, expiry and admission bounds above;
-  factor auth service responsibilities before adding more flows. Cost:
-  verifier dependency/challenge storage. Discriminator: wrong origin/RP, replay,
-  UV absence, revoked credential, counter/backup and concurrent finish tests.
-- **PRF grants — align on implementation:** one account encryption purpose with
-  explicit unlock methods, replacing the personal-means-password assumption.
-  Custody stays local, trial unwrap precedes CAS, grant counts are bounded. Cost:
-  provider compatibility and a possible second prompt; test cross-device unwrap,
-  wrong context/epoch, missing PRF and malformed oversized records.
-- **Trusted adapters — align on implementation:** only installed code handles
-  PRF results; page requests cannot inherit native authority. Provider calls use
-  one injected port and operation-bound cancellation, with no secret persistence
-  or response after stale completion. One explicit ceremony at a time and expiry
-  bound admission. Cost: packaging/associated domains and platform qualification;
-  test forged senders, locked-vault pairing, stale results and secret-free DTOs.
-- **Scoped unlock — align on implementation:** reuse replica/session ownership
-  without releasing the multi-account root. Cost: explicit root capability vs
-  account-session capability; preserve existing paged queries and generation
-  leases, and avoid cross-account scans or persistent root replacement. Test A unlocked by passkey while B and root-wide
-  operations stay locked, including lock/cancel/restart and pending writes.
-- **Recovery — realign on implementation:** replace server-generated recovery-kit
-  semantics, obsolete hash storage/DTO/UI and all callers together; no dual-write
-  or compatibility route. One client-owned recovery grant/proof protocol also
-  subsumes #149's future portable-envelope need where its semantics fit. Cost:
-  custody proof, anti-lockout and multi-store crash traces; do not treat that
-  historical discussion as an accepted protocol or reuse token secrets as PRFs.
-  Keep recovery secret client-owned, publication/revocation atomic and expiry,
-  grant count, enumeration and global admission bounded as specified above.
-- **Rotation — deferred with a hard trigger:** ADR 0013 must specify/verify epoch,
-  cache/history and compromise behavior before converting existing accounts.
-  Random shared-only cache keys remain isolated; no extra account-key store.
-- **Backups — aligned as-is:** ADR 0017 keeps its independent archive semantics.
-  Reuse secret handling and trial-decrypt primitives, not archive headers as an
-  online account protocol. Recovery cards remain a separate custody obligation.
-
-## Consequences and rejected alternatives
-
-The user can recover a personal account without entrusting decryption keys to
-the server, provided an independent recovery copy survives. The cost is provider
-dependency, recovery-card custody, scoped-session work and a reviewed publication
-protocol. A cloud provider's account recovery becomes part of the passkey trust
-boundary; multiple devices in that provider are not independent factors.
-
-Rejected: signatures as encryption keys, personal-key handling in server-served
-JavaScript, recovery material generated by the server, opening the multi-account
-root with one account credential, silent password fallback, and promising
-cryptographic erasure by deleting a credential. The closest existing mechanisms
-are reused above; none currently provides a complete remote unlock protocol.
+- **RP auth — align on implementation:** reuse session/trust owners; keep personal
+  secrets out of login; atomically consume challenges with session issuance under
+  expiry/message/admission bounds. Factor auth service responsibilities before
+  growing them. Cost: verifier dependency/storage. Test replay, origin/RP/UV,
+  account binding, backup/counters and racing finish.
+- **Modes and grants — align on implementation:** preserve the current password
+  key purpose and add explicit per-credential unlock capability. One crypto owner,
+  local PRF custody, verified wraps before generation CAS and bounded grant count.
+  Cost: password-guess exposure remains and unsupported providers require the
+  authorized password prompt. Test full/Auth-only, disabled unlock, corrupt grant,
+  wrong context/epoch and no silent downgrade after cancellation.
+- **Adapters — align on implementation:** one injected port serves installed
+  clients; never delegate personal-key custody to pages. Operation binding rejects
+  stale completion, one ceremony at a time with expiry. Cost: packaging/domain
+  association and provider qualification. Test forged senders, locked pairing,
+  cancellation and secret-free network DTOs.
+- **Bootstrap/device — aligned boundary, extend orchestration:** reuse independent
+  DeviceUnlock and verified account CAS. Zeroize abandoned account keys, persist
+  no unprotected cache, retain generation checks and paged queries. Cost: one final
+  local-protection step. Test fresh setup/restart and account A never opening B.
+- **Recovery — preserve text-root custody; decision pending:** reuse password KDF
+  and vault-key proof for decryption, choose server authorization independently.
+  Reuse auth owners and atomic credential transitions, with bounded recovery
+  challenges. Cost: separate server-recovery availability. If replacing legacy
+  recovery semantics, migrate all callers/storage in place; no dual-write or
+  misleading E2EE recovery surface. #149's grant need shares this owner, not a
+  separate hardware-key table. All-key-loss tests gate completion.
+- **Revocation/rotation — reuse and defer precisely:** atomic factor/grant removal
+  cannot erase copied secrets. One generation/rotation owner preserves old cache
+  and history in bounded batches. Cost: unavailable factors need renewal and
+  compromise may need re-encryption. ADR 0013 blocks rotation, not initial grants;
+  fault traces and an unaffected second account discriminate the implementation.
+- **Backups — aligned as-is:** retain ADR 0017's independent custody, archive owner,
+  atomic/private output and bounded frames. Reuse crypto primitives, not archive
+  headers as an online protocol. Cost: an independent recovery copy to maintain.
 
 ## Delivery and acceptance gates
 
-1. Resolve the two product choices; qualify a trusted COSMIC/browser bootstrap
-   with a real externally synced PRF credential on a fresh device. Record exact
-   browser/provider/OS versions, permissions and prompt sequence. Qualify Apple
-   and Android separately; unsupported platforms remain explicit.
-2. Review exact grant/manifest/proof transcripts, trusted origin configuration,
-   fresh-device rollback limits, scoped-unlock capability and every crash point.
-   Specify recovery save confirmation, last-factor policy, quotas and expiry.
-   These block acceptance of this ADR, not just release testing.
-3. Deliver RP auth through existing sessions and typed shared flows. Login-only
-   is an honest intermediate milestone, not completion of #30. Separate public
-   browser login from the trusted PRF path.
-4. Deliver random-key enrollment, scoped personal unlock and independent recovery
-   together before offering passwordless personal accounts. Prove restart,
-   lost-response, racing enrollment/recovery and unaffected-account behavior.
-5. Specify/implement ADR 0013 conversion, then remove superseded password-derived
-   enrollment/recovery paths in the cutover scope. Preserve unrelated password
-   authentication where still explicitly supported; no silent method fallback.
+1. Qualify trusted COSMIC/bootstrap and a real synced PRF credential on a clean
+   device, including UV and the one-ceremony login target. Record exact versions,
+   permissions/prompts and Auth-only behavior. Qualify native platforms separately.
+2. Decide lost-all-passkeys server authorization; review grant/manifest/custody
+   transcripts, PRF input/key schedule, recovery/last-factor policy, scoped bootstrap
+   states, quotas, expiry, rollback limits and each crash point. These block ADR
+   acceptance, not merely final release testing.
+3. Deliver RP login through existing sessions and shared flows, including the
+   explicit credential mode. Login-only is an intermediate milestone, not #30 done.
+4. Deliver tested PRF grants, Auth-only local password unlock, fresh device
+   protection/enrollment, revocation and both independent recovery jobs. Require
+   clean-device success, unsupported PRF, wrong UV/context, races, cancellation,
+   restart/lost responses and unaffected-account evidence.
+5. Design rotation/password changes separately under ADR 0013; do not make initial
+   passkey enrollment depend on random-root conversion. Coalesce obsolete recovery
+   paths only where the selected protocol replaces their actual purpose.
 
-Implementation is T2: update capability/architecture/audit contracts with the
-code; run format, affected package clippy/tests, architecture and crypto-dependency
-gates plus security/consolidation reviews. Require real provider sync/PRF evidence
-and platform builds beyond fake-port tests. This documentation proposal is T0;
-it changes no live auth, encryption, account or local-root state.
+Implementation is T2: update capability/architecture/audit contracts with code;
+run format, affected clippy/tests, architecture and crypto-dependency gates plus
+security/consolidation review and platform builds. Real provider sync/PRF evidence
+supplements fake-port tests. This documentation proposal is T0 and changes no live
+auth, encryption, account or local-root state.
