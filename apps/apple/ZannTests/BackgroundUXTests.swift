@@ -124,7 +124,7 @@ private final class BootstrapCore: UXDelayedCore {
             systemLanguage: "en", browser: .loopback(open: { _ in }))
         app.startConnecting()
         await app.connected(.init(storageID: try XCTUnwrap(core.currentStorageId()), hasPersonalKeys: true))
-        let unlock = Task { await app.submit(password: "fixture master password", mode: .unlock) }
+        await app.submit(password: "fixture master password", mode: .unlock)
         await fulfillment(of: [started], timeout: 4)
         XCTAssertEqual(app.screen, .vault, "network sync must not hold the password screen")
         XCTAssertFalse(app.busy)
@@ -135,7 +135,6 @@ private final class BootstrapCore: UXDelayedCore {
         XCTAssertEqual(vault.visibleItems.map(\.title), ["First"])
         vault.startCreating(typeID: "note")
         XCTAssertNotNil(vault.editor, "the workspace remains usable during sync")
-        await unlock.value
         let finishing = Task { await vault.sync() }
         await Task.yield()
         gate.signal()

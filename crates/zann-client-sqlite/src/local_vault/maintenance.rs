@@ -120,33 +120,7 @@ impl LocalVault {
         })
     }
 
-    /// Export every local vault to a plain backup file. An empty `path` writes
-    /// to the vault directory's default location, which is what a client with
-    /// no file picker of its own wants.
-    pub fn backup_export_file(&self, path: String) -> LocalResult<BackupExportReport> {
-        let ctx = self.backup_ctx()?;
-        let path = path.trim();
-        let target = if path.is_empty() {
-            ctx.default_export_path()
-        } else {
-            PathBuf::from(path)
-        };
-        let report = self
-            .runtime
-            .block_on(crate::maintenance::backup::plain_export(&ctx, target))?;
-        Ok(BackupExportReport {
-            path: report.path,
-            storages_count: report.storages_count as u64,
-            vaults_count: report.vaults_count as u64,
-            items_count: report.items_count as u64,
-        })
-    }
-
-    /// Walk every vault and item this key can open, checking the database
-    /// structure, every stored checksum and every payload's decryption.
-    ///
-    /// Needs the key, unlike a snapshot: proving a payload is still readable
-    /// means reading it.
+    /// Verify local ciphertext and database integrity without modifying items.
     pub fn verify(&self) -> LocalResult<VerifyReport> {
         let _root = self.root_key()?;
         let keys = self.account_keys.lock().expect("lock poisoned").clone();

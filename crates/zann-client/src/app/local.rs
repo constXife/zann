@@ -2,7 +2,9 @@
 
 mod browser;
 mod error;
+mod export;
 pub use browser::*;
+pub use export::*;
 mod model;
 mod port;
 mod recovery;

@@ -5,12 +5,14 @@
 //! What lands on disk is only `credential_id` and `salt`, neither of which is
 //! secret and neither of which is useful without the physical token.
 //!
-//! Credentials are non-discoverable and require user presence (a touch) but not
-//! user verification (a PIN): this is an optional convenience over the master
-//! password, so a PIN on every unlock is the wrong trade. The token's own
-//! discoverable-credential slots stay free for other uses.
+//! Credentials are non-discoverable. Callers explicitly choose presence,
+//! PIN verification, or built-in user verification for each derivation.
+//! Ordinary remembered unlock keeps its presence policy; export confirmation
+//! can request a PIN without changing the enrollment or persisting the PIN.
 
-use crate::{AuthenticatorInfo, FidoError, HardwareAuthenticator, HardwareCredential};
+use crate::{
+    AuthenticatorInfo, FidoError, HardwareAuthenticator, HardwareCredential, HardwareVerification,
+};
 use ctap_hid_fido2::fidokey::{
     get_assertion::get_assertion_params::{Extension as Aext, GetAssertionArgsBuilder},
     make_credential::make_credential_params::{Extension as Mext, MakeCredentialArgsBuilder},
@@ -57,6 +59,8 @@ fn classify(message: &str) -> FidoError {
     let lower = message.to_ascii_lowercase();
     if lower.contains("0x2e") || lower.contains("no_credentials") {
         FidoError::NotEnrolled
+    } else if lower.contains("0x31") || lower.contains("pin_invalid") {
+        FidoError::InvalidPin
     } else if lower.contains("0x27") || lower.contains("operation_denied") {
         // The authenticator reports a touch that never came the same way it
         // reports one the user actively declined.
@@ -128,9 +132,13 @@ impl HardwareAuthenticator for CtapHidAuthenticator {
     }
 
     /// Derive the device wrapping key. Requires a touch.
-    fn derive_dwk(&self, credential: &HardwareCredential) -> Result<[u8; 32], FidoError> {
+    fn derive_dwk(
+        &self,
+        credential: &HardwareCredential,
+        verification: HardwareVerification<'_>,
+    ) -> Result<[u8; 32], FidoError> {
         let device = open()?;
-        derive_dwk_with(&device, credential)
+        derive_dwk_with(&device, credential, verification)
     }
 
     /// Whether *this* credential's authenticator is connected, without asking the
@@ -152,12 +160,22 @@ impl HardwareAuthenticator for CtapHidAuthenticator {
 fn derive_dwk_with(
     device: &FidoKeyHid,
     credential: &HardwareCredential,
+    verification: HardwareVerification<'_>,
 ) -> Result<[u8; 32], FidoError> {
     let args = GetAssertionArgsBuilder::new(RP_ID, &challenge())
-        .without_pin_and_uv()
         .credential_id(&credential.credential_id)
-        .extensions(&[Aext::HmacSecret(Some(credential.salt))])
-        .build();
+        .extensions(&[Aext::HmacSecret(Some(credential.salt))]);
+    let args = match verification {
+        HardwareVerification::Presence => args.without_pin_and_uv(),
+        HardwareVerification::Pin(pin) => {
+            if !(4..=63).contains(&pin.len()) {
+                return Err(FidoError::InvalidPin);
+            }
+            args.pin(pin)
+        }
+        HardwareVerification::BuiltIn => args,
+    }
+    .build();
     let assertions = device
         .get_assertion_with_args(&args)
         .map_err(backend_error)?;

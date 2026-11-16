@@ -10,8 +10,8 @@ private final class PartialExportCore: CoreFacade {
     var entered: (() -> Void)?
     var gate: DispatchSemaphore?
     var fail = false
-    override func backupExportFile(path: String) throws -> BackupExportReport {
-        let report = try super.backupExportFile(path: path)
+    override func backupExportFile(path: String, authorization: ExportAuthorizationFfi) throws -> BackupExportReport {
+        let report = try super.backupExportFile(path: path, authorization: authorization)
         entered?()
         if let gate, gate.wait(timeout: .now() + 10) != .success { throw CoreError.Service("export test timed out") }
         if fail { throw CoreError.Service("export test failed after writing") }
@@ -42,8 +42,16 @@ private final class PartialExportCore: CoreFacade {
         try? FileManager.default.removeItem(at: root)
     }
 
+    private func prepareExport(_ model: MaintenanceModel) async {
+        do {
+            let operation = try SessionOperationFfi(timeoutMs: 120_000)
+            let authorization = try core.authorizeExport(proof: .init(password: "maintenance fixture password", factor: .devicePassword, pin: nil), operation: operation)
+            await model.prepareExport(authorization: authorization, operation: operation)
+        } catch { XCTFail("Fixture authorization failed: \(describe(error))") }
+    }
+
     func testExportIsPlainVersionedJSONAndPrivateUntilPickerCompletion() async throws {
-        await model.prepareExport()
+        await prepareExport(model)
         let export = try XCTUnwrap(model.export)
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: export.file)) as? [String: Any])
         XCTAssertEqual(json["version"] as? Int, 1)
@@ -75,7 +83,7 @@ private final class PartialExportCore: CoreFacade {
             delayed.entered = { entered.fulfill() }
             delayed.gate = gate
             defer { gate.signal() }
-            let preparing = Task { await model.prepareExport() }
+            let preparing = Task { await prepareExport(model) }
             await fulfillment(of: [entered], timeout: 3)
             if fail { model.invalidate() } else { model.dismissed() }
             gate.signal()
@@ -87,7 +95,7 @@ private final class PartialExportCore: CoreFacade {
     }
 
     func testRelaunchPurgesAbandonedExportAndSnapshotsRetainPendingData() async throws {
-        await model.prepareExport()
+        await prepareExport(model)
         let artifact = try XCTUnwrap(model.export)
         let reopened = MaintenanceModel(core: core, exportRoot: root.appendingPathComponent("exports"))
         reopened.sessionOpened()
@@ -114,12 +122,12 @@ private final class PartialExportCore: CoreFacade {
 
     func testInvalidationRefusesNewSensitiveWorkUntilSessionOpens() async {
         model.invalidate()
-        await model.prepareExport()
+        await prepareExport(model)
         await model.verify()
         XCTAssertNil(model.export)
         XCTAssertNil(model.verification)
         model.sessionOpened()
-        await model.prepareExport()
+        await prepareExport(model)
         XCTAssertNotNil(model.export)
         model.invalidate()
         XCTAssertNil(model.export)
@@ -134,10 +142,10 @@ private final class PartialExportCore: CoreFacade {
     }
 
     func testStalePickerCompletionCannotRemoveANewerExportOrReplaceItsError() async throws {
-        await model.prepareExport()
+        await prepareExport(model)
         let old = try XCTUnwrap(model.export)
         model.finishExport(id: old.id)
-        await model.prepareExport()
+        await prepareExport(model)
         let current = try XCTUnwrap(model.export)
         model.finishExport(id: old.id, failure: CoreError.Service("stale picker error"))
         XCTAssertEqual(model.export?.id, current.id)
@@ -147,7 +155,7 @@ private final class PartialExportCore: CoreFacade {
 
     #if os(macOS)
     func testNativeExportReplacingAPublicFileKeepsOwnerOnlyPermissions() async throws {
-        await model.prepareExport()
+        await prepareExport(model)
         let artifact = try XCTUnwrap(model.export)
         let destination = root.appendingPathComponent("selected.json")
         try Data("old".utf8).write(to: destination)

@@ -87,7 +87,22 @@ pub trait LocalVaultService: Send + Sync {
         path: String,
         options: BackupImportOptions,
     ) -> LocalResult<ApplePasswordsImportReport>;
-    fn backup_export_file(&self, path: String) -> LocalResult<BackupExportReport>;
+    fn export_security(&self) -> LocalResult<ExportSecurity>;
+    fn authorize_export(
+        &self,
+        proof: ExportStepUp,
+        operation: SessionOperation,
+    ) -> LocalResult<ExportAuthorization>;
+    fn set_export_policy(
+        &self,
+        policy: ExportPolicy,
+        authorization: ExportAuthorization,
+    ) -> LocalResult<()>;
+    fn backup_export_file(
+        &self,
+        path: String,
+        authorization: ExportAuthorization,
+    ) -> LocalResult<BackupExportReport>;
     fn verify(&self) -> LocalResult<VerifyReport>;
     fn snapshot_create(&self, retention: Option<Retention>) -> LocalResult<Snapshot>;
     fn snapshot_create_if_due(

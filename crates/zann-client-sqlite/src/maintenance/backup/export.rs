@@ -1,6 +1,10 @@
 use super::*;
 
-pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport, BackupError> {
+/// Canonical paged serializer. The caller owns the authorized/private writer.
+pub(crate) async fn export_to_writer<W: Write>(
+    ctx: &BackupCtx,
+    writer: &mut W,
+) -> Result<ExportReport, BackupError> {
     let storage_repo = LocalStorageRepo::new(&ctx.pool);
     let vault_repo = LocalVaultRepo::new(&ctx.pool);
     let item_repo = LocalItemRepo::new(&ctx.pool);
@@ -15,7 +19,7 @@ pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport
         ));
     }
 
-    let storages = storage_repo.list().await.map_err(|err| err.to_string())?;
+    let storages = storage_repo.list().await.map_err(BackupError::source)?;
 
     let mut backup_storages = Vec::with_capacity(storages.len());
     let mut backup_vaults = Vec::new();
@@ -38,7 +42,7 @@ pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport
         let vaults = vault_repo
             .list_by_storage(storage_id)
             .await
-            .map_err(|err| err.to_string())?;
+            .map_err(BackupError::source)?;
         if !vaults.is_empty() {
             ctx.key(storage_id)?;
         }
@@ -54,18 +58,10 @@ pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport
         }
     }
 
-    let output_path = path;
-    ctx.log(&format!("export_start path={}", output_path.display()));
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-    let file = crate::maintenance::secure_file::create_private_file(&output_path)
-        .map_err(|err| err.to_string())?;
-    let mut writer = BufWriter::new(file);
     let exported_at = Utc::now().to_rfc3339();
     let mut streamer = ExportItemStreamer::new(ctx, item_repo, vault_queue);
-    let items_count = match write_backup_streaming(
-        &mut writer,
+    let items_count = write_backup_streaming(
+        writer,
         BACKUP_VERSION,
         &exported_at,
         &backup_storages,
@@ -73,35 +69,9 @@ pub async fn plain_export(ctx: &BackupCtx, path: PathBuf) -> Result<ExportReport
         &mut streamer,
     )
     .await
-    {
-        Ok(count) => count,
-        Err(err) => {
-            ctx.log(&format!(
-                "export_failed path={} error={}",
-                output_path.display(),
-                err
-            ));
-            return Err(err.to_string().into());
-        }
-    };
-    if let Err(err) = writer.flush() {
-        ctx.log(&format!(
-            "export_failed path={} error={}",
-            output_path.display(),
-            err
-        ));
-        return Err(err.to_string().into());
-    }
-    ctx.log(&format!(
-        "export_ok path={} storages={} vaults={} items={}",
-        output_path.display(),
-        backup_storages.len(),
-        backup_vaults.len(),
-        items_count
-    ));
+    .map_err(BackupError::from)?;
 
     Ok(ExportReport {
-        path: output_path.display().to_string(),
         storages_count: backup_storages.len(),
         vaults_count: backup_vaults.len(),
         items_count,

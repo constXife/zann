@@ -1,4 +1,20 @@
 {
+  "export": {
+    "securityTitle": "Export security",
+    "policyHelp": "Plaintext export requires fresh confirmation. Strict mode requires both your device password and an enrolled security key or biometrics. Disable strict mode before removing your last second factor.",
+    "changePolicy": "Change export confirmation policy",
+    "confirmTitle": "Confirm access to your secrets",
+    "anyFactor": "Confirm with your device password, an enrolled security key, or biometrics.",
+    "strictPolicy": "Your policy requires your device password AND a security key or biometrics.",
+    "enableStrict": "Enable strict confirmation",
+    "disableStrict": "Disable strict confirmation",
+    "factor": "Confirmation method",
+    "password": "Device password",
+    "hardware": "Security key",
+    "biometric": "Biometrics",
+    "pin": "Security key PIN (when required)",
+    "confirm": "Confirm"
+  },
   "app": {
     "title": "Zann Desktop"
   },

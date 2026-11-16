@@ -290,7 +290,7 @@ fn one_password_change_keeps_both_independent_accounts_readable_after_restart() 
         .join("local.sqlite");
     let core = open_vault(format!("sqlite://{}", path.display())).expect("reopen");
     assert!(core.unlock(old_password).is_err());
-    core.unlock(new_password).expect("offline unlock");
+    core.unlock(new_password.clone()).expect("offline unlock");
     core.set_current_storage(first.to_string()).expect("first");
     assert!(core.item_get(first_item).is_ok());
     core.set_current_storage(remote.to_string())
@@ -298,7 +298,17 @@ fn one_password_change_keeps_both_independent_accounts_readable_after_restart() 
     assert!(core.item_get(second_item).is_ok());
     let export = dir.path().join("both-accounts.json");
     let report = core
-        .backup_export_file(export.to_str().expect("path").into())
+        .backup_export_file(
+            export.to_str().expect("path").into(),
+            core.authorize_export(
+                ExportStepUp::device_password(new_password),
+                SessionOperation::new(
+                    std::time::Instant::now() + std::time::Duration::from_secs(120),
+                )
+                .0,
+            )
+            .expect("fresh export proof"),
+        )
         .expect("multi-account export");
     assert_eq!(report.items_count, 2);
     assert_eq!(core.verify().expect("verify").items_ok, 2);

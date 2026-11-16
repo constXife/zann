@@ -26,6 +26,8 @@ mod connect_flow;
 pub use connect_flow::*;
 mod generator;
 pub use generator::*;
+mod export;
+pub use export::*;
 mod platform;
 mod unlock;
 mod unlock_flow;
@@ -87,6 +89,10 @@ impl From<zann_client::app::local::LocalError> for CoreError {
     fn from(error: zann_client::app::local::LocalError) -> Self {
         use zann_client::app::local::LocalError;
         match error {
+            LocalError::Export(error) => Self::Unlock {
+                kind: error.kind().into(),
+                message: error.to_string(),
+            },
             LocalError::Backup { kind, message, .. } => Self::Service(format!("{kind}: {message}")),
             LocalError::BrowserPolicy(_) | LocalError::BrowserDelivery(_) => {
                 Self::Service(error.to_string())
@@ -263,12 +269,6 @@ impl CoreFacade {
     ) -> CoreResult<ApplePasswordsImportReportFfi> {
         self.inner
             .apple_passwords_import_file(path, options.into())
-            .map(|value| value.into())
-            .map_err(Into::into)
-    }
-    pub fn backup_export_file(&self, path: String) -> CoreResult<BackupExportReport> {
-        self.inner
-            .backup_export_file(path)
             .map(|value| value.into())
             .map_err(Into::into)
     }

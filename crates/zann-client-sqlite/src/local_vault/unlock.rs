@@ -41,9 +41,10 @@ impl LocalVault {
         let remembered = self.load_remembered()?;
         let master_key = match remembered.unlock_source {
             UnlockSource::Keystore => remembered.unlock_with_keystore(self.keystore.as_ref()),
-            UnlockSource::HardwareKey => {
-                remembered.unlock_with_hardware_key(self.authenticator.as_ref())
-            }
+            UnlockSource::HardwareKey => remembered.unlock_with_hardware_key(
+                self.authenticator.as_ref(),
+                zann_keystore::HardwareVerification::Presence,
+            ),
         }
         .map_err(unlock_error)?;
         self.finish_unlock(Arc::new(SecretKey::from_bytes(master_key)), generation)
@@ -70,6 +71,8 @@ impl LocalVault {
     }
 
     pub fn remove_hardware_key(&self, credential_id: String) -> LocalResult<()> {
+        let _context = self.context_gate.write().expect("context");
+        self.check_export_factor_removal(Some(&credential_id), false)?;
         let mut remembered = self.load_remembered()?;
         remembered.remove_hardware_key(&credential_id);
         self.save_remembered(&remembered)
@@ -95,6 +98,8 @@ impl LocalVault {
     /// Stop remembering entirely. Enrolled authenticators are left alone: they
     /// carry their own copies and removing them is a separate, explicit act.
     pub fn forget_remembered(&self) -> LocalResult<()> {
+        let _context = self.context_gate.write().expect("context");
+        self.check_export_factor_removal(None, true)?;
         let mut remembered = self.load_remembered()?;
         remembered
             .forget_keystore(self.keystore.as_ref())
@@ -118,6 +123,10 @@ impl LocalVault {
             self.recovery.lock().expect("recovery lock").take();
         }
         self.context_generation.fetch_add(1, Ordering::SeqCst);
+        self.export_authorization
+            .lock()
+            .expect("export authorization")
+            .take();
         *self.device_key.lock().expect("lock poisoned") = None;
         self.account_keys.lock().expect("lock poisoned").clear();
         *self.vault_id.lock().expect("lock poisoned") = None;
@@ -159,7 +168,8 @@ impl LocalVault {
             .map_err(keyring_error)?;
         let _context = self.context_gate.write().expect("lock poisoned");
         self.check_context_generation(generation)?;
-        self.commit_device_unlock(Some(&keyring), &candidate)
+        self.commit_device_unlock(Some(&keyring), &candidate)?;
+        Ok(())
     }
 
     pub(super) fn finish_unlock(

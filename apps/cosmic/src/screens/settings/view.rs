@@ -156,6 +156,7 @@ impl State {
             clipboard.into(),
             reveal.into(),
             self.password.view().map(Message::Password),
+            self.export.security_view().map(Message::ExportStepUp),
         ];
         if let Some(unlock) = self.unlock_section() {
             sections.push(unlock);
@@ -179,7 +180,9 @@ impl State {
         if !self.busy {
             export = export.on_press(Message::Export);
         }
-        column = column.push(export);
+        column = column
+            .push(export)
+            .push(self.export.view().map(Message::ExportStepUp));
         if let Some(report) = self.exported.as_ref() {
             column = column.push(widget::text::caption(format!(
                 "{} items written to {}",

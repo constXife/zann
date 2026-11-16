@@ -1,6 +1,20 @@
 //! Platform-independent hardware unlock port. No OS discovery or UI policy.
 use serde::{Deserialize, Serialize};
 
+/// An explicit choice for each live operation; never persisted or Debug-printed.
+#[derive(Clone, Copy)]
+pub enum HardwareVerification<'a> {
+    Presence,
+    Pin(&'a str),
+    BuiltIn,
+}
+
+impl std::fmt::Debug for HardwareVerification<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("HardwareVerification(<redacted>)")
+    }
+}
+
 /// What has to be remembered to derive a DWK again. Not secret.
 #[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HardwareCredential {
@@ -8,7 +22,7 @@ pub struct HardwareCredential {
     pub salt: [u8; 32],
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error)]
 pub enum FidoError {
     #[error("no authenticator connected")]
     NoDevice,
@@ -25,7 +39,7 @@ pub enum FidoError {
     #[error("hardware keys are not supported on this platform")]
     UnsupportedPlatform,
     /// Classified backend failure with its original diagnostic chain intact.
-    #[error("authenticator error ({kind}): {source}")]
+    #[error("authenticator error ({kind})")]
     Backend {
         kind: &'static str,
         #[source]
@@ -33,6 +47,8 @@ pub enum FidoError {
     },
     #[error("authenticator error: {message}")]
     Internal { message: String },
+    #[error("invalid hardware key PIN")]
+    InvalidPin,
 }
 
 impl FidoError {
@@ -50,6 +66,7 @@ impl FidoError {
             Self::UnsupportedPlatform => "hardware_key_unsupported_platform",
             Self::Backend { kind, .. } => kind,
             Self::Internal { .. } => "hardware_key_error",
+            Self::InvalidPin => "hardware_key_pin_invalid",
         }
     }
 }
@@ -69,7 +86,11 @@ pub trait HardwareAuthenticator: Send + Sync {
     fn supported(&self) -> bool;
     fn status(&self) -> Result<AuthenticatorInfo, FidoError>;
     fn create_credential(&self, salt: [u8; 32]) -> Result<HardwareCredential, FidoError>;
-    fn derive_dwk(&self, credential: &HardwareCredential) -> Result<[u8; 32], FidoError>;
+    fn derive_dwk(
+        &self,
+        credential: &HardwareCredential,
+        verification: HardwareVerification<'_>,
+    ) -> Result<[u8; 32], FidoError>;
     /// An error or a different token must report absent so auto-lock fails closed.
     fn is_present(&self, credential: &HardwareCredential) -> bool;
 }
@@ -85,11 +106,23 @@ impl HardwareAuthenticator for UnsupportedAuthenticator {
     fn create_credential(&self, _: [u8; 32]) -> Result<HardwareCredential, FidoError> {
         Err(FidoError::UnsupportedPlatform)
     }
-    fn derive_dwk(&self, _: &HardwareCredential) -> Result<[u8; 32], FidoError> {
+    fn derive_dwk(
+        &self,
+        _: &HardwareCredential,
+        _: HardwareVerification<'_>,
+    ) -> Result<[u8; 32], FidoError> {
         Err(FidoError::UnsupportedPlatform)
     }
     fn is_present(&self, _: &HardwareCredential) -> bool {
         false
+    }
+}
+
+impl std::fmt::Debug for FidoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FidoError")
+            .field("kind", &self.kind())
+            .finish_non_exhaustive()
     }
 }
 

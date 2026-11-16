@@ -64,6 +64,11 @@ impl LocalVault {
                 zann_client::config::ConfigError::IdentityChanged,
             ));
         }
+        self.context_generation.fetch_add(1, Ordering::SeqCst);
+        self.export_authorization
+            .lock()
+            .expect("export authorization")
+            .take();
         Ok(())
     }
 }

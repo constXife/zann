@@ -70,7 +70,8 @@ pub(super) fn create_note(core: &LocalVault, marker: &str) {
 }
 pub(super) fn export(core: &LocalVault, root: &Path, name: &str) -> Vec<Value> {
     let path = root.join(name);
-    core.backup_export_file(path.display().to_string()).unwrap();
+    core.backup_export_file(path.display().to_string(), export_authorization(core))
+        .unwrap();
     normalized(&path)
 }
 

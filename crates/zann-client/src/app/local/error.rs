@@ -2,6 +2,8 @@ use crate::app::{SessionError, SessionErrorKind, SyncError, SyncErrorKind};
 
 #[derive(Debug, thiserror::Error)]
 pub enum LocalError {
+    #[error(transparent)]
+    Export(#[from] super::ExportError),
     #[error("backup {kind}: {message}")]
     Backup {
         kind: String,

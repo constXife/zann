@@ -7,11 +7,10 @@ use zann_client::app::local::LocalVaultService;
 
 pub use zann_client::app::local::StorageSyncState;
 use zann_client::app::local::{
-    AppStatus, ApplePasswordsImportReport, ApplePasswordsPreflight, BackupExportReport,
-    BackupImportOptions, HardwareKey, ItemCreate, ItemDetail, ItemHistoryDetail,
-    ItemHistorySummary, ItemSummary, ItemUpdate, ItemsFilter, LocalError, LocalSyncOutcome, Page,
-    RememberedUnlock, Snapshot, SnapshotRestore, StorageLink, StorageSummary, VaultSummary,
-    VerifyReport,
+    AppStatus, ApplePasswordsImportReport, ApplePasswordsPreflight, BackupImportOptions,
+    HardwareKey, ItemCreate, ItemDetail, ItemHistoryDetail, ItemHistorySummary, ItemSummary,
+    ItemUpdate, ItemsFilter, LocalError, LocalSyncOutcome, Page, RememberedUnlock, Snapshot,
+    SnapshotRestore, StorageLink, StorageSummary, VaultSummary, VerifyReport,
 };
 use zann_ui_core::ItemCounts;
 
@@ -305,15 +304,6 @@ pub fn enroll_hardware_key(facade: &Facade, label: String) -> Result<HardwareKey
 pub fn remove_hardware_key(facade: &Facade, credential_id: String) -> Result<(), String> {
     facade
         .remove_hardware_key(credential_id)
-        .map_err(|err| err.to_string())
-}
-
-/// Writes a plain backup of every cached vault. The facade picks the path,
-/// because this client has no file picker of its own — see
-/// docs/adr/0002-client-strategy.md on why being able to leave comes first.
-pub fn export_backup(facade: &Facade) -> Result<BackupExportReport, String> {
-    facade
-        .backup_export_file(String::new())
         .map_err(|err| err.to_string())
 }
 

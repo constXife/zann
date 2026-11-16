@@ -11,7 +11,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::fs::File;
 use std::future::Future;
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
@@ -203,7 +203,6 @@ pub struct PlainBackupItem {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportReport {
-    pub path: String,
     pub storages_count: usize,
     pub vaults_count: usize,
     pub items_count: usize,
@@ -252,7 +251,7 @@ mod apple;
 pub use apple::*;
 
 mod export;
-pub use export::*;
+pub(crate) use export::*;
 
 mod import;
 pub use import::*;
