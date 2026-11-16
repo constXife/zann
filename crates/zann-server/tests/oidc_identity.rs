@@ -65,6 +65,8 @@ async fn oidc_rejects_disabled_user() {
         kdf_memory_kb: i64::from(state.config.auth.kdf.memory_kb),
         kdf_parallelism: i64::from(state.config.auth.kdf.parallelism),
         recovery_key_hash: None,
+        auth_epoch: 1,
+        active_recovery_id: None,
         status: UserStatus::Disabled,
         deleted_at: None,
         deleted_by_user_id: None,
@@ -127,6 +129,8 @@ async fn oidc_links_existing_user_by_email() {
         kdf_memory_kb: i64::from(state.config.auth.kdf.memory_kb),
         kdf_parallelism: i64::from(state.config.auth.kdf.parallelism),
         recovery_key_hash: None,
+        auth_epoch: 1,
+        active_recovery_id: None,
         status: UserStatus::Active,
         deleted_at: None,
         deleted_by_user_id: None,
@@ -162,19 +166,19 @@ async fn oidc_links_existing_user_by_email() {
     assert_eq!(oidc_identity.user_id, user.id);
 }
 
-async fn fresh_oidc_state() -> AppState {
+async fn fresh_oidc_state() -> (AppState, support::TestGuard) {
     let _guard = support::test_guard().await;
     let pool = support::setup_shared_db().await;
     support::reset_db(&pool).await;
     let mut config = ServerConfig::default();
     support::tune_test_kdf(&mut config);
-    build_state(pool.clone(), config).await
+    (build_state(pool.clone(), config).await, _guard)
 }
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn unverified_email_cannot_adopt_an_existing_account() {
-    let state = fresh_oidc_state().await;
+    let (state, _guard) = fresh_oidc_state().await;
 
     let now = Utc::now();
     let victim = User {
@@ -188,6 +192,8 @@ async fn unverified_email_cannot_adopt_an_existing_account() {
         kdf_memory_kb: i64::from(state.config.auth.kdf.memory_kb),
         kdf_parallelism: i64::from(state.config.auth.kdf.parallelism),
         recovery_key_hash: None,
+        auth_epoch: 1,
+        active_recovery_id: None,
         status: UserStatus::Active,
         deleted_at: None,
         deleted_by_user_id: None,
@@ -225,7 +231,7 @@ async fn unverified_email_cannot_adopt_an_existing_account() {
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn unverified_email_cannot_create_an_account() {
-    let state = fresh_oidc_state().await;
+    let (state, _guard) = fresh_oidc_state().await;
 
     let token = OidcToken {
         issuer: "https://issuer.example.com".to_string(),
@@ -250,7 +256,7 @@ async fn unverified_email_cannot_create_an_account() {
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
 async fn verified_email_provisions_a_new_user() {
-    let state = fresh_oidc_state().await;
+    let (state, _guard) = fresh_oidc_state().await;
 
     let token = OidcToken {
         issuer: "https://issuer.example.com".to_string(),

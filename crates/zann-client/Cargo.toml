@@ -22,7 +22,7 @@ tempfile = { version = "3", optional = true }
 thiserror = { version = "1", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"], optional = true }
 url = { version = "2", optional = true }
-uuid = { version = "1", features = ["v7", "serde"], optional = true }
+uuid = { version = "1", features = ["v4", "v7", "serde"], optional = true }
 zeroize = { version = "1", optional = true }
 
 zann-core = { path = "../zann-core", optional = true }
@@ -76,6 +76,7 @@ remote = [
   "dep:zann-core",
 ]
 config = [
+  "dep:zann-crypto",
   "dep:chrono",
   "dep:data-encoding",
   "dep:same-file",

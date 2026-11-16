@@ -42,8 +42,14 @@ pub use changes::ChangeRepo;
 pub use devices::{DeviceRepo, ServiceAccountRepo, ServiceAccountSessionRepo};
 pub use groups::{GroupMemberRepo, GroupRepo, OidcGroupMappingRepo};
 pub use items::{AttachmentRepo, ItemHistoryRepo, ItemRepo, ItemUsageRepo};
-pub use sessions::SessionRepo;
+pub use sessions::{SessionRepo, SessionWriteError};
 pub use users::{OidcIdentityRepo, UserRepo};
 pub use vaults::{
     VaultCatalogEntry, VaultCatalogScopeFilter, VaultKeyMaterialEntry, VaultMemberRepo, VaultRepo,
+};
+
+mod recovery;
+pub use recovery::{
+    AccountAuthState, RecoveryMutation, RecoveryReceipt, RecoveryRecord, RecoveryRepo,
+    RecoveryStart, RecoveryStoreError,
 };

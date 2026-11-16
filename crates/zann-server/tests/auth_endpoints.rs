@@ -490,7 +490,7 @@ async fn refresh_unauthorized_statuses_are_terminal_without_a_second_rotation() 
     let forced_expiry = chrono::DateTime::from_timestamp(chrono::Utc::now().timestamp() - 1, 0)
         .expect("representable forced expiry");
     repo.update_refresh_token(
-        session.id,
+        &session,
         &session.access_token_hash,
         session.access_expires_at,
         &session.refresh_token_hash,
@@ -595,4 +595,91 @@ async fn service_account_login_rejects_invalid_format() {
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert_eq!(body["error"], "invalid_token");
+}
+
+#[tokio::test]
+#[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
+async fn pending_recovery_blocks_login_and_refresh_without_partial_devices() {
+    use zann_db::repo::{RecoveryRepo, RecoveryStart};
+    let app = TestApp::new().await;
+    let email = "recovery-foundation@example.com";
+    let password = "password-1";
+    let registration = app.register(email, password).await;
+    let users = UserRepo::new(&app.pool);
+    let user = users.get_by_email(email).await.unwrap().unwrap();
+    users
+        .update_recovery_key_hash(user.id, user.row_version, "test-recovery-verifier")
+        .await
+        .unwrap();
+    let recovery = RecoveryRepo::new(&app.pool);
+    let state = recovery.account_state(user.id).await.unwrap().unwrap();
+    recovery
+        .start(RecoveryStart {
+            operation_id: Uuid::new_v4(),
+            user_id: user.id,
+            expected_auth_epoch: state.auth_epoch,
+            expected_security_revision: state.security_revision,
+            expected_code_version: state.recovery_key_version,
+            expected_code_hash: "test-recovery-verifier",
+            successor_code_hash: "test-successor-verifier",
+            resume_token_hash: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            consume_digest: [4; 32],
+            account_key_epoch: Some(1),
+        })
+        .await
+        .unwrap();
+    let before = DeviceRepo::new(&app.pool)
+        .list_by_user(user.id, 100, 0, "asc")
+        .await
+        .unwrap()
+        .len();
+    let (status, _) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/login",
+            json!({"email":email,"password":password}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = app
+        .send_json(
+            Method::POST,
+            "/v1/auth/refresh",
+            json!({"refresh_token":registration["refresh_token"]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        DeviceRepo::new(&app.pool)
+            .list_by_user(user.id, 100, 0, "asc")
+            .await
+            .unwrap()
+            .len(),
+        before
+    );
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/v1/users/me")
+        .header(
+            "authorization",
+            format!(
+                "Bearer {}",
+                registration["access_token"]
+                    .as_str()
+                    .expect("registration token")
+            ),
+        )
+        .body(Body::empty())
+        .expect("account request");
+    let response = app
+        .app
+        .clone()
+        .oneshot(request)
+        .await
+        .expect("account response");
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "the old access token must be rejected by HTTP admission"
+    );
 }

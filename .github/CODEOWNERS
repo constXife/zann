@@ -117,3 +117,16 @@
 /crates/zann-server/src/domains/vaults/http/v1/shared/handlers/rotation_commit.rs @constXife
 /crates/zann-server/src/domains/items/http/v1/mod.rs @constXife
 /crates/zann-server/src/domains/vaults/http/v1/shared/handlers/items.rs @constXife
+
+# Account epoch and resumable recovery foundation (#30)
+/crates/zann-core/src/recovery.rs @constXife
+/crates/zann-core/src/models/structs.rs @constXife
+/crates/zann-db/src/repo/recovery/ @constXife
+/crates/zann-db/src/repo/sessions.rs @constXife
+/crates/zann-db/src/repo/sessions/ @constXife
+/crates/zann-db/src/repo/users.rs @constXife
+/crates/zann-db/tests/recovery.rs @constXife
+/crates/zann-server/migrations/0004_account_recovery.sql @constXife
+/crates/zann-server/src/domains/auth/service.rs @constXife
+/crates/zann-server/src/domains/auth/service/ @constXife
+/crates/zann-server/src/domains/auth/helpers.rs @constXife

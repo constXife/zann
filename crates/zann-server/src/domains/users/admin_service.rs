@@ -157,6 +157,8 @@ pub async fn create_user(
             .map(str::to_string),
         password_hash: None,
         recovery_key_hash: None,
+        auth_epoch: 1,
+        active_recovery_id: None,
         kdf_salt: kdf_salt.clone(),
         kdf_algorithm: params.algorithm.to_string(),
         kdf_iterations: i64::from(params.iterations),

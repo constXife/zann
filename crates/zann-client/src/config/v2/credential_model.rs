@@ -201,6 +201,26 @@ pub trait LegacyCredentialSource: Send + Sync {
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
+    #[error("recovery intent conflict: {reason}")]
+    RecoveryIntentConflict { reason: &'static str },
+    #[error("malformed recovery intents at {path}")]
+    MalformedRecoveryIntents {
+        path: PathBuf,
+        #[source]
+        source: serde_json::Error,
+    },
+    #[error("recovery credential store failed")]
+    RecoveryCredential {
+        #[source]
+        source: CredentialPortError,
+    },
+    #[error("recovery credential is missing or has changed")]
+    RecoveryCredentialMismatch,
+    #[error("invalid recovery secret bundle")]
+    RecoverySecret {
+        #[source]
+        source: zann_crypto::recovery::RecoverySecretError,
+    },
     #[error("{operation} failed for {path}: {source}")]
     Io {
         operation: &'static str,

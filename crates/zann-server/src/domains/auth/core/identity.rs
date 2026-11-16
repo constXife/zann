@@ -86,6 +86,8 @@ pub async fn identity_from_oidc(
                 kdf_memory_kb: i64::from(params.memory_kb),
                 kdf_parallelism: i64::from(params.parallelism),
                 recovery_key_hash: None,
+                auth_epoch: 1,
+                active_recovery_id: None,
                 status: UserStatus::Active,
                 deleted_at: None,
                 deleted_by_user_id: None,
@@ -138,6 +140,9 @@ pub async fn identity_from_oidc(
 
     if !matches!(user.status, UserStatus::Active) {
         return Err("user_disabled");
+    }
+    if user.active_recovery_id.is_some() {
+        return Err("recovery_required");
     }
 
     let groups_claim = state
