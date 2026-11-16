@@ -13,7 +13,7 @@
   [#149](https://github.com/constXife/zann/issues/149) (historical portable-unlock discussion)
 
 The product direction below is confirmed; this ADR remains Proposed pending
-protocol review, provider qualification and the server-access recovery decision.
+protocol review, crash-recovery design and provider qualification.
 It is not an implemented protocol or approval to change cryptographic formats.
 The repository has no separate values manifest; governing values are the trust
 separation, custody, canonical ownership, atomicity and bounded-work invariants
@@ -39,7 +39,11 @@ Inspected `main` at `7ec8e0798d4948b44c31ff1a045cc15276d70528`:
 - The [existing recovery-kit service](../../crates/zann-server/src/domains/users/service.rs)
   generates a secret on the server and stores its password-style hash. It does
   not wrap a personal account key; its existence does not establish E2EE recovery
-  or a complete lost-passkey server-login recovery flow.
+  or a complete lost-passkey server-login recovery flow. Its 48-character generator,
+  KDF/peppered verifier and the
+  [server schema's `users.recovery_key_hash`](../../crates/zann-server/migrations/0001_init.sql)
+  are reusable. Current issuance rejects users without a password hash and
+  non-Internal auth sources; those checks cannot remain the passkey eligibility rule.
 - [#291](https://github.com/constXife/zann/issues/291) concerns passkeys for other
   sites. The current desktop provider (#293/#305) supplies presence, not UV or
   PRF. Neither it nor device-local hardware unlock implements this proposal.
@@ -72,6 +76,12 @@ Inspected `main` at `7ec8e0798d4948b44c31ff1a045cc15276d70528`:
    an external provider or a qualified phone-assisted ceremony are candidates.
    Passkeys stored solely inside locked Zann cannot bootstrap it. Current Zann
    provider UV/PRF limitations also prevent claiming self-hosted full unlock.
+6. **Three server-recovery tiers, independent of E2EE:** a one-use Server Recovery
+   Key is mandatory before disabling/omitting the server password; an existing
+   authorized, unlocked client can replace lost factors; OIDC recovery or a local
+   privileged server reset provides break-glass. No SMTP dependency or additional
+   memorized server password is required. The Server Recovery Key is distinct
+   from the Account Encryption Password and any future E2EE Recovery Key.
 
 ## Proposed technical decision
 
@@ -178,37 +188,91 @@ phone/hybrid PRF behavior. App minimum versions and brand names do not prove
 support. Qualify sync to a clean device and successful unwrap, not only local
 feature detection; provide explicit Auth-only support where PRF is unavailable.
 
-### 5. Independent recovery has two separate jobs
+### 5. Two independent locks and three server-recovery tiers
 
 **Recover decryption:** the Account Encryption Password remains the first-release
 text root. In Auth-only mode it derives the account key locally using authenticated
 KDF parameters and existing personal-vault proof. Losing every passkey must not
 force a change of this encryption key or destroy readable local copies.
 
-**Recover server authorization:** possession of the encryption password alone
-does not currently issue a server session. Before shipping a lost-all-passkeys
-claim, select and test an independent authorization path:
+**Tier 1 — independent Server Recovery Key.** Reuse the existing 48-character
+random generator and Argon2id/peppered verifier in `users.recovery_key_hash`,
+generalizing issuance to explicitly eligible passkey accounts without requiring
+`password_hash`. Keep one active verifier. Require saving/confirming the code
+outside Zann and its passkey provider before a transition removes the last server
+password or completes a password-free account setup. The code is not a personal
+key recipient and is never used to derive an E2EE key.
 
-- Retain a separate server password or deploy an explicit OIDC/admin recovery
-  policy, then locally unlock with the Account Encryption Password; or
-- Specify a client-generated independent Recovery Key with separate public
-  recovery-proof and key-wrapping purposes, enabling self-service server and
-  personal-data recovery. Never send its raw secret to the server.
+Eligibility follows account status and the configured authentication mode, not
+the accidental presence of `password_hash`. Internal passkey recovery must not
+bypass an OIDC-only deployment or silently reactivate a disabled account.
 
-This product choice is still open. Do not silently reuse the encryption password
-as a server credential or advertise today's server-generated recovery kit as
-sufficient. Any future text-root replacement must be generated locally, saved
-outside Zann/the passkey provider and proven before removing the prior root.
-Its exact proof transcript, key schedule and replacement transaction need review.
+Propose `POST /v1/auth/recover` with an account locator and Server Recovery Key.
+The locator (email initially) selects an account but is not proof of ownership.
+Choose one wire representation: the proposal sends the raw high-entropy code over
+the trusted TLS connection and reuses existing server verification. Do not accept
+an ambiguous raw-code-or-auth-hash union. Redact request bodies and never put the
+code in URLs, logs or argv. Account/anonymous admission limits and the existing
+KDF semaphore bound verification; failed/unknown-account responses must not enable
+enumeration or unbounded work.
 
-An already unlocked device can authorize enrollment of a tested replacement
-passkey using fresh server authorization plus current account-key custody. A
-stolen session alone must not replace the accepted personal-key manifest, remove
-the text-root recovery path or add a usable decrypting grant. Specify the
-manifest/custody proof; local unwrap alone is not server-verifiable custody proof.
-Bind generation and purpose to prevent substitution and cross-account replay.
-A fresh device cannot detect every malicious-server rollback without an independent
-checkpoint; document that limit rather than claim global rollback prevention.
+Successful consumption is one generation-checked database transaction: verify
+the still-current recovery verifier, burn it, revoke all old account passkeys
+and their grants, invalidate old access/refresh sessions, and create a restricted
+recovery session/operation. Concurrent consumers cannot both win. The session
+can fetch the account's personal ciphertext/KDF identity and enroll replacement
+factors; ordinary shared-vault reads, general account administration and service
+token issuance wait for recovery completion. Full session issuance follows a
+tested new passkey and saving/confirming a replacement Server Recovery Key.
+Recovering the E2EE key still requires the local Account Encryption Password;
+publish a new full-unlock grant only after local vault-key proof and trial unwrap.
+
+Burning a code before delivering a new credential creates a lost-response hazard.
+The protocol must persist an operation binding on the client before dispatch and
+support bounded resume under independent proof of that binding after consumption.
+Resume cannot reuse the burned code as a new login or authorize another client.
+Replacement-code delivery/confirmation and session-token delivery also need
+recoverable ordering; no plaintext secrets in intent files, no automatic replay
+of an ambiguous request, and no usable old credential kept as a hidden fallback.
+Specify and fault-test this trace before implementing the consuming endpoint.
+
+**Tier 2 — a surviving device.** An authorized client with a usable refresh session
+and an unlocked local account can revoke a lost factor and enroll a replacement
+through Settings -> Security without consuming the Server Recovery Key. Refresh
+the session through current trust checks and require fresh local key-custody
+authorization for decrypting-grant changes. Do not require the already lost
+passkey as the only management step-up factor. A bearer session alone cannot
+publish an accepted personal-key manifest or a usable decrypting grant. Specify
+the manifest/custody proof: local unwrap is not server-verifiable custody proof.
+Bind purpose and generation; include cross-account substitution and stolen-session
+tests. A fresh device cannot detect every malicious-server rollback without an
+independent checkpoint; document that residual limit.
+
+**Tier 3 — break-glass.** For OIDC, recover IdP access using its normal policy,
+then locally supply the Account Encryption Password. For Internal Auth, add one
+privileged local command to the existing server provisioning/administration owner
+(for example `zann-server provision reset-recovery-key --email ...`; final naming
+follows the CLI's existing `provision` hierarchy, not a new admin framework).
+It rotates the Server Recovery Key, invalidates old unlock grants/passkeys and
+old sessions atomically, preserves account KDF/vault ciphertext, and records a
+non-secret audit event. Recovery then uses the same HTTP consuming flow.
+
+The operator explicitly requests a newly generated code as terminal output;
+that output is the deliberate credential-delivery boundary, never tracing or
+error output. Reuse existing private-file credential output for noninteractive
+delivery, with owner-only permissions, and preserve original diagnostic causes.
+A lost CLI response can be resolved by issuing a new code; it supersedes the
+prior verifier without changing the account encryption key. No code is accepted
+from CLI argv. Local database/host privilege authorizes server recovery, not
+personal decryption; SMTP and remote unauthenticated admin reset are unnecessary.
+
+A Server Recovery Key is a server authentication credential: protect it like
+other bearer credentials. It cannot directly decrypt a personal vault, but it
+can obtain ciphertext for offline attacks on the encryption password and,
+after completing recovery, grants the account's server-authorized rights,
+including eligible server-encrypted shared data. Do not call it a universal
+"ciphertext-only" credential. Any future E2EE text-root replacement is generated
+locally and saved independently; it is not this server-issued code.
 
 If no text root, usable grant, unlocked copy or independent backup survives,
 personal data is unrecoverable. Admin/email/OIDC reset cannot decrypt personal
@@ -260,7 +324,9 @@ expiry remain acceptance requirements; per-account caps alone are insufficient.
 No all-account scans or repeated provider prompts for discovery.
 
 - `zann-server::domains::auth`: RP verification, challenge/credential/grant
-  transactions, server recovery policy and ordinary session issuance.
+  transactions, recovery consumption/resume and ordinary session issuance;
+  users recovery-kit issuance and the local provisioning command share this
+  canonical recovery service and database transition, not parallel implementations.
 - `zann-core::api`: typed public contracts; `zann-crypto`: secret types, derivation,
   authenticated wraps and any reviewed custody/recovery proof primitives.
 - `zann-client::app` / auth/session/config/sync: one orchestration owner for trust,
@@ -294,13 +360,20 @@ No all-account scans or repeated provider prompts for discovery.
   DeviceUnlock and verified account CAS. Zeroize abandoned account keys, persist
   no unprotected cache, retain generation checks and paged queries. Cost: one final
   local-protection step. Test fresh setup/restart and account A never opening B.
-- **Recovery — preserve text-root custody; decision pending:** reuse password KDF
-  and vault-key proof for decryption, choose server authorization independently.
-  Reuse auth owners and atomic credential transitions, with bounded recovery
-  challenges. Cost: separate server-recovery availability. If replacing legacy
-  recovery semantics, migrate all callers/storage in place; no dual-write or
-  misleading E2EE recovery surface. #149's grant need shares this owner, not a
-  separate hardware-key table. All-key-loss tests gate completion.
+- **Server recovery — realign on implementation:** keep E2EE custody local and
+  reuse the existing server-code generator/verifier/column through one service
+  for issuance, consume/resume and CLI reset. Atomic code burn/revocation and
+  proof-bound resumability preserve crash safety; expiry/admission/KDF bounds
+  prevent resource abuse. Cost: an offline code to retain and a reviewed delivery
+  trace. Remove password-hash-only issuance assumptions and obsolete DTO/UI
+  semantics in place, without dual-write. Test racing consume, lost responses,
+  interrupted enrollment, admin reset and secret-free audit. #149's grants share
+  the account owner, not a separate hardware-key table.
+- **Text-root recovery — aligned as-is:** reuse the local KDF and vault-key proof,
+  never server credential submission. Bound parameter validation and bootstrap
+  lifetime; no key replacement or server reset rewrites local ciphertext. Cost:
+  password-guess exposure remains. Test recovery with all passkeys lost and an
+  untouched second account. Future E2EE Recovery Keys need a separate decision.
 - **Revocation/rotation — reuse and defer precisely:** atomic factor/grant removal
   cannot erase copied secrets. One generation/rotation owner preserves old cache
   and history in bounded batches. Cost: unavailable factors need renewal and
@@ -315,16 +388,17 @@ No all-account scans or repeated provider prompts for discovery.
 1. Qualify trusted COSMIC/bootstrap and a real synced PRF credential on a clean
    device, including UV and the one-ceremony login target. Record exact versions,
    permissions/prompts and Auth-only behavior. Qualify native platforms separately.
-2. Decide lost-all-passkeys server authorization; review grant/manifest/custody
-   transcripts, PRF input/key schedule, recovery/last-factor policy, scoped bootstrap
-   states, quotas, expiry, rollback limits and each crash point. These block ADR
-   acceptance, not merely final release testing.
+2. Review grant/manifest/custody transcripts, PRF input/key schedule, recovery
+   consume/resume and replacement-code delivery, local break-glass authorization,
+   last-factor policy, scoped bootstrap, quotas, expiry, rollback limits and each
+   crash point. These block ADR acceptance, not merely final release testing.
 3. Deliver RP login through existing sessions and shared flows, including the
    explicit credential mode. Login-only is an intermediate milestone, not #30 done.
 4. Deliver tested PRF grants, Auth-only local password unlock, fresh device
-   protection/enrollment, revocation and both independent recovery jobs. Require
-   clean-device success, unsupported PRF, wrong UV/context, races, cancellation,
-   restart/lost responses and unaffected-account evidence.
+   protection/enrollment, revocation and all three server-recovery tiers followed
+   by local text-root decryption. Require clean-device success, unsupported PRF,
+   wrong UV/context, racing code consumption/reset, cancellation, restart/lost
+   responses, forced replacement enrollment and unaffected-account evidence.
 5. Design rotation/password changes separately under ADR 0013; do not make initial
    passkey enrollment depend on random-root conversion. Coalesce obsolete recovery
    paths only where the selected protocol replaces their actual purpose.
