@@ -7,7 +7,8 @@
   [ADR 0002](0002-client-strategy.md), Decision §5
 - **Related:** [ADR 0007](0007-browser-integration.md) owns the channel, the
   pairing model and origin derivation this ADR rides on
-- **Out of scope:** signing *into Zann* with a passkey (Zann as a relying party)
+- **Out of scope:** signing *into Zann* with a passkey (Zann as a relying party);
+  see [ADR 0018](0018-passkey-account-access.md) (Proposed) and #30
 
 The platform-provider plan remains proposed. The core implementation contract
 for #200 is recorded below; #291 tracks the staged delivery. Platform admission
@@ -24,8 +25,9 @@ first way this decision goes wrong.
    *client* of an authenticator; the credential is non-discoverable, scoped to
    `RP_ID = "zann.local"` (`fido.rs:23`), and deliberately requires user presence
    but not verification. Nothing about it is a passkey.
-2. **Zann as a relying party** — a passkey that unlocks a Zann account. Small,
-   server-side, `webauthn-rs`, and independent of everything below.
+2. **Zann as a relying party** — passkey authentication is server-side;
+   personal-vault unlock and recovery additionally require client-owned key
+   custody. [ADR 0018](0018-passkey-account-access.md) proposes that separate flow.
 3. **Zann as a provider** — websites' passkeys stored in a Zann vault, with Zann
    playing the authenticator. That is this ADR.
 
