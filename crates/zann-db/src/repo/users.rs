@@ -30,10 +30,10 @@ impl<'a> UserRepo<'a> {
                 row_version,
                 created_at,
                 updated_at,
-                last_login_at
+                last_login_at, auth_epoch, active_recovery_id
             )
             VALUES (
-                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20
             )
             "#,
             user.id,
@@ -53,7 +53,9 @@ impl<'a> UserRepo<'a> {
             user.row_version,
             user.created_at,
             user.updated_at,
-            user.last_login_at
+            user.last_login_at,
+            user.auth_epoch,
+            user.active_recovery_id
         )
         .execute(self.pool)
         .await
@@ -75,6 +77,8 @@ impl<'a> UserRepo<'a> {
                 kdf_memory_kb,
                 kdf_parallelism,
                 recovery_key_hash,
+                auth_epoch,
+                active_recovery_id,
                 status as "status",
                 deleted_at as "deleted_at",
                 deleted_by_user_id as "deleted_by_user_id",
@@ -107,6 +111,8 @@ impl<'a> UserRepo<'a> {
                 kdf_memory_kb,
                 kdf_parallelism,
                 recovery_key_hash,
+                auth_epoch,
+                active_recovery_id,
                 status as "status",
                 deleted_at as "deleted_at",
                 deleted_by_user_id as "deleted_by_user_id",
@@ -202,6 +208,8 @@ impl<'a> UserRepo<'a> {
                 kdf_memory_kb,
                 kdf_parallelism,
                 recovery_key_hash,
+                auth_epoch,
+                active_recovery_id,
                 status as "status",
                 deleted_at as "deleted_at",
                 deleted_by_user_id as "deleted_by_user_id",
@@ -316,9 +324,12 @@ impl<'a> UserRepo<'a> {
             r#"
             UPDATE users
             SET recovery_key_hash = $3,
+                recovery_key_version = recovery_key_version + 1,
+                security_revision = security_revision + 1,
                 row_version = row_version + 1,
                 updated_at = $4
             WHERE id = $1 AND row_version = $2
+              AND active_recovery_id IS NULL AND status = 1 AND deleted_at IS NULL
             "#,
             user_id,
             row_version,

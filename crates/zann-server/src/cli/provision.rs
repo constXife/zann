@@ -873,6 +873,8 @@ async fn ensure_system_user(
         kdf_memory_kb: i64::from(settings.config.auth.kdf.memory_kb),
         kdf_parallelism: i64::from(settings.config.auth.kdf.parallelism),
         recovery_key_hash: None,
+        auth_epoch: 1,
+        active_recovery_id: None,
         status: UserStatus::System,
         deleted_at: None,
         deleted_by_user_id: None,

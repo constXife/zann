@@ -14,7 +14,7 @@ sqlx-macros = { version = "0.8", default-features = false, features = ["migrate"
 sqlx-postgres = { version = "0.8", default-features = false, features = ["chrono", "json", "migrate", "uuid"], optional = true }
 sqlx-sqlite = { version = "0.8", default-features = false, features = ["bundled", "chrono", "json", "migrate", "uuid"], optional = true }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v4", "v7"] }
 serde_json = "1"
 same-file = { version = "1", optional = true }
 tracing = "0.1"

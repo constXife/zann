@@ -318,6 +318,8 @@ async fn oidc_mode_accepts_session_tokens() {
         kdf_memory_kb: i64::from(app.config().auth.kdf.memory_kb),
         kdf_parallelism: i64::from(app.config().auth.kdf.parallelism),
         recovery_key_hash: None,
+        auth_epoch: 1,
+        active_recovery_id: None,
         status: UserStatus::Active,
         deleted_at: None,
         deleted_by_user_id: None,
@@ -350,6 +352,7 @@ async fn oidc_mode_accepts_session_tokens() {
     let access_token = "access-token";
     let refresh_token = "refresh-token";
     let session = Session {
+        auth_epoch: 1,
         id: Uuid::now_v7(),
         user_id: user.id,
         device_id: device.id,

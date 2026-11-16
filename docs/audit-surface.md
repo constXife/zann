@@ -331,3 +331,19 @@ only to their exact key IDs. Hardware recipient enrollment and derivation use
 explicit presence/PIN/built-in-UV admission, fresh credential salts and a separate
 backup wrapping-key context. Physical token/biometric behavior needs device
 qualification in addition to deterministic fake-port and CI tests.
+
+## Account epoch and recovery foundation (#30)
+
+The shared `zann-core/src/recovery.rs` states/limits and `models/structs.rs` epoch
+fields, `zann-crypto/src/recovery.rs` secrets, `zann-db/src/repo/{sessions.rs,sessions/**,users.rs,recovery/**}`
+and `zann-server/migrations/0004_account_recovery.sql` are sensitive. Server
+`domains::auth/{service.rs,service/**,helpers.rs}` owns the consolidated interactive
+issuer; the existing core middleware owns admission. Client
+`config/v2/recovery/**` shares the existing Config/CredentialStore boundary.
+
+See [the implemented foundation](architecture/recovery-foundation.md) for scope
+and the explicit gate against exposing a consuming endpoint before complete
+authorization, passkey/grant revocation, mutation epoch guards and completion.
+Forward-migration, concurrency, recovery receipt/capacity/expiry, auth endpoint
+and client restart/pin/root/read-back tests cover this slice. CODEOWNERS, security
+labeling and audit CI include the new/moved paths; no crypto format is changed.

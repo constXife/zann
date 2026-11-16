@@ -182,6 +182,8 @@ impl TestApp {
             kdf_memory_kb: i64::from(self.config.auth.kdf.memory_kb),
             kdf_parallelism: i64::from(self.config.auth.kdf.parallelism),
             recovery_key_hash: None,
+            auth_epoch: 1,
+            active_recovery_id: None,
             status: UserStatus::Active,
             deleted_at: None,
             deleted_by_user_id: None,
@@ -214,6 +216,7 @@ impl TestApp {
         let access_token = format!("access-{}", uuid::Uuid::now_v7().simple());
         let refresh_token = format!("refresh-{}", uuid::Uuid::now_v7().simple());
         let session = Session {
+            auth_epoch: 1,
             id: uuid::Uuid::now_v7(),
             user_id: user.id,
             device_id: device.id,

@@ -1,5 +1,3 @@
-use rand::distributions::Alphanumeric;
-use rand::{thread_rng, Rng};
 use zann_core::{AuthSource, Identity, User};
 use zann_db::repo::{SessionRepo, UserRepo};
 
@@ -294,11 +292,7 @@ pub async fn create_recovery_kit(
         return Err(MeError::Forbidden("internal_only"));
     }
 
-    let recovery_key: String = thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(48)
-        .map(char::from)
-        .collect();
+    let recovery_key = zann_crypto::recovery::generate_server_recovery_key();
     let params = kdf_params_from_user(&user);
     let _permit =
         match metrics::acquire_kdf_permit(&state.argon2_semaphore, "users_recovery_kit").await {
@@ -334,5 +328,7 @@ pub async fn create_recovery_kit(
     }
 
     tracing::info!(event = "users_me_recovery_created", "Recovery kit created");
-    Ok(RecoveryKitResult { recovery_key })
+    Ok(RecoveryKitResult {
+        recovery_key: recovery_key.to_string(),
+    })
 }

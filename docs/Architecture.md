@@ -547,3 +547,15 @@ The server-oriented CLI uses the bounded `zann-client::server` capability with
 or FFI dependency. Shared item wire responses live in `zann-core::api::items`;
 transport, service-token exchange and endpoint identity verification remain
 inside `zann-client`. Interface code owns terminal trust confirmation only.
+
+## Account epoch and recovery foundation (#30)
+
+[The first recovery slice](architecture/recovery-foundation.md) adds epoch-stamped
+interactive session issuance/admission, exact refresh CAS, bounded transactional
+recovery persistence and operation-scoped native intents through the existing
+Config/CredentialStore owner. It does not expose recovery HTTP, passkey RP or
+E2EE unlock. Password/OIDC session issuance shares one transaction owner; machine
+and direct IdP authority retain explicit separate policies. Crypto/data formats
+and local device roots do not change. Later slices must add verified recovery
+authorization, RP/grant handling, protected mutation epoch checks and proof-gated
+completion before enabling a consuming endpoint.

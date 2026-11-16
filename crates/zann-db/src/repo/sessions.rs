@@ -1,4 +1,6 @@
+mod epoch;
 use super::prelude::*;
+pub use epoch::SessionWriteError;
 use tracing::{instrument, Span};
 
 pub struct SessionRepo<'a> {
@@ -12,7 +14,7 @@ impl<'a> SessionRepo<'a> {
 
     #[instrument(
         level = "debug",
-        skip(self, session),
+        skip_all,
         fields(
             session_id = %session.id,
             user_id = %session.user_id,
@@ -21,34 +23,28 @@ impl<'a> SessionRepo<'a> {
             db.query = "sessions.create"
         )
     )]
-    pub async fn create(&self, session: &Session) -> Result<(), sqlx_core::Error> {
-        query!(
-            r#"
-            INSERT INTO sessions (
-                id, user_id, device_id, access_token_hash, access_expires_at,
-                refresh_token_hash, expires_at, created_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            "#,
-            session.id,
-            session.user_id,
-            session.device_id,
-            session.access_token_hash.as_str(),
-            session.access_expires_at,
-            session.refresh_token_hash.as_str(),
-            session.expires_at,
-            session.created_at
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| {
-            Span::current().record("db.rows", result.rows_affected() as i64);
-        })
+    pub async fn create(&self, session: &Session) -> Result<(), SessionWriteError> {
+        epoch::create(self.pool, session).await
+    }
+
+    pub async fn guard_account_in(
+        connection: &mut sqlx_postgres::PgConnection,
+        user_id: Uuid,
+        expected_epoch: i64,
+    ) -> Result<(), SessionWriteError> {
+        epoch::lock_account(connection, user_id, expected_epoch).await
+    }
+
+    pub async fn create_in(
+        connection: &mut sqlx_postgres::PgConnection,
+        session: &Session,
+    ) -> Result<(), SessionWriteError> {
+        epoch::create_in(connection, session).await
     }
 
     #[instrument(
         level = "debug",
-        skip(self),
+        skip_all,
         fields(session_id = %id, db.system = "postgresql", db.operation = "SELECT", db.query = "sessions.get_by_id")
     )]
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<Session>, sqlx_core::Error> {
@@ -59,6 +55,7 @@ impl<'a> SessionRepo<'a> {
                 id as "id",
                 user_id as "user_id",
                 device_id as "device_id",
+                auth_epoch,
                 access_token_hash,
                 access_expires_at as "access_expires_at",
                 refresh_token_hash,
@@ -75,7 +72,7 @@ impl<'a> SessionRepo<'a> {
 
     #[instrument(
         level = "debug",
-        skip(self),
+        skip_all,
         fields(user_id = %user_id, db.system = "postgresql", db.operation = "SELECT", db.query = "sessions.list_by_user")
     )]
     pub async fn list_by_user(&self, user_id: Uuid) -> Result<Vec<Session>, sqlx_core::Error> {
@@ -86,6 +83,7 @@ impl<'a> SessionRepo<'a> {
                 id as "id",
                 user_id as "user_id",
                 device_id as "device_id",
+                auth_epoch,
                 access_token_hash,
                 access_expires_at as "access_expires_at",
                 refresh_token_hash,
@@ -105,7 +103,7 @@ impl<'a> SessionRepo<'a> {
 
     #[instrument(
         level = "debug",
-        skip(self),
+        skip_all,
         fields(db.system = "postgresql", db.operation = "SELECT", db.query = "sessions.get_by_refresh_token_hash")
     )]
     pub async fn get_by_refresh_token_hash(
@@ -119,15 +117,18 @@ impl<'a> SessionRepo<'a> {
                 s.id as "id",
                 s.user_id as "user_id",
                 s.device_id as "device_id",
+                s.auth_epoch,
                 s.access_token_hash,
                 s.access_expires_at as "access_expires_at",
                 s.refresh_token_hash,
                 s.expires_at as "expires_at",
                 s.created_at as "created_at"
             FROM sessions s
-            JOIN devices d ON d.id = s.device_id
+            JOIN devices d ON d.id = s.device_id AND d.user_id = s.user_id
+            JOIN users u ON u.id = s.user_id AND u.auth_epoch = s.auth_epoch
             WHERE s.refresh_token_hash = $1
               AND d.revoked_at IS NULL
+              AND u.status = 1 AND u.deleted_at IS NULL AND u.active_recovery_id IS NULL
             "#,
             refresh_token_hash
         )
@@ -137,7 +138,7 @@ impl<'a> SessionRepo<'a> {
 
     #[instrument(
         level = "debug",
-        skip(self),
+        skip_all,
         fields(db.system = "postgresql", db.operation = "SELECT", db.query = "sessions.get_by_access_token_hash")
     )]
     pub async fn get_by_access_token_hash(
@@ -151,15 +152,18 @@ impl<'a> SessionRepo<'a> {
                 s.id as "id",
                 s.user_id as "user_id",
                 s.device_id as "device_id",
+                s.auth_epoch,
                 s.access_token_hash,
                 s.access_expires_at as "access_expires_at",
                 s.refresh_token_hash,
                 s.expires_at as "expires_at",
                 s.created_at as "created_at"
             FROM sessions s
-            JOIN devices d ON d.id = s.device_id
+            JOIN devices d ON d.id = s.device_id AND d.user_id = s.user_id
+            JOIN users u ON u.id = s.user_id AND u.auth_epoch = s.auth_epoch
             WHERE s.access_token_hash = $1
               AND d.revoked_at IS NULL
+              AND u.status = 1 AND u.deleted_at IS NULL AND u.active_recovery_id IS NULL
             "#,
             access_token_hash
         )
@@ -169,43 +173,31 @@ impl<'a> SessionRepo<'a> {
 
     #[instrument(
         level = "debug",
-        skip(self),
-        fields(session_id = %session_id, db.system = "postgresql", db.operation = "UPDATE", db.query = "sessions.update_refresh_token")
+        skip_all,
+        fields(session_id = %session.id, db.system = "postgresql", db.operation = "UPDATE", db.query = "sessions.update_refresh_token")
     )]
     pub async fn update_refresh_token(
         &self,
-        session_id: Uuid,
+        session: &Session,
         access_token_hash: &str,
         access_expires_at: DateTime<Utc>,
         refresh_token_hash: &str,
         expires_at: DateTime<Utc>,
-    ) -> Result<(), sqlx_core::Error> {
-        query!(
-            r#"
-            UPDATE sessions
-            SET
-                access_token_hash = $2,
-                access_expires_at = $3,
-                refresh_token_hash = $4,
-                expires_at = $5
-            WHERE id = $1
-            "#,
-            session_id,
+    ) -> Result<(), SessionWriteError> {
+        epoch::rotate(
+            self.pool,
+            session,
             access_token_hash,
             access_expires_at,
             refresh_token_hash,
-            expires_at
+            expires_at,
         )
-        .execute(self.pool)
         .await
-        .map(|result| {
-            Span::current().record("db.rows", result.rows_affected() as i64);
-        })
     }
 
     #[instrument(
         level = "debug",
-        skip(self),
+        skip_all,
         fields(db.system = "postgresql", db.operation = "DELETE", db.query = "sessions.delete_by_refresh_token_hash")
     )]
     pub async fn delete_by_refresh_token_hash(
@@ -228,7 +220,7 @@ impl<'a> SessionRepo<'a> {
 
     #[instrument(
         level = "debug",
-        skip(self),
+        skip_all,
         fields(device_id = %device_id, db.system = "postgresql", db.operation = "DELETE", db.query = "sessions.delete_by_device")
     )]
     pub async fn delete_by_device(&self, device_id: Uuid) -> Result<u64, sqlx_core::Error> {
@@ -249,7 +241,7 @@ impl<'a> SessionRepo<'a> {
     /// devices while the caller stays signed in.
     #[instrument(
         level = "debug",
-        skip(self),
+        skip_all,
         fields(user_id = %user_id, db.system = "postgresql", db.operation = "DELETE", db.query = "sessions.delete_for_user_except_device")
     )]
     pub async fn delete_for_user_except_device(

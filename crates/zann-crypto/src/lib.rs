@@ -24,3 +24,5 @@ pub use crate::passwords::*;
 pub use crate::secrets::*;
 pub use crate::tokens::*;
 pub use crate::vault_crypto::*;
+
+pub mod recovery;

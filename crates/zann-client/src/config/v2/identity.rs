@@ -48,6 +48,10 @@ impl ClientPaths {
         self.root.join(AUTH_OPERATION_INTENT_FILENAME)
     }
 
+    pub(crate) fn recovery_intents(&self) -> PathBuf {
+        self.root.join(AUTH_RECOVERY_INTENTS_FILENAME)
+    }
+
     pub fn credential_operation_lock(&self) -> PathBuf {
         LockKind::CredentialOperation.path_in(&self.root)
     }
@@ -160,7 +164,13 @@ impl CredentialId {
                 suffix.len() == LIFECYCLE_NONCE_HEX_LEN + LIFECYCLE_TAG_HEX_LEN
                     && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
             });
-        if !valid_legacy && !valid_lifecycle {
+        let valid_recovery = value.strip_prefix("credr_").is_some_and(|suffix| {
+            suffix.len() == 96
+                && suffix
+                    .bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+        });
+        if !valid_legacy && !valid_lifecycle && !valid_recovery {
             return Err(ConfigError::InvalidIdentifier {
                 kind: "credential",
                 value,
