@@ -85,7 +85,11 @@ pub trait HardwareAuthenticator: Send + Sync {
     /// Whether this adapter implements hardware unlock (independent of device presence).
     fn supported(&self) -> bool;
     fn status(&self) -> Result<AuthenticatorInfo, FidoError>;
-    fn create_credential(&self, salt: [u8; 32]) -> Result<HardwareCredential, FidoError>;
+    fn create_credential(
+        &self,
+        salt: [u8; 32],
+        verification: HardwareVerification<'_>,
+    ) -> Result<HardwareCredential, FidoError>;
     fn derive_dwk(
         &self,
         credential: &HardwareCredential,
@@ -103,7 +107,11 @@ impl HardwareAuthenticator for UnsupportedAuthenticator {
     fn status(&self) -> Result<AuthenticatorInfo, FidoError> {
         Err(FidoError::UnsupportedPlatform)
     }
-    fn create_credential(&self, _: [u8; 32]) -> Result<HardwareCredential, FidoError> {
+    fn create_credential(
+        &self,
+        _: [u8; 32],
+        _: HardwareVerification<'_>,
+    ) -> Result<HardwareCredential, FidoError> {
         Err(FidoError::UnsupportedPlatform)
     }
     fn derive_dwk(

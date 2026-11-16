@@ -130,6 +130,9 @@ impl LocalVault {
         *self.device_key.lock().expect("lock poisoned") = None;
         self.account_keys.lock().expect("lock poisoned").clear();
         *self.vault_id.lock().expect("lock poisoned") = None;
+        if let Some(work) = self.archive.lock().expect("archive").take() {
+            work.cancel();
+        }
         self.syncs.cancel_all();
         self.item_reads.cancel_all();
         Ok(VaultStatus { unlocked: false })

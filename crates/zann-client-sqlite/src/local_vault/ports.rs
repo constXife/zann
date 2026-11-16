@@ -11,8 +11,8 @@ use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_db::SqliteFileLocation;
 use zann_keystore::{default_authenticator, default_keystore, default_secret_store};
 pub use zann_keystore::{
-    HardwareAuthenticator, Keystore, KeystoreError, KeystoreStatus, KeystoreStatusReason,
-    SecretStore, SecretValue,
+    BiometricKeyStore, HardwareAuthenticator, Keystore, KeystoreError, KeystoreStatus,
+    KeystoreStatusReason, SecretStore, SecretValue,
 };
 
 use super::LocalVault;
@@ -29,6 +29,7 @@ impl LocalVault {
 pub struct LocalVaultPorts {
     /// Holds the device wrapping key for remembered unlock.
     pub keystore: Arc<dyn Keystore>,
+    pub backup_keys: Arc<dyn zann_keystore::BiometricKeyStore>,
     pub authenticator: Arc<dyn HardwareAuthenticator>,
     /// Holds remote session tokens referenced by Config v2.
     pub credentials: Arc<dyn CredentialStore>,
@@ -42,7 +43,11 @@ impl LocalVaultPorts {
     /// for credentials, raw-HID FIDO2 where the platform has it.
     #[must_use]
     pub fn system_default() -> Self {
-        Self::with_platform_secrets(default_keystore().into(), Arc::from(default_secret_store()))
+        Self::with_platform_secrets(
+            default_keystore().into(),
+            Arc::from(default_secret_store()),
+            Arc::new(zann_keystore::UnsupportedBiometricKeys),
+        )
     }
 
     /// Composition for a shell that owns its OS secret storage (Keychain with
@@ -53,9 +58,11 @@ impl LocalVaultPorts {
     pub fn with_platform_secrets(
         keystore: Arc<dyn Keystore>,
         secret_store: Arc<dyn SecretStore>,
+        backup_keys: Arc<dyn zann_keystore::BiometricKeyStore>,
     ) -> Self {
         Self {
             keystore,
+            backup_keys,
             authenticator: default_authenticator().into(),
             credentials: Arc::new(OsCredentialStore::new(secret_store)),
             legacy_credentials: Arc::new(OsLegacyCredentialSource::system_default()),

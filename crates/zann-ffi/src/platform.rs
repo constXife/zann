@@ -74,6 +74,9 @@ pub trait PlatformKeystore: Send + Sync {
     fn store_dwk(&self, dwk: Vec<u8>) -> Result<(), PlatformStoreError>;
     fn load_dwk(&self) -> Result<Option<Vec<u8>>, PlatformStoreError>;
     fn delete_dwk(&self) -> Result<(), PlatformStoreError>;
+    fn store_backup_key(&self, key_id: Vec<u8>, key: Vec<u8>) -> Result<(), PlatformStoreError>;
+    fn load_backup_key(&self, key_id: Vec<u8>) -> Result<Option<Vec<u8>>, PlatformStoreError>;
+    fn delete_backup_key(&self, key_id: Vec<u8>) -> Result<(), PlatformStoreError>;
 }
 
 /// Untyped service/account secret storage for remote session tokens. The
@@ -164,6 +167,28 @@ impl SecretStore for ForeignSecretStore {
         self.0
             .delete(service.to_owned(), account.to_owned())
             .map_err(Into::into)
+    }
+}
+
+pub(crate) fn backup_keys(
+    platform: Arc<dyn PlatformKeystore>,
+) -> Arc<dyn zann_client_sqlite::local_vault::BiometricKeyStore> {
+    Arc::new(ForeignKeystore(platform))
+}
+impl zann_client_sqlite::local_vault::BiometricKeyStore for ForeignKeystore {
+    fn status(&self) -> KeystoreStatus {
+        Keystore::status(self)
+    }
+    fn store(&self, id: &[u8; 16], key: &[u8; 32]) -> Result<(), KeystoreError> {
+        self.0
+            .store_backup_key(id.to_vec(), key.to_vec())
+            .map_err(Into::into)
+    }
+    fn load(&self, id: &[u8; 16]) -> Result<Option<Vec<u8>>, KeystoreError> {
+        self.0.load_backup_key(id.to_vec()).map_err(Into::into)
+    }
+    fn delete(&self, id: &[u8; 16]) -> Result<(), KeystoreError> {
+        self.0.delete_backup_key(id.to_vec()).map_err(Into::into)
     }
 }
 

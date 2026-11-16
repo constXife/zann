@@ -7,16 +7,11 @@ pub(super) struct ValidatedBackup {
     pub source_vaults: HashMap<(Uuid, Uuid), (VaultKind, String)>,
 }
 
-pub(super) fn validate(path: &Path, selected: Uuid) -> Result<ValidatedBackup, BackupError> {
-    // Validation completes before any server or SQLite mutation. The bound also
-    // limits a malicious single JSON value while the item array stays streamed.
-    if std::fs::metadata(path).map_err(BackupError::source)?.len() > 50 * 1024 * 1024 {
-        return Err(BackupError::new(
-            "backup_too_large",
-            "backup exceeds 50 MiB",
-        ));
-    }
-    let meta = read_backup_metadata(path).map_err(BackupError::source)?;
+pub(super) fn validate(
+    input: &BackupInput,
+    selected: Option<Uuid>,
+) -> Result<ValidatedBackup, BackupError> {
+    let meta = read_backup_metadata(input).map_err(BackupError::source)?;
     if meta.version != BACKUP_VERSION {
         return Err(BackupError::new(
             "backup_version_unsupported",
@@ -43,7 +38,7 @@ pub(super) fn validate(path: &Path, selected: Uuid) -> Result<ValidatedBackup, B
             "invalid backup storage catalog",
         ));
     }
-    if !source_storages.contains(&selected) {
+    if selected.is_some_and(|id| !source_storages.contains(&id)) {
         return Err(BackupError::new(
             "backup_source_missing",
             "selected source storage is not in this backup",
@@ -69,7 +64,7 @@ pub(super) fn validate(path: &Path, selected: Uuid) -> Result<ValidatedBackup, B
                 "invalid backup vault catalog",
             ));
         }
-        if source_storage == selected {
+        if selected.is_none_or(|id| source_storage == id) {
             specs.push(BackupVaultSpec {
                 source_id,
                 name: vault.name.clone(),
@@ -77,7 +72,7 @@ pub(super) fn validate(path: &Path, selected: Uuid) -> Result<ValidatedBackup, B
             });
         }
     }
-    stream_backup_items(path, |item, _| {
+    stream_backup_items(input, |item, _| {
         let storage = Uuid::parse_str(&item.storage_id).map_err(|e| e.to_string())?;
         let vault = Uuid::parse_str(&item.vault_id).map_err(|e| e.to_string())?;
         if storage.is_nil() || vault.is_nil() {
@@ -111,10 +106,12 @@ pub(super) fn validate(path: &Path, selected: Uuid) -> Result<ValidatedBackup, B
         Ok(())
     })
     .map_err(BackupError::source)?;
-    source_vaults.retain(|(storage, _), _| *storage == selected);
+    if let Some(selected) = selected {
+        source_vaults.retain(|(storage, _), _| *storage == selected);
+    }
     Ok(ValidatedBackup {
         specs,
-        source_storages: HashSet::from([selected]),
+        source_storages: selected.map_or(source_storages, |id| HashSet::from([id])),
         source_vaults,
     })
 }

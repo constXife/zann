@@ -61,6 +61,12 @@ final class KeychainKeystore: DeviceKeystore {
     }
 
     func storeDwk(dwk: Data) throws {
+        try storeKey(account: account, key: dwk, replacing: true)
+    }
+    func storeBackupKey(keyId: Data, key: Data) throws {
+        try storeKey(account: "backup-recipient-" + keyId.base64EncodedString(), key: key, replacing: false)
+    }
+    private func storeKey(account: String, key: Data, replacing: Bool) throws {
         let current = status()
         guard current.supported else { throw PlatformStoreError.Unsupported }
         guard current.biometricsAvailable else {
@@ -74,15 +80,17 @@ final class KeychainKeystore: DeviceKeystore {
             throw PlatformStoreError.Unavailable(message: message ?? "access control unavailable")
         }
         // An access control cannot be updated in place: replace the item.
-        try deleteDwk()
+        if replacing { try Keychain.delete(service: service, account: account, dataProtection: true, scope: scope) }
         try Keychain.add(
-            service: service, account: account, data: dwk,
+            service: service, account: account, data: key,
             protection: [kSecAttrAccessControl: access], dataProtection: true, scope: scope
         )
     }
 
     /// Presents Touch ID; the core calls this off the main thread.
-    func loadDwk() throws -> Data? {
+    func loadDwk() throws -> Data? { try loadKey(account: account) }
+    func loadBackupKey(keyId: Data) throws -> Data? { try loadKey(account: "backup-recipient-" + keyId.base64EncodedString()) }
+    private func loadKey(account: String) throws -> Data? {
         let context = LAContext()
         context.localizedReason = try lock.withLock {
             guard let promptReason, !promptReason.isEmpty else {
@@ -107,6 +115,10 @@ final class KeychainKeystore: DeviceKeystore {
     func deleteDwk() throws {
         try Keychain.delete(service: service, account: account, dataProtection: true, scope: scope)
     }
+    func deleteBackupKey(keyId: Data) throws {
+        try Keychain.delete(service: service, account: "backup-recipient-" + keyId.base64EncodedString(), dataProtection: true, scope: scope)
+    }
+
 }
 
 /// Session tokens under the service and account names the core chooses. The

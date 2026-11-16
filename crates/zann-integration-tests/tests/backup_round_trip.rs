@@ -58,6 +58,7 @@ fn open_with_credentials(root: &Path, credentials: Arc<Credentials>) -> Arc<Loca
     LocalVault::open(
         zann_db::SqliteFileLocation::from_path(&root.join("local.sqlite")).unwrap(),
         LocalVaultPorts {
+            backup_keys: Arc::new(zann_keystore::UnsupportedBiometricKeys),
             keystore: Arc::new(zann_keystore::UnsupportedKeystore),
             authenticator: Arc::new(zann_keystore::UnsupportedAuthenticator),
             credentials: credentials.clone(),
@@ -206,3 +207,5 @@ async fn canonical_server_backup_preserves_items_metadata_and_encryption_planes(
 mod account_replicas;
 
 mod shared_cache_keys;
+
+mod encrypted_backup_round_trip;

@@ -33,7 +33,7 @@ struct BackupExportPicker: View {
     var body: some View {
         ProgressView().padding().task {
             let panel = NSSavePanel()
-            panel.allowedContentTypes = [.json]
+            panel.allowedContentTypes = [file.pathExtension == "json" ? .json : .data]
             panel.nameFieldStringValue = file.lastPathComponent
             let response = await withTaskCancellationHandler {
                 await panel.begin()
@@ -53,7 +53,7 @@ struct BackupExportPicker: View {
 enum ExportDestination {
     static func copy(source: URL, to destination: URL) throws {
         let manager = FileManager.default
-        let staging = destination.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString).json")
+        let staging = destination.deletingLastPathComponent().appendingPathComponent(".\(UUID().uuidString)").appendingPathExtension(source.pathExtension)
         do {
             try manager.copyItem(at: source, to: staging)
             if manager.fileExists(atPath: destination.path) {

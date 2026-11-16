@@ -2,11 +2,11 @@
 use super::*;
 use zann_client::app::{BackupVaultSpec, SyncOutcomeStatus};
 use zann_db::local::PendingChangeRepo;
-mod validate;
+pub(super) mod validate;
 
-pub async fn plain_import(
+pub async fn import_input(
     ctx: &BackupCtx,
-    path: PathBuf,
+    input: BackupInput,
     source_storage_id: Uuid,
     session: &zann_client::app::BackupImportSession,
 ) -> Result<ImportReport, BackupError> {
@@ -15,7 +15,7 @@ pub async fn plain_import(
         specs,
         source_storages,
         source_vaults,
-    } = validate::validate(&path, source_storage_id)?;
+    } = validate::validate(&input, Some(source_storage_id))?;
     ensure_complete(session.sync().await.map_err(BackupError::sync)?)?;
     session
         .prepare_vaults(&specs)
@@ -52,7 +52,7 @@ pub async fn plain_import(
     }
     let services = LocalServices::new(&ctx.pool, ctx.key(storage_id)?);
     let report = std::sync::Mutex::new(ImportReport::default());
-    stream_backup_items_async(&path, |item, _| {
+    stream_backup_items_async(&input, |item, _| {
         let mapping = &mapping;
         let services = &services;
         let report = &report;
@@ -141,4 +141,30 @@ fn ensure_complete(outcome: zann_client::app::SyncOutcome) -> Result<(), BackupE
         ));
     }
     Ok(())
+}
+
+/// Complete canonical dry-run, including payload semantics, without network or writes.
+pub fn inspect(
+    input: &BackupInput,
+) -> Result<zann_client::app::local::BackupInspection, BackupError> {
+    validate::validate(input, None)?;
+    let metadata = read_backup_metadata(input).map_err(BackupError::source)?;
+    let mut items_count = 0;
+    stream_backup_items(input, |_, _| {
+        items_count += 1;
+        Ok(())
+    })
+    .map_err(BackupError::source)?;
+    Ok(zann_client::app::local::BackupInspection {
+        storages: metadata
+            .storages
+            .into_iter()
+            .map(|s| zann_client::app::local::BackupSourceStorage {
+                id: s.id,
+                name: s.name,
+            })
+            .collect(),
+        vaults_count: metadata.vaults.len() as u64,
+        items_count,
+    })
 }

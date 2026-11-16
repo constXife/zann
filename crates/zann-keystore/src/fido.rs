@@ -59,13 +59,17 @@ fn classify(message: &str) -> FidoError {
     let lower = message.to_ascii_lowercase();
     if lower.contains("0x2e") || lower.contains("no_credentials") {
         FidoError::NotEnrolled
-    } else if lower.contains("0x31") || lower.contains("pin_invalid") {
+    } else if lower.contains("0x31")
+        || lower.contains("0x33")
+        || lower.contains("pin_invalid")
+        || lower.contains("pin_auth_invalid")
+    {
         FidoError::InvalidPin
     } else if lower.contains("0x27") || lower.contains("operation_denied") {
         // The authenticator reports a touch that never came the same way it
         // reports one the user actively declined.
         FidoError::Timeout
-    } else if lower.contains("0x33") || lower.contains("unsupported_extension") {
+    } else if lower.contains("0x16") || lower.contains("unsupported_extension") {
         FidoError::NoHmacSecret
     } else if lower.contains("device not found") || lower.contains("no device") {
         FidoError::NoDevice
@@ -113,12 +117,25 @@ impl HardwareAuthenticator for CtapHidAuthenticator {
     }
 
     /// Touch 1: create a credential. Confirmation is a separate derivation.
-    fn create_credential(&self, salt: [u8; 32]) -> Result<HardwareCredential, FidoError> {
+    fn create_credential(
+        &self,
+        salt: [u8; 32],
+        verification: HardwareVerification<'_>,
+    ) -> Result<HardwareCredential, FidoError> {
         let device = open()?;
         let args = MakeCredentialArgsBuilder::new(RP_ID, &challenge())
-            .without_pin_and_uv()
-            .extensions(&[Mext::HmacSecret(Some(true))])
-            .build();
+            .extensions(&[Mext::HmacSecret(Some(true))]);
+        let args = match verification {
+            HardwareVerification::Presence => args.without_pin_and_uv(),
+            HardwareVerification::Pin(pin) => {
+                if !(4..=63).contains(&pin.len()) {
+                    return Err(FidoError::InvalidPin);
+                }
+                args.pin(pin)
+            }
+            HardwareVerification::BuiltIn => args,
+        }
+        .build();
         let attestation = device
             .make_credential_with_args(&args)
             .map_err(backend_error)?;
@@ -218,8 +235,12 @@ mod tests {
             FidoError::Timeout.kind()
         );
         assert_eq!(
-            classify("response_status err = 0x33 CTAP2_ERR_UNSUPPORTED_EXTENSION").kind(),
+            classify("response_status err = 0x16 CTAP2_ERR_UNSUPPORTED_EXTENSION").kind(),
             FidoError::NoHmacSecret.kind()
+        );
+        assert_eq!(
+            classify("response_status err = 0x33 CTAP2_ERR_PIN_AUTH_INVALID").kind(),
+            FidoError::InvalidPin.kind()
         );
         assert!(matches!(
             classify("something we have never seen"),

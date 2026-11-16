@@ -270,3 +270,34 @@ Review proof replay/expiry, cancellation during prompts and SQLite waits, lock
 and key eviction, strict factor removal, redacted PIN/password errors, and atomic
 0600 publication with failed-output cleanup. Shells show the plaintext warning
 and local challenge before any export file or destination picker is opened.
+
+### Portable encrypted archives (#298, ADR 0017)
+
+`zann-crypto/src/backup{.rs,/**}` owns archive v1, independently of Item v1.
+Audit the complete recipient context/header AAD, header authentication,
+Decrypt-Before-Commit wraps, domain-separated keys, index/length/final-frame
+binding and required EOF. Header size, recipient count, KDF parameters and
+frame allocation are bounded before use. Recipient descriptors and key-bearing
+types deliberately omit Debug; errors expose stable kinds and preserve causes.
+
+`zann-client-sqlite::local_vault::encrypted_backup` owns preparation, native
+factor I/O, handle cancellation/expiry, export and restore. Biometric-only plans
+are refused before output creation. Cancellation and expiration asynchronously
+retire pending slot keys even if a late handle never reaches its shell. Existing
+session-bound private output publication serves both plaintext and ciphertext.
+`maintenance::backup::BackupInput` reopens authenticated readers for canonical
+preflight/import; no decrypted temporary file or whole-vault buffer is created.
+The existing canonical decoded-input limit remains 50 MiB.
+
+`zann-keystore::BiometricKeyStore`, `zann-ffi::platform` and Apple
+`KeychainKeystore` use dedicated backup-recipient IDs and `.biometryCurrentSet`
+items; remembered-unlock DWK is never reused or changed by archive creation.
+A new biometric key is read back and compared before publishing its metadata;
+failed pre-commit verification cleans its uncommitted entry. A dispatched SQLite
+CAS is awaited outside the session gate; an ambiguous or competing metadata
+commit retains the private OS key to avoid a dangling durable reference.
+Existing archive slots route
+only to their exact key IDs. Hardware recipient enrollment and derivation use
+explicit presence/PIN/built-in-UV admission, fresh credential salts and a separate
+backup wrapping-key context. Physical token/biometric behavior needs device
+qualification in addition to deterministic fake-port and CI tests.

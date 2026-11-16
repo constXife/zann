@@ -13,6 +13,7 @@ import ZannCoreKit
 /// behave like a dismissed prompt.
 final class MemoryKeystore: DeviceKeystore {
     private var dwk: Data?
+    private var backupKeys: [Data: Data] = [:]
     private(set) var promptReason = ""
     var cancelLoads = false
     var biometricsAvailable = true
@@ -41,6 +42,17 @@ final class MemoryKeystore: DeviceKeystore {
     }
 
     func deleteDwk() throws { dwk = nil }
+    func storeBackupKey(keyId: Data, key: Data) throws {
+        guard backupKeys[keyId] == nil else { throw PlatformStoreError.Unavailable(message: "Key already exists") }
+        backupKeys[keyId] = key
+    }
+    func loadBackupKey(keyId: Data) throws -> Data? {
+        loadCalls += 1
+        if cancelLoads { throw PlatformStoreError.Cancelled }
+        return backupKeys[keyId]
+    }
+    func deleteBackupKey(keyId: Data) throws { backupKeys.removeValue(forKey: keyId) }
+
 }
 
 final class MemorySecretStore: PlatformSecretStore {

@@ -5,6 +5,7 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::similar_names)]
 
+pub mod backup;
 pub mod crypto;
 #[cfg(feature = "passkey")]
 pub mod es256;

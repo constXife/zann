@@ -16,6 +16,7 @@ fn open(
 ) -> Arc<LocalVault> {
     let location = SqliteFileLocation::from_path(&root.path().join("local.sqlite")).unwrap();
     let ports = LocalVaultPorts {
+        backup_keys: Arc::new(zann_keystore::UnsupportedBiometricKeys),
         keystore,
         authenticator: auth,
         ..LocalVaultPorts::system_default()

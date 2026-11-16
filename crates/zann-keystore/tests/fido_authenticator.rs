@@ -23,7 +23,9 @@ fn enrols_derives_and_detects_the_authenticator() {
     eprintln!("touch the key twice to enrol");
     let salt: [u8; 32] = rand::random();
     let authenticator = fido::CtapHidAuthenticator;
-    let credential = authenticator.create_credential(salt).expect("touch 1");
+    let credential = authenticator
+        .create_credential(salt, zann_keystore::HardwareVerification::Presence)
+        .expect("touch 1");
     let enrolled_key = authenticator
         .derive_dwk(&credential, zann_keystore::HardwareVerification::Presence)
         .expect("touch 2");

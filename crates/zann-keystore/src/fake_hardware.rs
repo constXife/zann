@@ -84,9 +84,19 @@ impl HardwareAuthenticator for FakeHardwareAuthenticator {
         })
     }
 
-    fn create_credential(&self, salt: [u8; 32]) -> Result<HardwareCredential, FidoError> {
+    fn create_credential(
+        &self,
+        salt: [u8; 32],
+        verification: HardwareVerification<'_>,
+    ) -> Result<HardwareCredential, FidoError> {
         let mut state = self.state.lock().expect("fake state poisoned");
         let token = state.token.ok_or(FidoError::NoDevice)?;
+        if let Some(expected) = &state.pin {
+            if !matches!(verification, HardwareVerification::Pin(value) if value == expected.as_str())
+            {
+                return Err(FidoError::InvalidPin);
+            }
+        }
         state.touches += 1;
         if let Some(error) = state.next_create_error.take() {
             return Err(error);

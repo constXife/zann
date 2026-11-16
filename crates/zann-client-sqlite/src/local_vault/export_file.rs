@@ -1,29 +1,8 @@
 //! Authorization is rechecked at bounded writes and under the publication lease.
+use super::output::CheckedOutput;
 use super::*;
-use crate::maintenance::private_output::PrivateOutput;
-use std::io::{self, BufWriter, Write};
+use std::io::{BufWriter, Write};
 
-struct ExportOutput<'a> {
-    core: &'a LocalVault,
-    authorization: export::AuthorizedExport,
-    output: PrivateOutput,
-}
-impl Write for ExportOutput<'_> {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let _context = self.core.context_gate.read().expect("context");
-        self.authorization
-            .check(self.core)
-            .map_err(io::Error::other)?;
-        self.output.write(bytes)
-    }
-    fn flush(&mut self) -> io::Result<()> {
-        let _context = self.core.context_gate.read().expect("context");
-        self.authorization
-            .check(self.core)
-            .map_err(io::Error::other)?;
-        self.output.flush()
-    }
-}
 impl LocalVault {
     pub fn backup_export_file(
         &self,
@@ -43,12 +22,7 @@ impl LocalVault {
         };
         let operation = record.operation.clone();
         let deadline = record.expires;
-        let output = ExportOutput {
-            core: self,
-            authorization: record,
-            output: PrivateOutput::create(&target)
-                .map_err(crate::maintenance::BackupError::source)?,
-        };
+        let output = CheckedOutput::new(self, record, &target)?;
         let mut writer = BufWriter::new(output);
         let report = self.runtime.block_on(async {
             tokio::select! {
@@ -61,20 +35,12 @@ impl LocalVault {
         writer
             .flush()
             .map_err(crate::maintenance::BackupError::source)?;
-        let mut output = writer
+        let output = writer
             .into_inner()
             .map_err(|error| crate::maintenance::BackupError::source(error.into_error()))?;
-        output
-            .output
-            .seal()
-            .map_err(crate::maintenance::BackupError::source)?;
-        output.authorization.check_persisted(self)?;
-        let _context = self.context_gate.read().expect("context");
-        output.authorization.check(self)?;
-        output
-            .output
-            .publish()
-            .map_err(crate::maintenance::BackupError::source)?;
+
+        output.lease.check_persisted(self)?;
+        output.publish()?;
         Ok(BackupExportReport {
             path: target.display().to_string(),
             storages_count: report.storages_count as u64,

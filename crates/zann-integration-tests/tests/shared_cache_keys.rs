@@ -319,6 +319,7 @@ fn open_shared(
     LocalVault::open(
         zann_db::SqliteFileLocation::from_path(&root.join("local.sqlite")).unwrap(),
         LocalVaultPorts {
+            backup_keys: Arc::new(zann_keystore::UnsupportedBiometricKeys),
             keystore,
             authenticator: Arc::new(zann_keystore::UnsupportedAuthenticator),
             credentials: credentials.clone(),

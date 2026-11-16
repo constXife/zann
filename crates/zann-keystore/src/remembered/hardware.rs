@@ -13,7 +13,8 @@ impl RememberedUnlock {
         authenticator: &dyn crate::HardwareAuthenticator,
         label: &str,
     ) -> Result<PendingHardwareKey, UnlockError> {
-        let credential = authenticator.create_credential(rand::random())?;
+        let credential = authenticator
+            .create_credential(rand::random(), crate::HardwareVerification::Presence)?;
         Ok(PendingHardwareKey {
             credential,
             label: label.trim().to_string(),

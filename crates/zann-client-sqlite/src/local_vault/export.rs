@@ -201,3 +201,9 @@ impl LocalVault {
         Ok((record, active))
     }
 }
+
+impl super::output::OutputLease for AuthorizedExport {
+    fn check_output(&self, core: &LocalVault) -> LocalResult<()> {
+        self.check(core)
+    }
+}

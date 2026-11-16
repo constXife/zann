@@ -15,6 +15,25 @@ impl LocalVault {
                 "backup path is empty".to_string(),
             ));
         }
+        self.backup_import_input(
+            crate::maintenance::backup::BackupInput::plain(PathBuf::from(path)),
+            source_storage_id,
+            options,
+            Arc::new(
+                SessionOperation::new(
+                    std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
+                )
+                .0,
+            ),
+        )
+    }
+    pub(super) fn backup_import_input(
+        &self,
+        input: crate::maintenance::backup::BackupInput,
+        source_storage_id: String,
+        options: BackupImportOptions,
+        operation: Arc<SessionOperation>,
+    ) -> LocalResult<BackupImportReport> {
         let source_storage = Uuid::parse_str(&source_storage_id)
             .map_err(crate::maintenance::backup::BackupError::source)?;
         if source_storage.is_nil() || source_storage.to_string() != source_storage_id {
@@ -22,10 +41,9 @@ impl LocalVault {
                 "select a canonical source storage UUID from the backup".into(),
             ));
         }
-        let (operation, cancel) = SessionOperation::new(
-            std::time::Instant::now() + std::time::Duration::from_secs(10 * 60),
-        );
-        let _in_flight = self.syncs.register(operation.operation_id(), cancel);
+        let _in_flight = self
+            .syncs
+            .register(operation.operation_id(), operation.cancellation_handle());
         let ctx = self.backup_ctx()?;
         let (selection_before, generation) = {
             let _context = self.context_gate.read().expect("lock poisoned");
@@ -50,9 +68,9 @@ impl LocalVault {
         )?;
         let report = self
             .runtime
-            .block_on(crate::maintenance::backup::plain_import(
+            .block_on(crate::maintenance::backup::import_input(
                 &ctx,
-                PathBuf::from(path),
+                input,
                 source_storage,
                 &session,
             ))?;

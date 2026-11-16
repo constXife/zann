@@ -154,13 +154,13 @@ fn reads_metadata_and_streams_items() {
     let file = File::create(&path).expect("create temp backup");
     serde_json::to_writer(file, &backup).expect("write backup");
 
-    let meta = read_backup_metadata(&path).expect("read metadata");
+    let meta = read_backup_metadata(&BackupInput::plain(path.clone())).expect("read metadata");
     assert_eq!(meta.version, BACKUP_VERSION);
     assert_eq!(meta.storages.len(), 1);
     assert_eq!(meta.vaults.len(), 1);
 
     let mut streamed = Vec::new();
-    stream_backup_items(&path, |item, _index| {
+    stream_backup_items(&BackupInput::plain(path.clone()), |item, _index| {
         streamed.push(item);
         Ok(())
     })
@@ -218,7 +218,7 @@ fn streams_items_async() {
     tokio::runtime::Runtime::new()
         .expect("runtime")
         .block_on(async {
-            stream_backup_items_async(&path, |item, _index| {
+            stream_backup_items_async(&BackupInput::plain(path.clone()), |item, _index| {
                 let items_clone = Arc::clone(&items_clone);
                 async move {
                     let mut guard = items_clone.lock().expect("lock items");
@@ -307,13 +307,13 @@ fn writes_backup_streaming() {
     writer.flush().expect("flush");
     assert_eq!(items_count, 2);
 
-    let meta = read_backup_metadata(&path).expect("read metadata");
+    let meta = read_backup_metadata(&BackupInput::plain(path.clone())).expect("read metadata");
     assert_eq!(meta.version, BACKUP_VERSION);
     assert_eq!(meta.storages.len(), 1);
     assert_eq!(meta.vaults.len(), 1);
 
     let mut streamed = Vec::new();
-    stream_backup_items(&path, |item, _index| {
+    stream_backup_items(&BackupInput::plain(path.clone()), |item, _index| {
         streamed.push(item);
         Ok(())
     })

@@ -15,6 +15,7 @@ use zann_ffi::{
 #[derive(Default)]
 pub struct MemoryKeystore {
     pub dwk: Mutex<Option<Vec<u8>>>,
+    pub backup_keys: Mutex<BTreeMap<Vec<u8>, Vec<u8>>>,
     /// When set, `load_dwk` behaves as a dismissed biometric prompt.
     pub cancel_load: Mutex<bool>,
 }
@@ -40,6 +41,26 @@ impl PlatformKeystore for MemoryKeystore {
     }
     fn delete_dwk(&self) -> Result<(), PlatformStoreError> {
         *self.dwk.lock().unwrap() = None;
+        Ok(())
+    }
+    fn store_backup_key(&self, id: Vec<u8>, key: Vec<u8>) -> Result<(), PlatformStoreError> {
+        let mut keys = self.backup_keys.lock().unwrap();
+        if keys.contains_key(&id) {
+            return Err(PlatformStoreError::Unavailable {
+                message: "key already exists".into(),
+            });
+        }
+        keys.insert(id, key);
+        Ok(())
+    }
+    fn load_backup_key(&self, id: Vec<u8>) -> Result<Option<Vec<u8>>, PlatformStoreError> {
+        if *self.cancel_load.lock().unwrap() {
+            return Err(PlatformStoreError::Cancelled);
+        }
+        Ok(self.backup_keys.lock().unwrap().get(&id).cloned())
+    }
+    fn delete_backup_key(&self, id: Vec<u8>) -> Result<(), PlatformStoreError> {
+        self.backup_keys.lock().unwrap().remove(&id);
         Ok(())
     }
 }
