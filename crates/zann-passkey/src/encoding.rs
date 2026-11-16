@@ -30,6 +30,16 @@ pub(crate) fn none_attestation(auth_data: &[u8]) -> Result<Vec<u8>, PasskeyError
     ]))
 }
 
+/// DER SubjectPublicKeyInfo: id-ecPublicKey + prime256v1 + uncompressed point.
+pub(crate) fn public_key_spki(point: &[u8; 65]) -> Vec<u8> {
+    let mut bytes = vec![
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
+        0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+    ];
+    bytes.extend_from_slice(point);
+    bytes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

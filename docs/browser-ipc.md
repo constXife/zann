@@ -239,3 +239,52 @@ risk (at most five guesses per issued code); native code display and browser
 profile custody remain trusted endpoints. Rust-owned code/confirmation buffers
 are zeroized, while shell/upstream-library memory copies have no forensic-erasure
 guarantee. See [ADR 0007](adr/0007-browser-integration.md) for tradeoffs.
+
+## Passkey ceremony operations (#293)
+
+The existing authenticated Noise channel admits three additional typed methods:
+
+- `passkey_query { request }` binds observed origins, canonical RP, challenge,
+  verification requirement and complete registration/assertion options. It returns
+  a native scope/generation, at most 32 public account candidates and an opaque
+  ticket. Registration rechecks the exclusion list; assertions support both
+  discoverable and explicit allow lists. Signing keys, credential/user IDs and
+  encrypted payloads are absent from chooser metadata.
+- `make_credential { ticket, gesture }` consumes a registration ticket after the
+  extension-only trusted confirmation. Its original request cannot be replaced.
+- `get_assertion { ticket, item_id, gesture }` consumes an assertion ticket for
+  an item admitted by that exact query. It cannot select an arbitrary vault/item.
+
+Tickets expire after 30 seconds and bind the paired signing key, fresh connection
+nonce, exact request, candidate IDs and native selection generation. Capacity is
+64 total/four per connection. Native revocation clears tickets. All attempts
+consume before execution, including denial/error; reconnect cannot reuse a ticket.
+No automatic retry follows timeout, disconnect or a lost registration response.
+An already committed credential remains durable even if response delivery fails.
+The next-frame deadline after a successful query is 35 seconds for confirmation;
+other frames and response writes retain the ordinary five-second bound.
+
+The local adapter holds the existing context read lease through commit and
+bounded encrypted delivery; vault lock, account/vault changes and native pairing
+revocation linearize with completion. Passkeys require personal scope plus client
+encryption, checked before candidate decryption. One canonical item-batch writer
+unwraps one vault key for the indexed RP lookup, final exclusion/selection check,
+key generation and atomic item/history/pending publication. Assertion reads never
+change item version, history, pending sync, recency or signCount. Responses contain
+only public WebAuthn material; the private key never leaves LocalVaultService.
+UP is set only after this per-operation confirmation; UV is always zero because
+this adapter supplies no fresh verification evidence. Required UV refuses.
+
+`passkey_rp_index` is a rebuildable local projection of public RP metadata,
+separate from item payloads, FTS and sync authority. Creation and personal pull
+publish it in the same SQLite transaction. Triggers invalidate only this derived
+table on payload/scope/type/deletion changes and remove entries on deletion.
+Unprojected rows (including existing records at migration) are queued under NULL
+RP and repaired from authenticated ciphertext with the same batch key. A request
+repairs at most the existing exchange bound of 4,096 queued records in 32-row
+batches, then admits 32 matching candidates (one lookahead detects overflow), with fixed ciphertext/metadata/string bounds and a two-second
+preparation budget. An excessive queue or RP refuses rather than truncating
+exclusions/discovery. Repair never changes an item, pending change or history.
+
+The browser adapter's origin/ancestry and native confirmation boundaries are
+specified in [the Chromium contract](chromium-extension.md#passkey-provider-admission-293).

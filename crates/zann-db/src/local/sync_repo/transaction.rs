@@ -117,6 +117,15 @@ pub(super) async fn commit_pull_in(
             &change.item,
         )
         .await?;
+        query!(
+            "UPDATE passkey_rp_index SET rp_id=? WHERE storage_id=? AND item_id=?",
+            change.passkey_rp_id.as_deref(),
+            page.scope.storage_id,
+            change.item.id
+        )
+        .execute(&mut **tx)
+        .await
+        .map_err(LocalSyncError::Database)?;
         replace_history(tx, page.scope, change).await?;
         history_entries += change.history.len();
     }

@@ -6,6 +6,10 @@ use zeroize::Zeroize;
 
 mod error;
 pub use error::{IpcError, Result};
+mod passkey_options;
+pub use passkey_options::passkey_request;
+pub mod passkey;
+pub use passkey::*;
 mod model;
 pub use model::*;
 
@@ -54,6 +58,18 @@ impl Drop for SignedReply {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "method", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Request {
+    PasskeyQuery {
+        request: PasskeyRequest,
+    },
+    MakeCredential {
+        ticket: String,
+        gesture: bool,
+    },
+    GetAssertion {
+        ticket: String,
+        item_id: String,
+        gesture: bool,
+    },
     PairStatus {},
     PairStart {
         name: String,
@@ -95,6 +111,13 @@ pub enum ErrorCode {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Reply {
+    PasskeyMatches {
+        ticket: String,
+        matches: PasskeyMatches,
+    },
+    Credential {
+        response: PasskeyResponse,
+    },
     PairChallenge {
         message: String,
         confirmation: String,

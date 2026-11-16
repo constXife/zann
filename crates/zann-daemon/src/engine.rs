@@ -16,12 +16,14 @@ use zann_client::browser_ipc::{ErrorCode, MatchPage, Reply, Request, SignedReply
 mod cursors;
 mod fill;
 mod pairing;
+mod passkey;
 pub(crate) use pairing::PairingAttempt;
 
 pub(crate) struct State {
     pub pairings: Vec<Pairing>,
     pub pairing: Option<PairingWindow>,
     pub cursors: cursors::CursorStore,
+    pub tickets: passkey::Tickets,
 }
 
 pub(crate) struct Engine {
@@ -44,6 +46,7 @@ impl Engine {
                 pairings,
                 pairing: None,
                 cursors: cursors::CursorStore::default(),
+                tickets: passkey::Tickets::default(),
             }),
             running: AtomicBool::new(true),
             vault,
@@ -104,6 +107,60 @@ impl Engine {
         }
         let delivery = |error: DaemonError| LocalError::BrowserDelivery(Box::new(error));
         let result = match body {
+            Request::PasskeyQuery { request: ceremony } => {
+                self.vault.passkey_query(ceremony.clone(), &mut |matches| {
+                    let ticket = state
+                        .tickets
+                        .issue(&public, nonce, ceremony.clone(), &matches)?;
+                    stream.await_confirmation();
+                    self.send(
+                        stream,
+                        nonce,
+                        request.sequence,
+                        &Reply::PasskeyMatches { ticket, matches },
+                    )
+                    .map_err(delivery)
+                })
+            }
+            Request::MakeCredential { ticket, gesture } => self.complete_passkey(
+                &mut state.tickets,
+                &public,
+                nonce,
+                &ticket,
+                gesture,
+                None,
+                &mut |response| {
+                    self.send(
+                        stream,
+                        nonce,
+                        request.sequence,
+                        &Reply::Credential { response },
+                    )
+                    .map_err(delivery)
+                },
+            ),
+            Request::GetAssertion {
+                ticket,
+                item_id,
+                gesture,
+            } => self.complete_passkey(
+                &mut state.tickets,
+                &public,
+                nonce,
+                &ticket,
+                gesture,
+                Some(item_id),
+                &mut |response| {
+                    self.send(
+                        stream,
+                        nonce,
+                        request.sequence,
+                        &Reply::Credential { response },
+                    )
+                    .map_err(delivery)
+                },
+            ),
+
             Request::PairStatus {} | Request::PairStart { .. } | Request::PairFinish { .. } => {
                 unreachable!()
             }

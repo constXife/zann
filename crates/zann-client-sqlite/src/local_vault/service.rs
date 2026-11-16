@@ -2,6 +2,23 @@
 use super::*;
 
 impl LocalVaultService for LocalVault {
+    fn passkey_query(
+        &self,
+        request: PasskeyRequest,
+        sink: &mut dyn FnMut(PasskeyMatches) -> LocalResult<()>,
+    ) -> LocalResult<()> {
+        LocalVault::passkey_query(self, request, sink)
+    }
+    fn passkey_ceremony(
+        &self,
+        request: PasskeyRequest,
+        scope: BrowserScope,
+        selected: Option<String>,
+        sink: &mut dyn FnMut(PasskeyResponse) -> LocalResult<()>,
+    ) -> LocalResult<()> {
+        LocalVault::passkey_ceremony(self, request, scope, selected, sink)
+    }
+
     fn passkey_targets(&self) -> LocalResult<Vec<PasskeyTargetSummary>> {
         LocalVault::passkey_targets(self)
     }

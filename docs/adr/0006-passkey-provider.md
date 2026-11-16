@@ -348,3 +348,57 @@ backup/snapshot/verify tests prove recovered keys can produce valid assertions.
 The costs are bounded plaintext decoding during explicit import/conversion,
 a private optional metadata field, and a provider metadata extension. Hardware
 provider activation and PRF/large-blob ceremonies remain outside this stage.
+
+## Desktop Chromium implementation contract (#293)
+
+The platform-provider plan remains Proposed for other platforms. Chromium uses
+[document-bound interception](../chromium-extension.md#passkey-provider-admission-293)
+and the [existing paired IPC](../browser-ipc.md#passkey-ceremony-operations-293).
+The pure ceremony/storage/exchange owners established by #200/#292 remain intact.
+The browser adapter never attaches the exclusive global webAuthenticationProxy:
+its events lack authenticated requesting-document identity. This is evaluated
+against the linked official Chrome API, rather than inferred from the active tab.
+
+The daemon owns single-use request/selection/channel tickets. The thin browser
+shell renders the per-ceremony presence prompt in an extension-only top-level
+window. Native lock/selection and pairing revocation hold their existing leases
+through commit and delivery. This implements the prompt requirement without
+placing crypto, RP policy, private keys or another vault session in JavaScript.
+No current request performs user verification; UV remains zero and required UV
+fails closed. The already-unlocked session is never treated as verification.
+
+### Values and alignment
+
+There is no separate repository values manifest; `AGENTS.md` and the capability
+map remain normative. Each mechanism is evaluated separately:
+
+- Document-bound shim: privileged sender/navigation identity feeds the existing
+  Rust RP/PSL owner; only public WebAuthn input/output crosses the page bridge.
+  The cost is opt-in per-host interception and possible early-API/provider
+  collisions. Refusing unsupported calls preserves honest admission; a parallel
+  proxy/fallback path would add an unauthenticated document inference.
+- Native tickets and isolated confirmation: exact challenge, request, channel
+  and selection are retained once, with bounded expiry/capacity. Confirmation
+  grants one attempt; assertions remain read-only. A retry cannot be idempotent
+  at this boundary after a website loses its response: returning another
+  assertion/registration would reuse consumed presence. No recovery command is
+  introduced; a fresh user action is required.
+- RP projection and atomic creation: the encrypted item is the source of truth;
+  the existing item-batch key/transaction owns index, history and pending writes.
+  Bounded repair changes only derived metadata. Indexed matching avoids a vault
+  scan and per-candidate unwraps. Excessive candidates/backlog refuse; no silent
+  truncation weakens exclusion. No payload/envelope migration or dual-write owner
+  is introduced.
+- Honest UV and public credential serialization: the headless ceremony controls
+  flags, counters and attestations; browser code only reconstructs WebAuthn values.
+  Required verification is explicitly unavailable until a fresh native factor
+  adapter exists. The existing backup/export guarantees are prerequisites already
+  delivered by #292, not new per-registration operator steps.
+
+Alignment: existing Noise/SPAKE2, context/pairing leases, item-batch transactions,
+PSL admission, pure passkey crypto and exchange are reused. The login autofill
+bridge remains isolated and unchanged in authority. The new page bridge is
+limited to public WebAuthn values. No new MIG exception or runtime service is
+introduced. One migration creates a derived table; packaging and test commands
+stay the existing extension workflow. Changes are split by domain module, with
+only existing IPC/port/owner maps as shared edit points.

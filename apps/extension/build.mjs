@@ -1,5 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { installPasskeyShim } from './src/passkey-main.js';
+import { installPasskeyBridge } from './src/passkey-content.js';
 import { pageFields } from './src/fields.js';
 import { installInline } from './src/inline-content.js';
 import { keyIcon } from './src/key-icon.js';
@@ -27,6 +29,8 @@ run('wasm-bindgen', [path.join(root, 'target/browser/wasm32-unknown-unknown/rele
 await cp(path.join(here, 'src'), dist, { recursive: true });
 // Packaged classic content script; no runtime eval/import or page-world bridge.
 await writeFile(path.join(dist, 'content.js'), `(()=>{${pageFields.toString()}\n${keyIcon.toString()}\n(${installInline.toString()})(pageFields, keyIcon);})();\n`);
+await writeFile(path.join(dist, 'passkey-main-content.js'), `(${installPasskeyShim.toString()})();\n`);
+await writeFile(path.join(dist, 'passkey-isolated-content.js'), `(${installPasskeyBridge.toString()})();\n`);
 await cp(path.join(here, 'manifest.json'), path.join(dist, 'manifest.json'));
 await mkdir(path.join(dist, 'icons'));
 for (const size of [32, 128]) await cp(path.join(root, `assets/icons/${size}x${size}.png`), path.join(dist, `icons/${size}.png`));

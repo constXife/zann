@@ -67,6 +67,8 @@ impl NativeClient {
     }
 }
 
+mod passkey;
+pub use passkey::*;
 mod search;
 pub use search::NativeLoginSearch;
 mod pairing;

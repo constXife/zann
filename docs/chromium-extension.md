@@ -357,3 +357,55 @@ keyboard selection beyond the initial window, correct insertion in both
 surfaces and no usage update from filtering. Pure presentation tests also cover
 8192 entries, Unicode/case handling, stable ordering and invalid window/query
 bounds. The existing fill/save/generate/OTP/document/pairing regressions remain.
+
+## Passkey provider admission (#293)
+
+The minimum supported Chromium version is 111 (packaged MAIN-world registrations).
+On an individually enabled HTTPS host, Zann now handles WebAuthn `publicKey`
+`navigator.credentials.create/get` requests. Settings names both login suggestions
+and passkeys before the user grants the host. The two packaged document-start
+scripts run in MAIN and ISOLATED worlds; neither is web accessible. Existing
+loaded top documents can be activated from Settings; reload to install the
+provider before a website captures `navigator.credentials` or in existing frames.
+
+The page bridge carries only bounded WebAuthn options, cancellation and the
+standard public credential response. It carries no native packet, seed, pin,
+chooser metadata, native selection or private signing key. The worker derives
+origins and document identities from `runtime.Port.sender` and `webNavigation`,
+checks every ancestor, and passes observed URLs to `zann-browser`'s Rust admission.
+All origins must be HTTPS and same-origin, including intermediate ancestors;
+no page-provided origin or Permissions Policy claim is admitted. RP admission
+uses the existing canonical `zann-autofill::RpId`/PSL policy.
+
+Each request opens a separate extension-only confirmation window, outside the
+page's framing/CSS boundary. It displays the admitted RP and registration account
+or a bounded account chooser. Only a trusted click consumes the native-issued,
+30-second, single-use ticket. A synthetic click, page `gesture` flag, unlocked
+vault or previous confirmation cannot authorize another operation. Navigation,
+port/window closure and abort invalidate the transient browser operation. Host
+permission removal also refuses confirmation. Nothing is persisted to browser
+storage beyond the existing pairing and successful-login usage records.
+
+Current support is ES256, discoverable credentials, `none` attestation, an empty
+extension-results object and explicit interactive ceremonies. The provider does
+not claim user verification: preferred/discouraged verification runs with UV=0;
+required verification refuses. Silent/conditional mediation, nonempty WebAuthn
+extensions, cross-platform authenticator attachment and direct/enterprise
+attestation refuse. There is no automatic provider switch or retry after dispatch.
+Non-`publicKey` calls retain their original browser behavior. The returned public
+credential implements the standard byte properties, `toJSON`, attestation
+transport/authenticator-data/public-key getters and assertion signature/userHandle.
+
+### Proxy evaluation
+
+Evaluated against the [Chrome webAuthenticationProxy API](https://developer.chrome.com/docs/extensions/reference/api/webAuthenticationProxy)
+on 2026-11-16: attach is exclusive per profile, suspends normal WebAuthn handling,
+and its create/get events expose request ID/options without a tab/frame/document
+identity. Guessing the active tab cannot authenticate a requesting frame.
+Therefore Zann uses the document-bound shim and never attaches the global proxy.
+Browser-native WebAuthn remains available on hosts where Zann is not enabled.
+On an enabled document, public-key requests belong to Zann until the site is
+disabled and reloaded. The cost is explicit: early API capture or a colliding
+provider shim can prevent interception; no hidden fallback claims coexistence.
+The service worker registers listeners synchronously, holds only transient
+bounded sessions, and loses in-flight tickets on restart instead of replaying.

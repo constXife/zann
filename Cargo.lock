@@ -6670,6 +6670,7 @@ dependencies = [
 name = "zann-daemon"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "hex",
  "libc",
  "rpassword",

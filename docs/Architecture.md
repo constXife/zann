@@ -23,8 +23,9 @@ specified by [`ADR 0005`](adr/0005-runtime-secret-delivery-profiles.md).
 `zann-autofill` and feature-gated ES256 in `zann-crypto`. It owns pure passkey
 ceremonies and immutable assertions; persistence keeps the existing Item model.
 Personal-only eligibility belongs to `zann-core::item_policy`, and native
-read/list projection stays in `zann-ui-core`. Browser/OS provider activation is
-tracked separately in #293/#294; see ADR 0006 and the capability map.
+read/list projection stays in `zann-ui-core`. The opt-in Chromium provider (#293)
+uses request-bound daemon tickets and an extension-only confirmation window, with origins admitted in Rust. OS providers
+remain #294; see ADR 0006 and the capability map.
 
 ## Goals
 

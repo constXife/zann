@@ -43,7 +43,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-
 [features]
 default = ["remote"]
 native-messaging = ["dep:zeroize"]
-browser-ipc = ["dep:hex", "dep:serde", "dep:serde_json", "dep:thiserror", "dep:zeroize", "dep:zann-autofill", "dep:zann-crypto", "zann-crypto/ipc-transport", "zann-crypto/ipc-pairing", "dep:zann-core"]
+browser-ipc = ["dep:base64", "dep:sha2", "dep:hex", "dep:serde", "dep:serde_json", "dep:thiserror", "dep:zeroize", "dep:zann-autofill", "dep:zann-crypto", "zann-crypto/ipc-transport", "zann-crypto/ipc-pairing", "dep:zann-core"]
 app = ["sync", "delivery", "browser-ipc", "passkey-exchange"]
 passkey-exchange = ["dep:zann-passkey", "dep:zann-core", "dep:chrono", "dep:uuid", "dep:libc"]
 delivery = [

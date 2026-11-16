@@ -548,6 +548,7 @@ fn validate_personal_change(
     let updated_at = strict_timestamp(&change.updated_at)?;
     let server_checksum = ContentChecksum::parse(&change.checksum)?;
 
+    let mut passkey_rp_id = None;
     let (payload_enc, checksum, deleted_at) = match operation {
         ChangeType::Create | ChangeType::Update => {
             let payload = change
@@ -561,6 +562,8 @@ fn validate_personal_change(
                 zann_crypto::decrypt_payload(key.expose(), scope.vault_id(), item_id, &payload)
                     .map_err(|_| WireError::new(WireErrorKind::Crypto))?;
             validate_typed_payload(&decoded, &change.type_id)?;
+            passkey_rp_id =
+                zann_core::item_policy::passkey_rp_projection(&decoded).map(str::to_string);
             (payload, server_checksum, None)
         }
         ChangeType::Delete => {
@@ -589,6 +592,7 @@ fn validate_personal_change(
             updated_at,
             deleted_at,
         )
+        .with_passkey_rp(passkey_rp_id)
         .with_metadata(change.metadata)?,
         history,
     })

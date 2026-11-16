@@ -1,5 +1,7 @@
 #[derive(thiserror::Error)]
 pub enum IpcError {
+    #[error("invalid public passkey encoding")]
+    Encoding(#[source] base64::DecodeError),
     #[error("one-time browser pairing refused")]
     Pairing(#[from] zann_crypto::ipc_pairing::PairingError),
     #[error("encrypted local channel refused")]

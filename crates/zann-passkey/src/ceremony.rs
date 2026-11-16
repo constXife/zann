@@ -59,6 +59,7 @@ pub struct GetAssertionRequest<'a> {
 /// Safe for a provider response; deliberately excludes the local private key.
 pub struct RegistrationResponse {
     pub credential_id: Vec<u8>,
+    pub public_key_spki: Vec<u8>,
     pub authenticator_data: Vec<u8>,
     pub attestation_object: Vec<u8>,
 }
@@ -128,6 +129,7 @@ pub fn make_credential(
     Ok(Registration {
         response: RegistrationResponse {
             credential_id: credential.id.clone(),
+            public_key_spki: encoding::public_key_spki(&credential.public_key()),
             authenticator_data: auth_data,
             attestation_object,
         },
