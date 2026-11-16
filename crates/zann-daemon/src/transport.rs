@@ -36,9 +36,15 @@ impl Write for Deadline<'_> {
 }
 
 pub(crate) fn read(stream: &mut UnixStream) -> io::Result<Option<Vec<u8>>> {
+    read_deadline(stream, FRAME_DEADLINE)
+}
+pub(crate) fn read_deadline(
+    stream: &mut UnixStream,
+    duration: Duration,
+) -> io::Result<Option<Vec<u8>>> {
     native_messaging::read_frame(&mut Deadline {
         stream,
-        end: Instant::now() + FRAME_DEADLINE,
+        end: Instant::now() + duration,
     })
 }
 pub(crate) fn write(stream: &mut UnixStream, bytes: &[u8]) -> io::Result<()> {

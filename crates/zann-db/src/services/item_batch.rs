@@ -6,9 +6,9 @@ use sqlx_sqlite::Sqlite;
 type Error = Box<dyn std::error::Error + Send + Sync>;
 
 pub struct PreparedItemBatch {
-    transaction: Transaction<'static, Sqlite>,
-    vault: LocalVault,
-    key: SecretKey,
+    pub(super) transaction: Transaction<'static, Sqlite>,
+    pub(super) vault: LocalVault,
+    pub(super) key: SecretKey,
 }
 impl LocalServices<'_> {
     pub async fn begin_item_batch(
@@ -115,6 +115,14 @@ impl PreparedItemBatch {
             sync_status: SyncStatus::Modified,
         };
         super::create_item::insert_created_item(&mut self.transaction, &item).await?;
+        sqlx_core::query::query(
+            "UPDATE passkey_rp_index SET rp_id=? WHERE storage_id=? AND item_id=?",
+        )
+        .bind(zann_core::item_policy::passkey_rp_projection(&payload))
+        .bind(self.vault.storage_id)
+        .bind(id)
+        .execute(&mut *self.transaction)
+        .await?;
         Ok(id)
     }
     /// Preserve the original error while completing rollback before a retry.

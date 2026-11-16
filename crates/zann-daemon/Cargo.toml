@@ -29,4 +29,5 @@ zann-client-sqlite = { path = "../zann-client-sqlite", features = ["local-vault"
 rpassword = { version = "7", optional = true }
 
 [dev-dependencies]
+base64 = "0.22"
 zann-client-sqlite = { path = "../zann-client-sqlite", features = ["test-support"] }

@@ -705,7 +705,8 @@ impl SqliteSyncStore {
                 .collect::<Result<Vec<_>, SyncStoreError>>()?;
             changes.push(
                 PullChange::new(local_scope, expected, item, history)
-                    .map_err(map_local_sync_error)?,
+                    .map_err(map_local_sync_error)?
+                    .with_passkey_rp(change.item().passkey_rp_id().map(str::to_string)),
             );
         }
         let page = PullPage::new(

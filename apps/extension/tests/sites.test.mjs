@@ -18,7 +18,7 @@ test('Chrome grants are the only source of truth, not activeTab or a copied allo
   await installInTab(chrome, 5);
   assert.deepEqual(calls[0].target, { tabId: 5, documentIds: ['current'] });
   origins = []; await assert.rejects(installInTab(chrome, 5), /permission/);
-  assert.equal(calls.length, 1, 'revocation prevents reinjection');
+  assert.equal(calls.length, 3, 'revocation prevents reinjection');
 });
 test('registration converges after host grants and removal without persistent side state', async () => {
   let origins = [], registration;

@@ -495,6 +495,7 @@ mod recovery;
 use identity::*;
 
 mod browser;
+mod browser_passkey;
 mod browser_save;
 mod context;
 mod item_read;

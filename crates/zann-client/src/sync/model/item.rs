@@ -3,6 +3,7 @@ use super::*;
 /// Exact local item projection used as a compare-and-swap proof.
 #[derive(Clone, Eq, PartialEq)]
 pub struct ItemProjection {
+    pub(super) passkey_rp_id: Option<String>,
     pub(super) metadata: zann_core::ItemMetadata,
     pub(super) scope: SyncScope,
     pub(super) item_id: Uuid,
@@ -74,6 +75,13 @@ impl ItemProjection {
         Ok(self)
     }
 
+    pub fn passkey_rp_id(&self) -> Option<&str> {
+        self.passkey_rp_id.as_deref()
+    }
+    pub(crate) fn with_passkey_rp(mut self, rp: Option<String>) -> Self {
+        self.passkey_rp_id = rp;
+        self
+    }
     pub fn metadata(&self) -> &zann_core::ItemMetadata {
         &self.metadata
     }
@@ -93,6 +101,7 @@ impl ItemProjection {
         deleted_at: Option<DateTime<Utc>>,
     ) -> Self {
         Self {
+            passkey_rp_id: None,
             metadata: Default::default(),
             scope,
             item_id,

@@ -2,14 +2,14 @@ import { sitePattern, hasSite } from './sites.js';
 export async function siteSettings(chrome) {
   const button = document.getElementById('site-toggle'), label = document.getElementById('site-host'), status = document.getElementById('site-status');
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url?.startsWith('https:')) { status.textContent = 'Suggestions are available on HTTPS websites.'; return; }
+  if (!tab?.url?.startsWith('https:')) { status.textContent = 'Logins and passkeys are available on HTTPS websites.'; return; }
   const pattern = sitePattern(tab.url);
   label.textContent = `${new URL(tab.url).hostname} · HTTPS, all ports`;
   async function update() {
     const enabled = await hasSite(chrome, tab.url);
     button.textContent = enabled ? 'Disable on this site' : 'Enable on this site';
     button.dataset.enabled = String(enabled); button.disabled = false;
-    status.textContent = enabled ? 'Focus a login field to see Zann suggestions.' : 'Allow access to this website to show suggestions beside fields.';
+    status.textContent = enabled ? 'Zann suggests logins and asks you to confirm each passkey request.' : 'Enable Zann login suggestions and passkey requests for this website.';
   }
   button.addEventListener('click', event => {
     if (!event.isTrusted || button.disabled) return;

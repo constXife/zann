@@ -1,0 +1,5 @@
+body.passkey-window { width:100%; }
+#choices { display:flex; flex-direction:column; gap:8px; max-height:300px; overflow:auto; }
+#choices button { margin:0; text-align:left; overflow-wrap:anywhere; }
+#rp,#account { overflow-wrap:anywhere; }
+#error { color:var(--danger); }

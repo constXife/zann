@@ -7,6 +7,19 @@ use super::*;
 pub type LocalSyncObserver = dyn Fn(crate::app::SyncProgress) + Send + Sync;
 
 pub trait LocalVaultService: Send + Sync {
+    fn passkey_query(
+        &self,
+        request: PasskeyRequest,
+        sink: &mut dyn FnMut(PasskeyMatches) -> LocalResult<()>,
+    ) -> LocalResult<()>;
+    fn passkey_ceremony(
+        &self,
+        request: PasskeyRequest,
+        scope: BrowserScope,
+        selected: Option<String>,
+        sink: &mut dyn FnMut(PasskeyResponse) -> LocalResult<()>,
+    ) -> LocalResult<()>;
+
     /// Sink runs under the context read lease: lock/selection cannot complete
     /// before a bounded IPC response has finished or failed.
     fn browser_query(

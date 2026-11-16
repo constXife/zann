@@ -277,12 +277,18 @@ impl PushReceipt {
 /// Committing replaces only prior `Server + Confirmed` rows; local,
 /// UI-optimistic, pending, and rejected history remains untouched.
 pub struct PullChange {
+    pub(super) passkey_rp_id: Option<String>,
     pub(super) expected_item: LocalItemExpectation,
     pub(super) item: LocalItem,
     pub(super) history: Vec<LocalItemHistory>,
 }
 
 impl PullChange {
+    pub fn with_passkey_rp(mut self, rp: Option<String>) -> Self {
+        self.passkey_rp_id = rp;
+        self
+    }
+
     pub fn new(
         scope: LocalSyncScope,
         expected_item: LocalItemExpectation,
@@ -290,6 +296,7 @@ impl PullChange {
         history: Vec<LocalItemHistory>,
     ) -> Result<Self, LocalSyncError> {
         let change = Self {
+            passkey_rp_id: None,
             expected_item,
             item,
             history,

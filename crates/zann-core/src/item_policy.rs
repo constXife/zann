@@ -23,3 +23,13 @@ pub fn admit_item_type(
     }
     Ok(())
 }
+
+/// Public, rebuildable lookup metadata. This does not authorize an RP: provider
+/// requests still pass canonical zann-autofill admission and payload validation.
+pub fn passkey_rp_projection(payload: &crate::EncryptedPayload) -> Option<&str> {
+    (payload.type_id == PASSKEY_TYPE_ID)
+        .then(|| payload.fields.get("rp_id"))
+        .flatten()
+        .filter(|field| field.kind == crate::FieldKind::Text && field.value.len() <= 253)
+        .map(|field| field.value.as_str())
+}
