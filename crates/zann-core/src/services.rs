@@ -49,12 +49,14 @@ pub enum AuthMethod {
     Password = 1,
     Oidc = 2,
     ServiceAccount = 3,
+    Passkey = 4,
 }
 
 impl AuthMethod {
     pub const PASSWORD: i32 = Self::Password as i32;
     pub const OIDC: i32 = Self::Oidc as i32;
     pub const SERVICE_ACCOUNT: i32 = Self::ServiceAccount as i32;
+    pub const PASSKEY: i32 = Self::Passkey as i32;
 
     #[must_use]
     pub const fn as_i32(self) -> i32 {
@@ -76,6 +78,7 @@ impl TryFrom<i32> for AuthMethod {
             1 => Ok(Self::Password),
             2 => Ok(Self::Oidc),
             3 => Ok(Self::ServiceAccount),
+            4 => Ok(Self::Passkey),
             _ => Err(crate::EnumParseError::new("auth_method", value.to_string())),
         }
     }
