@@ -62,6 +62,7 @@ private struct ItemDetailContent: View {
     let selectionGeneration: Int
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var textSize
+    @Environment(\.copyFeedbackDuration) private var copyFeedbackDuration
 
     @State private var stateGeneration: Int?
     @StateObject private var reveal = FieldRevealState()
@@ -158,7 +159,7 @@ private struct ItemDetailContent: View {
         copied = index
         copyFeedbackTask?.cancel()
         copyFeedbackTask = Task {
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try? await Task.sleep(for: copyFeedbackDuration)
             guard !Task.isCancelled else { return }
             copied = nil
         }
@@ -169,4 +170,17 @@ private struct ItemDetailContent: View {
         if stateGeneration != selectionGeneration { resetInteractions() }
         reveal.toggle(index, seconds: preferences.autoHideRevealSeconds)
     }
+}
+
+extension EnvironmentValues {
+    /// How long copy feedback stays before it clears on its own. Selection,
+    /// focus loss, layout geometry and lock still reset it earlier.
+    var copyFeedbackDuration: Duration {
+        get { self[CopyFeedbackDurationKey.self] }
+        set { self[CopyFeedbackDurationKey.self] = newValue }
+    }
+}
+
+private struct CopyFeedbackDurationKey: EnvironmentKey {
+    static let defaultValue: Duration = .milliseconds(1500)
 }
