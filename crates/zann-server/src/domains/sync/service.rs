@@ -807,6 +807,8 @@ pub(crate) async fn sync_push(
         return Err(SyncError::DbError);
     }
 
+    crate::domains::auth::core::mutation::guard(&mut tx, identity).await?;
+
     for change in changes {
         match apply_change(
             &mut tx,

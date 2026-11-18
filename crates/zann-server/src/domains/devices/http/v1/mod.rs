@@ -1,3 +1,4 @@
+use crate::domains::auth::core::mutation;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -168,7 +169,11 @@ async fn revoke_device(
         return StatusCode::NOT_FOUND.into_response();
     }
 
-    let Ok(affected) = repo.revoke(device_id, Utc::now()).await else {
+    let mut tx = match mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return mutation::response(error),
+    };
+    let Ok(affected) = DeviceRepo::revoke_in(&mut *tx, device_id, Utc::now()).await else {
         tracing::error!(event = "device_revoke_failed", "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -180,6 +185,9 @@ async fn revoke_device(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    if let Err(error) = tx.commit().await {
+        return mutation::response(mutation::database(error));
+    }
     tracing::info!(
         event = "device_revoked",
         device_id = %device_id,

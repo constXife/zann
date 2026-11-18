@@ -104,8 +104,13 @@ pub(crate) async fn rotate_status(
                 .into_response();
         }
     };
-    let row = match normalize_rotation_state(&state, item.id, row).await {
+    let row = match normalize_rotation_state(&state, &identity, item.id, row).await {
         Ok(row) => row,
+        Err(crate::domains::errors::ServiceError::Unauthorized(code)) => {
+            return crate::domains::auth::core::mutation::response(
+                crate::domains::errors::ServiceError::Unauthorized(code),
+            )
+        }
         Err(_) => {
             tracing::error!(event = "rotation_status_failed", "DB error");
             return (
@@ -206,8 +211,13 @@ pub(crate) async fn rotate_candidate(
                 .into_response();
         }
     };
-    let row = match normalize_rotation_state(&state, item.id, row).await {
+    let row = match normalize_rotation_state(&state, &identity, item.id, row).await {
         Ok(row) => row,
+        Err(crate::domains::errors::ServiceError::Unauthorized(code)) => {
+            return crate::domains::auth::core::mutation::response(
+                crate::domains::errors::ServiceError::Unauthorized(code),
+            )
+        }
         Err(_) => {
             tracing::error!(event = "rotation_candidate_failed", "DB error");
             return (
@@ -345,8 +355,13 @@ pub(crate) async fn rotate_recover(
                 .into_response();
         }
     };
-    let row = match normalize_rotation_state(&state, item.id, row).await {
+    let row = match normalize_rotation_state(&state, &identity, item.id, row).await {
         Ok(row) => row,
+        Err(crate::domains::errors::ServiceError::Unauthorized(code)) => {
+            return crate::domains::auth::core::mutation::response(
+                crate::domains::errors::ServiceError::Unauthorized(code),
+            )
+        }
         Err(_) => {
             tracing::error!(event = "rotation_recover_failed", "DB error");
             return (
@@ -518,8 +533,13 @@ pub(crate) async fn rotate_abort(
                 .into_response();
         }
     };
-    let row = match normalize_rotation_state(&state, item.id, row).await {
+    let row = match normalize_rotation_state(&state, &identity, item.id, row).await {
         Ok(row) => row,
+        Err(crate::domains::errors::ServiceError::Unauthorized(code)) => {
+            return crate::domains::auth::core::mutation::response(
+                crate::domains::errors::ServiceError::Unauthorized(code),
+            )
+        }
         Err(_) => {
             tracing::error!(event = "rotation_abort_failed", "DB error");
             return (
@@ -550,6 +570,10 @@ pub(crate) async fn rotate_abort(
 
     let reason = payload.reason.clone();
     let expected_state = row.state.clone();
+    let mut tx = match crate::domains::auth::core::mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return crate::domains::auth::core::mutation::response(error),
+    };
     let result = sqlx_core::query::query(
         r#"
         UPDATE items
@@ -567,7 +591,7 @@ pub(crate) async fn rotate_abort(
     .bind(item.id)
     .bind(reason.clone())
     .bind(expected_state)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
     match result {
         Ok(result) if result.rows_affected() == 1 => {}
@@ -590,6 +614,11 @@ pub(crate) async fn rotate_abort(
         }
     }
 
+    if let Err(error) = tx.commit().await {
+        return crate::domains::auth::core::mutation::response(
+            crate::domains::auth::core::mutation::database(error),
+        );
+    }
     let response = RotationStatusResponse {
         state: "active".to_string(),
         started_at: None,

@@ -1,6 +1,7 @@
 use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
+pub mod admin;
 pub mod export;
 pub mod import;
 pub mod init;
@@ -31,6 +32,7 @@ enum Command {
     Provision(provision::ProvisionArgs),
     /// Manage service account tokens
     Token(tokens::TokenArgs),
+    Admin(admin::AdminArgs),
 }
 
 #[derive(Args)]
@@ -52,6 +54,7 @@ pub enum RunMode {
     Init(init::InitArgs),
     Provision(provision::ProvisionArgs),
     Token(tokens::TokenArgs),
+    Admin(admin::AdminArgs),
 }
 
 pub fn parse_args() -> RunMode {
@@ -65,6 +68,7 @@ pub fn parse_args() -> RunMode {
         Some(Command::Init(args)) => RunMode::Init(args),
         Some(Command::Provision(args)) => RunMode::Provision(args),
         Some(Command::Token(args)) => RunMode::Token(args),
+        Some(Command::Admin(args)) => RunMode::Admin(args),
     }
 }
 

@@ -13,10 +13,6 @@ pub fn router() -> Router<AppState> {
         .route("/v1/users/me", get(handlers::me).put(handlers::update_me))
         .route("/v1/users/me/password", post(handlers::change_password))
         .route(
-            "/v1/users/me/recovery-kit",
-            post(handlers::create_recovery_kit),
-        )
-        .route(
             "/v1/users",
             get(handlers::list_users).post(handlers::create_user),
         )

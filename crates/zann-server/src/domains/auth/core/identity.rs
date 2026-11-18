@@ -238,6 +238,7 @@ pub async fn identity_from_oidc(
         },
         device_id: None,
         service_account_id: None,
+        session_authority: None,
     })
 }
 
@@ -318,17 +319,18 @@ pub async fn identity_from_session_token(
     let service_account_session_repo = ServiceAccountSessionRepo::new(&state.db);
     let service_account_repo = ServiceAccountRepo::new(&state.db);
 
-    let (user_id, device_id, service_account_id, source) = if let Some(session) = session_repo
-        .get_by_access_token_hash(&token_hash)
-        .await
-        .map_err(|err| {
-            tracing::error!(
-                event = "auth_session_lookup_failed",
-                error = %err,
-                "Failed to load session by access token"
-            );
-            "db_error"
-        })? {
+    let (user_id, device_id, service_account_id, source, authority) = if let Some(session) =
+        session_repo
+            .get_by_access_token_hash(&token_hash)
+            .await
+            .map_err(|err| {
+                tracing::error!(
+                    event = "auth_session_lookup_failed",
+                    error = %err,
+                    "Failed to load session by access token"
+                );
+                "db_error"
+            })? {
         if session.access_expires_at < Utc::now() {
             return Err("token_expired");
         }
@@ -336,7 +338,15 @@ pub async fn identity_from_session_token(
             session.user_id,
             Some(session.device_id),
             None,
-            AuthSource::Internal,
+            if session.passkey_credential_id.is_some() {
+                AuthSource::Passkey
+            } else {
+                AuthSource::Internal
+            },
+            Some(zann_core::auth::InteractiveSessionAuthority {
+                session_id: session.id,
+                auth_epoch: session.auth_epoch,
+            }),
         )
     } else if let Some(session) = service_account_session_repo
         .get_by_access_token_hash(&token_hash)
@@ -380,11 +390,15 @@ pub async fn identity_from_session_token(
             None,
             Some(account.id),
             AuthSource::ServiceAccount,
+            None,
         )
     } else {
         return Err("invalid_token");
     };
-    identity_from_user(state, user_id, source, device_id, service_account_id).await
+    let mut identity =
+        identity_from_user(state, user_id, source, device_id, service_account_id).await?;
+    identity.session_authority = authority;
+    Ok(identity)
 }
 
 async fn identity_from_user(
@@ -459,5 +473,6 @@ async fn identity_from_user(
         source,
         device_id,
         service_account_id,
+        session_authority: None,
     })
 }

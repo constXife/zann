@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+mod passkey;
+pub use passkey::PasskeyConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ServerConfig {
@@ -90,6 +92,8 @@ pub struct SecretsConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passkey: Option<PasskeyConfig>,
     #[serde(default)]
     pub mode: AuthMode,
     #[serde(default)]
@@ -104,6 +108,7 @@ impl Default for AuthConfig {
     fn default() -> Self {
         Self {
             mode: AuthMode::Internal,
+            passkey: None,
             kdf: KdfConfig::default(),
             internal: InternalAuthConfig::default(),
             oidc: OidcConfig::default(),

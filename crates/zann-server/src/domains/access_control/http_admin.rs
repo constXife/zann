@@ -61,7 +61,13 @@ async fn reload(
             .into_response();
     };
 
+    let tx = match crate::domains::auth::core::mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return crate::domains::auth::core::mutation::response(error),
+    };
+    // The account lock linearizes the in-memory publication with recovery.
     state.policy_store.set(PolicySet::from_rules(rules));
+    drop(tx);
 
     tracing::info!(event = "policies_reloaded", "Policies reloaded");
     (StatusCode::OK, Json(ReloadResponse { status: "ok" })).into_response()

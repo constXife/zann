@@ -564,6 +564,7 @@ pub async fn upload_item_file(
         tracing::error!(event = "attachment_create_failed", error = %err, "DB error");
         ItemsError::DbError
     })?;
+    crate::domains::auth::core::mutation::guard(&mut tx, identity).await?;
     let locked = item_repo
         .get_by_id_for_update_in(&mut tx, item.id)
         .await
@@ -964,6 +965,7 @@ pub async fn create_item(
         tracing::error!(event = "item_create_failed", error = %err, "DB error");
         ItemsError::DbError
     })?;
+    crate::domains::auth::core::mutation::guard(&mut tx, identity).await?;
     item_repo.create_in(&mut tx, &item).await.map_err(|err| {
         tracing::error!(event = "item_create_failed", error = %err, "DB error");
         ItemsError::DbError
@@ -1194,6 +1196,7 @@ pub async fn update_item(
         tracing::error!(event = "item_update_failed", error = %err, "DB error");
         ItemsError::DbError
     })?;
+    crate::domains::auth::core::mutation::guard(&mut tx, identity).await?;
     let locked = item_repo
         .get_by_id_for_update_in(&mut tx, item.id)
         .await
@@ -1330,6 +1333,7 @@ pub async fn delete_item(
         tracing::error!(event = "item_delete_failed", error = %err, "DB error");
         ItemsError::DbError
     })?;
+    crate::domains::auth::core::mutation::guard(&mut tx, identity).await?;
     let locked = item_repo
         .get_by_id_for_update_in(&mut tx, item.id)
         .await
@@ -1562,6 +1566,7 @@ pub async fn restore_item_version(
         tracing::error!(event = "item_restore_failed", error = %err, "DB error");
         ItemsError::DbError
     })?;
+    crate::domains::auth::core::mutation::guard(&mut tx, identity).await?;
     let mut item = item_repo
         .get_by_id_for_update_in(&mut tx, item_id)
         .await

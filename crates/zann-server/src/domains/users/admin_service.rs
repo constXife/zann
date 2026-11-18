@@ -1,11 +1,12 @@
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 use uuid::Uuid;
-use zann_core::{AuthSource, Identity, User, UserStatus};
-use zann_db::repo::UserRepo;
+use zann_core::{Identity, User, UserStatus};
+use zann_db::repo::{SessionRepo, UserRepo};
 
 use crate::app::AppState;
 use crate::config::AuthMode;
+use crate::domains::auth::core::mutation;
 use crate::domains::auth::core::passwords::{
     derive_auth_hash, hash_password, random_kdf_salt, KdfParams,
 };
@@ -47,7 +48,7 @@ fn ensure_internal(
     resource: &str,
     action: &str,
 ) -> Result<(), AdminUserError> {
-    if !matches!(identity.source, AuthSource::Internal) {
+    if !identity.source.is_internal_interactive() {
         metrics::forbidden_access(resource);
         tracing::warn!(
             event = "forbidden",
@@ -199,10 +200,12 @@ pub async fn create_user(
         return Err(AdminUserError::BadRequest("email_exists"));
     }
 
-    let Ok(()) = repo.create(&user).await else {
+    let mut tx = mutation::begin(state, identity).await?;
+    let Ok(()) = UserRepo::create_in(&mut *tx, &user).await else {
         tracing::error!(event = "users_create_failed", "DB error");
         return Err(AdminUserError::DbError);
     };
+    tx.commit().await.map_err(mutation::database)?;
     tracing::info!(event = "users_create", user_id = "redacted", "User created");
     Ok(user)
 }
@@ -259,15 +262,16 @@ pub async fn delete_user(
     };
 
     let deleted_at = chrono::Utc::now();
-    let Ok(affected) = repo
-        .delete_by_id(
-            user.id,
-            user.row_version,
-            deleted_at,
-            identity.user_id,
-            device_id,
-        )
-        .await
+    let mut tx = mutation::begin(state, identity).await?;
+    let Ok(affected) = UserRepo::delete_by_id_in(
+        &mut *tx,
+        user.id,
+        user.row_version,
+        deleted_at,
+        identity.user_id,
+        device_id,
+    )
+    .await
     else {
         tracing::error!(event = "users_delete_failed", "DB error");
         return Err(AdminUserError::DbError);
@@ -276,6 +280,10 @@ pub async fn delete_user(
         return Err(AdminUserError::NotFound);
     }
 
+    SessionRepo::invalidate_user_in(&mut tx, user.id, None)
+        .await
+        .map_err(mutation::database)?;
+    tx.commit().await.map_err(mutation::database)?;
     tracing::info!(event = "users_delete", user_id = "redacted", "User deleted");
     Ok(())
 }
@@ -302,9 +310,9 @@ pub async fn block_user(
             return Err(AdminUserError::DbError);
         }
     };
-    let Ok(affected) = repo
-        .update_status(user.id, user.row_version, UserStatus::Disabled)
-        .await
+    let mut tx = mutation::begin(state, identity).await?;
+    let Ok(affected) =
+        UserRepo::update_status_in(&mut *tx, user.id, user.row_version, UserStatus::Disabled).await
     else {
         tracing::error!(event = "users_block_failed", "DB error");
         return Err(AdminUserError::DbError);
@@ -313,6 +321,10 @@ pub async fn block_user(
         return Err(AdminUserError::NotFound);
     }
 
+    SessionRepo::invalidate_user_in(&mut tx, user.id, None)
+        .await
+        .map_err(mutation::database)?;
+    tx.commit().await.map_err(mutation::database)?;
     tracing::info!(event = "users_block", user_id = "redacted", "User blocked");
     Ok(user)
 }
@@ -339,9 +351,9 @@ pub async fn unblock_user(
             return Err(AdminUserError::DbError);
         }
     };
-    let Ok(affected) = repo
-        .update_status(user.id, user.row_version, UserStatus::Active)
-        .await
+    let mut tx = mutation::begin(state, identity).await?;
+    let Ok(affected) =
+        UserRepo::update_status_in(&mut *tx, user.id, user.row_version, UserStatus::Active).await
     else {
         tracing::error!(event = "users_unblock_failed", "DB error");
         return Err(AdminUserError::DbError);
@@ -350,6 +362,10 @@ pub async fn unblock_user(
         return Err(AdminUserError::NotFound);
     }
 
+    SessionRepo::invalidate_user_in(&mut tx, user.id, None)
+        .await
+        .map_err(mutation::database)?;
+    tx.commit().await.map_err(mutation::database)?;
     tracing::info!(
         event = "users_unblock",
         user_id = "redacted",
@@ -426,9 +442,14 @@ pub async fn reset_password(
             tracing::error!(event = "users_reset_password_failed", "KDF error");
             return Err(AdminUserError::Kdf);
         };
-    let Ok(affected) = repo
-        .update_password_hash(user.id, user.row_version, Some(&password_hash))
-        .await
+    let mut tx = mutation::begin(state, identity).await?;
+    let Ok(affected) = UserRepo::update_password_hash_in(
+        &mut *tx,
+        user.id,
+        user.row_version,
+        Some(&password_hash),
+    )
+    .await
     else {
         tracing::error!(event = "users_reset_password_failed", "DB error");
         return Err(AdminUserError::DbError);
@@ -437,6 +458,10 @@ pub async fn reset_password(
         return Err(AdminUserError::NotFound);
     }
 
+    SessionRepo::invalidate_user_in(&mut tx, user.id, None)
+        .await
+        .map_err(mutation::database)?;
+    tx.commit().await.map_err(mutation::database)?;
     tracing::info!(
         event = "users_reset_password",
         user_id = "redacted",

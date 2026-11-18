@@ -27,6 +27,7 @@ pub struct AppState {
     pub access_token_ttl_seconds: i64,
     pub refresh_token_ttl_seconds: i64,
     pub argon2_semaphore: Arc<Semaphore>,
+    pub account_access: Arc<crate::domains::auth::AccountAccessRuntime>,
     pub oidc_jwks_cache: OidcJwksCache,
     pub config: ServerConfig,
     pub policy_store: PolicyStore,

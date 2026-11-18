@@ -167,6 +167,7 @@ pub fn build_state(settings: &settings::Settings, db: PgPool) -> AppState {
         access_token_ttl_seconds: settings.access_token_ttl_seconds,
         refresh_token_ttl_seconds: settings.refresh_token_ttl_seconds,
         argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
+        account_access: Default::default(),
         oidc_jwks_cache: oidc::OidcJwksCache::new(),
         config: settings.config.clone(),
         policy_store: policy_store::PolicyStore::new(settings.policies.clone()),
@@ -263,6 +264,9 @@ pub fn start_background_tasks(settings: &settings::Settings, state: &AppState) {
                             error = %err
                         );
                     }
+                }
+                if let Err(error) = zann_db::repo::RecoveryRepo::new(&pool).maintain().await {
+                    tracing::error!(error=?error,"recovery maintenance failed");
                 }
                 tokio::time::sleep(interval).await;
             }

@@ -174,6 +174,16 @@ impl Settings {
 
 pub fn preflight(settings: &Settings) -> Result<(), Vec<String>> {
     let mut missing = Vec::new();
+    if let Some(passkey) = &settings.config.auth.passkey {
+        if let Err(error) = passkey.validate() {
+            missing.push(error.into());
+        }
+        if !settings.config.auth.internal.enabled
+            || matches!(settings.config.auth.mode, crate::config::AuthMode::Oidc)
+        {
+            missing.push("passkey RP requires Internal or Hybrid authentication".into());
+        }
+    }
     if settings.require_pepper {
         if settings.token_pepper.is_empty() {
             missing.push(

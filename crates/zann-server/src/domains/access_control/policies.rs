@@ -151,6 +151,7 @@ mod tests {
             source: AuthSource::Internal,
             device_id: None,
             service_account_id: None,
+            session_authority: None,
         }
     }
 

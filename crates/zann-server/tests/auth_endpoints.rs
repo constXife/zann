@@ -79,6 +79,7 @@ impl TestApp {
             access_token_ttl_seconds: 3600,
             refresh_token_ttl_seconds: 3600,
             argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
+            account_access: Default::default(),
             oidc_jwks_cache: OidcJwksCache::new(),
             config: config_for_state,
             policy_store: PolicyStore::new(PolicySet::from_rules(rules)),
@@ -242,6 +243,7 @@ fn refresh_predispatch_router(max_body_bytes: usize) -> axum::Router {
         access_token_ttl_seconds: 3600,
         refresh_token_ttl_seconds: 3600,
         argon2_semaphore: std::sync::Arc::new(Semaphore::new(1)),
+        account_access: Default::default(),
         oidc_jwks_cache: OidcJwksCache::new(),
         config,
         policy_store: PolicyStore::new(PolicySet::from_rules(Vec::new())),
@@ -607,8 +609,11 @@ async fn pending_recovery_blocks_login_and_refresh_without_partial_devices() {
     let registration = app.register(email, password).await;
     let users = UserRepo::new(&app.pool);
     let user = users.get_by_email(email).await.unwrap().unwrap();
-    users
-        .update_recovery_key_hash(user.id, user.row_version, "test-recovery-verifier")
+    // Fixture state only: production writers are recovery start and code activation.
+    sqlx_core::query::query::<Postgres>("UPDATE users SET recovery_key_hash = $2, recovery_key_version = recovery_key_version + 1, security_revision = security_revision + 1, row_version = row_version + 1 WHERE id = $1")
+        .bind(user.id)
+        .bind("test-recovery-verifier")
+        .execute(&app.pool)
         .await
         .unwrap();
     let recovery = RecoveryRepo::new(&app.pool);

@@ -187,7 +187,15 @@ pub async fn login_internal(
         now,
     );
 
-    let tokens = issuance::issue_login_session(state, &user, &device, now, ctx, "internal").await?;
+    let tokens = issuance::issue_login_session(
+        state,
+        &user,
+        &device,
+        now,
+        ctx,
+        issuance::LoginFactor::Password,
+    )
+    .await?;
 
     if let Err(err) = repo.update_last_login(user.id, user.row_version, now).await {
         tracing::warn!(

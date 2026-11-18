@@ -79,6 +79,7 @@ async fn main() {
             | cli::RunMode::Init(_)
             | cli::RunMode::Provision(_)
             | cli::RunMode::Token(_)
+            | cli::RunMode::Admin(_)
     ) {
         if let Err(missing) = settings::preflight(&settings) {
             tracing::error!(
@@ -108,6 +109,13 @@ async fn main() {
             std::process::exit(1);
         }
         tracing::info!("migrations applied");
+        return;
+    }
+    if let cli::RunMode::Admin(args) = run_mode {
+        if let Err(error) = cli::admin::run(&settings, &db, &args).await {
+            eprintln!("{error:?}");
+            std::process::exit(1);
+        }
         return;
     }
     if let cli::RunMode::Token(token_args) = run_mode {

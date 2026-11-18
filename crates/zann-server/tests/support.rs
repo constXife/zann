@@ -141,6 +141,17 @@ pub async fn reset_db(pool: &PgPool) {
     sqlx_core::query::query::<Postgres>("INSERT INTO account_recovery_quota (singleton,active_count,retained_count) VALUES (TRUE,0,0)")
         .execute(pool).await.expect("reset recovery quota");
     sqlx_core::query::query::<Postgres>(
+        "INSERT INTO account_access_slots (slot) SELECT generate_series(1,8192)",
+    )
+    .execute(pool)
+    .await
+    .expect("reset bounded account-access slots");
+    sqlx_core::query::query::<Postgres>("INSERT INTO account_credential_fence VALUES (TRUE,1)")
+        .execute(pool)
+        .await
+        .expect("restore credential fence");
+
+    sqlx_core::query::query::<Postgres>(
         "INSERT INTO changes_commit_clock (singleton, last_seq) VALUES (TRUE, 0)",
     )
     .execute(pool)
