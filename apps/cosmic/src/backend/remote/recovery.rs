@@ -1,6 +1,6 @@
 //! Blocking native executor over the canonical restricted account-access flow.
 use super::*;
-use zann_client::app::{AccountRecoveryHandle, AccountRecoveryPreparation};
+use super::{AccountRecoveryHandle, AccountRecoveryPreparation};
 use zann_core::api::account_access::{PasskeyMode, RecoveryView};
 use zeroize::Zeroizing;
 pub enum Request {
@@ -23,7 +23,7 @@ pub enum Request {
         name: String,
         mode: PasskeyMode,
         password: Option<LoginPassword>,
-        provider: Arc<dyn zann_client::account_access::AccountCeremonyProvider>,
+        provider: Arc<dyn super::AccountCeremonyProvider>,
     },
 }
 pub enum ResultValue {
@@ -39,7 +39,7 @@ pub enum ResultValue {
 }
 pub struct RecoveryPlan {
     remote: Arc<Remote>,
-    target: zann_client::app::SessionTarget,
+    target: super::SessionTarget,
     operation: SessionOperation,
     request: Request,
 }

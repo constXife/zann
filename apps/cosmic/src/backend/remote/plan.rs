@@ -23,7 +23,7 @@ enum Work {
     },
     Passkey {
         prepared: PreparedConnection,
-        provider: Arc<dyn zann_client::account_access::AccountCeremonyProvider>,
+        provider: Arc<dyn super::AccountCeremonyProvider>,
         operation: SessionOperation,
     },
     Begin {
@@ -41,7 +41,7 @@ pub(super) enum ResultValue {
     Trusted(PreparedConnection),
     Browser(Box<OidcBrowserLogin>),
     Connected(Connected),
-    Passkey(Connected, Box<zann_client::app::PasskeyVaultBootstrap>),
+    Passkey(Connected, Box<super::PasskeyVaultBootstrap>),
 }
 
 #[derive(Clone)]

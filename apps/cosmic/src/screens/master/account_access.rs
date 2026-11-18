@@ -1,7 +1,7 @@
 //! Opaque passkey handoff across independent DeviceUnlock retries.
 use super::*;
+use crate::backend::remote::{PasskeyVaultBootstrap, PasskeyVaultRequirement};
 use std::sync::{Arc, Mutex};
-use zann_client::app::{PasskeyVaultBootstrap, PasskeyVaultRequirement};
 pub(super) struct PasskeySlot {
     bootstrap: Option<PasskeyVaultBootstrap>,
     failed: bool,

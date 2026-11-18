@@ -4,10 +4,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::runtime::Runtime;
 use zann_client::app::{
-    AppClient, ClientId, ConnectionTrustChallenge, LoginPassword, PasswordLoginInputError,
-    PasswordLoginRequest, PasswordRegistrationRequest, PrepareConnectionOutcome,
-    PreparedConnection, SessionCancellationHandle, SessionClient, SessionError, SessionErrorKind,
-    SessionOperation,
+    AppClient, ClientId, ConnectionTrustChallenge, PasswordLoginInputError, PasswordLoginRequest,
+    PasswordRegistrationRequest, PrepareConnectionOutcome, PreparedConnection,
+    SessionCancellationHandle, SessionClient, SessionError, SessionErrorKind, SessionOperation,
 };
 use zann_client::credentials::{OsCredentialStore, OsLegacyCredentialSource};
 use zann_client::oidc::{OidcBrowserErrorKind, OidcBrowserLogin, OidcCallback};
@@ -19,6 +18,12 @@ use zann_flows::connect::{
 mod plan;
 pub mod recovery;
 pub use plan::{Plan, Reply};
+// Composition root: shells reach application types only through these names.
+pub use zann_client::account_access::AccountCeremonyProvider;
+pub use zann_client::app::{
+    AccountRecoveryCode, AccountRecoveryHandle, AccountRecoveryPreparation, LoginPassword,
+    PasskeyEnrollmentAuthorization, PasskeyVaultBootstrap, PasskeyVaultRequirement, SessionTarget,
+};
 
 pub struct Remote {
     runtime: Runtime,

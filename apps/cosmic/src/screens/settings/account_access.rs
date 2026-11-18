@@ -1,6 +1,6 @@
 //! Account sign-in credentials are distinct from this device's unlock keys.
 use super::*;
-use zann_client::app::{LoginPassword, PasskeyEnrollmentAuthorization};
+use crate::backend::remote::{LoginPassword, PasskeyEnrollmentAuthorization};
 use zann_core::api::account_access::{AccountSecurity, PasskeyMode};
 mod view;
 
@@ -14,7 +14,7 @@ pub(super) struct AccountKeys {
     password: String,
     auth_only: bool,
     confirm_revoke: Option<String>,
-    code: Option<std::sync::Arc<zann_client::app::AccountRecoveryCode>>,
+    code: Option<std::sync::Arc<crate::backend::remote::AccountRecoveryCode>>,
     code_confirmation: String,
     disable_password: bool,
 }
@@ -23,7 +23,7 @@ pub enum Message {
     PrepareCode,
     CodePrepared(
         u64,
-        Result<std::sync::Arc<zann_client::app::AccountRecoveryCode>, String>,
+        Result<std::sync::Arc<crate::backend::remote::AccountRecoveryCode>, String>,
     ),
     CodeConfirmation(String),
     DisablePassword(bool),

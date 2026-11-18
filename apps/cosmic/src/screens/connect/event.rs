@@ -57,6 +57,6 @@ pub enum Outcome {
     Connected {
         storage_id: String,
         has_personal_keys: bool,
-        passkey: Option<Box<zann_client::app::PasskeyVaultBootstrap>>,
+        passkey: Option<Box<crate::backend::remote::PasskeyVaultBootstrap>>,
     },
 }

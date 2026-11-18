@@ -3,7 +3,7 @@
 use super::*;
 use crate::backend::remote::recovery::{Request, ResultValue};
 mod view;
-use zann_client::app::{AccountRecoveryHandle, AccountRecoveryPreparation, LoginPassword};
+use crate::backend::remote::{AccountRecoveryHandle, AccountRecoveryPreparation, LoginPassword};
 use zann_core::api::account_access::{PasskeyMode, RecoveryView};
 use zann_flows::recovery::{
     AccountRecovery, Action, Candidate, Consumed, Effect, Failure, Progress, Reply,
