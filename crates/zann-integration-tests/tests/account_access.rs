@@ -292,10 +292,7 @@ async fn full_native_account_flow_enrolls_opens_clean_device_and_recovers_withou
                 account_replicas::operation(),
             ))
             .unwrap_or_else(|e| failure(e));
-        assert_eq!(
-            result.expect_err("lost consume reply").status(),
-            Some(503)
-        );
+        assert_eq!(result.expect_err("lost consume reply").status(), Some(503));
         // Restart the facade and resume from the persisted keystore bundle.
         drop(recovering);
         let recovering = account_replicas::client(recovery_root.path(), credentials);
