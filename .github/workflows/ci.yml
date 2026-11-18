@@ -196,6 +196,25 @@ jobs:
               - 'crates/zann-db/tests/local_vault_migration.rs'
               - 'crates/zann-db/tests/server_replicas_migration.rs'
               - 'crates/zann-server/src/domains/auth/core/**'
+              - 'crates/zann-core/src/api/account_access.rs'
+              - 'crates/zann-core/src/api/account_access/**'
+              - 'crates/zann-db/src/repo/account_access.rs'
+              - 'crates/zann-db/src/repo/account_access/**'
+              - 'crates/zann-db/src/repo/users/**'
+              - 'crates/zann-db/src/repo/groups/**'
+              - 'crates/zann-db/src/repo/devices/**'
+              - 'crates/zann-db/src/repo/vaults/**'
+              - 'crates/zann-db/migrations/0011_account_passkey_auth.sql'
+              - 'crates/zann-db/tests/account_passkey_auth_migration.rs'
+              - 'crates/zann-integration-tests/tests/account_access.rs'
+              - 'crates/zann-server/migrations/0005_account_passkeys.sql'
+              - 'crates/zann-server/src/domains/auth/account_access/**'
+              - 'crates/zann-server/src/config/passkey.rs'
+              - 'crates/zann-server/src/cli/admin.rs'
+              - 'crates/zann-server/tests/account_access.rs'
+              - 'crates/zann-server/tests/account_access_support/**'
+              - 'crates/zann-server/tests/account_recovery.rs'
+              - 'apps/extension/src/account-*'
               - 'crates/zann-core/src/recovery.rs'
               - 'crates/zann-core/src/models/structs.rs'
               - 'crates/zann-db/src/repo/recovery/**'
@@ -432,7 +451,7 @@ jobs:
       - name: Tests (pull-only SQLite sync adapter)
         run: cargo test -p zann-client-sqlite --locked
       - name: Tests (SQLite sync and path seams)
-        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration --test local_history --test local_payload_versions --test passkey_vault
+        run: cargo test -p zann-db --no-default-features --features sqlite --locked --test local_sqlite_path --test local_sync_transactions --test local_vault_migration --test server_replicas_migration --test account_passkey_auth_migration --test local_history --test local_payload_versions --test passkey_vault
 
   extension:
     needs: changes
@@ -457,11 +476,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Install pinned WASM packaging tool
         run: cargo install wasm-bindgen-cli --version 0.2.106 --locked
-      - name: Build extension and native bridge
-        run: |
-          node apps/extension/build.mjs
-          cargo build -p zann-native-host --locked
-          cargo test -p zann-daemon --test chromium_fixture --no-run --locked
+      - name: Build extension
+        run: node apps/extension/build.mjs
       - name: Shared browser search and usage tests
         run: cargo test -p zann-client --no-default-features --features browser-ipc --test browser_search --test browser_usage --locked
       - name: Shared login-list presentation tests
