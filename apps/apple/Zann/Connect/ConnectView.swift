@@ -84,7 +84,7 @@ struct ConnectView: View {
                         Task { await connect.signInWithBrowser() }
                     } label: { Text(app.strings("auth.oidc")).frame(maxWidth: .infinity).appleTouchTarget() }
                     .accessibilityIdentifier("connect.method.oidc")
-                case .serviceAccount:
+                case .serviceAccount, .passkey:
                     EmptyView()
                 }
             }

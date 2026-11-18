@@ -1,6 +1,8 @@
 //! Toolkit- and runtime-independent interactive client flows.
 pub mod connect;
 
+pub mod recovery;
+
 pub mod unlock;
 
 /// The composition root supplies a unique instance ID. Sequence numbers are

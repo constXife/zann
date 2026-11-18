@@ -23,6 +23,7 @@ impl From<ConnectStepFfi> for flow::Step {
             ConnectStepFfi::Probe => Self::Probe,
             ConnectStepFfi::Trust => Self::Trust,
             ConnectStepFfi::Password => Self::Password,
+            ConnectStepFfi::Passkey => Self::Passkey,
             ConnectStepFfi::OidcStart => Self::OidcStart,
             ConnectStepFfi::OidcFinish => Self::OidcFinish,
         }
@@ -34,10 +35,15 @@ impl From<ConnectServerFfi> for flow::ServerInfo {
             methods: info
                 .methods
                 .into_iter()
-                .map(|method| match method {
-                    AuthMethodFfi::Password => zann_client::app::AuthMethod::Password,
-                    AuthMethodFfi::Oidc => zann_client::app::AuthMethod::Oidc,
-                    AuthMethodFfi::ServiceAccount => zann_client::app::AuthMethod::ServiceAccount,
+                .filter_map(|method| match method {
+                    AuthMethodFfi::Password => Some(zann_client::app::AuthMethod::Password),
+                    AuthMethodFfi::Oidc => Some(zann_client::app::AuthMethod::Oidc),
+                    AuthMethodFfi::ServiceAccount => {
+                        Some(zann_client::app::AuthMethod::ServiceAccount)
+                    }
+                    // This native edge has no account ceremony provider yet.
+                    // The exact method remains representable for stored sessions.
+                    AuthMethodFfi::Passkey => None,
                 })
                 .collect(),
             registration_available: info.registration_available,
@@ -114,6 +120,7 @@ impl ConnectCompletionFfi {
                         ConnectStepFfi::Probe => C::Probed(Err(failure)),
                         ConnectStepFfi::Trust => C::Trusted(Err(failure)),
                         ConnectStepFfi::Password => C::Password(Err(failure)),
+                        ConnectStepFfi::Passkey => C::Passkey(Err(failure)),
                         ConnectStepFfi::OidcStart => C::OidcStarted(Err(failure)),
                         ConnectStepFfi::OidcFinish => C::OidcFinished(Err(failure)),
                     },
@@ -175,6 +182,10 @@ impl From<flow::Effect> for ConnectEffectFfi {
                 password,
                 full_name,
                 register,
+                timeout_ms: flow::LOGIN_TIMEOUT_MS,
+            },
+            flow::Effect::Passkey { id } => Self::Passkey {
+                id: id.into(),
                 timeout_ms: flow::LOGIN_TIMEOUT_MS,
             },
             flow::Effect::BeginOidc { id } => Self::BeginOidc {
