@@ -8,10 +8,13 @@ import ZannCoreKit
 @MainActor
 enum MobileUIFixture {
     @ViewBuilder static func root(_ content: MobileRootView) -> some View {
+        // Copy feedback outlasts any test step, so a slow simulator cannot
+        // miss it; the layout-change reset still clears it deterministically.
+        let held = content.environment(\.copyFeedbackDuration, .seconds(600))
         if ProcessInfo.processInfo.arguments.contains("--mobile-ui-large-text") {
-            content.dynamicTypeSize(.accessibility5)
+            held.dynamicTypeSize(.accessibility5)
         } else {
-            content
+            held
         }
     }
     static let password = "synthetic mobile UI fixture"

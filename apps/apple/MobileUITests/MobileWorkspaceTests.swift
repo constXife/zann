@@ -21,16 +21,20 @@ final class MobileWorkspaceTests: XCTestCase {
         XCTAssertTrue(reveal.waitForExistence(timeout: 5))
         XCTAssertGreaterThanOrEqual(reveal.frame.height, 44)
         XCTAssertTrue(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "detail.totp.")).firstMatch.exists)
+        capture(app, "detail-portrait-masked")
+        // The fixture holds copy feedback until a reset, so the accessible
+        // value cannot expire before this check on a slow simulator.
+        let copied = NSPredicate(format: "value CONTAINS %@", "Copied")
         let copy = app.buttons["detail.copy.password"]
         copy.tap()
-        expectation(for: NSPredicate(format: "value CONTAINS %@", "Copied"), evaluatedWith: copy)
+        expectation(for: copied, evaluatedWith: copy)
         waitForExpectations(timeout: 5)
-        capture(app, "detail-portrait-masked")
         reveal.tap()
         XCTAssertEqual(reveal.label, "Hide")
         XCUIDevice.shared.orientation = .landscapeLeft
         XCTAssertTrue(app.buttons["detail.reveal.password"].waitForExistence(timeout: 5))
         expectation(for: NSPredicate(format: "label == %@", "Reveal"), evaluatedWith: app.buttons["detail.reveal.password"])
+        expectation(for: NSCompoundPredicate(notPredicateWithSubpredicate: copied), evaluatedWith: app.buttons["detail.copy.password"])
         waitForExpectations(timeout: 5)
         let storage = app.buttons["workspace.storage"]
         if UIDevice.current.userInterfaceIdiom == .pad && app.windows.firstMatch.frame.width >= 900 {
