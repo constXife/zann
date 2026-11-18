@@ -64,6 +64,12 @@ impl Daemon {
     fn stop(&mut self) -> Result<()> {
         if let Some(worker) = self.worker.take() {
             self.control.engine.running.store(false, Ordering::Release);
+            self.control
+                .engine
+                .state
+                .lock()
+                .expect("lock poisoned")
+                .account_ceremony = None;
             // Wakes the accept loop without a public shutdown command.
             let wake = if worker.is_finished() {
                 Ok(None)
@@ -168,6 +174,11 @@ fn connection(stream: &mut UnixStream, engine: &Engine) -> Result<()> {
     crate::transport::write(stream, &hello)?;
     let handshake = engine.transport_key.responder(&hello)?;
     let mut channel = crate::channel::Channel::accept(stream, handshake)?;
+    let _account_channel = AccountChannelLease {
+        engine,
+        nonce,
+        binding: *channel.binding(),
+    };
     let mut sequence = 0_u64;
     let mut client = None;
     let mut pairing = None;
@@ -187,4 +198,22 @@ fn connection(stream: &mut UnixStream, engine: &Engine) -> Result<()> {
         engine.handle(request, &nonce, &mut channel, &mut pairing)?;
     }
     Ok(())
+}
+
+struct AccountChannelLease<'a> {
+    engine: &'a Engine,
+    nonce: [u8; 32],
+    binding: [u8; 32],
+}
+impl Drop for AccountChannelLease<'_> {
+    fn drop(&mut self) {
+        let mut state = self.engine.state.lock().expect("lock poisoned");
+        if state
+            .account_ceremony
+            .as_ref()
+            .is_some_and(|p| p.channel == Some((self.nonce, self.binding)))
+        {
+            state.account_ceremony = None;
+        }
+    }
 }

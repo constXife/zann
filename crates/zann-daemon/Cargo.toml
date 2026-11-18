@@ -19,6 +19,7 @@ libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3"
+tokio = {version="1",features=["rt","sync"]}
 thiserror = "1"
 zeroize = { version = "1", features = ["serde"] }
 zann-client = { path = "../zann-client", default-features = false, features = ["app", "native-messaging"] }
@@ -29,5 +30,6 @@ zann-client-sqlite = { path = "../zann-client-sqlite", features = ["local-vault"
 rpassword = { version = "7", optional = true }
 
 [dev-dependencies]
+uuid = {version="1",features=["v4"]}
 base64 = "0.22"
 zann-client-sqlite = { path = "../zann-client-sqlite", features = ["test-support"] }

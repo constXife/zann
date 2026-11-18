@@ -1,3 +1,4 @@
+import { showPendingAccount } from './account-launch.js';
 import init, { NativePairing, NativeLoginSearch, create_identity, checked_context, generate_password } from './wasm/zann_browser.js';
 import { collectLogins } from './search.js';
 import { NativeConnection } from './native.js';
@@ -121,6 +122,7 @@ async function pair() {
     const server = await native.pair();
     identity = await pinIdentity(chrome, identity, server, navigator.locks);
   } finally { close(); }
+  await showPendingAccount(chrome, identity, $('account-request'), $('account-request-label'), $('account-continue'));
   await connect();
 }
 click('pair', pair);
@@ -170,5 +172,6 @@ window.addEventListener('pagehide', () => { searchAbort?.abort(new Error('Popup 
 void action(async () => {
   await siteSettings(chrome);
   await init(); page = new BrowserPage(chrome, checked_context); identity = await loadIdentity(chrome, create_identity, navigator.locks);
+  await showPendingAccount(chrome, identity, $('account-request'), $('account-request-label'), $('account-continue'));
   await connect();
 });

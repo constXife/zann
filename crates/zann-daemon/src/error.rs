@@ -16,6 +16,10 @@ pub enum DaemonError {
     Protocol,
     #[error("local IPC resource limit reached")]
     Limit,
+    #[error("account ceremony context failed")]
+    AccountCeremony(#[from] zann_client::account_access::AccountCeremonyError),
+    #[error("account ceremony wait ended")]
+    CeremonyWait(#[from] std::sync::mpsc::RecvTimeoutError),
     #[error("local IPC owner is no longer running")]
     Closed,
     #[error("local IPC state permissions or identity are invalid")]

@@ -13,6 +13,7 @@ use crate::settings::{Pairing, PairingWindow};
 use crate::{DaemonError, Result};
 use zann_client::browser_ipc::{ErrorCode, MatchPage, Reply, Request, SignedReply, SignedRequest};
 
+mod account_access;
 mod cursors;
 mod fill;
 mod pairing;
@@ -20,6 +21,7 @@ mod passkey;
 pub(crate) use pairing::PairingAttempt;
 
 pub(crate) struct State {
+    pub account_ceremony: Option<crate::account_access::Pending>,
     pub pairings: Vec<Pairing>,
     pub pairing: Option<PairingWindow>,
     pub cursors: cursors::CursorStore,
@@ -43,6 +45,7 @@ impl Engine {
             key,
             transport_key,
             state: Mutex::new(State {
+                account_ceremony: None,
                 pairings,
                 pairing: None,
                 cursors: cursors::CursorStore::default(),
@@ -105,8 +108,27 @@ impl Engine {
                 },
             );
         }
+        if let Some(reply) =
+            Self::account_request(&mut state, &public, nonce, stream.binding(), &body)?
+        {
+            if matches!(body, Request::AccountCeremonyTake { .. }) {
+                stream.await_account_ceremony();
+            }
+            return self.send(stream, nonce, request.sequence, &reply);
+        }
         let delivery = |error: DaemonError| LocalError::BrowserDelivery(Box::new(error));
         let result = match body {
+            Request::AccountCeremonyFinish { completion, .. } => {
+                let pending = state.account_ceremony.take().ok_or(DaemonError::Protocol)?;
+                let reply = if pending.deliver.try_send(completion).is_ok() {
+                    Reply::AccountCeremonyAccepted {}
+                } else {
+                    Reply::Error {
+                        code: ErrorCode::Refused,
+                    }
+                };
+                return self.send(stream, nonce, request.sequence, &reply);
+            }
             Request::PasskeyQuery { request: ceremony } => {
                 self.vault.passkey_query(ceremony.clone(), &mut |matches| {
                     let ticket = state
@@ -161,7 +183,11 @@ impl Engine {
                 },
             ),
 
-            Request::PairStatus {} | Request::PairStart { .. } | Request::PairFinish { .. } => {
+            Request::AccountCeremonyStatus {}
+            | Request::AccountCeremonyTake { .. }
+            | Request::PairStatus {}
+            | Request::PairStart { .. }
+            | Request::PairFinish { .. } => {
                 unreachable!()
             }
             Request::Save {

@@ -36,6 +36,14 @@ export class NativeConnection {
   async request(request) {
     if (this.closed) throw new Error('Connection closed. Reconnect explicitly.');
     this.port.postMessage(JSON.parse(this.client.request(JSON.stringify(request))));
+    return this.readReply();
+  }
+  async accountResponse(operationId, response, prf) {
+    if (this.closed) throw new Error('Connection closed.');
+    this.port.postMessage(JSON.parse(this.client.account_response(operationId, JSON.stringify(response), prf)));
+    return this.readReply();
+  }
+  async readReply() {
     const reply = JSON.parse(this.client.reply(JSON.stringify(await this.next())));
     if (reply.status === 'error') {
       const messages = { locked: 'Unlock your vault in Zann, then reconnect.', unpaired: 'Browser access was revoked or is not connected. Forget this connection and pair using a new code from Zann.', refused: 'Desktop refused this operation.', limit: 'Desktop resource limit reached.', timeout: 'Desktop timed out. The operation was not retried.', internal: 'Desktop operation failed.' };

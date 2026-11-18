@@ -106,7 +106,7 @@ export async function fixture({ matches = 2 } = {}) {
     } catch (error) { if (!context?.pages().length) return; errors.push(error.message); }
     finally { pumping = false; }
   }, 10);
-  return { site, popup, worker, info, errors, async close() {
+  return { site, popup, worker, info, errors, ready, async close() {
     clearInterval(workerPump);
     for (const host of hosts.values()) host.kill(); await context.close();
     await rm(ready, { force: true });

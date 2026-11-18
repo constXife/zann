@@ -1,3 +1,4 @@
+import { accountWindows } from './account-background.js';
 import init, { checked_context, checked_passkey_request, create_identity } from './wasm/zann_browser.js';
 import { passkeyBroker } from './passkey-background.js';
 import { BrowserPage } from './browser.js';
@@ -6,6 +7,7 @@ import { InlineSession } from './inline-session.js';
 import { hasSite, syncSites, installInTab } from './sites.js';
 
 const initialized = init();
+accountWindows(chrome);
 const broker = {
   chrome, pages: new Set(), tokens: new Map(),
   async identity() { await initialized; return loadIdentity(chrome, create_identity, navigator.locks); }
@@ -22,7 +24,7 @@ async function authorize(sender) {
   return { page, target };
 }
 chrome.runtime.onConnect.addListener(port => {
-  if (port.name.startsWith('zann-passkey-')) return;
+  if (port.name.startsWith('zann-passkey-') || port.name === 'zann-account-document') return;
   if (port.name === 'zann-field') {
     if (broker.pages.size >= 16) { port.disconnect(); return; }
     const ready = authorize(port.sender);
