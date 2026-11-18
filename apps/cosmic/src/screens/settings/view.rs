@@ -162,6 +162,7 @@ impl State {
             sections.push(unlock);
         }
         sections.push(self.browser_section());
+        sections.push(self.account_keys_view());
         widget::settings::view_column(sections).into()
     }
 

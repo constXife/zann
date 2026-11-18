@@ -17,6 +17,7 @@ use zann_flows::connect::{
     Completion, Connected, Effect, Failure, OperationId, Probe, ServerInfo, Step,
 };
 mod plan;
+pub mod recovery;
 pub use plan::{Plan, Reply};
 
 pub struct Remote {
@@ -32,6 +33,8 @@ struct ExecutionState {
     challenge: Option<ConnectionTrustChallenge>,
     browser: Option<OidcBrowserLogin>,
     active: Option<(OperationId, SessionCancellationHandle)>,
+    provider: Option<Arc<dyn zann_client::account_access::AccountCeremonyProvider>>,
+    vault: Option<zann_client::app::PasskeyVaultBootstrap>,
 }
 
 impl Remote {
@@ -110,12 +113,33 @@ impl Remote {
                 state.browser = Some(*login);
                 Completion::OidcStarted(Ok(url))
             }
+            Ok(plan::ResultValue::Passkey(connected, vault)) => {
+                state.vault = Some(*vault);
+                Completion::Passkey(Ok(connected))
+            }
             Ok(plan::ResultValue::Connected(connected)) => match reply.step {
                 Step::Password => Completion::Password(Ok(connected)),
                 Step::OidcFinish => Completion::OidcFinished(Ok(connected)),
                 _ => unreachable!("only authentication plans return Connected"),
             },
         })
+    }
+
+    pub fn set_account_provider(
+        &self,
+        provider: Arc<dyn zann_client::account_access::AccountCeremonyProvider>,
+    ) {
+        self.state
+            .lock()
+            .expect("Connect executor lock poisoned")
+            .provider = Some(provider);
+    }
+    pub fn take_passkey_vault(&self) -> Option<zann_client::app::PasskeyVaultBootstrap> {
+        self.state
+            .lock()
+            .expect("Connect executor lock poisoned")
+            .vault
+            .take()
     }
 
     pub fn cancel(&self, id: OperationId) {
@@ -142,6 +166,8 @@ impl Remote {
     pub fn close(&self) {
         let mut state = self.state.lock().expect("Connect executor lock poisoned");
         state.closed = true;
+        state.vault = None;
+        state.provider = None;
         if let Some((_, cancellation)) = state.active.take() {
             cancellation.cancel();
         }

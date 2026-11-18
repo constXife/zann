@@ -103,6 +103,12 @@ impl State {
         if !self.busy {
             recovery = recovery.on_press(Message::Recovery);
         }
+        if self.passkey_repair && !self.busy {
+            form = form.push(
+                widget::button::suggested(t("accountPasskey.useEncryptionPassword"))
+                    .on_press(Message::UseEncryptionPassword),
+            );
+        }
         centered(form.push(submit).push(recovery))
     }
 }

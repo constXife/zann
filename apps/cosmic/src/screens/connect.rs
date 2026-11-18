@@ -7,6 +7,7 @@ use std::sync::Arc;
 pub use zann_flows::connect::Stage;
 use zann_flows::connect::{Action, Completion, Connect, Effect, Failure};
 mod event;
+mod recovery;
 mod view;
 pub use event::{Event, Message, Outcome};
 #[cfg(test)]
@@ -21,6 +22,11 @@ pub struct State {
     password: String,
     full_name: String,
     password_hidden: bool,
+    control: Option<zann_daemon::DaemonControl>,
+    pairings: Vec<zann_daemon::Pairing>,
+    pairing_code: Option<zann_daemon::PairingCode>,
+    browser_error: Option<String>,
+    recovery: Option<recovery::Recovery>,
 }
 impl Default for State {
     fn default() -> Self {
@@ -34,6 +40,11 @@ impl Default for State {
             password: String::new(),
             full_name: String::new(),
             password_hidden: true,
+            control: None,
+            pairings: Vec::new(),
+            pairing_code: None,
+            browser_error: None,
+            recovery: None,
         }
     }
 }
@@ -50,6 +61,15 @@ impl State {
             state.url = url;
         }
         state
+    }
+    pub fn attach_browser(&mut self, control: zann_daemon::DaemonControl) {
+        if self.control.is_none() {
+            match control.settings() {
+                Ok(settings) => self.pairings = settings.paired,
+                Err(error) => self.browser_error = Some(error.to_string()),
+            }
+        }
+        self.control = Some(control);
     }
     pub fn server_url(&self) -> &str {
         &self.url
@@ -74,6 +94,57 @@ impl State {
             return vec![];
         }
         let action = match event.message {
+            Message::Recovery(message) => return self.update_recovery(message),
+            Message::RefreshBrowsers => {
+                if let Some(control) = &self.control {
+                    match control.settings() {
+                        Ok(settings) => {
+                            self.pairings = settings.paired;
+                            if self.pairing_code.as_ref().is_some_and(|code| {
+                                settings.active_code_id.as_ref() != Some(&code.id)
+                            }) {
+                                self.pairing_code = None;
+                            }
+                            self.browser_error = None;
+                        }
+                        Err(error) => self.browser_error = Some(error.to_string()),
+                    }
+                }
+                return vec![];
+            }
+            Message::PairBrowser => {
+                if !self.flow.snapshot().busy {
+                    if let Some(control) = &self.control {
+                        match control.begin_pairing() {
+                            Ok(code) => {
+                                self.pairing_code = Some(code);
+                                self.browser_error = None;
+                            }
+                            Err(error) => self.browser_error = Some(error.to_string()),
+                        }
+                    }
+                }
+                return vec![];
+            }
+            Message::StartPasskey(pairing) => {
+                if self.flow.snapshot().busy
+                    || !self.pairings.iter().any(|p| p.public_key == pairing)
+                {
+                    return vec![];
+                }
+                let Some(control) = &self.control else {
+                    return vec![];
+                };
+                let provider = control.account_ceremony_provider(pairing);
+                match self.remote() {
+                    Ok(remote) => remote.set_account_provider(provider),
+                    Err(error) => {
+                        self.browser_error = Some(error);
+                        return vec![];
+                    }
+                }
+                Action::StartPasskey
+            }
             Message::UrlInput(value) => {
                 if !self.flow.snapshot().busy {
                     self.url = value;
@@ -144,6 +215,7 @@ impl State {
                 work @ (Effect::Probe { .. }
                 | Effect::TrustFingerprint { .. }
                 | Effect::Password { .. }
+                | Effect::Passkey { .. }
                 | Effect::BeginOidc { .. }
                 | Effect::FinishOidc { .. }) => {
                     let (id, step) = work.operation().expect("work has an operation");
@@ -180,6 +252,11 @@ impl State {
                 Effect::Connected(connected) => outcomes.push(Outcome::Connected {
                     storage_id: connected.storage_id,
                     has_personal_keys: connected.has_personal_keys,
+                    passkey: self
+                        .remote
+                        .as_ref()
+                        .and_then(|remote| remote.take_passkey_vault())
+                        .map(Box::new),
                 }),
                 Effect::Closed => {
                     self.password.clear();

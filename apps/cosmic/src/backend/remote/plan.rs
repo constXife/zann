@@ -21,6 +21,11 @@ enum Work {
         register: bool,
         operation: SessionOperation,
     },
+    Passkey {
+        prepared: PreparedConnection,
+        provider: Arc<dyn zann_client::account_access::AccountCeremonyProvider>,
+        operation: SessionOperation,
+    },
     Begin {
         prepared: PreparedConnection,
         operation: SessionOperation,
@@ -36,6 +41,7 @@ pub(super) enum ResultValue {
     Trusted(PreparedConnection),
     Browser(Box<OidcBrowserLogin>),
     Connected(Connected),
+    Passkey(Connected, Box<zann_client::app::PasskeyVaultBootstrap>),
 }
 
 #[derive(Clone)]
@@ -61,6 +67,7 @@ impl Plan {
             Effect::Probe { id, .. }
             | Effect::TrustFingerprint { id }
             | Effect::Password { id, .. }
+            | Effect::Passkey { id }
             | Effect::BeginOidc { id }
             | Effect::FinishOidc { id } => *id,
             _ => return Err("not a Connect work effect".into()),
@@ -113,6 +120,20 @@ impl Plan {
                     full_name,
                     register,
                     operation: operation.expect("new password operation"),
+                },
+            ),
+            Effect::Passkey { .. } => (
+                Step::Passkey,
+                Work::Passkey {
+                    prepared: state
+                        .prepared
+                        .clone()
+                        .ok_or("server connection has not been prepared")?,
+                    provider: state
+                        .provider
+                        .clone()
+                        .ok_or("select a paired browser first")?,
+                    operation: operation.expect("new passkey operation"),
                 },
             ),
             Effect::BeginOidc { .. } => (
@@ -209,6 +230,29 @@ impl Plan {
                     }
                     .map_err(session_failure)?;
                     (access, prepared.storage_id().to_string())
+                }
+                Work::Passkey {
+                    prepared,
+                    provider,
+                    operation,
+                } => {
+                    let outcome = remote
+                        .client
+                        .passkey_login(prepared.target().clone(), provider, operation)
+                        .await
+                        .map_err(session_failure)?;
+                    let status = remote
+                        .client
+                        .personal_vault_status(&outcome.access)
+                        .await
+                        .map_err(session_failure)?;
+                    return Ok(ResultValue::Passkey(
+                        Connected {
+                            storage_id: prepared.storage_id().to_string(),
+                            has_personal_keys: status.personal_key_envelopes_present(),
+                        },
+                        Box::new(outcome.vault),
+                    ));
                 }
                 Work::Begin {
                     prepared,

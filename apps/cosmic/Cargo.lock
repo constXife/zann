@@ -8788,6 +8788,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",
+ "tokio",
  "zann-client",
  "zann-core",
  "zann-crypto",
