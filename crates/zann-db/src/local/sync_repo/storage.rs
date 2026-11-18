@@ -100,7 +100,7 @@ pub(super) async fn ensure_storage_projection_bounded(
             AND CASE
                 WHEN auth_method IS NULL THEN 1
                 WHEN typeof(auth_method) = 'integer'
-                    THEN auth_method IN (1, 2, 3)
+                    THEN auth_method IN (1, 2, 3, 4)
                 ELSE 0
             END
             AND CASE

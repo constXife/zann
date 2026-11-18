@@ -70,7 +70,7 @@ impl<'a> LocalStorageRepo<'a> {
                 AND CASE
                     WHEN auth_method IS NULL THEN 1
                     WHEN typeof(auth_method) = 'integer'
-                        THEN auth_method IN (1, 2, 3)
+                        THEN auth_method IN (1, 2, 3, 4)
                     ELSE 0
                 END
                 AND CASE
@@ -362,7 +362,7 @@ async fn storage_rows_corrupt(tx: &mut Transaction<'_, Sqlite>) -> Result<bool, 
             WHEN typeof(personal_vaults_enabled) != 'integer' THEN 1
             WHEN personal_vaults_enabled NOT IN (0, 1) THEN 1
             WHEN auth_method IS NOT NULL AND typeof(auth_method) != 'integer' THEN 1
-            WHEN auth_method IS NOT NULL AND auth_method NOT IN (1, 2, 3) THEN 1
+            WHEN auth_method IS NOT NULL AND auth_method NOT IN (1, 2, 3, 4) THEN 1
             WHEN sync_config_repository_fp IS NULL AND (
                 sync_stable_target_fp IS NOT NULL
                 OR sync_config_revision IS NOT NULL

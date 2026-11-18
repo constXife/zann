@@ -6,8 +6,10 @@ use sqlx_postgres::{PgConnection, PgRow, Postgres};
 use zann_core::recovery::{RecoveryState, RecoveryStatus};
 
 mod maintenance;
+mod protocol;
 mod start;
 mod steps;
+pub use protocol::RecoveryAdmission;
 pub use start::RecoveryStart;
 pub use steps::RecoveryMutation;
 
@@ -19,6 +21,8 @@ pub struct RecoveryRepo<'a> {
 pub enum RecoveryStoreError {
     #[error("recovery generation or operation conflict")]
     Conflict,
+    #[error("recovery operation has ended")]
+    Ended,
     #[error("recovery capacity is exhausted")]
     Capacity,
     #[error("invalid recovery storage input")]
@@ -95,6 +99,7 @@ fn decode_record(row: PgRow) -> Result<RecoveryRecord, sqlx_core::Error> {
             user_id: row.try_get("user_id")?,
             auth_epoch: row.try_get("auth_epoch")?,
             account_key_epoch: row.try_get("account_key_epoch")?,
+            successor_code_version: row.try_get("successor_code_version")?,
             state,
             revision: row.try_get("revision")?,
             expires_at: row.try_get("expires_at")?,

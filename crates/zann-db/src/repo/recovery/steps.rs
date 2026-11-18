@@ -64,16 +64,27 @@ impl RecoveryRepo<'_> {
         expected_revision: i64,
         state: RecoveryState,
     ) -> Result<RecoveryStatus, RecoveryStoreError> {
+        let mut tx = self.pool.begin().await?;
+        let status = Self::end_in(&mut tx, user_id, id, expected_revision, state).await?;
+        tx.commit().await?;
+        Ok(status)
+    }
+    pub async fn end_in(
+        conn: &mut PgConnection,
+        user_id: Uuid,
+        id: Uuid,
+        expected_revision: i64,
+        state: RecoveryState,
+    ) -> Result<RecoveryStatus, RecoveryStoreError> {
         if !matches!(
             state,
             RecoveryState::Expired | RecoveryState::Abandoned | RecoveryState::Superseded
         ) {
             return Err(RecoveryStoreError::InvalidInput);
         }
-        let mut tx = self.pool.begin().await?;
-        let account = lock_account(&mut tx, user_id).await?;
+        let account = lock_account(&mut *conn, user_id).await?;
         let row = sqlx_core::query::query::<Postgres>("SELECT *, expires_at <= CURRENT_TIMESTAMP AS expired FROM account_recovery_operations WHERE id = $1 AND user_id = $2 FOR UPDATE")
-            .bind(id).bind(user_id).fetch_optional(&mut *tx).await?.ok_or(RecoveryStoreError::Conflict)?;
+            .bind(id).bind(user_id).fetch_optional(&mut *conn).await?.ok_or(RecoveryStoreError::Conflict)?;
         let expired: bool = row.try_get("expired")?;
         let record = decode_record(row)?;
         if record.status.state == state {
@@ -87,16 +98,15 @@ impl RecoveryRepo<'_> {
             return Err(RecoveryStoreError::Conflict);
         }
         let row = sqlx_core::query::query::<Postgres>("UPDATE account_recovery_operations SET state = $2, revision = revision + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1 RETURNING *")
-            .bind(id).bind(state as i16).fetch_one(&mut *tx).await?;
+            .bind(id).bind(state as i16).fetch_one(&mut *conn).await?;
         sqlx_core::query::query::<Postgres>("UPDATE users SET active_recovery_id = NULL, security_revision = security_revision + 1, row_version = row_version + 1 WHERE id = $1")
-            .bind(user_id).execute(&mut *tx).await?;
+            .bind(user_id).execute(&mut *conn).await?;
         sqlx_core::query::query::<Postgres>(
             "UPDATE account_recovery_quota SET active_count = active_count - 1 WHERE singleton",
         )
-        .execute(&mut *tx)
+        .execute(&mut *conn)
         .await?;
         let status = decode_record(row)?.status;
-        tx.commit().await?;
         Ok(status)
     }
 }

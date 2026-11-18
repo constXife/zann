@@ -9,8 +9,8 @@ use zann_core::recovery::RecoveryState;
 use zann_core::{Device, Session};
 use zann_db::{
     repo::{
-        AccountAuthState, DeviceRepo, RecoveryMutation, RecoveryRepo, RecoveryStart,
-        RecoveryStoreError, SessionRepo, SessionWriteError, UserRepo,
+        AccountAccessRepo, AccountAccessStoreError, AccountAuthState, DeviceRepo, RecoveryMutation,
+        RecoveryRepo, RecoveryStart, RecoveryStoreError, SessionRepo, SessionWriteError, UserRepo,
     },
     PgPool,
 };
@@ -20,13 +20,13 @@ async fn account(pool: &PgPool) -> (Uuid, Session) {
     let user = test_user(now, "recovery@example.test", None);
     let users = UserRepo::new(pool);
     users.create(&user).await.unwrap();
-    assert_eq!(
-        users
-            .update_recovery_key_hash(user.id, user.row_version, "test-old-verifier")
-            .await
-            .unwrap(),
-        1
-    );
+    // Fixture state only: production writers are recovery start and code activation.
+    query::<Postgres>("UPDATE users SET recovery_key_hash = $2, recovery_key_version = recovery_key_version + 1, security_revision = security_revision + 1, row_version = row_version + 1 WHERE id = $1")
+        .bind(user.id)
+        .bind("test-old-verifier")
+        .execute(pool)
+        .await
+        .unwrap();
     let device = Device {
         id: Uuid::new_v4(),
         user_id: user.id,
@@ -46,6 +46,8 @@ async fn account(pool: &PgPool) -> (Uuid, Session) {
         user_id: user.id,
         device_id: device.id,
         auth_epoch: 1,
+        passkey_credential_id: None,
+        passkey_session_epoch: None,
         access_token_hash: "test-access".into(),
         access_expires_at: now + chrono::Duration::hours(1),
         refresh_token_hash: "test-refresh".into(),
@@ -127,13 +129,26 @@ async fn consume_race_invalidates_access_refresh_and_new_issuance() {
         Some("test-next-verifier")
     );
     assert_eq!(fetched.active_recovery_id, Some(status.operation_id));
-    assert_eq!(
-        UserRepo::new(&pool)
-            .update_recovery_key_hash(user, fetched.row_version, "must-not-replace-successor")
-            .await
-            .unwrap(),
-        0
-    );
+    let mut conn = pool.acquire().await.unwrap();
+    let revision: i64 = query::<Postgres>("SELECT security_revision FROM users WHERE id = $1")
+        .bind(user)
+        .fetch_one(&mut *conn)
+        .await
+        .unwrap()
+        .get("security_revision");
+    assert!(matches!(
+        AccountAccessRepo::activate_code_in(
+            &mut conn,
+            user,
+            revision,
+            Uuid::new_v4(),
+            &"r".repeat(44),
+            false,
+        )
+        .await,
+        Err(AccountAccessStoreError::Conflict)
+    ));
+    drop(conn);
     assert_eq!(
         UserRepo::new(&pool)
             .get_by_id(user)
@@ -322,6 +337,13 @@ async fn forward_migration_preserves_existing_credentials_and_ciphertext() {
     .execute(&pool)
     .await
     .unwrap();
+    sqlx_core::raw_sql::raw_sql(include_str!(
+        "../../zann-server/migrations/0005_account_passkeys.sql"
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
+
     let state = RecoveryRepo::new(&pool)
         .account_state(user)
         .await

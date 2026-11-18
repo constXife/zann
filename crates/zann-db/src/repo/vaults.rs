@@ -227,34 +227,7 @@ impl<'a> VaultRepo<'a> {
         &self,
         user_id: Uuid,
     ) -> Result<Option<Vault>, sqlx_core::Error> {
-        query_as!(
-            Vault,
-            r#"
-            SELECT
-                v.id as "id",
-                v.slug,
-                v.name,
-                v.kind as "kind",
-                v.encryption_type as "encryption_type",
-                v.vault_key_enc,
-                v.cache_policy as "cache_policy",
-                v.tags as "tags",
-                v.deleted_at as "deleted_at",
-                v.deleted_by_user_id as "deleted_by_user_id",
-                v.deleted_by_device_id as "deleted_by_device_id",
-                v.row_version as "row_version",
-                v.created_at as "created_at"
-            FROM vaults v
-            INNER JOIN vault_members vm ON vm.vault_id = v.id
-            WHERE vm.user_id = $1 AND v.kind = $2 AND v.deleted_at IS NULL
-            ORDER BY v.created_at ASC
-            LIMIT 1
-            "#,
-            user_id,
-            zann_core::VaultKind::Personal.as_i32()
-        )
-        .fetch_optional(self.pool)
-        .await
+        Self::get_personal_by_user_in(self.pool, user_id).await
     }
 
     #[instrument(
@@ -384,28 +357,15 @@ impl<'a> VaultRepo<'a> {
         deleted_by_user_id: Uuid,
         deleted_by_device_id: Option<Uuid>,
     ) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            UPDATE vaults
-            SET deleted_at = $3,
-                deleted_by_user_id = $4,
-                deleted_by_device_id = $5,
-                row_version = row_version + 1
-            WHERE id = $1 AND row_version = $2
-            "#,
+        Self::delete_by_id_in(
+            self.pool,
             id,
             row_version,
             deleted_at,
             deleted_by_user_id,
-            deleted_by_device_id
+            deleted_by_device_id,
         )
-        .execute(self.pool)
         .await
-        .map(|result| {
-            let rows = result.rows_affected();
-            Span::current().record("db.rows", rows as i64);
-            rows
-        })
     }
 
     #[instrument(
@@ -424,21 +384,7 @@ impl<'a> VaultRepo<'a> {
         id: Uuid,
         vault_key_enc: &[u8],
     ) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            UPDATE vaults
-            SET vault_key_enc = $2,
-                row_version = row_version + 1
-            WHERE id = $1
-              AND deleted_at IS NULL
-              AND octet_length(vault_key_enc) = 0
-            "#,
-            id,
-            vault_key_enc
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        Self::update_key_by_id_in(self.pool, id, vault_key_enc).await
     }
 }
 
@@ -479,22 +425,7 @@ impl<'a> VaultMemberRepo<'a> {
         vault_id: Uuid,
         user_id: Uuid,
     ) -> Result<Option<VaultMember>, sqlx_core::Error> {
-        query_as!(
-            VaultMember,
-            r#"
-            SELECT
-                vault_id as "vault_id",
-                user_id as "user_id",
-                role as "role",
-                created_at as "created_at"
-            FROM vault_members
-            WHERE vault_id = $1 AND user_id = $2
-            "#,
-            vault_id,
-            user_id
-        )
-        .fetch_optional(self.pool)
-        .await
+        Self::get_in(self.pool, vault_id, user_id).await
     }
 
     pub async fn list_by_vault(
@@ -536,3 +467,5 @@ impl<'a> VaultMemberRepo<'a> {
         .await
     }
 }
+
+mod transactions;

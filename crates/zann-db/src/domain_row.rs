@@ -159,6 +159,8 @@ impl_from_row!(Session, row => {
             user_id: row.try_get("user_id")?,
             device_id: row.try_get("device_id")?,
             auth_epoch: row.try_get("auth_epoch")?,
+            passkey_credential_id: row.try_get("passkey_credential_id")?,
+            passkey_session_epoch: row.try_get("passkey_session_epoch")?,
             access_token_hash: row.try_get("access_token_hash")?,
             access_expires_at: row.try_get("access_expires_at")?,
             refresh_token_hash: row.try_get("refresh_token_hash")?,
