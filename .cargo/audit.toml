@@ -18,4 +18,15 @@ ignore = [
   # Remove once `sqlx-sqlite` accepts `libsqlite3-sys` >= 0.39, or revisit if
   # the client ever opens a SQLite file it did not create (e.g. imports one).
   "RUSTSEC-2026-0459",
+  # RUSTSEC-2023-0071 - Marvin: the `rsa` crate's private-key decryption and
+  # signing leak timing that can recover the key. No fixed `rsa` release exists.
+  #
+  # `rsa` reaches us only through `crypto-glue` <- `webauthn-rs-core` (and its
+  # attestation CA list) in `zann-server`, which only verifies RS256 assertion
+  # and attestation signatures with public keys. Zann holds no RSA private key
+  # and never decrypts or signs with RSA, so no timing oracle exists.
+  #
+  # Remove once a patched `rsa` ships, or revisit if any Zann code or the
+  # WebAuthn stack starts using an RSA private key.
+  "RUSTSEC-2023-0071",
 ]
