@@ -205,9 +205,9 @@ impl ConfigRepository {
         Ok((intent, bytes))
     }
 
-    pub(in crate::config::v2) fn ensure_owned_password_login_intent_locked(
+    pub(in crate::config::v2) fn ensure_owned_login_intent_locked(
         &self,
-        permit: &PasswordLoginIntentPermit,
+        permit: &InteractiveLoginIntentPermit,
     ) -> Result<(AuthOperationIntent, Vec<u8>), ConfigError> {
         let Some((intent, bytes)) = self.pending_auth_operation_intent_locked()? else {
             return Err(ConfigError::AuthOperationIntentConflict {
@@ -230,7 +230,7 @@ impl ConfigRepository {
         if byte_digest(&bytes) != permit.journal_bytes_digest
             || intent.journal_version != AUTH_OPERATION_INTENT_VERSION
             || intent.operation_id != permit.operation_id
-            || intent.operation != AuthOperationKind::PasswordLogin
+            || intent.operation != permit.preflight.operation()
             || !reservation_matches
             || !source_matches
         {

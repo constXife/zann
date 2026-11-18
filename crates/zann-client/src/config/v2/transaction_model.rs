@@ -29,11 +29,11 @@ pub(super) struct CredentialWriteSpec<'a> {
     pub(super) bundle: &'a CredentialBundle,
 }
 
-pub(super) fn ensure_password_login_transaction_source(
+pub(super) fn ensure_login_transaction_source(
     intent: &AuthOperationIntent,
     source: &CredentialTransactionSource,
 ) -> Result<(), ConfigError> {
-    if intent.operation != AuthOperationKind::PasswordLogin
+    if intent.operation.login_method().is_none()
         || source.config.revision != intent.source.revision
         || byte_digest(&source.source_primary_bytes) != intent.source.raw_digest
     {

@@ -108,7 +108,7 @@ pub struct CredentialProfileAnchor {
 /// The connection itself must already exist and carry a complete pinned
 /// endpoint binding.
 #[derive(Clone, Eq, PartialEq)]
-pub(crate) struct PasswordLoginAnchor {
+pub(crate) struct InteractiveLoginAnchor {
     pub(super) repository_binding_digest: String,
     pub(super) source_revision: u64,
     pub(super) source_digest: String,
@@ -126,10 +126,10 @@ pub(crate) struct PasswordLoginAnchor {
     pub(super) identity: Option<ConfigIdentity>,
 }
 
-impl fmt::Debug for PasswordLoginAnchor {
+impl fmt::Debug for InteractiveLoginAnchor {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
-            .debug_struct("PasswordLoginAnchor")
+            .debug_struct("InteractiveLoginAnchor")
             .field("source_revision", &self.source_revision)
             .field("connection_id", &self.connection_id)
             .field("profile_name", &self.profile_name)
@@ -144,7 +144,7 @@ impl fmt::Debug for PasswordLoginAnchor {
 }
 
 #[cfg_attr(not(feature = "session"), allow(dead_code))]
-impl PasswordLoginAnchor {
+impl InteractiveLoginAnchor {
     pub(crate) fn source_revision(&self) -> u64 {
         self.source_revision
     }

@@ -46,14 +46,14 @@ pub(super) fn resolve_credential_profile_anchor_from_config(
     })
 }
 
-pub(super) fn resolve_password_login_anchor_from_config(
+pub(super) fn resolve_login_anchor_from_config(
     repository_binding_digest: String,
     source_digest: String,
     config: &ConfigV2,
     connection_id: &ConnectionId,
     profile_name: &str,
     client_id: &ClientId,
-) -> Result<PasswordLoginAnchor, ConfigError> {
+) -> Result<InteractiveLoginAnchor, ConfigError> {
     let connection =
         config
             .connections
@@ -83,7 +83,7 @@ pub(super) fn resolve_password_login_anchor_from_config(
             reason: "password login requires an already pinned server fingerprint".to_string(),
         })?;
     let client = config.clients.get(client_id);
-    Ok(PasswordLoginAnchor {
+    Ok(InteractiveLoginAnchor {
         repository_binding_digest,
         source_revision: config.revision,
         source_digest,
@@ -107,8 +107,8 @@ pub(super) fn resolve_password_login_anchor_from_config(
     })
 }
 
-pub(super) fn ensure_password_login_anchor_matches(
-    anchor: &PasswordLoginAnchor,
+pub(super) fn ensure_login_anchor_matches(
+    anchor: &InteractiveLoginAnchor,
     expected_repository_binding: &str,
     config: &ConfigV2,
     source_digest: &str,
@@ -354,11 +354,12 @@ pub(super) fn apply_session_credential_rotation(
     Ok(())
 }
 
-pub(super) fn apply_password_login_candidate(
+pub(super) fn apply_login_candidate(
     config: &mut ConfigV2,
-    anchor: &PasswordLoginAnchor,
+    anchor: &InteractiveLoginAnchor,
     identity: &ConfigIdentity,
     account_subject: &str,
+    auth_method: AuthMethod,
     access_expires_at: &str,
     credential_ids: &BTreeMap<CredentialKind, CredentialId>,
 ) -> Result<(), ConfigError> {
@@ -422,7 +423,7 @@ pub(super) fn apply_password_login_candidate(
                 .and_then(|p| p.expected_master_key_fp.clone()),
             account_email: identity.email.clone(),
             account_subject: Some(account_subject.to_string()),
-            auth_method: Some(AuthMethod::Password),
+            auth_method: Some(auth_method),
             access_expires_at: Some(access_expires_at.to_string()),
             credentials,
         },

@@ -1130,13 +1130,13 @@ fn armed_password_login_with_absent_profile_abandons_without_credential_deletes(
     repo.reconcile_credentials_with_operation_lock(&store)
         .expect("settle seed journal");
     let anchor = repo
-        .resolve_password_login_anchor(&connection_id, "password", &client_id("test"))
+        .resolve_login_anchor(&connection_id, "password", &client_id("test"))
         .expect("absent-profile login anchor");
     let permit = repo
-        .prepare_password_login_intent_with_operation_locks(
+        .prepare_login_intent_with_operation_locks(
             &anchor,
             &endpoint("https://intent.test", "server-intent", "pin-intent"),
-            password_login_identity(),
+            LoginPreflight::Password(password_login_identity()),
             "operation-password-armed",
             &store,
         )
@@ -1171,13 +1171,13 @@ fn absent_password_login_target_in_descendant_clears_without_credential_io() {
     repo.reconcile_credentials_with_operation_lock(&store)
         .expect("settle seed journal");
     let anchor = repo
-        .resolve_password_login_anchor(&connection_id, "password", &client_id("test"))
+        .resolve_login_anchor(&connection_id, "password", &client_id("test"))
         .expect("absent-profile login anchor");
     let permit = repo
-        .prepare_password_login_intent_with_operation_locks(
+        .prepare_login_intent_with_operation_locks(
             &anchor,
             &endpoint("https://intent.test", "server-intent", "pin-intent"),
-            password_login_identity(),
+            LoginPreflight::Password(password_login_identity()),
             "operation-password-removed",
             &store,
         )
@@ -1214,7 +1214,7 @@ fn absent_password_login_target_in_descendant_clears_without_credential_io() {
 }
 
 #[test]
-fn password_login_candidate_marker_without_credential_journal_abandons_source() {
+fn login_candidate_marker_without_credential_journal_abandons_source() {
     let temp = TempDir::new().expect("tempdir");
     let repo = repository(&temp);
     initialize(&repo);
@@ -1223,13 +1223,13 @@ fn password_login_candidate_marker_without_credential_journal_abandons_source() 
     repo.reconcile_credentials_with_operation_lock(&store)
         .expect("settle seed journal");
     let anchor = repo
-        .resolve_password_login_anchor(&connection_id, "password", &client_id("test"))
+        .resolve_login_anchor(&connection_id, "password", &client_id("test"))
         .expect("absent-profile login anchor");
     let mut permit = repo
-        .prepare_password_login_intent_with_operation_locks(
+        .prepare_login_intent_with_operation_locks(
             &anchor,
             &endpoint("https://intent.test", "server-intent", "pin-intent"),
-            password_login_identity(),
+            LoginPreflight::Password(password_login_identity()),
             "operation-password-marker",
             &store,
         )
@@ -1241,7 +1241,7 @@ fn password_login_candidate_marker_without_credential_journal_abandons_source() 
     )
     .with_access_expires_at(Some("2026-08-16T13:00:00Z".to_string()));
     let plan = repo
-        .install_password_login_candidate_without_credential_journal_for_test(
+        .install_login_candidate_without_credential_journal_for_test(
             &mut permit,
             "018f4f08-7f1d-7d57-bd43-bb4b7c520001",
             &bundle,
@@ -1267,7 +1267,7 @@ fn password_login_candidate_marker_without_credential_journal_abandons_source() 
 }
 
 #[test]
-fn committed_password_login_candidate_is_preserved_with_exact_binding_and_service_slot() {
+fn committed_login_candidate_is_preserved_with_exact_binding_and_service_slot() {
     let temp = TempDir::new().expect("tempdir");
     let repo = repository(&temp);
     initialize(&repo);
@@ -1280,13 +1280,13 @@ fn committed_password_login_candidate_is_preserved_with_exact_binding_and_servic
         .expect("source profile");
     let service_id = source.credentials()[&CredentialKind::ServiceAccount].clone();
     let anchor = repo
-        .resolve_password_login_anchor(&connection_id, "default", &client_id("test"))
+        .resolve_login_anchor(&connection_id, "default", &client_id("test"))
         .expect("present-profile login anchor");
     let mut permit = repo
-        .prepare_password_login_intent_with_operation_locks(
+        .prepare_login_intent_with_operation_locks(
             &anchor,
             &endpoint("https://intent.test", "server-intent", "pin-intent"),
-            password_login_identity(),
+            LoginPreflight::Password(password_login_identity()),
             "operation-password-committed",
             &store,
         )
@@ -1298,7 +1298,7 @@ fn committed_password_login_candidate_is_preserved_with_exact_binding_and_servic
     )
     .with_access_expires_at(Some("2026-08-16T13:00:00Z".to_string()));
     let plan = repo
-        .install_password_login_candidate_without_credential_journal_for_test(
+        .install_login_candidate_without_credential_journal_for_test(
             &mut permit,
             "018f4f08-7f1d-7d57-bd43-bb4b7c520001",
             &bundle,
@@ -1352,7 +1352,7 @@ fn password_login_rebases_unrelated_revision_but_rejects_same_revision_aba() {
     repo.reconcile_credentials_with_operation_lock(&store)
         .expect("settle seed journal");
     let anchor = repo
-        .resolve_password_login_anchor(&connection_id, "password", &client_id("test"))
+        .resolve_login_anchor(&connection_id, "password", &client_id("test"))
         .expect("login anchor");
     repo.mutate(None, |config| {
         config.legacy_known_hosts.insert(
@@ -1363,10 +1363,10 @@ fn password_login_rebases_unrelated_revision_but_rejects_same_revision_aba() {
     })
     .expect("unrelated revision advance");
     let permit = repo
-        .prepare_password_login_intent_with_operation_locks(
+        .prepare_login_intent_with_operation_locks(
             &anchor,
             &endpoint("https://intent.test", "server-intent", "pin-intent"),
-            password_login_identity(),
+            LoginPreflight::Password(password_login_identity()),
             "operation-password-rebase",
             &store,
         )
@@ -1376,7 +1376,7 @@ fn password_login_rebases_unrelated_revision_but_rejects_same_revision_aba() {
         .expect("clear rebased intent");
 
     let aba_anchor = repo
-        .resolve_password_login_anchor(&connection_id, "password", &client_id("test"))
+        .resolve_login_anchor(&connection_id, "password", &client_id("test"))
         .expect("ABA anchor");
     let mut tampered = repo.snapshot().expect("ABA source").config().clone();
     tampered
@@ -1387,10 +1387,10 @@ fn password_login_rebases_unrelated_revision_but_rejects_same_revision_aba() {
         &serialize_config(&tampered).expect("serialize ABA config"),
     )
     .expect("publish same-revision ABA");
-    let error = match repo.prepare_password_login_intent_with_operation_locks(
+    let error = match repo.prepare_login_intent_with_operation_locks(
         &aba_anchor,
         &endpoint("https://intent.test", "server-intent", "pin-intent"),
-        password_login_identity(),
+        LoginPreflight::Password(password_login_identity()),
         "operation-password-aba",
         &store,
     ) {
@@ -1421,13 +1421,13 @@ fn published_password_candidate_proof_normalizes_legacy_endpoint_address() {
     })
     .expect("retain legacy noncanonical address");
     let anchor = repo
-        .resolve_password_login_anchor(&connection_id, "password", &client_id("test"))
+        .resolve_login_anchor(&connection_id, "password", &client_id("test"))
         .expect("normalized login anchor");
     let mut permit = repo
-        .prepare_password_login_intent_with_operation_locks(
+        .prepare_login_intent_with_operation_locks(
             &anchor,
             &endpoint("https://intent.test", "server-intent", "pin-intent"),
-            password_login_identity(),
+            LoginPreflight::Password(password_login_identity()),
             "operation-password-visible-unlink",
             &store,
         )
@@ -1439,7 +1439,7 @@ fn published_password_candidate_proof_normalizes_legacy_endpoint_address() {
     )
     .with_access_expires_at(Some("2026-08-16T13:00:00Z".to_string()));
     let plan = repo
-        .install_password_login_candidate_without_credential_journal_for_test(
+        .install_login_candidate_without_credential_journal_for_test(
             &mut permit,
             "018f4f08-7f1d-7d57-bd43-bb4b7c520001",
             &bundle,
@@ -1463,7 +1463,7 @@ fn published_password_candidate_proof_normalizes_legacy_endpoint_address() {
     sync_parent(repo.paths().root()).expect("sync visible unlink");
 
     assert!(repo
-        .password_login_candidate_is_published_with_operation_locks(&permit)
+        .login_candidate_is_published_with_operation_locks(&permit)
         .expect("candidate proof")
         .is_some());
 }

@@ -29,6 +29,9 @@ impl RecoveryPreparation {
             confirmed: false,
         })
     }
+    pub(crate) fn matches(&self, endpoint: &VerifiedEndpointBinding) -> bool {
+        self.target.matches(endpoint)
+    }
     pub(crate) fn operation_id(&self) -> Uuid {
         self.operation_id
     }
@@ -99,6 +102,7 @@ pub(crate) struct RecoveryIntent {
     bundle_digest: String,
     pub(crate) phase: RecoveryIntentPhase,
     consume_digest: Option<String>,
+    consume_device: Option<zann_core::api::account_access::DeviceDescriptor>,
     pub(crate) status: Option<RecoveryStatus>,
 }
 #[derive(Serialize, Deserialize)]
@@ -118,15 +122,24 @@ fn credential_id(
     id: Uuid,
     target: &RecoveryTarget,
 ) -> Result<CredentialId, ConfigError> {
-    let binding = repository_binding(root)?;
-    let tag = stable_hash(&[
+    operation_credential(
+        root,
+        id,
         b"recovery-credential-v1",
-        &binding,
-        id.as_bytes(),
-        target.address.as_bytes(),
-        target.server_id.as_bytes(),
-        target.fingerprint.as_bytes(),
-        target.locator.as_bytes(),
-    ]);
-    CredentialId::from_serialized(format!("credr_{}{tag}", id.simple()))
+        &[
+            target.address.as_bytes(),
+            target.server_id.as_bytes(),
+            target.fingerprint.as_bytes(),
+            target.locator.as_bytes(),
+        ],
+    )
+}
+
+impl RecoveryIntent {
+    pub(crate) fn locator(&self) -> &str {
+        &self.target.locator
+    }
+    pub(crate) fn matches(&self, endpoint: &VerifiedEndpointBinding) -> bool {
+        self.target.matches(endpoint)
+    }
 }

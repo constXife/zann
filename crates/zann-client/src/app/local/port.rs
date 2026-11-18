@@ -52,6 +52,32 @@ pub trait LocalVaultService: Send + Sync {
     fn change_unlock_password(&self, current: String, replacement: String) -> LocalResult<()>;
     fn activate_connected_account(&self) -> LocalResult<bool>;
     fn enroll_account_key(&self, password: String) -> LocalResult<VaultStatus>;
+    fn revoke_account_passkey(
+        &self,
+        credential_id: String,
+        provider: std::sync::Arc<dyn crate::account_access::AccountCeremonyProvider>,
+    ) -> LocalResult<zann_core::api::account_access::SecurityReceipt>;
+    fn acknowledge_account_recovery(&self) -> LocalResult<()>;
+    fn complete_account_passkey_login(
+        &self,
+        bootstrap: crate::session::PasskeyVaultBootstrap,
+    ) -> LocalResult<VaultStatus>;
+    fn prepare_server_recovery_code(&self) -> LocalResult<crate::app::AccountRecoveryCode>;
+    fn activate_server_recovery_code(
+        &self,
+        candidate: &crate::app::AccountRecoveryCode,
+        confirmation: String,
+        disable_password: bool,
+        provider: std::sync::Arc<dyn crate::account_access::AccountCeremonyProvider>,
+    ) -> LocalResult<zann_core::api::account_access::SecurityReceipt>;
+    fn account_security(&self) -> LocalResult<zann_core::api::account_access::AccountSecurity>;
+    fn enroll_account_passkey(
+        &self,
+        name: String,
+        mode: zann_core::api::account_access::PasskeyMode,
+        authorization: crate::app::PasskeyEnrollmentAuthorization,
+        provider: std::sync::Arc<dyn crate::account_access::AccountCeremonyProvider>,
+    ) -> LocalResult<zann_core::api::account_access::SecurityReceipt>;
     fn unlock(&self, password: String) -> LocalResult<VaultStatus>;
     fn remembered_unlock(&self) -> LocalResult<RememberedUnlock>;
     fn unlock_remembered(&self) -> LocalResult<VaultStatus>;

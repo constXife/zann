@@ -5,9 +5,9 @@ impl ConfigRepository {
     /// intent. The caller continues to hold auth then credential locks.
     #[cfg_attr(not(feature = "session"), allow(dead_code))]
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn commit_password_login_after_auth_intent_with_operation_locks<F>(
+    pub(crate) fn commit_login_after_auth_intent_with_operation_locks<F>(
         &self,
-        permit: &mut PasswordLoginIntentPermit,
+        permit: &mut InteractiveLoginIntentPermit,
         account_subject: &str,
         authenticated_identity: ConfigIdentity,
         access: CredentialSecret,
@@ -34,6 +34,7 @@ impl ConfigRepository {
         validate_string_len("$.password_login.identity.email", authenticated_email, 320)?;
         let anchor = permit.anchor.clone();
         let identity = authenticated_identity;
+        let auth_method = permit.preflight.method();
         let bundle = CredentialBundle::new(Some(access), Some(refresh), None)
             .with_access_expires_at(Some(access_expires_at.clone()));
         validate_credential_bundle_input("$.password_login.bundle", &bundle)?;
@@ -49,11 +50,12 @@ impl ConfigRepository {
         ]);
         let apply = |config: &mut ConfigV2,
                      credential_ids: &BTreeMap<CredentialKind, CredentialId>| {
-            apply_password_login_candidate(
+            apply_login_candidate(
                 config,
                 &anchor,
                 &identity,
                 account_subject,
+                auth_method,
                 &access_expires_at,
                 credential_ids,
             )
@@ -61,17 +63,18 @@ impl ConfigRepository {
 
         let initial_plan = {
             let _lock = self.exclusive_lock()?;
-            let (intent, _) = self.ensure_owned_password_login_intent_locked(permit)?;
-            if permit.identity.kdf_salt != identity.kdf_salt
-                || permit.identity.kdf_params != identity.kdf_params
-                || permit.identity.salt_fingerprint != identity.salt_fingerprint
-            {
+            let (intent, _) = self.ensure_owned_login_intent_locked(permit)?;
+            if permit.preflight.identity().is_some_and(|expected| {
+                expected.kdf_salt != identity.kdf_salt
+                    || expected.kdf_params != identity.kdf_params
+                    || expected.salt_fingerprint != identity.salt_fingerprint
+            }) {
                 return Err(ConfigError::AuthenticatedIdentityConflict {
                     reason: "post-authentication KDF identity differs from prelogin".to_string(),
                 });
             }
             let source = self.load_latest_credential_transaction_source()?;
-            ensure_password_login_transaction_source(&intent, &source)?;
+            ensure_login_transaction_source(&intent, &source)?;
             let write = CredentialWriteSpec {
                 connection_id: &anchor.connection_id,
                 profile_name: &anchor.profile_name,
@@ -89,9 +92,9 @@ impl ConfigRepository {
 
         let (expected_revision, plan) = {
             let _lock = self.exclusive_lock()?;
-            let (intent, _) = self.ensure_owned_password_login_intent_locked(permit)?;
+            let (intent, _) = self.ensure_owned_login_intent_locked(permit)?;
             let source = self.load_latest_credential_transaction_source()?;
-            ensure_password_login_transaction_source(&intent, &source)?;
+            ensure_login_transaction_source(&intent, &source)?;
             let expected_revision = source.config.revision;
             let write = CredentialWriteSpec {
                 connection_id: &anchor.connection_id,
@@ -103,11 +106,12 @@ impl ConfigRepository {
                 Some(&write),
                 Some(&prepared_ids),
                 |config, credential_ids| {
-                    apply_password_login_candidate(
+                    apply_login_candidate(
                         config,
                         &anchor,
                         &identity,
                         account_subject,
+                        auth_method,
                         &access_expires_at,
                         credential_ids,
                     )
@@ -119,7 +123,7 @@ impl ConfigRepository {
                     reason: "password login was cancelled before candidate preparation".to_string(),
                 });
             }
-            self.install_password_login_candidate_locked(permit, &plan, account_subject)?;
+            self.install_login_candidate_locked(permit, &plan, account_subject)?;
             self.install_credential_transaction_intent_locked(expected_revision, &plan)?;
             (expected_revision, plan)
         };
@@ -130,16 +134,16 @@ impl ConfigRepository {
             credential_store,
         )?;
         let _lock = self.exclusive_lock_allow_credential_journal()?;
-        self.accept_owned_password_login_locked(permit)?;
+        self.accept_owned_login_locked(permit)?;
         Ok(outcome)
     }
 
     /// Proves that a candidate whose intent unlink became visible is the exact
     /// locally published password-login session. This performs no store I/O.
     #[cfg_attr(not(feature = "session"), allow(dead_code))]
-    pub(crate) fn password_login_candidate_is_published_with_operation_locks(
+    pub(crate) fn login_candidate_is_published_with_operation_locks(
         &self,
-        permit: &PasswordLoginIntentPermit,
+        permit: &InteractiveLoginIntentPermit,
     ) -> Result<Option<ConfigSnapshot>, ConfigError> {
         let Some(candidate) = permit.candidate.as_ref() else {
             return Ok(None);
@@ -200,7 +204,7 @@ impl ConfigRepository {
                 == Some(&permit.anchor.connection_id)
             && profile.credentials == expected_credentials
             && profile.account_subject.as_deref() == Some(candidate.account_subject.as_str())
-            && profile.auth_method == Some(AuthMethod::Password)
+            && profile.auth_method == Some(permit.preflight.method())
             && profile.access_expires_at.as_deref() == Some(candidate.access_expires_at.as_str());
         Ok(published.then_some(ConfigSnapshot { config }))
     }
@@ -258,15 +262,20 @@ impl ConfigRepository {
     }
 
     #[cfg(test)]
-    pub(in crate::config::v2) fn install_password_login_candidate_without_credential_journal_for_test(
+    pub(in crate::config::v2) fn install_login_candidate_without_credential_journal_for_test(
         &self,
-        permit: &mut PasswordLoginIntentPermit,
+        permit: &mut InteractiveLoginIntentPermit,
         account_subject: &str,
         bundle: &CredentialBundle,
         credential_store: &dyn CredentialStore,
     ) -> Result<CredentialTransactionPlan, ConfigError> {
         let anchor = permit.anchor.clone();
-        let identity = permit.identity.clone();
+        let identity = permit
+            .preflight
+            .identity()
+            .expect("password test preflight")
+            .clone();
+        let auth_method = permit.preflight.method();
         let access_expires_at =
             bundle
                 .access_expires_at
@@ -287,9 +296,9 @@ impl ConfigRepository {
         ]);
         let initial_plan = {
             let _lock = self.exclusive_lock()?;
-            let (intent, _) = self.ensure_owned_password_login_intent_locked(permit)?;
+            let (intent, _) = self.ensure_owned_login_intent_locked(permit)?;
             let source = self.load_latest_credential_transaction_source()?;
-            ensure_password_login_transaction_source(&intent, &source)?;
+            ensure_login_transaction_source(&intent, &source)?;
             let write = CredentialWriteSpec {
                 connection_id: &anchor.connection_id,
                 profile_name: &anchor.profile_name,
@@ -300,11 +309,12 @@ impl ConfigRepository {
                 Some(&write),
                 Some(&prepared_ids),
                 |config, ids| {
-                    apply_password_login_candidate(
+                    apply_login_candidate(
                         config,
                         &anchor,
                         &identity,
                         account_subject,
+                        auth_method,
                         &access_expires_at,
                         ids,
                     )
@@ -313,9 +323,9 @@ impl ConfigRepository {
         };
         self.preflight_credential_transaction_plan(Some(bundle), &initial_plan, credential_store)?;
         let _lock = self.exclusive_lock()?;
-        let (intent, _) = self.ensure_owned_password_login_intent_locked(permit)?;
+        let (intent, _) = self.ensure_owned_login_intent_locked(permit)?;
         let source = self.load_latest_credential_transaction_source()?;
-        ensure_password_login_transaction_source(&intent, &source)?;
+        ensure_login_transaction_source(&intent, &source)?;
         let write = CredentialWriteSpec {
             connection_id: &anchor.connection_id,
             profile_name: &anchor.profile_name,
@@ -326,17 +336,18 @@ impl ConfigRepository {
             Some(&write),
             Some(&prepared_ids),
             |config, ids| {
-                apply_password_login_candidate(
+                apply_login_candidate(
                     config,
                     &anchor,
                     &identity,
                     account_subject,
+                    auth_method,
                     &access_expires_at,
                     ids,
                 )
             },
         )?;
-        self.install_password_login_candidate_locked(permit, &plan, account_subject)?;
+        self.install_login_candidate_locked(permit, &plan, account_subject)?;
         Ok(plan)
     }
 

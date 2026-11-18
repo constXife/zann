@@ -69,7 +69,7 @@ pub(super) fn validate_auth_operation_intent(
     }
     let repository_binding = repository_binding(repository_root)?;
     if intent.journal_version == AUTH_OPERATION_INTENT_V1 {
-        if intent.operation == AuthOperationKind::PasswordLogin
+        if intent.operation.login_method().is_some()
             || intent.client_id.is_some()
             || intent.reserved_login.is_some()
             || intent.candidate_login.is_some()
@@ -99,7 +99,7 @@ pub(super) fn validate_auth_operation_intent(
             });
         }
     } else {
-        if intent.operation != AuthOperationKind::PasswordLogin
+        if intent.operation.login_method().is_none()
             || intent.candidate_rotation.is_some()
             || intent.client_id.is_none()
             || intent.reserved_login.is_none()
@@ -318,7 +318,7 @@ pub(super) fn validate_auth_operation_intent(
             "$.candidate_login.access_expires_at",
             &candidate.access_expires_at,
         )?;
-        if candidate.auth_method != AuthMethod::Password
+        if Some(candidate.auth_method) != intent.operation.login_method()
             || candidate.access_credential_id != reservation.access_credential_id
             || candidate.refresh_credential_id != reservation.refresh_credential_id
         {

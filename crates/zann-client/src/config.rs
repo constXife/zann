@@ -15,6 +15,7 @@ pub use v2::{
 #[cfg(feature = "session")]
 pub(crate) use v2::{
     AuthOperationIntentPermit, AuthOperationKind, AuthOperationRecoveryDisposition,
-    AuthenticatedConnectionTarget, AuthenticatedSessionCommit, IdentityCommit, PasswordLoginAnchor,
-    PasswordLoginIntentPermit, StoredConnectionBinding, VerifiedEndpointBinding,
+    AuthenticatedConnectionTarget, AuthenticatedSessionCommit, IdentityCommit,
+    InteractiveLoginAnchor, InteractiveLoginIntentPermit, LoginPreflight, StoredConnectionBinding,
+    VerifiedEndpointBinding,
 };

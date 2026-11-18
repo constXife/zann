@@ -35,3 +35,6 @@ pub mod server;
 pub mod passkey_exchange;
 #[cfg(feature = "passkey-exchange")]
 pub mod private_output;
+
+#[cfg(any(feature = "browser-ipc", feature = "session"))]
+pub mod account_access;

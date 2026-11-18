@@ -15,6 +15,7 @@ path = "tests/backup_round_trip.rs"
 required-features = ["postgres-tests"]
 
 [dev-dependencies]
+zeroize = "1"
 zann-passkey = {path="../zann-passkey"}
 axum = "0.7"
 chrono = "0.4"
