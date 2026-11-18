@@ -13,7 +13,7 @@ it does not version or rewrite existing item/vault/device envelopes.
 
 `T(label, f1, ..., fn)` is ASCII `label`, one zero byte, then each field as
 `u32be(byte_length) || bytes` in the exact declared order. Fixed labels below
-are literal and immutable. UUIDs use 16 raw RFC-order bytes, integers use eight
+are literal and immutable. User, grant and operation UUIDs use 16 raw RFC-order bytes. `server_id` is the existing 52-character lowercase base32 SHA-256 fingerprint of the server identity key, encoded as UTF-8, never a second UUID. Integers use eight
 big-endian bytes, booleans one byte (`0`/`1`); byte fields are raw, not hex/base64.
 Text is UTF-8: canonical `RpId` ASCII comes from the existing RP owner, subject is
 the server user UUID, never email. Optional values have a one-byte presence field
@@ -21,7 +21,7 @@ followed by their value only when present. Wire binary fields use base64url
 without padding. Reject duplicate/unknown JSON members, wrong lengths/algorithms,
 noncanonical encodings and over-budget data before cryptographic work.
 
-SHA-256, BLAKE3 derivation, ChaCha20-Poly1305 verified wrapping and Ed25519 are
+SHA-256, BLAKE3 derivation, XChaCha20-Poly1305 verified wrapping and Ed25519 are
 owned by `zann-crypto`. Extract a purpose-neutral Ed25519 primitive from the
 existing IPC implementation, keeping distinct typed keys/namespaces: an account
 key is never an IPC identity. Use strict verification and pure Ed25519 over the
@@ -138,7 +138,7 @@ interoperability. Credentials without PRF remain Auth-only.
 After authentication identifies the account/credential, obtain the associated
 grant. Its public context fields, in order, are `format` (u64 value 1),
 `server_id`, `user_id`, `rp_id`, `credential_id`, `grant_id` (UUIDv4), `key_epoch`,
-`proof_public_key`, `algorithm` (ASCII `chacha20poly1305`). Let `C` denote those
+`proof_public_key`, `algorithm` (ASCII `xchacha20poly1305`). Let `C` denote those
 fields in precisely that order. Derive and wrap:
 
 ```
@@ -150,7 +150,7 @@ signature = Ed25519(account_proof_seed,
               T("zann account grant signature v1", AAD, blob_bytes))
 ```
 
-Use the existing verified blob encoder/random nonce; no new BLOB_VERSION branch.
+The algorithm name matches the existing XChaCha20-Poly1305 blob implementation (24-byte nonce). Use the existing verified blob encoder/random nonce; no new BLOB_VERSION branch.
 A grant carries context, opaque blob and the 64-byte signature. The complete
 record is at most 4 KiB; credential IDs at most 1,024 bytes. Fresh grant IDs
 prevent confusing replacement with replay. Before persistence/publication, unwrap
@@ -182,15 +182,15 @@ key/epoch binding remains a stronger independent checkpoint.
 ### Public input-normalization vector
 
 This vector contains only public inputs, not a real credential or secret. For
-`server_id = 11111111-1111-4111-8111-111111111111` and `rp_id = zann.example`:
+`server_id = ceirceirceirceirceirceirceirceirceirceirceirceirceiq` (the canonical base32 encoding of 32 public `0x11` bytes) and `rp_id = zann.example`:
 
 ```
 T hex:
-7a616e6e206163636f756e742070726620696e7075742076310000000010111111111111411181111111111111110000000c7a616e6e2e6578616d706c65
+7a616e6e206163636f756e742070726620696e7075742076310000000034636569726365697263656972636569726365697263656972636569726365697263656972636569726365697263656972636569710000000c7a616e6e2e6578616d706c65
 I hex (WebAuthn eval.first):
-33baf108a779edaf96534176bf8faea5545f688e8160d8703925da09df3759b0
+6bc12783bee367383f8a541268d121a645f34a169f7837445e5379688939effa
 raw CTAP hmac-secret salt hex:
-0515e4cc99d789edd9e60619caac890514652fa2612fcc4441351d51a01ce301
+c874ec63cf93f6911bbd29a0cc25c0c1348f5db1a09d3e0a6ec5fbdb9f6920b6
 ```
 
 Use this as an implementation tripwire for UUID order, field lengths and single
@@ -256,7 +256,12 @@ A private packaged extension page invokes the real browser credential API, not
 Zann's injected website provider shim. Check the runtime sender's exact packaged
 extension origin and page path; no web-accessible resource, externally-connectable
 web sender or embedded frame can dispatch account-bootstrap messages. The page
-has `frame-ancestors 'none'`; use operation/channel binding and existing one-flight
+is absent from `web_accessible_resources`; the browser denies website embedding
+before any page code runs. The private page also requires `window.top === window`
+and a single-use capability bound by the background worker to the exact native-created
+window, tab and document IDs. Manifest-wide `frame-ancestors https:` remains for
+the existing inline chooser; an HTML meta policy cannot override it for this page.
+A Chromium negative embedding test is mandatory. Use operation/channel binding and existing one-flight
 admission, never a page-supplied gesture/origin boolean. Require the browser's
 effective permission on the configured RP host and the server's exact extension
 origin allowlist. No auto-grant or wildcard RP/origin expansion.
@@ -317,3 +322,15 @@ without PRF output and grant proof. No platform is advertised as full-unlock
 supported until it passes. Generic Auth-only remains available through qualified
 UV authentication. Server compromise, copied offline keys, same-provider recovery
 and malicious rollback retain the explicit limits in ADR 0018.
+
+## Activation visibility fence
+
+A public login challenge created before factor activation must never authenticate
+a staged factor after activation or recovery completion. PostgreSQL stores one
+transactional `account_credential_fence.generation`; activation increments it and
+records the committed value on the factor in the same transaction. Login options
+capture a non-locking MVCC read of the fence. Finish requires the factor generation
+not exceed that captured value. The singleton is written only for rare factor
+activation, never for login, refresh or sync. A PostgreSQL sequence is unsuitable:
+its uncommitted increments are visible, and wall-clock ordering cannot prove
+transaction visibility. Ordinary dump/restore retains this table and its ordering.

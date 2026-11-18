@@ -2,14 +2,16 @@
 
 This implements the first slice of [#30](https://github.com/constXife/zann/issues/30).
 The design is reviewed separately in [PR #306](https://github.com/constXife/zann/pull/306).
-It exposes no recovery HTTP endpoint, passkey registration or E2EE unlock flow.
+This document records phase 1. The consuming RP/recovery flow is now specified in
+[ADR 0018](../adr/0018-passkey-account-access.md), [account grants](passkey-account-keys.md)
+and [consume/resume](passkey-recovery.md); its native owner is `app::account_access`.
 
 ## Active owners and guarantees
 
 - `zann-core::recovery` owns value-only states, status and cardinality limits.
 - `zann-crypto::recovery` owns the shared 48-character server-code generator,
   256-bit resume credentials, zeroizing bundle encoding and operation-bound
-  token hashing. Existing kit issuance reuses it; codes are not E2EE keys.
+  token hashing. Staged recovery-code issuance and admin reset reuse it; codes are not E2EE keys.
 - `zann-db::repo::sessions` owns epoch-aware persistence and refresh CAS. Issuance
   locks/checks the user before device FK acquisition, then creates device/session
   and personal-vault membership in one transaction. Password and OIDC use the same
@@ -69,6 +71,7 @@ Protected mutation paths/long-lived streams need epoch rechecks at commit/messag
 boundaries before exposing destructive recovery. Endpoint absence is intentional;
 no browser/UI or raw recovery-bearer transport is introduced here.
 
-Existing recovery-kit issuance still has its current immediate-rotation behavior;
-staged acknowledgment/fresh-factor admission is a later slice and must precede
-password-free onboarding. Public APIs cannot use this store to bypass that gate.
+The immediate recovery-kit endpoint is removed. Server Recovery Keys are now
+staged in the client credential store, re-entered and activated with a fresh
+management proof ([passkey recovery](passkey-recovery.md)); that gate precedes
+password-free onboarding. Public APIs cannot use this store to bypass it.

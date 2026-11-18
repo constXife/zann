@@ -20,9 +20,10 @@ The client prepares three independent values with the shared crypto owner:
 
 - `operation_id`: random UUIDv4, never reused for another attempt/account.
 - `resume_token`: 32 CSPRNG bytes, base64url without padding on the wire.
-- `next_recovery_key`: 48 uniformly sampled ASCII alphanumeric characters,
-  using the same generator as initial server recovery-kit issuance. Move that
-  generator to `zann-crypto`; do not duplicate it in native/browser shells.
+- `next_recovery_key`: 48 uniformly sampled ASCII alphanumeric characters from
+  `zann_crypto::recovery::generate_server_recovery_key`, the single generator for
+  staged codes, successors and administrator reset; native/browser shells never
+  duplicate it.
 
 Replacement generation moves to the trusted client so secrets can be durably
 stored **before** destructive consumption. It remains a server authentication
@@ -107,11 +108,13 @@ The route set is intentionally small:
 4. `POST /v1/auth/recover/{id}/complete`: activate staged factor, confirm code version.
 5. `POST /v1/auth/recover/{id}/abandon`: permanently end the restricted operation.
 
-Personal read-only catalog/ciphertext access is exposed by typed recovery-router
-handlers over existing bounded query services, under `/v1/auth/recover/{id}/data`.
-It does not enable the ordinary sync router, writes, shared plaintext, deleted
-history, admin APIs or service-token creation. Vault ownership/type/cache policy
-are checked for every page; no arbitrary item lookup or unbounded export route.
+The first recovery data adapter returns only the canonical personal wrapped key
+envelope under `GET /v1/auth/recover/{id}/data`. It checks current recovery epoch,
+active account, personal `Client` vault type and owner membership in one transaction.
+The client uses that envelope for local account-key/custody proof. Ordinary catalog
+and item sync starts only after completion and fresh ordinary passkey login; recovery
+does not expose item writes, shared plaintext, deleted history, admin APIs or
+service-token creation. No second item-sync implementation is introduced.
 A completed/terminal operation cannot continue reading ciphertext with its token.
 
 Every mutator after consume has a random `mutation_id`, `expected_revision` and
@@ -271,23 +274,26 @@ revoked by consumption; offline possession of an E2EE key is not server authorit
   never normal login, status or ciphertext pages. Capacity is checked before burn.
   This low-frequency shared counter avoids a new Redis/control plane; cleanup
   processes indexed pages of at most 100 rows, with one bounded page per tick.
-- Per process: 5 consume attempts/minute/normalized locator, 20/source IP/minute,
-  60 total/minute; authenticated resume mutations 30/operation/minute. Reuse the
-  trusted-proxy IP owner. Limiter storage has 8,192 entries and 15-minute idle
+- Per process: 5 consume attempts/minute/normalized locator, 20/source/minute,
+  60 consume attempts/minute in total; passkey login has only its own 20/source/minute
+  budget and never shares the consume budget. A source is an IPv4 address or an
+  IPv6 /64. Resume mutations are limited to 30/operation/minute and admitted only
+  after the resume token authenticates, so anonymous ids allocate no limiter
+  entries. Reuse the trusted-proxy IP owner. Limiter storage has 8,192 entries and 15-minute idle
   eviction; on capacity, reject new keys rather than evict a live limit. Bounded
   in-process limits multiply with replicas; durable quota/one-account CAS are
   deployment-wide. The existing KDF semaphore is mandatory and has no unbounded
   waiting queue. No anonymous failed-attempt rows or immutable audit payload dumps.
-- These values are one explicit canonical policy in auth configuration/schema,
-  read by all producers; no shell defaults. Tests cover configured boundary values.
-  Raising limits is an explicit config change, not an alternate recovery mechanism.
+- These v1 bounds are canonical core/schema/authority constants, consumed by the
+  producers; shells do not select their own limits. Raising a bound requires an
+  explicit protocol/schema change and boundary tests.
 
-Local `zann-server provision reset-recovery-key --email ...` uses the same service,
-account lock, epoch bump and supersede transition. It generates a new code, writes
-only its verifier and leaves old factors/grants/sessions revoked. Terminal output
-is the explicit operator-authorized credential delivery; automation uses the
-existing private-file writer. Output failure does not roll back database state:
-repeat reset to issue a new code and invalidate the inaccessible prior one.
+Local `zann-server admin reset-recovery-key --email ... --out <new-private-file>`
+uses the same verifier, account lock, epoch bump, supersede, code installation
+and factor/grant revocation owners. It writes and fsyncs a new owner-only file
+before changing server authority; stdout contains only account/candidate/version
+metadata. Existing files and symlink targets are rejected. A reset failure retains
+the file but never reports activation success; a later reset can issue a new code.
 No E2EE keys/KDF identity/ciphertext change, no raw code in argv/logs/errors.
 A disabled user stays disabled. Server-code reset is unavailable in OIDC-only mode.
 

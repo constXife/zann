@@ -341,9 +341,28 @@ and `zann-server/migrations/0004_account_recovery.sql` are sensitive. Server
 issuer; the existing core middleware owns admission. Client
 `config/v2/recovery/**` shares the existing Config/CredentialStore boundary.
 
-See [the implemented foundation](architecture/recovery-foundation.md) for scope
-and the explicit gate against exposing a consuming endpoint before complete
-authorization, passkey/grant revocation, mutation epoch guards and completion.
+The [phase-1 foundation](architecture/recovery-foundation.md) is extended by the
+consuming flow below: complete authorization, factor/grant revocation,
+same-transaction mutation guards and replacement completion precede HTTP exposure.
 Forward-migration, concurrency, recovery receipt/capacity/expiry, auth endpoint
 and client restart/pin/root/read-back tests cover this slice. CODEOWNERS, security
 labeling and audit CI include the new/moved paths; no crypto format is changed.
+
+## Account passkey vertical flow (#30)
+
+Review `zann-core/src/api/account_access/**`, `zann-crypto/src/{account_access/**,signatures.rs}`,
+`zann-db/src/repo/account_access/**`, server migration `0005_account_passkeys.sql`,
+SQLite migration `0011_account_passkey_auth.sql` (atomic storage metadata rebuild),
+`zann-server/src/domains/auth/account_access/**`, `config/passkey.rs`, `cli/admin.rs`,
+and the same-transaction interactive mutation guards across item/vault/sync/user/group/device writes.
+The native owner is `zann-client::app::account_access`, its closed public request
+journal in `config/v2/account_requests/**`, and the shared journaled session completion.
+`zann-client-sqlite::local_vault::{account_access,recovery_codes}` publishes only
+verified account keys under an independently open DeviceUnlock root.
+
+The browser boundary adds native-only daemon admission, the account IPC projection,
+WASM zeroizing PRF ingestion and `apps/extension/src/account-*`. The private page
+is not web accessible and is admitted only by its exact window/tab/document.
+Noise-channel completion, selected-pairing revocation/cancel, UV/PRF, negative
+framing and public-response replay tests cover this boundary. Real YubiKey PIN/touch
+and platform/provider qualification remain physical acceptance evidence.

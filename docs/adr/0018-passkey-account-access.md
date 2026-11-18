@@ -1,8 +1,9 @@
 # ADR 0018: Passkey account access and independent recovery
 
-- **Status:** Proposed — design complete; ready for implementation review
+- **Status:** Accepted — Linux/COSMIC + Chromium internal-account vertical flow; other native provider edges remain scoped follow-up
 - **Proposed:** 2026-11-16
 - **Protocol specified:** 2026-11-16
+- **Accepted:** 2026-11-16
 - **Scope:** server authentication, native account-key custody, Connect/unlock and recovery
 - **Normative contracts:** [consume/resume](../architecture/passkey-recovery.md),
   [account-key grants and custody](../architecture/passkey-account-keys.md)
@@ -125,12 +126,12 @@ account KDF identity, key epoch or personal ciphertext.
 2. **Surviving device:** usable refresh plus fresh unlocked-account custody can
    replace a lost factor without consuming the code or requiring that lost factor
    as the only step-up. Full grants still require actual key custody.
-3. **Break-glass:** OIDC recovers at the IdP; Internal uses
-   `zann-server provision reset-recovery-key --email ...` through existing local
-   provisioning. Reset rotates server code, revokes old local factors/grants and
-   interactive sessions, and supersedes recovery; it cannot decrypt personal data.
-   Explicit terminal output is the authorized credential-delivery boundary;
-   automation reuses private-file output. Never code-in-argv, logs or error text.
+3. **Break-glass:** OIDC recovers at the IdP; Internal uses local
+   `zann-server admin reset-recovery-key --email ... --out <new-private-file>`.
+   Reset rotates server code, revokes old local factors/grants and interactive
+   sessions, and supersedes recovery; it cannot decrypt personal data. The new
+   owner-only (`0600`, create-new) file is the only credential-delivery boundary:
+   never code-in-argv, terminal output, logs or error text.
 
 A Server Recovery Key is a server credential, not an E2EE recipient. It can
 ultimately confer eligible shared-server rights and obtain ciphertext for offline
