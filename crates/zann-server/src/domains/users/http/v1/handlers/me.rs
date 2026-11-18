@@ -3,13 +3,11 @@ use zann_core::Identity;
 
 use crate::app::AppState;
 use crate::domains::users::service::{
-    change_password as change_password_service, create_recovery_kit as create_recovery_kit_service,
-    get_me, update_me as update_me_service, ChangePasswordCommand, MeError, UpdateMeCommand,
+    change_password as change_password_service, get_me, update_me as update_me_service,
+    ChangePasswordCommand, MeError, UpdateMeCommand,
 };
 
-use super::super::types::{
-    ChangePasswordRequest, ErrorResponse, RecoveryKitResponse, UpdateMeRequest,
-};
+use super::super::types::{ChangePasswordRequest, ErrorResponse, UpdateMeRequest};
 use super::helpers::user_response;
 
 fn map_me_error(error: MeError) -> axum::response::Response {
@@ -126,23 +124,6 @@ pub(crate) async fn change_password(
     };
     match change_password_service(&state, &identity, command).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(err) => map_me_error(err),
-    }
-}
-
-#[tracing::instrument(skip(state, identity))]
-pub(crate) async fn create_recovery_kit(
-    State(state): State<AppState>,
-    Extension(identity): Extension<Identity>,
-) -> impl IntoResponse {
-    match create_recovery_kit_service(&state, &identity).await {
-        Ok(result) => (
-            StatusCode::OK,
-            Json(RecoveryKitResponse {
-                recovery_key: result.recovery_key,
-            }),
-        )
-            .into_response(),
         Err(err) => map_me_error(err),
     }
 }

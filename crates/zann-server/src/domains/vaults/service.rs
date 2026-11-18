@@ -1,3 +1,4 @@
+use crate::domains::auth::core::mutation;
 use chrono::Utc;
 use uuid::Uuid;
 use zann_core::api::vaults::VaultSummary;
@@ -237,23 +238,24 @@ pub async fn create_vault(
         created_at: now,
     };
 
-    if let Err(err) = repo.create(&vault).await {
+    let mut tx = mutation::begin(state, identity).await?;
+    if let Err(err) = VaultRepo::create_in(&mut tx, &vault).await {
         tracing::error!(event = "vault_create_failed", error = %err, "DB error");
         return Err(VaultServiceError::DbError);
     }
 
-    let member_repo = VaultMemberRepo::new(&state.db);
     let member = zann_core::VaultMember {
         vault_id: vault.id,
         user_id: identity.user_id,
         role: zann_core::VaultMemberRole::Admin,
         created_at: now,
     };
-    if let Err(err) = member_repo.create(&member).await {
+    if let Err(err) = VaultMemberRepo::create_in(&mut tx, &member).await {
         tracing::error!(event = "vault_member_create_failed", error = %err, "DB error");
         return Err(VaultServiceError::DbError);
     }
 
+    tx.commit().await.map_err(mutation::database)?;
     tracing::info!(event = "vault_created", vault_id = %vault.id, "Vault created");
     Ok(vault)
 }
@@ -383,7 +385,9 @@ pub async fn update_vault_key(
     }
 
     let key_checksum = blake3::hash(&cmd.vault_key_enc).to_hex().to_string();
-    let Ok(affected) = repo.update_key_by_id(vault.id, &cmd.vault_key_enc).await else {
+    let mut tx = mutation::begin(state, identity).await?;
+    let Ok(affected) = VaultRepo::update_key_by_id_in(&mut *tx, vault.id, &cmd.vault_key_enc).await
+    else {
         tracing::error!(event = "vault_key_update_failed", "DB error");
         return Err(VaultServiceError::DbError);
     };
@@ -391,6 +395,7 @@ pub async fn update_vault_key(
         return Err(VaultServiceError::Conflict("vault_key_already_initialized"));
     }
 
+    tx.commit().await.map_err(mutation::database)?;
     tracing::info!(
         event = "vault_key_updated",
         vault_id = %vault.id,
@@ -454,15 +459,16 @@ pub async fn delete_vault(
         }
     }
 
-    let Ok(affected) = repo
-        .delete_by_id(
-            vault.id,
-            vault.row_version,
-            Utc::now(),
-            identity.user_id,
-            identity.device_id,
-        )
-        .await
+    let mut tx = mutation::begin(state, identity).await?;
+    let Ok(affected) = VaultRepo::delete_by_id_in(
+        &mut *tx,
+        vault.id,
+        vault.row_version,
+        Utc::now(),
+        identity.user_id,
+        identity.device_id,
+    )
+    .await
     else {
         tracing::error!(event = "vault_delete_failed", "DB error");
         return Err(VaultServiceError::DbError);
@@ -471,6 +477,7 @@ pub async fn delete_vault(
         return Err(VaultServiceError::NotFound);
     }
 
+    tx.commit().await.map_err(mutation::database)?;
     tracing::info!(event = "vault_deleted", vault_id = %vault.id, "Vault deleted");
     Ok(())
 }

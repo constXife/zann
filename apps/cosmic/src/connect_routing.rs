@@ -5,8 +5,12 @@ impl App {
         let outcomes = match &mut self.shell {
             Shell::Ready {
                 screen: Screen::Connect { state, .. },
+                session,
                 ..
-            } => state.update(event),
+            } => {
+                state.attach_browser(session.browser_control());
+                state.update(event)
+            }
             _ => return Task::none(),
         };
         let mut tasks = Vec::new();
@@ -29,6 +33,7 @@ impl App {
                 connect::Outcome::Connected {
                     storage_id,
                     has_personal_keys,
+                    passkey,
                 } => {
                     if let Shell::Ready {
                         screen, session, ..
@@ -43,7 +48,8 @@ impl App {
                         };
                         let mode = zann_flows::unlock::device_phase(status.initialized);
                         let mut master = master::State::new(mode, Some(storage_id.clone()))
-                            .with_account(has_personal_keys);
+                            .with_account(has_personal_keys)
+                            .with_passkey(passkey.map(|bootstrap| *bootstrap));
                         match session.facade().setup_accounts() {
                             Ok(accounts) => {
                                 if let Some(account) = accounts

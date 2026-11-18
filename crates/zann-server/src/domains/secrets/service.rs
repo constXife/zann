@@ -412,7 +412,8 @@ pub async fn ensure_secret(
 
     let created = match create_secret_aggregate(state, identity, &item).await {
         Ok(()) => true,
-        Err(err) => {
+        Err(SecretCreateError::Authority(error)) => return Err(error),
+        Err(SecretCreateError::Store(err)) => {
             tracing::warn!(event = "secret_create_conflict", error = %err);
             if !err
                 .as_database_error()
@@ -591,7 +592,8 @@ pub async fn set_secret(
 
     match create_secret_aggregate(state, identity, &item).await {
         Ok(()) => {}
-        Err(err) => {
+        Err(SecretCreateError::Authority(error)) => return Err(error),
+        Err(SecretCreateError::Store(err)) => {
             tracing::warn!(event = "secret_set_conflict", error = %err);
             if err
                 .as_database_error()
@@ -705,7 +707,7 @@ async fn create_secret_aggregate(
     state: &AppState,
     identity: &Identity,
     item: &Item,
-) -> Result<(), sqlx_core::Error> {
+) -> Result<(), SecretCreateError> {
     let actor = actor_snapshot(state, identity, Some(item.device_id)).await;
     let history = ItemHistory {
         id: Uuid::now_v7(),
@@ -735,13 +737,15 @@ async fn create_secret_aggregate(
     let history_repo = ItemHistoryRepo::new(&state.db);
     let change_repo = ChangeRepo::new(&state.db);
     let mut tx = state.db.begin().await?;
+    crate::domains::auth::core::mutation::guard(&mut tx, identity).await?;
     item_repo.create_in(&mut tx, item).await?;
     history_repo.create_in(&mut tx, &history).await?;
     history_repo
         .prune_by_item_in(&mut tx, item.id, ITEM_HISTORY_LIMIT)
         .await?;
     change_repo.create_in(&mut tx, &change).await?;
-    tx.commit().await
+    tx.commit().await?;
+    Ok(())
 }
 
 async fn update_secret_aggregate(
@@ -760,6 +764,7 @@ async fn update_secret_aggregate(
         tracing::error!(event = "secret_mutation_failed", error = %err, "DB error");
         SecretError::DbError
     })?;
+    crate::domains::auth::core::mutation::guard(&mut tx, identity).await?;
     let locked = item_repo
         .get_by_id_for_update_in(&mut tx, item.id)
         .await
@@ -1460,4 +1465,12 @@ mod tests {
         ));
         assert!(!service_account_access_allowed(PolicyDecision::Deny, true));
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum SecretCreateError {
+    #[error("secret storage failed")]
+    Store(#[from] sqlx_core::Error),
+    #[error("secret mutation authorization failed")]
+    Authority(#[from] SecretError),
 }

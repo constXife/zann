@@ -88,10 +88,10 @@ fn restart_keeps_secrets_out_of_intents_and_requires_the_exact_pin() {
         .unwrap();
     assert!(secrets.confirms_code(prep.next_recovery_key()));
     restarted
-        .mark_recovery_dispatched(id, &endpoint("pin-a"), [7; 32])
+        .mark_recovery_dispatched(id, &endpoint("pin-a"), [7; 32], device())
         .unwrap();
     assert!(restarted
-        .mark_recovery_dispatched(id, &endpoint("pin-a"), [8; 32])
+        .mark_recovery_dispatched(id, &endpoint("pin-a"), [8; 32], device())
         .is_err());
     assert!(restarted.discard_prepared_recovery(id, &store).is_err());
     assert!(restarted
@@ -132,13 +132,14 @@ fn scope_copy_and_status_rollback_fail_closed() {
     let prep = preparation();
     let id = prep.operation_id();
     repo.prepare_recovery(&prep, &store).unwrap();
-    repo.mark_recovery_dispatched(id, &endpoint("pin-a"), [1; 32])
+    repo.mark_recovery_dispatched(id, &endpoint("pin-a"), [1; 32], device())
         .unwrap();
     let mut status = RecoveryStatus {
         operation_id: id,
         user_id: Uuid::new_v4(),
         auth_epoch: 2,
         account_key_epoch: Some(1),
+        successor_code_version: 2,
         state: RecoveryState::Consumed,
         revision: 1,
         expires_at: Utc::now() + chrono::Duration::hours(24),
@@ -200,4 +201,71 @@ fn symlink_journal_is_never_followed() {
         .prepare_recovery(&preparation(), &Store::default())
         .is_err());
     assert_eq!(fs::metadata(target.path()).unwrap().len(), 0);
+}
+
+fn device() -> zann_core::api::account_access::DeviceDescriptor {
+    zann_core::api::account_access::DeviceDescriptor {
+        name: "test".into(),
+        platform: "fixture".into(),
+        fingerprint: None,
+        os: None,
+        os_version: None,
+        app_version: None,
+    }
+}
+
+#[test]
+fn local_publication_cleanup_preserves_future_and_unresolved_recovery_bundles() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = ConfigRepository::new(ClientPaths::new(root.path()));
+    let store = Store {
+        root: Some(root.path().into()),
+        ..Store::default()
+    };
+    let user = Uuid::new_v4();
+    let mut ids = Vec::new();
+    for epoch in 2..=5 {
+        let prep = preparation();
+        let id = prep.operation_id();
+        repo.prepare_recovery(&prep, &store).unwrap();
+        repo.mark_recovery_dispatched(id, &endpoint("pin-a"), [epoch as u8; 32], device())
+            .unwrap();
+        if epoch < 5 {
+            repo.observe_recovery(
+                id,
+                &endpoint("pin-a"),
+                RecoveryStatus {
+                    operation_id: id,
+                    user_id: user,
+                    auth_epoch: epoch,
+                    account_key_epoch: Some(1),
+                    successor_code_version: epoch,
+                    state: if epoch == 3 {
+                        RecoveryState::Completed
+                    } else {
+                        RecoveryState::Expired
+                    },
+                    revision: 2,
+                    expires_at: Utc::now() + chrono::Duration::hours(24),
+                },
+            )
+            .unwrap();
+        }
+        ids.push(id);
+    }
+    repo.acknowledge_recovery_key_publication(&endpoint("pin-a"), user, &store)
+        .unwrap();
+    let pending = repo.pending_recoveries().unwrap();
+    assert_eq!(pending.len(), 2);
+    for id in &ids[..2] {
+        assert!(repo
+            .recovery_secrets(*id, &endpoint("pin-a"), &store)
+            .is_err());
+    }
+    for id in &ids[2..] {
+        assert!(repo
+            .recovery_secrets(*id, &endpoint("pin-a"), &store)
+            .is_ok());
+    }
+    assert_eq!(store.values.lock().unwrap().len(), 2);
 }

@@ -56,8 +56,18 @@ impl ConfigRepository {
             {
                 return Err(conflict("invalid recovery digest"));
             }
-            if (intent.phase == RecoveryIntentPhase::Prepared) != intent.consume_digest.is_none() {
+            if (intent.phase == RecoveryIntentPhase::Prepared) != intent.consume_device.is_none()
+                || (intent.phase == RecoveryIntentPhase::Prepared)
+                    != intent.consume_digest.is_none()
+            {
                 return Err(conflict("recovery dispatch binding missing"));
+            }
+            if intent
+                .status
+                .as_ref()
+                .is_some_and(|s| s.successor_code_version <= 0)
+            {
+                return Err(conflict("invalid successor code version"));
             }
             let consistent = match (intent.phase, intent.status.as_ref()) {
                 (RecoveryIntentPhase::Prepared | RecoveryIntentPhase::Dispatched, None) => true,

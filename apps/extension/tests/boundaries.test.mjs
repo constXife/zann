@@ -41,7 +41,7 @@ test('shipping manifest declares opt-in HTTPS access and only the chooser is web
   assert.equal(manifest.manifest_version, 3);
   assert.deepEqual(manifest.permissions.slice().sort(), ['activeTab', 'nativeMessaging', 'scripting', 'storage', 'webNavigation'].sort());
   for (const key of ['host_permissions', 'content_scripts', 'externally_connectable']) assert.equal(manifest[key], undefined);
-  assert.deepEqual(manifest.optional_host_permissions, ['https://*/*']);
+  assert.deepEqual(manifest.optional_host_permissions, ['https://*/*', 'http://localhost/*']);
   assert.deepEqual(manifest.web_accessible_resources, [{ resources: ['inline.html'], matches: ['https://*/*'], use_dynamic_url: true }]);
   assert.deepEqual(manifest.background, { service_worker: 'background.js', type: 'module' });
   assert.match(manifest.content_security_policy.extension_pages, /script-src 'self' 'wasm-unsafe-eval'/);

@@ -40,6 +40,8 @@ pub(crate) const AUTH_OPERATION_INTENT_FILENAME: &str = "client-auth.intent.json
 pub const LEGACY_CONFIG_FILENAME: &str = "config.json";
 pub const LEGACY_KNOWN_HOSTS_FILENAME: &str = "known_hosts.json";
 pub(crate) const AUTH_RECOVERY_INTENTS_FILENAME: &str = "client-auth.recovery-intents.json";
+pub(crate) const ACCOUNT_REQUESTS_FILENAME: &str = "client-auth.account-requests.json";
+pub(crate) const ACCOUNT_REQUESTS_MAX_BYTES: u64 = 2 * 1024 * 1024;
 pub const LOCAL_DB_FILENAME: &str = "local.sqlite";
 pub const DESKTOP_SETTINGS_FILENAME: &str = "desktop.json";
 pub const REMEMBERED_UNLOCK_FILENAME: &str = "unlock.json";
@@ -105,8 +107,12 @@ mod session_model;
 mod transaction_model;
 mod validation;
 
-#[allow(dead_code)] // Foundation for the recovery application flow; no network/HTTP path yet.
+#[cfg(feature = "app")]
+mod account_requests;
+#[allow(dead_code)] // The config-only surface retains the same recoverable intent schema.
 pub(crate) mod recovery;
+#[cfg(feature = "app")]
+pub(crate) use account_requests::RecoveryCodeCandidate;
 mod repository;
 
 #[cfg(test)]

@@ -82,7 +82,7 @@ pub fn generate_server_recovery_key() -> Zeroizing<String> {
             .collect(),
     )
 }
-fn valid_recovery_code(value: &str) -> bool {
+pub fn valid_recovery_code(value: &str) -> bool {
     value.len() == 48 && value.bytes().all(|c| c.is_ascii_alphanumeric())
 }
 fn decode_resume(value: &str) -> Result<Zeroizing<Vec<u8>>, RecoverySecretError> {
@@ -112,6 +112,21 @@ pub fn resume_token_hash(
     material.extend_from_slice(&bytes);
     let encoded = Zeroizing::new(URL_SAFE_NO_PAD.encode(material.as_slice()));
     Ok(crate::tokens::hash_token(&encoded, pepper))
+}
+
+/// Canonical server-auth verifier for both online recovery and offline admin
+/// issuance. It never derives or changes an account E2EE key.
+pub fn server_recovery_verifier(
+    code: &str,
+    salt: &str,
+    pepper: &str,
+    params: &crate::passwords::KdfParams,
+) -> Result<Zeroizing<String>, &'static str> {
+    if !valid_recovery_code(code) {
+        return Err("invalid recovery code format");
+    }
+    let auth = Zeroizing::new(crate::passwords::derive_auth_hash(code, salt, params)?);
+    crate::passwords::hash_password(&auth, pepper, params).map(Zeroizing::new)
 }
 
 #[cfg(test)]

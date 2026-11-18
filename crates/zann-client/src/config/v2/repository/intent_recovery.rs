@@ -1,13 +1,13 @@
 use super::super::*;
 
 impl ConfigRepository {
-    pub(in crate::config::v2) fn install_password_login_candidate_locked(
+    pub(in crate::config::v2) fn install_login_candidate_locked(
         &self,
-        permit: &mut PasswordLoginIntentPermit,
+        permit: &mut InteractiveLoginIntentPermit,
         plan: &CredentialTransactionPlan,
         account_subject: &str,
     ) -> Result<(), ConfigError> {
-        let (mut intent, _) = self.ensure_owned_password_login_intent_locked(permit)?;
+        let (mut intent, _) = self.ensure_owned_login_intent_locked(permit)?;
         if intent.state != AuthOperationIntentState::Armed
             || intent.candidate_rotation.is_some()
             || intent.candidate_login.is_some()
@@ -41,7 +41,7 @@ impl ConfigRepository {
             }
         })?;
         if profile.account_subject.as_deref() != Some(account_subject)
-            || profile.auth_method != Some(AuthMethod::Password)
+            || profile.auth_method != intent.operation.login_method()
             || profile.credentials.get(&CredentialKind::Access)
                 != Some(&reservation.access_credential_id)
             || profile.credentials.get(&CredentialKind::Refresh)
@@ -64,7 +64,7 @@ impl ConfigRepository {
             revision: plan.candidate_config.revision,
             raw_digest: byte_digest(&plan.candidate_bytes),
             account_subject: account_subject.to_string(),
-            auth_method: AuthMethod::Password,
+            auth_method: permit.preflight.method(),
             access_expires_at,
             access_credential_id: reservation.access_credential_id.clone(),
             refresh_credential_id: reservation.refresh_credential_id.clone(),
@@ -77,11 +77,11 @@ impl ConfigRepository {
         Ok(())
     }
 
-    pub(in crate::config::v2) fn accept_owned_password_login_locked(
+    pub(in crate::config::v2) fn accept_owned_login_locked(
         &self,
-        permit: &PasswordLoginIntentPermit,
+        permit: &InteractiveLoginIntentPermit,
     ) -> Result<(), ConfigError> {
-        let (intent, bytes) = self.ensure_owned_password_login_intent_locked(permit)?;
+        let (intent, bytes) = self.ensure_owned_login_intent_locked(permit)?;
         if intent.state != AuthOperationIntentState::CandidatePrepared
             || !matches!(
                 self.classify_auth_operation_intent_locked(&intent)?,
@@ -206,7 +206,7 @@ impl ConfigRepository {
         self.ensure_legacy_unchanged(&config)?;
         let digest = byte_digest(&primary_bytes);
         if config.revision == intent.source.revision && digest == intent.source.raw_digest {
-            if intent.operation == AuthOperationKind::PasswordLogin {
+            if intent.operation.login_method().is_some() {
                 return Ok(AuthIntentState::LoginSource);
             }
             let anchor = auth_intent_source_anchor(intent);

@@ -1,6 +1,8 @@
 //! Authenticated local session service. The management handle is in-process
 //! only; the socket never exports approval, revocation, unlock or raw vault APIs.
 #![cfg(unix)]
+mod account_access;
+pub use account_access::AccountCeremonyWait;
 mod channel;
 mod engine;
 mod error;

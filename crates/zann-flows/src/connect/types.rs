@@ -10,6 +10,7 @@ pub enum Step {
     Probe,
     Trust,
     Password,
+    Passkey,
     OidcStart,
     OidcFinish,
 }
@@ -65,6 +66,7 @@ pub enum Action {
         password: String,
         full_name: Option<String>,
     },
+    StartPasskey,
     StartOidc,
     ReopenBrowser,
     CopyBrowserUrl,
@@ -77,6 +79,7 @@ pub enum Completion {
     Probed(Result<Probe, Failure>),
     Trusted(Result<ServerInfo, Failure>),
     Password(Result<Connected, Failure>),
+    Passkey(Result<Connected, Failure>),
     OidcStarted(Result<String, Failure>),
     OidcFinished(Result<Connected, Failure>),
 }
@@ -87,6 +90,7 @@ impl Completion {
             Step::Probe => Self::Probed(Err(failure)),
             Step::Trust => Self::Trusted(Err(failure)),
             Step::Password => Self::Password(Err(failure)),
+            Step::Passkey => Self::Passkey(Err(failure)),
             Step::OidcStart => Self::OidcStarted(Err(failure)),
             Step::OidcFinish => Self::OidcFinished(Err(failure)),
         }
@@ -97,6 +101,7 @@ impl Completion {
             Self::Probed(_) => Step::Probe,
             Self::Trusted(_) => Step::Trust,
             Self::Password(_) => Step::Password,
+            Self::Passkey(_) => Step::Passkey,
             Self::OidcStarted(_) => Step::OidcStart,
             Self::OidcFinished(_) => Step::OidcFinish,
         }
@@ -118,6 +123,9 @@ pub enum Effect {
         password: String,
         full_name: Option<String>,
         register: bool,
+    },
+    Passkey {
+        id: OperationId,
     },
     BeginOidc {
         id: OperationId,
@@ -147,6 +155,7 @@ impl Effect {
             Self::Probe { id, .. } => Some((*id, Step::Probe)),
             Self::TrustFingerprint { id } => Some((*id, Step::Trust)),
             Self::Password { id, .. } => Some((*id, Step::Password)),
+            Self::Passkey { id } => Some((*id, Step::Passkey)),
             Self::BeginOidc { id } => Some((*id, Step::OidcStart)),
             Self::FinishOidc { id } => Some((*id, Step::OidcFinish)),
             _ => None,

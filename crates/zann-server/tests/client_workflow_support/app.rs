@@ -41,6 +41,15 @@ impl TestApp {
         build_router(state)
     }
 
+    pub fn router_with_account_passkeys(&self) -> axum::Router {
+        let mut state = self.state.clone();
+        state.config.auth.passkey = Some(zann_server::config::PasskeyConfig {
+            rp_id: "zann.example".into(),
+            rp_name: "Zann integration".into(),
+            origins: vec!["https://zann.example".into()],
+        });
+        build_router(state)
+    }
     pub fn router(&self) -> axum::Router {
         self.app.clone()
     }
@@ -94,6 +103,7 @@ impl TestApp {
             access_token_ttl_seconds: 3600,
             refresh_token_ttl_seconds: 3600,
             argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
+            account_access: Default::default(),
             oidc_jwks_cache: OidcJwksCache::new(),
             config,
             policy_store: PolicyStore::new(PolicySet::from_rules(rules)),

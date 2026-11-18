@@ -28,7 +28,12 @@ pub(crate) mod prelude {
     };
 }
 
+mod account_access;
 mod backup;
+pub use account_access::{
+    AccessOperation, AccountAccessRepo, AccountAccessStoreError, NewPasskey, PasskeyRecord,
+    SecurityAccount,
+};
 mod changes;
 mod devices;
 mod groups;
@@ -50,6 +55,6 @@ pub use vaults::{
 
 mod recovery;
 pub use recovery::{
-    AccountAuthState, RecoveryMutation, RecoveryReceipt, RecoveryRecord, RecoveryRepo,
-    RecoveryStart, RecoveryStoreError,
+    AccountAuthState, RecoveryAdmission, RecoveryMutation, RecoveryReceipt, RecoveryRecord,
+    RecoveryRepo, RecoveryStart, RecoveryStoreError,
 };

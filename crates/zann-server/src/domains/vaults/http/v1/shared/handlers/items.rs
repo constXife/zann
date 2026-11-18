@@ -824,6 +824,9 @@ pub(crate) async fn create_shared_item(
                 .into_response();
         }
     };
+    if let Err(error) = crate::domains::auth::core::mutation::guard(&mut tx, &identity).await {
+        return crate::domains::auth::core::mutation::response(error);
+    }
     if let Err(err) = item_repo.create_in(&mut tx, &item).await {
         tracing::error!(event = "shared_item_create_failed", error = %err, "DB error");
         return (
@@ -1138,6 +1141,9 @@ pub(crate) async fn update_shared_item(
                 .into_response();
         }
     };
+    if let Err(error) = crate::domains::auth::core::mutation::guard(&mut tx, &identity).await {
+        return crate::domains::auth::core::mutation::response(error);
+    }
     let locked = match item_repo.get_by_id_for_update_in(&mut tx, item.id).await {
         Ok(Some(locked)) => locked,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
@@ -1396,6 +1402,9 @@ pub(crate) async fn delete_shared_item(
                 .into_response();
         }
     };
+    if let Err(error) = crate::domains::auth::core::mutation::guard(&mut tx, &identity).await {
+        return crate::domains::auth::core::mutation::response(error);
+    }
     let locked = match item_repo.get_by_id_for_update_in(&mut tx, item.id).await {
         Ok(Some(locked)) => locked,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),

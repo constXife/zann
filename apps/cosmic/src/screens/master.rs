@@ -1,4 +1,5 @@
 //! Device unlock and account enrollment adapter.
+mod account_access;
 mod view;
 
 use cosmic::iced::Task;
@@ -16,6 +17,9 @@ pub struct State {
     platform_prompt: bool,
     mode: Mode,
     connected_keys: Option<bool>,
+    passkey: Option<account_access::PendingPasskey>,
+    passkey_repair: bool,
+    passkey_login: bool,
     select_after: Option<String>,
     account_label: Option<String>,
     confirmation: String,
@@ -56,6 +60,7 @@ pub enum Message {
     PasswordSubmitted,
     FocusPassword,
     UseUnlocked,
+    UseEncryptionPassword,
     Recovery,
     /// The vault contents, plus the outcome of the sync that ran on the way
     /// in, if one did; a failed one did not stop the vault opening.
@@ -89,6 +94,9 @@ impl State {
             startup: false,
             platform_prompt: false,
             connected_keys: None,
+            passkey: None,
+            passkey_repair: false,
+            passkey_login: false,
             select_after: None,
             account_label: None,
             confirmation: String::new(),
@@ -135,6 +143,7 @@ impl State {
 
     pub fn can_submit(&self) -> bool {
         !self.busy
+            && !self.passkey_repair
             && !self.password.is_empty()
             && (!self.creating()
                 || (self.password == self.confirmation
@@ -160,6 +169,19 @@ impl State {
 
     pub fn update(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
+            Message::UseEncryptionPassword if !self.busy => {
+                self.passkey = None;
+                self.passkey_repair = false;
+                self.notice = None;
+                match session.facade().app_status() {
+                    Ok(status) if status.initialized && !status.locked => {
+                        return self.update(Message::UseUnlocked, session)
+                    }
+                    Ok(_) => return Outcome::Task(self.focus_password()),
+                    Err(error) => self.error = Some(error.to_string()),
+                }
+            }
+            Message::UseEncryptionPassword => {}
             Message::Remembered(remembered) => {
                 let armed = remembered.armed;
                 self.remembered = Some(remembered);
@@ -194,7 +216,7 @@ impl State {
             Message::Submit | Message::UseUnlocked | Message::PasswordSubmitted => {
                 self.platform_prompt = false;
                 let use_unlocked = matches!(message, Message::UseUnlocked);
-                if self.busy || (!use_unlocked && !self.can_submit()) {
+                if self.busy || self.passkey_repair || (!use_unlocked && !self.can_submit()) {
                     return Outcome::None;
                 }
                 let Some(id) = self.operations.begin() else {
@@ -205,7 +227,9 @@ impl State {
                 self.confirmation.clear();
                 let storage = self.sync_after.clone();
                 let selected = self.select_after.clone();
+                let passkey = self.passkey.clone();
                 let mode = self.mode;
+                let passkey_login = self.passkey_login;
                 self.busy = true;
                 self.error = None;
                 return Outcome::Task(cosmic::task::future(async move {
@@ -232,9 +256,7 @@ impl State {
                             }
                             if storage.is_some()
                                 && matches!(mode, Mode::Create | Mode::Unlock)
-                                && !facade
-                                    .activate_connected_account()
-                                    .map_err(|e| e.to_string())?
+                                && !account_access::activate(&facade, passkey)?
                             {
                                 return Ok(OpenResult::AccountKeyRequired);
                             }
@@ -246,6 +268,11 @@ impl State {
                                     .any(|account| account.enrolled)
                             {
                                 return Ok(OpenResult::AccountKeyRequired);
+                            }
+                            if passkey_login {
+                                facade
+                                    .acknowledge_account_recovery()
+                                    .map_err(|e| e.to_string())?;
                             }
                             local::items(&facade, None, None).map(|page| OpenResult::Vault { page })
                         })
@@ -285,6 +312,9 @@ impl State {
                 }
                 self.busy = false;
                 self.error = Some(err);
+                if self.passkey.as_ref().is_some_and(account_access::failed) {
+                    self.passkey_repair = true;
+                }
             }
         }
         Outcome::None
@@ -294,7 +324,7 @@ impl State {
     /// thread on a touch when the source is a hardware key, which is why the
     /// screen reports itself busy for the whole call.
     fn unlock_remembered(&mut self, session: &Session) -> Outcome {
-        if self.busy {
+        if self.busy || self.passkey_repair {
             return Outcome::None;
         }
         let Some(id) = self.operations.begin() else {
@@ -303,7 +333,9 @@ impl State {
         self.platform_prompt = true;
         let facade = session.facade();
         let storage = self.sync_after.clone();
+        let passkey_login = self.passkey_login;
         let selected = self.select_after.clone();
+        let passkey = self.passkey.clone();
         self.busy = true;
         self.error = None;
         Outcome::Task(cosmic::task::future(async move {
@@ -316,11 +348,7 @@ impl State {
                             .set_current_storage(selected)
                             .map_err(|e| e.to_string())?;
                     }
-                    if storage.is_some()
-                        && !facade
-                            .activate_connected_account()
-                            .map_err(|e| e.to_string())?
-                    {
+                    if storage.is_some() && !account_access::activate(&facade, passkey)? {
                         return Ok(OpenResult::AccountKeyRequired);
                     }
                     if facade.current_storage_id().is_none()
@@ -331,6 +359,11 @@ impl State {
                             .any(|account| account.enrolled)
                     {
                         return Ok(OpenResult::AccountKeyRequired);
+                    }
+                    if passkey_login {
+                        facade
+                            .acknowledge_account_recovery()
+                            .map_err(|e| e.to_string())?;
                     }
                     local::items(&facade, None, None).map(|page| OpenResult::Vault { page })
                 })

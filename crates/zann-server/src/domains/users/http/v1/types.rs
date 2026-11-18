@@ -45,11 +45,6 @@ pub(crate) struct ChangePasswordRequest {
 }
 
 #[derive(Serialize, JsonSchema)]
-pub(crate) struct RecoveryKitResponse {
-    pub(crate) recovery_key: String,
-}
-
-#[derive(Serialize, JsonSchema)]
 pub(crate) struct UserResponse {
     pub(crate) id: String,
     pub(crate) email: String,

@@ -102,6 +102,20 @@ pub(crate) async fn rotate_commit(
                 .into_response();
         }
     };
+    if let Err(error) = crate::domains::auth::core::mutation::guard(&mut tx, &identity).await {
+        let status = if matches!(error, crate::domains::errors::ServiceError::Unauthorized(_)) {
+            StatusCode::UNAUTHORIZED
+        } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+        };
+        return (
+            status,
+            Json(ErrorResponse {
+                error: "session_invalidated",
+            }),
+        )
+            .into_response();
+    }
     let row = sqlx_core::query::query(
         r#"
         SELECT

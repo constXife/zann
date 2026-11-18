@@ -97,6 +97,52 @@ impl LocalVaultService for LocalVault {
     fn enroll_account_key(&self, password: String) -> LocalResult<VaultStatus> {
         LocalVault::enroll_account_key(self, password)
     }
+    fn revoke_account_passkey(
+        &self,
+        credential_id: String,
+        provider: Arc<dyn zann_client::account_access::AccountCeremonyProvider>,
+    ) -> LocalResult<zann_core::api::account_access::SecurityReceipt> {
+        LocalVault::revoke_account_passkey(self, credential_id, provider)
+    }
+    fn acknowledge_account_recovery(&self) -> LocalResult<()> {
+        LocalVault::acknowledge_account_recovery(self)
+    }
+    fn complete_account_passkey_login(
+        &self,
+        bootstrap: zann_client::app::PasskeyVaultBootstrap,
+    ) -> LocalResult<VaultStatus> {
+        LocalVault::complete_account_passkey_login(self, bootstrap)
+    }
+    fn prepare_server_recovery_code(&self) -> LocalResult<zann_client::app::AccountRecoveryCode> {
+        LocalVault::prepare_server_recovery_code(self)
+    }
+    fn activate_server_recovery_code(
+        &self,
+        candidate: &zann_client::app::AccountRecoveryCode,
+        confirmation: String,
+        disable_password: bool,
+        provider: std::sync::Arc<dyn zann_client::account_access::AccountCeremonyProvider>,
+    ) -> LocalResult<zann_core::api::account_access::SecurityReceipt> {
+        LocalVault::activate_server_recovery_code(
+            self,
+            candidate,
+            confirmation,
+            disable_password,
+            provider,
+        )
+    }
+    fn account_security(&self) -> LocalResult<zann_core::api::account_access::AccountSecurity> {
+        LocalVault::account_security(self)
+    }
+    fn enroll_account_passkey(
+        &self,
+        name: String,
+        mode: zann_core::api::account_access::PasskeyMode,
+        authorization: zann_client::app::PasskeyEnrollmentAuthorization,
+        provider: Arc<dyn zann_client::account_access::AccountCeremonyProvider>,
+    ) -> LocalResult<zann_core::api::account_access::SecurityReceipt> {
+        LocalVault::enroll_account_passkey(self, name, mode, authorization, provider)
+    }
     fn unlock(&self, password: String) -> LocalResult<VaultStatus> {
         LocalVault::unlock(self, password)
     }

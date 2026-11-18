@@ -107,7 +107,9 @@ pub async fn login_oidc(
         now,
     );
 
-    let tokens = issuance::issue_login_session(state, &user, &device, now, ctx, "oidc").await?;
+    let tokens =
+        issuance::issue_login_session(state, &user, &device, now, ctx, issuance::LoginFactor::Oidc)
+            .await?;
 
     metrics::auth_login("ok", "oidc");
     metrics::auth_tokens_issued("access");

@@ -7,6 +7,7 @@ use zann_flows::connect::{OperationId, Step};
 
 #[derive(Clone)]
 pub enum Message {
+    Recovery(super::recovery::Message),
     UrlInput(String),
     Probe,
     ChoosePassword,
@@ -15,6 +16,9 @@ pub enum Message {
     PasswordInput(String),
     TogglePassword,
     SubmitPassword,
+    RefreshBrowsers,
+    PairBrowser,
+    StartPasskey(String),
     StartOidc,
     OpenAuthUrl,
     CopyAuthUrl,
@@ -53,5 +57,6 @@ pub enum Outcome {
     Connected {
         storage_id: String,
         has_personal_keys: bool,
+        passkey: Option<Box<crate::backend::remote::PasskeyVaultBootstrap>>,
     },
 }

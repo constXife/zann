@@ -118,12 +118,14 @@ pub(super) async fn fetch_rotation_row(
 
 pub(super) async fn normalize_rotation_state(
     state: &AppState,
+    identity: &Identity,
     item_id: Uuid,
     mut row: RotationRow,
-) -> Result<RotationRow, sqlx_core::Error> {
+) -> Result<RotationRow, crate::domains::errors::ServiceError> {
     if row.state.as_deref() == Some(ROTATION_STATE_ROTATING)
         && row.expires_at.is_some_and(|value| Utc::now() > value)
     {
+        let mut tx = crate::domains::auth::core::mutation::begin(state, identity).await?;
         sqlx_core::query::query(
             r#"
             UPDATE items
@@ -134,8 +136,12 @@ pub(super) async fn normalize_rotation_state(
         .bind(ROTATION_STATE_STALE)
         .bind(item_id)
         .bind(ROTATION_STATE_ROTATING)
-        .execute(&state.db)
-        .await?;
+        .execute(&mut *tx)
+        .await
+        .map_err(crate::domains::auth::core::mutation::database)?;
+        tx.commit()
+            .await
+            .map_err(crate::domains::auth::core::mutation::database)?;
         row.state = Some(ROTATION_STATE_STALE.to_string());
     }
     Ok(row)

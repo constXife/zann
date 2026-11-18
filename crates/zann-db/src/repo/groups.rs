@@ -10,19 +10,7 @@ impl<'a> GroupRepo<'a> {
     }
 
     pub async fn create(&self, group: &Group) -> Result<(), sqlx_core::Error> {
-        query!(
-            r#"
-            INSERT INTO groups (id, slug, name, created_at)
-            VALUES ($1, $2, $3, $4)
-            "#,
-            group.id,
-            group.slug.as_str(),
-            group.name.as_str(),
-            group.created_at
-        )
-        .execute(self.pool)
-        .await
-        .map(|_| ())
+        Self::create_in(self.pool, group).await
     }
 
     pub async fn get_by_slug(&self, slug: &str) -> Result<Option<Group>, sqlx_core::Error> {
@@ -96,32 +84,11 @@ impl<'a> GroupRepo<'a> {
         slug: &str,
         name: &str,
     ) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            UPDATE groups
-            SET slug = $2, name = $3
-            WHERE id = $1
-            "#,
-            group_id,
-            slug,
-            name
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        Self::update_in(self.pool, group_id, slug, name).await
     }
 
     pub async fn delete_by_id(&self, id: Uuid) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            DELETE FROM groups
-            WHERE id = $1
-            "#,
-            id
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        Self::delete_by_id_in(self.pool, id).await
     }
 }
 
@@ -135,18 +102,7 @@ impl<'a> GroupMemberRepo<'a> {
     }
 
     pub async fn create(&self, member: &GroupMember) -> Result<(), sqlx_core::Error> {
-        query!(
-            r#"
-            INSERT INTO group_members (group_id, user_id, created_at)
-            VALUES ($1, $2, $3)
-            "#,
-            member.group_id,
-            member.user_id,
-            member.created_at
-        )
-        .execute(self.pool)
-        .await
-        .map(|_| ())
+        Self::create_in(self.pool, member).await
     }
 
     pub async fn list_by_user(&self, user_id: Uuid) -> Result<Vec<GroupMember>, sqlx_core::Error> {
@@ -209,17 +165,7 @@ impl<'a> GroupMemberRepo<'a> {
     }
 
     pub async fn delete(&self, group_id: Uuid, user_id: Uuid) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            DELETE FROM group_members
-            WHERE group_id = $1 AND user_id = $2
-            "#,
-            group_id,
-            user_id
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        Self::delete_in(self.pool, group_id, user_id).await
     }
 }
 
@@ -271,3 +217,5 @@ impl<'a> OidcGroupMappingRepo<'a> {
         .await
     }
 }
+
+mod mutations;

@@ -15,7 +15,7 @@
     "zann-ffi": ["zann-client", "zann-client-sqlite", "zann-flows", "zann-ui-core", "zann-daemon"],
     "zann-flows": ["zann-core", "zann-ui-core"],
     "zann-keystore": ["zann-crypto"],
-    "zann-server": ["zann-core", "zann-crypto", "zann-db"],
+    "zann-server": ["zann-autofill", "zann-passkey", "zann-core", "zann-crypto", "zann-db"],
     "zann-ui-core": ["zann-autofill", "zann-core"],
     "zann-daemon": ["zann-client", "zann-client-sqlite", "zann-core", "zann-crypto", "zann-ui-core"],
     "zann-native-host": ["zann-client"],
@@ -47,7 +47,7 @@
       "owner": "@constXife",
       "tracking": "ADR-0001 phase 2",
       "grandfathered": true,
-      "review_on": "2026-11-16",
+      "review_on": "2027-02-15",
       "removal_condition": "COSMIC receives an explicit client root without the shell-local legacy default-root fallback"
     },
     "MIG-006": {
@@ -55,7 +55,7 @@
       "tracking": "ADR-0001 phase 6 remaining native flows",
       "grandfathered": false,
       "issue": "#258",
-      "expires_on": "2026-11-16",
+      "expires_on": "2027-02-15",
       "removal_condition": "All clients consume zann-flows and canonical zann-ui-core presentation policy"
     },
     "MIG-009": {

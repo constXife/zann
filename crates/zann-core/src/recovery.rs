@@ -45,6 +45,7 @@ pub struct RecoveryStatus {
     pub user_id: Uuid,
     pub auth_epoch: i64,
     pub account_key_epoch: Option<i64>,
+    pub successor_code_version: i64,
     pub state: RecoveryState,
     pub revision: i64,
     pub expires_at: DateTime<Utc>,

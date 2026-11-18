@@ -113,6 +113,8 @@ pub struct Session {
     pub user_id: Uuid,
     pub device_id: Uuid,
     pub auth_epoch: i64,
+    pub passkey_credential_id: Option<Vec<u8>>,
+    pub passkey_session_epoch: Option<i64>,
     pub access_token_hash: String,
     pub access_expires_at: DateTime<Utc>,
     pub refresh_token_hash: String,

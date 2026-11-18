@@ -68,6 +68,7 @@ impl TestApp {
             access_token_ttl_seconds: 3600,
             refresh_token_ttl_seconds: 3600,
             argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
+            account_access: Default::default(),
             oidc_jwks_cache: OidcJwksCache::new(),
             config: config_for_state,
             policy_store: PolicyStore::new(PolicySet::from_rules(rules)),
@@ -353,6 +354,8 @@ async fn oidc_mode_accepts_session_tokens() {
     let refresh_token = "refresh-token";
     let session = Session {
         auth_epoch: 1,
+        passkey_credential_id: None,
+        passkey_session_epoch: None,
         id: Uuid::now_v7(),
         user_id: user.id,
         device_id: device.id,

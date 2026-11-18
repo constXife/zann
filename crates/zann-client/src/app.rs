@@ -23,10 +23,11 @@ use crate::remote::auth::AuthHttpTransport;
 use crate::session::AppSession;
 pub use crate::session::{
     AccessSource, LegacySessionImport, LocalLogoutStatus, LoginPassword, LogoutOutcome,
-    OidcLoginInput, OidcLoginInputError, OidcToken, OperationCompletion, PasswordLoginInputError,
-    PasswordLoginRequest, PasswordRegistrationRequest, RemoteLogoutStatus, SessionAccess,
-    SessionCancellationHandle, SessionClient, SessionError, SessionErrorKind, SessionOperation,
-    SessionOperationId, SessionTarget, SessionTargetError,
+    OidcLoginInput, OidcLoginInputError, OidcToken, OperationCompletion, PasskeyVaultBootstrap,
+    PasskeyVaultRequirement, PasswordLoginInputError, PasswordLoginRequest,
+    PasswordRegistrationRequest, RemoteLogoutStatus, SessionAccess, SessionCancellationHandle,
+    SessionClient, SessionError, SessionErrorKind, SessionOperation, SessionOperationId,
+    SessionTarget, SessionTargetError,
 };
 pub use crate::sync::{
     AccountKeyCheck, AccountKeyOrigin, SyncError, SyncErrorKind, SyncOutcome, SyncOutcomeStatus,
@@ -1675,3 +1676,9 @@ pub mod unlock;
 
 mod backup;
 pub use backup::{BackupImportSession, BackupVaultSpec, BACKUP_MAX_VAULTS};
+
+mod account_access;
+pub use account_access::{
+    AccountRecoveryCode, AccountRecoveryHandle, AccountRecoveryPreparation,
+    PasskeyAccountEnrollment, PasskeyEnrollmentAuthorization,
+};

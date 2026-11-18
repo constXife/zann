@@ -287,3 +287,41 @@ fn failed_trust_returns_to_discovery_instead_of_reusing_a_consumed_challenge() {
         })
         .is_empty());
 }
+
+#[test]
+fn passkey_is_an_explicit_cancellable_method_and_stale_completion_cannot_connect() {
+    let mut flow = Connect::new(91);
+    let effects = flow.dispatch(Action::Probe {
+        url: "https://example.test".into(),
+    });
+    let (id, _) = effects.iter().find_map(Effect::operation).unwrap();
+    flow.complete(
+        id,
+        Completion::Probed(Ok(Probe::Ready(ServerInfo {
+            methods: vec![AuthMethod::Passkey; 20],
+            registration_available: false,
+            server_name: None,
+        }))),
+    );
+    assert_eq!(flow.snapshot().methods, vec![AuthMethod::Passkey]);
+    assert_eq!(flow.snapshot().stage, Stage::Methods);
+    let effect = flow.dispatch(Action::StartPasskey);
+    let (id, step) = effect[0].operation().unwrap();
+    assert_eq!(step, Step::Passkey);
+    assert!(flow.snapshot().busy);
+    assert!(flow.dispatch(Action::StartPasskey).is_empty());
+    let cancelled = flow.dispatch(Action::Back);
+    assert!(cancelled
+        .iter()
+        .any(|e| matches!(e,Effect::Cancel{id:other} if *other==id)));
+    assert!(flow
+        .complete(
+            id,
+            Completion::Passkey(Ok(Connected {
+                storage_id: "unexpected".into(),
+                has_personal_keys: true
+            }))
+        )
+        .is_empty());
+    assert_ne!(flow.snapshot().stage, Stage::Complete);
+}

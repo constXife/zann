@@ -44,8 +44,8 @@ use crate::domains::sync::http::v1::types::{
 };
 use crate::domains::system::http::v1::SecurityProfilesResponse;
 use crate::domains::users::http::v1::types::{
-    ChangePasswordRequest, CreateUserRequest, ListUsersQuery, RecoveryKitResponse,
-    ResetPasswordRequest, ResetPasswordResponse, UpdateMeRequest, UserListResponse, UserResponse,
+    ChangePasswordRequest, CreateUserRequest, ListUsersQuery, ResetPasswordRequest,
+    ResetPasswordResponse, UpdateMeRequest, UserListResponse, UserResponse,
 };
 use crate::domains::vaults::http::v1::shared::types::{
     ItemHistoryDetailResponse as SharedHistoryDetailResponse,
@@ -214,7 +214,6 @@ fn doc_router() -> ApiRouter<AppState> {
         .api_route("/v1/sync/shared/push", post(sync_shared_push))
         .api_route("/v1/users/me", get(users_me).put(users_update_me))
         .api_route("/v1/users/me/password", post(users_change_password))
-        .api_route("/v1/users/me/recovery-kit", post(users_recovery_kit))
         .api_route("/v1/users", get(users_list).post(users_create))
         .api_route("/v1/users/:id", get(users_get).delete(users_delete))
         .api_route("/v1/users/:id/block", post(users_block))
@@ -905,6 +904,7 @@ async fn users_me() -> (StatusCode, Json<Identity>) {
         source: AuthSource::Internal,
         device_id: None,
         service_account_id: None,
+        session_authority: None,
     })
 }
 
@@ -926,12 +926,6 @@ async fn users_update_me(
 
 async fn users_change_password(Json(_payload): Json<ChangePasswordRequest>) -> StatusCode {
     StatusCode::NOT_IMPLEMENTED
-}
-
-async fn users_recovery_kit() -> (StatusCode, Json<RecoveryKitResponse>) {
-    not_implemented(RecoveryKitResponse {
-        recovery_key: String::new(),
-    })
 }
 
 async fn users_list(Query(_query): Query<ListUsersQuery>) -> (StatusCode, Json<UserListResponse>) {

@@ -10,6 +10,7 @@ pub(crate) mod types;
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(crate::domains::auth::account_access::http::router())
         .route("/v1/auth/register", post(handlers::register))
         .route("/v1/auth/prelogin", get(handlers::prelogin))
         .route("/v1/auth/login", post(handlers::login))

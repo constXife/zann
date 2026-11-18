@@ -26,11 +26,11 @@
   actions: [write]
   resource: "users/me/password"
 
-- name: users-me-recovery
+- name: users-me-security
   subject_type: any
   effect: allow
-  actions: [write]
-  resource: "users/me/recovery-kit"
+  actions: [read, write]
+  resource: "users/me/security"
 
 # List vaults and view members/items (narrow examples)
 - name: vaults-list

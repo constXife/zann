@@ -30,6 +30,7 @@ pub struct State {
     export: export::State,
     encrypted_backup: encrypted_backup::State,
     passkeys: passkey::State,
+    account_keys: account_access::AccountKeys,
     browser_pairings: Option<zann_daemon::PairingSettings>,
     browser_code: Option<browser::ActiveCode>,
     section: SettingsSection,
@@ -104,6 +105,7 @@ pub struct Loaded {
 #[derive(Clone, Debug)]
 pub enum Message {
     Browser(browser::Message),
+    AccountKeys(account_access::Message),
     Password(password::Message),
     Select(SettingsSection),
     Set(Change),
@@ -178,6 +180,7 @@ impl State {
             export: export::State::default(),
             encrypted_backup: encrypted_backup::State::default(),
             passkeys: passkey::State::default(),
+            account_keys: account_access::AccountKeys::default(),
             browser_pairings: None,
             browser_code: None,
             section: SettingsSection::General,
@@ -279,8 +282,12 @@ impl State {
                 }
                 return Outcome::Task(self.passkeys.update(message, session).map(Message::Passkey));
             }
+            Message::AccountKeys(message) => return self.update_account_keys(message, session),
             Message::Browser(message) => return self.update_browser(message, session),
             Message::Select(section) => {
+                if self.busy {
+                    return Outcome::None;
+                }
                 self.export.cancel();
                 self.encrypted_backup.cancel();
                 self.passkeys.cancel();
@@ -748,6 +755,7 @@ impl State {
     }
 }
 
+mod account_access;
 mod accounts;
 mod browser;
 mod device_unlock;

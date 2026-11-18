@@ -40,11 +40,13 @@ impl From<zann_daemon::DaemonError> for CoreError {
             E::SocketPath(zann_client::native_messaging::SocketPathError::TooLong) => {
                 BrowserErrorKindFfi::PathTooLong
             }
-            E::SocketPath(_) | E::Json(_) | E::Protocol => BrowserErrorKindFfi::Protocol,
+            E::SocketPath(_) | E::Json(_) | E::Protocol | E::AccountCeremony(_) => {
+                BrowserErrorKindFfi::Protocol
+            }
             E::Ipc(_) | E::Channel(_) | E::Authentication | E::Filesystem => {
                 BrowserErrorKindFfi::Security
             }
-            E::Io(_) => BrowserErrorKindFfi::Transport,
+            E::Io(_) | E::CeremonyWait(_) => BrowserErrorKindFfi::Transport,
             E::Limit => BrowserErrorKindFfi::Busy,
             E::Closed => BrowserErrorKindFfi::Stopped,
             E::Vault(_) => BrowserErrorKindFfi::Vault,

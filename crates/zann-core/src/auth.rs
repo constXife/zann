@@ -14,15 +14,27 @@ pub struct Identity {
     pub source: AuthSource,
     pub device_id: Option<Uuid>,
     pub service_account_id: Option<Uuid>,
+    /// Server-created, non-wire authority captured at bearer admission.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub session_authority: Option<InteractiveSessionAuthority>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AuthSource {
     Internal,
+    Passkey,
     Device,
     ServiceAccount,
     Oidc { issuer: String, subject: String },
+}
+
+impl AuthSource {
+    #[must_use]
+    pub fn is_internal_interactive(&self) -> bool {
+        matches!(self, Self::Internal | Self::Passkey)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
@@ -46,4 +58,10 @@ pub fn extract_groups(token: &OidcToken, claim: &str) -> Vec<String> {
         Some(Value::Object(obj)) => obj.keys().cloned().collect(),
         _ => Vec::new(),
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct InteractiveSessionAuthority {
+    pub session_id: Uuid,
+    pub auth_epoch: i64,
 }

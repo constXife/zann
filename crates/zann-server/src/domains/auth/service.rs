@@ -44,7 +44,7 @@ pub struct AuthRequestContext {
 
 pub type AuthError = ServiceError;
 
-mod issuance;
+pub(crate) mod issuance;
 mod machine;
 mod oidc;
 mod password;

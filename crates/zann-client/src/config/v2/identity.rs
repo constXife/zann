@@ -361,3 +361,15 @@ pub(super) fn byte_digest(bytes: &[u8]) -> String {
     hasher.update(bytes);
     format!("sha256:{}", HEXLOWER.encode(&hasher.finalize()))
 }
+
+pub(super) fn operation_credential(
+    root: &Path,
+    id: uuid::Uuid,
+    purpose: &[u8],
+    fields: &[&[u8]],
+) -> Result<CredentialId, ConfigError> {
+    let binding = repository_binding(root)?;
+    let mut parts = vec![purpose, binding.as_slice(), id.as_bytes().as_slice()];
+    parts.extend_from_slice(fields);
+    CredentialId::from_serialized(format!("credr_{}{}", id.simple(), stable_hash(&parts)))
+}

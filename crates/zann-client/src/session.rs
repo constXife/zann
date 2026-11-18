@@ -31,8 +31,8 @@ use crate::config::{
     AuthorizedTargetGeneration, ClientId, ClientPaths, ConfigError, ConfigIdentity,
     ConfigRepository, ConfigV2, ConnectionConfig, ConnectionId, CredentialBundle, CredentialKind,
     CredentialPortErrorKind, CredentialProfileAnchor, CredentialSecret, CredentialStore,
-    CredentialTransactionOutcome, IdentityCommit, PasswordLoginAnchor, PasswordLoginIntentPermit,
-    StoredConnectionBinding, VerifiedEndpointBinding,
+    CredentialTransactionOutcome, IdentityCommit, InteractiveLoginAnchor,
+    InteractiveLoginIntentPermit, LoginPreflight, StoredConnectionBinding, VerifiedEndpointBinding,
 };
 use crate::remote::auth::{AuthHttpError, AuthHttpErrorKind, AuthHttpTransport};
 use crate::remote::trust::verify_and_bind_system_info;
@@ -144,7 +144,7 @@ impl LoginPassword {
         Ok(Self(value))
     }
 
-    fn expose(&self) -> &str {
+    pub(crate) fn expose(&self) -> &str {
         self.0.as_str()
     }
 }
@@ -570,6 +570,7 @@ pub enum AccessSource {
     Refreshed,
     PasswordLogin,
     OidcLogin,
+    PasskeyLogin,
 }
 
 /// Opaque authorization capability consumed by crate-owned remote operations.
@@ -1062,6 +1063,8 @@ struct EndpointIdentity {
     personal_vaults_enabled: bool,
     supports_password: bool,
     supports_oidc: bool,
+    #[cfg_attr(not(feature = "app"), allow(dead_code))]
+    supports_passkey: bool,
 }
 
 impl EndpointIdentity {
@@ -1114,6 +1117,7 @@ impl EndpointIdentity {
             personal_vaults_enabled,
             supports_password,
             supports_oidc: true,
+            supports_passkey: true,
         }
     }
 }
@@ -1185,6 +1189,27 @@ trait AuthFactory: Send + Sync {
 }
 
 trait AuthPort: Send + Sync {
+    #[cfg(feature = "app")]
+    fn passkey_configuration(
+        &self,
+    ) -> AuthFuture<'_, zann_core::api::account_access::PasskeyConfiguration> {
+        Box::pin(async { Err(unsupported_auth()) })
+    }
+    #[cfg(feature = "app")]
+    fn passkey_options<'a>(
+        &'a self,
+        _input: &'a zann_core::api::account_access::PasskeyLoginOptions,
+    ) -> AuthFuture<'a, zann_core::api::account_access::CeremonyOptions> {
+        Box::pin(async { Err(unsupported_auth()) })
+    }
+    #[cfg(feature = "app")]
+    fn passkey_finish<'a>(
+        &'a self,
+        _input: &'a zann_core::api::account_access::CeremonyFinish,
+    ) -> AuthFuture<'a, zann_core::api::account_access::PasskeyLogin> {
+        Box::pin(async { Err(unsupported_auth()) })
+    }
+
     fn verified_endpoint(&self) -> AuthFuture<'_, EndpointIdentity>;
     fn prelogin<'a>(&'a self, _email: &'a str) -> AuthFuture<'a, PreloginResponse> {
         Box::pin(async {
@@ -1309,6 +1334,42 @@ impl Drop for ZeroizingOidcLoginRequest {
 }
 
 impl AuthPort for HttpAuthPort {
+    #[cfg(feature = "app")]
+    fn passkey_configuration(
+        &self,
+    ) -> AuthFuture<'_, zann_core::api::account_access::PasskeyConfiguration> {
+        Box::pin(async {
+            self.transport
+                .passkey_configuration()
+                .await
+                .map_err(AuthFailure::from)
+        })
+    }
+    #[cfg(feature = "app")]
+    fn passkey_options<'a>(
+        &'a self,
+        input: &'a zann_core::api::account_access::PasskeyLoginOptions,
+    ) -> AuthFuture<'a, zann_core::api::account_access::CeremonyOptions> {
+        Box::pin(async {
+            self.transport
+                .passkey_options(input)
+                .await
+                .map_err(AuthFailure::from)
+        })
+    }
+    #[cfg(feature = "app")]
+    fn passkey_finish<'a>(
+        &'a self,
+        input: &'a zann_core::api::account_access::CeremonyFinish,
+    ) -> AuthFuture<'a, zann_core::api::account_access::PasskeyLogin> {
+        Box::pin(async {
+            self.transport
+                .passkey_finish(input)
+                .await
+                .map_err(AuthFailure::from)
+        })
+    }
+
     fn verified_endpoint(&self) -> AuthFuture<'_, EndpointIdentity> {
         Box::pin(async move {
             let info = self
@@ -1328,6 +1389,7 @@ impl AuthPort for HttpAuthPort {
                 personal_vaults_enabled: info.personal_vaults_enabled,
                 supports_password: info.supports_auth_method(AuthMethod::Password),
                 supports_oidc: info.supports_auth_method(AuthMethod::Oidc),
+                supports_passkey: info.supports_auth_method(AuthMethod::Passkey),
             })
         })
     }
@@ -1484,7 +1546,7 @@ impl TokenManager {
         let profile_name = request.target.profile_name.clone();
         let client_id = client.client_id.clone();
         let (locks, anchor) = run_with_locks(locks, move || {
-            repository.resolve_password_login_anchor(&connection_id, profile_name, &client_id)
+            repository.resolve_login_anchor(&connection_id, profile_name, &client_id)
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
@@ -1538,7 +1600,7 @@ impl TokenManager {
         locks: HeldSessionLocks,
         port: Arc<dyn AuthPort>,
         verified: EndpointIdentity,
-        anchor: PasswordLoginAnchor,
+        anchor: InteractiveLoginAnchor,
         request: OidcLoginInput,
         operation: SessionOperation,
         mut cleanup_deferred: bool,
@@ -1899,6 +1961,7 @@ impl TokenManager {
         let account_subject = identity.user_id.to_string();
         let auth_method = match &identity.source {
             zann_core::AuthSource::Oidc { .. } => AuthMethod::Oidc,
+            zann_core::AuthSource::Passkey => AuthMethod::Passkey,
             _ => AuthMethod::Password,
         };
 
@@ -2006,7 +2069,7 @@ impl TokenManager {
         let profile_name = request.target.profile_name.clone();
         let client_id = client.client_id.clone();
         let (locks, anchor) = run_with_locks(locks, move || {
-            repository.resolve_password_login_anchor(&connection_id, profile_name, &client_id)
+            repository.resolve_login_anchor(&connection_id, profile_name, &client_id)
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
@@ -2176,7 +2239,7 @@ impl TokenManager {
         let profile_name = request.target.profile_name.clone();
         let client_id = client.client_id.clone();
         let (locks, anchor) = run_with_locks(locks, move || {
-            repository.resolve_password_login_anchor(&connection_id, profile_name, &client_id)
+            repository.resolve_login_anchor(&connection_id, profile_name, &client_id)
         })
         .await
         .map_err(|kind| SessionError::new(operation, kind))?;
@@ -2249,10 +2312,10 @@ impl TokenManager {
         let operation_id = operation.operation_id.to_string();
         let endpoint_binding = verified.binding.clone();
         let (locks, permit) = run_with_locks(locks, move || {
-            repository.prepare_password_login_intent_with_operation_locks(
+            repository.prepare_login_intent_with_operation_locks(
                 &anchor,
                 &endpoint_binding,
-                identity,
+                LoginPreflight::Password(identity),
                 &operation_id,
                 store.as_ref(),
             )
@@ -2310,7 +2373,7 @@ impl TokenManager {
     async fn password_login_dispatched(
         &self,
         locks: HeldSessionLocks,
-        permit: PasswordLoginIntentPermit,
+        permit: InteractiveLoginIntentPermit,
         prelogin_identity: ConfigIdentity,
         request: PasswordLoginRequest,
         client: SessionClient,
@@ -2342,349 +2405,21 @@ impl TokenManager {
                     .await;
             }
         };
-        let LoginResponse {
-            access_token,
-            refresh_token,
-            expires_in,
-        } = response;
-        let access = CredentialSecret::new(access_token);
-        let refresh = CredentialSecret::new(refresh_token);
-        let expires_at = checked_expiry(self.inner.clock.now(), expires_in);
-        let (access, refresh, expires_at) = match (access, refresh, expires_at) {
-            (Ok(access), Ok(refresh), Some(expires_at)) => (access, refresh, expires_at),
-            (_, refresh, _) => {
-                let refresh = refresh.ok();
-                let remote_outcome_unknown = refresh.is_none();
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        refresh.as_ref(),
-                        &port,
-                        &operation,
-                        if remote_outcome_unknown {
-                            SessionErrorKind::SessionLostRemoteUnknown
-                        } else {
-                            SessionErrorKind::Protocol
-                        },
-                        None,
-                        None,
-                        cleanup_deferred || remote_outcome_unknown,
-                    )
-                    .await;
-            }
-        };
-        if let Some(kind) = operation.pre_dispatch_error() {
-            return self
-                .finish_failed_password_login(
-                    locks,
-                    Some(&refresh),
-                    &port,
-                    &operation,
-                    kind,
-                    None,
-                    None,
-                    cleanup_deferred,
-                )
-                .await;
-        }
-        enum MeResult {
-            Completed(Box<Result<Identity, AuthFailure>>),
-            Cancelled,
-            Deadline,
-        }
-        let deadline = tokio::time::Instant::from_std(operation.deadline);
-        let me = tokio::select! {
-            biased;
-            _ = operation.cancelled() => MeResult::Cancelled,
-            _ = tokio::time::sleep_until(deadline) => MeResult::Deadline,
-            result = port.me(access.expose_secret()) => MeResult::Completed(Box::new(result)),
-        };
-        let identity = match me {
-            MeResult::Completed(result) => match *result {
-                Ok(identity) => identity,
-                Err(failure) => {
-                    return self
-                        .finish_failed_password_login(
-                            locks,
-                            Some(&refresh),
-                            &port,
-                            &operation,
-                            failure.kind.session_error_kind(),
-                            failure.status,
-                            failure.server_code,
-                            cleanup_deferred,
-                        )
-                        .await;
-                }
-            },
-            MeResult::Cancelled => {
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        Some(&refresh),
-                        &port,
-                        &operation,
-                        SessionErrorKind::Cancelled,
-                        None,
-                        None,
-                        cleanup_deferred,
-                    )
-                    .await;
-            }
-            MeResult::Deadline => {
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        Some(&refresh),
-                        &port,
-                        &operation,
-                        SessionErrorKind::DeadlineExceeded,
-                        None,
-                        None,
-                        cleanup_deferred,
-                    )
-                    .await;
-            }
-        };
-        if !matches!(identity.source, AuthSource::Internal) {
-            return self
-                .finish_failed_password_login(
-                    locks,
-                    Some(&refresh),
-                    &port,
-                    &operation,
-                    SessionErrorKind::TransportRejected,
-                    None,
-                    None,
-                    cleanup_deferred,
-                )
-                .await;
-        }
-        let canonical_email = identity.email.clone();
-        if canonical_email.is_empty()
-            || canonical_email.trim() != canonical_email
-            || canonical_email.len() > LOGIN_EMAIL_MAX_BYTES
-        {
-            return self
-                .finish_failed_password_login(
-                    locks,
-                    Some(&refresh),
-                    &port,
-                    &operation,
-                    SessionErrorKind::Protocol,
-                    None,
-                    None,
-                    cleanup_deferred,
-                )
-                .await;
-        }
-        enum ConfirmedPreloginResult {
-            Completed(Result<PreloginResponse, AuthFailure>),
-            Cancelled,
-            Deadline,
-        }
-        let deadline = tokio::time::Instant::from_std(operation.deadline);
-        let confirmed_prelogin = tokio::select! {
-            biased;
-            _ = operation.cancelled() => ConfirmedPreloginResult::Cancelled,
-            _ = tokio::time::sleep_until(deadline) => ConfirmedPreloginResult::Deadline,
-            result = port.prelogin(&canonical_email) => ConfirmedPreloginResult::Completed(result),
-        };
-        let confirmed_prelogin = match confirmed_prelogin {
-            ConfirmedPreloginResult::Completed(Ok(prelogin)) => prelogin,
-            ConfirmedPreloginResult::Completed(Err(failure)) => {
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        Some(&refresh),
-                        &port,
-                        &operation,
-                        failure.kind.session_error_kind(),
-                        failure.status,
-                        failure.server_code,
-                        cleanup_deferred,
-                    )
-                    .await;
-            }
-            ConfirmedPreloginResult::Cancelled => {
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        Some(&refresh),
-                        &port,
-                        &operation,
-                        SessionErrorKind::Cancelled,
-                        None,
-                        None,
-                        cleanup_deferred,
-                    )
-                    .await;
-            }
-            ConfirmedPreloginResult::Deadline => {
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        Some(&refresh),
-                        &port,
-                        &operation,
-                        SessionErrorKind::DeadlineExceeded,
-                        None,
-                        None,
-                        cleanup_deferred,
-                    )
-                    .await;
-            }
-        };
-        let authenticated_identity = match password_login_identity_from_prelogin(
-            confirmed_prelogin,
-            Some(canonical_email),
-        ) {
-            Ok(identity) => identity,
-            Err(kind) => {
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        Some(&refresh),
-                        &port,
-                        &operation,
-                        kind,
-                        None,
-                        None,
-                        cleanup_deferred,
-                    )
-                    .await;
-            }
-        };
-        if !password_login_kdf_is_coherent(&prelogin_identity, &authenticated_identity) {
-            return self
-                .finish_failed_password_login(
-                    locks,
-                    Some(&refresh),
-                    &port,
-                    &operation,
-                    SessionErrorKind::Protocol,
-                    None,
-                    None,
-                    cleanup_deferred,
-                )
-                .await;
-        }
-        if let Some(kind) = operation.pre_dispatch_error() {
-            return self
-                .finish_failed_password_login(
-                    locks,
-                    Some(&refresh),
-                    &port,
-                    &operation,
-                    kind,
-                    None,
-                    None,
-                    cleanup_deferred,
-                )
-                .await;
-        }
-        let account_subject = identity.user_id.to_string();
-        let access_copy = match copy_secret(&access) {
-            Ok(secret) => secret,
-            Err(_) => {
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        Some(&refresh),
-                        &port,
-                        &operation,
-                        SessionErrorKind::Internal,
-                        None,
-                        None,
-                        cleanup_deferred,
-                    )
-                    .await;
-            }
-        };
-        let refresh_copy = match copy_secret(&refresh) {
-            Ok(secret) => secret,
-            Err(_) => {
-                return self
-                    .finish_failed_password_login(
-                        locks,
-                        Some(&refresh),
-                        &port,
-                        &operation,
-                        SessionErrorKind::Internal,
-                        None,
-                        None,
-                        cleanup_deferred,
-                    )
-                    .await;
-            }
-        };
-        let expires_at_wire = expires_at.to_rfc3339_opts(SecondsFormat::Secs, true);
-        let repository = self.inner.repository.clone();
-        let store = self.inner.credential_store.clone();
-        let subject_for_commit = account_subject.clone();
-        let operation_for_commit = operation.detached_copy();
-        let (locks, (committed, permit)) = run_with_locks(locks, move || {
-            let mut permit = permit;
-            let committed = repository
-                .commit_password_login_after_auth_intent_with_operation_locks(
-                    &mut permit,
-                    &subject_for_commit,
-                    authenticated_identity,
-                    access_copy,
-                    refresh_copy,
-                    expires_at_wire,
-                    store.as_ref(),
-                    || operation_for_commit.pre_dispatch_error().is_some(),
-                );
-            (committed, permit)
-        })
+        drop(request.password);
+        self.complete_interactive_login(
+            locks,
+            permit,
+            Some(prelogin_identity),
+            request.target,
+            port,
+            verified,
+            storage_id,
+            operation,
+            cleanup_deferred,
+            AuthMethod::Password,
+            response,
+        )
         .await
-        .map_err(|_| SessionError::new(&operation, SessionErrorKind::RecoveryRequired))?;
-        match committed {
-            Ok(outcome) => {
-                let cleanup_deferred = cleanup_deferred || outcome_has_warnings(&outcome);
-                let (locks, authorized_target_generation) = self
-                    .generation_from_snapshot(
-                        locks,
-                        outcome.snapshot().clone(),
-                        &request.target,
-                        &operation,
-                    )
-                    .await?;
-                drop(locks);
-                Ok(password_login_access(
-                    &request.target,
-                    &verified,
-                    &operation,
-                    PasswordLoginAccess {
-                        storage_id: storage_id.clone(),
-                        account_subject,
-                        expires_at,
-                        access_secret: access,
-                        cleanup_deferred,
-                        authorized_target_generation,
-                    },
-                ))
-            }
-            Err(commit_error) => {
-                self.finish_password_login_commit_failure(
-                    locks,
-                    permit,
-                    &request.target,
-                    &verified,
-                    storage_id,
-                    account_subject,
-                    expires_at,
-                    access,
-                    refresh,
-                    port,
-                    &operation,
-                    cleanup_deferred,
-                    commit_error,
-                )
-                .await
-            }
-        }
     }
 
     async fn access(
@@ -3191,7 +2926,7 @@ impl TokenManager {
     async fn verified_login_auth_port(
         &self,
         locks: HeldSessionLocks,
-        anchor: &PasswordLoginAnchor,
+        anchor: &InteractiveLoginAnchor,
         operation: &SessionOperation,
     ) -> Result<
         (HeldSessionLocks, Arc<dyn AuthPort>, EndpointIdentity),
@@ -3324,7 +3059,7 @@ impl TokenManager {
     async fn finish_password_login_commit_failure(
         &self,
         locks: HeldSessionLocks,
-        permit: PasswordLoginIntentPermit,
+        permit: InteractiveLoginIntentPermit,
         target: &SessionTarget,
         verified: &EndpointIdentity,
         storage_id: Option<String>,
@@ -3336,6 +3071,7 @@ impl TokenManager {
         operation: &SessionOperation,
         mut cleanup_deferred: bool,
         commit_error: ConfigError,
+        auth_method: AuthMethod,
     ) -> Result<SessionAccess, SessionError> {
         let repository = self.inner.repository.clone();
         let store = self.inner.credential_store.clone();
@@ -3366,6 +3102,7 @@ impl TokenManager {
                     verified,
                     operation,
                     PasswordLoginAccess {
+                        auth_method,
                         storage_id,
                         account_subject,
                         expires_at,
@@ -3379,7 +3116,7 @@ impl TokenManager {
                 cleanup_deferred |= outcome_has_warnings(&outcome);
                 let repository = self.inner.repository.clone();
                 let (next_locks, published) = run_with_locks(locks, move || {
-                    repository.password_login_candidate_is_published_with_operation_locks(&permit)
+                    repository.login_candidate_is_published_with_operation_locks(&permit)
                 })
                 .await
                 .map_err(|_| {
@@ -3404,6 +3141,7 @@ impl TokenManager {
                         verified,
                         operation,
                         PasswordLoginAccess {
+                            auth_method,
                             storage_id,
                             account_subject,
                             expires_at,
@@ -3815,6 +3553,7 @@ impl TokenManager {
 }
 
 struct PasswordLoginAccess {
+    auth_method: AuthMethod,
     storage_id: Option<String>,
     account_subject: String,
     expires_at: DateTime<Utc>,
@@ -3876,10 +3615,14 @@ fn password_login_access(
         storage_id: result.storage_id,
         server_fingerprint: verified.server_fingerprint().to_string(),
         account_subject: Some(result.account_subject),
-        auth_method: Some(AuthMethod::Password),
+        auth_method: Some(result.auth_method),
         personal_vaults_enabled: verified.personal_vaults_enabled,
         expires_at: result.expires_at,
-        source: AccessSource::PasswordLogin,
+        source: if result.auth_method == AuthMethod::Passkey {
+            AccessSource::PasskeyLogin
+        } else {
+            AccessSource::PasswordLogin
+        },
         completion: operation.completion(),
         cleanup_deferred: result.cleanup_deferred,
         authorized_target_generation: result.authorized_target_generation,
@@ -4337,6 +4080,7 @@ mod tests {
                 source: AuthSource::Internal,
                 device_id: None,
                 service_account_id: None,
+                session_authority: None,
             };
             Arc::new(Self {
                 identity: Mutex::new(Ok(identity)),
@@ -6421,3 +6165,20 @@ mod tests {
         assert_eq!(profile.auth_method(), Some(zann_core::AuthMethod::Password));
     }
 }
+
+#[cfg(feature = "app")]
+mod account_access;
+mod interactive_login;
+
+#[cfg(feature = "app")]
+fn unsupported_auth() -> AuthFailure {
+    AuthFailure {
+        kind: AuthFailureKind::Rejected,
+        status: None,
+        server_code: None,
+    }
+}
+#[cfg(feature = "app")]
+pub(crate) use account_access::{perform_account_ceremony, CeremonyServer};
+#[cfg(feature = "app")]
+pub use account_access::{PasskeyLoginOutcome, PasskeyVaultBootstrap, PasskeyVaultRequirement};

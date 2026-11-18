@@ -45,6 +45,7 @@ impl TestApp {
             access_token_ttl_seconds: 3600,
             refresh_token_ttl_seconds: 3600,
             argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
+            account_access: Default::default(),
             oidc_jwks_cache: OidcJwksCache::new(),
             config,
             policy_store: PolicyStore::new(PolicySet::from_rules(rules)),

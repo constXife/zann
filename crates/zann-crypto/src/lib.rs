@@ -5,6 +5,7 @@
 #![allow(clippy::missing_errors_doc)]
 #![allow(clippy::similar_names)]
 
+pub mod account_access;
 pub mod backup;
 pub mod crypto;
 #[cfg(feature = "passkey")]
@@ -16,6 +17,7 @@ pub mod ipc_signatures;
 pub mod ipc_transport;
 pub mod passwords;
 pub mod secrets;
+pub mod signatures;
 pub mod tokens;
 pub mod vault_crypto;
 

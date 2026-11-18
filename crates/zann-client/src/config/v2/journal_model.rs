@@ -121,6 +121,7 @@ pub(crate) enum AuthOperationKind {
     Refresh,
     Logout,
     PasswordLogin,
+    PasskeyLogin,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -128,6 +129,42 @@ pub(crate) enum AuthOperationKind {
 pub(super) enum AuthOperationIntentState {
     Armed,
     CandidatePrepared,
+}
+
+impl AuthOperationKind {
+    pub(super) fn login_method(self) -> Option<AuthMethod> {
+        match self {
+            Self::PasswordLogin => Some(AuthMethod::Password),
+            Self::PasskeyLogin => Some(AuthMethod::Passkey),
+            _ => None,
+        }
+    }
+}
+pub(crate) enum LoginPreflight {
+    #[cfg_attr(not(feature = "session"), allow(dead_code))]
+    Password(ConfigIdentity),
+    #[cfg_attr(not(feature = "app"), allow(dead_code))]
+    Passkey,
+}
+impl LoginPreflight {
+    pub(super) fn method(&self) -> AuthMethod {
+        match self {
+            Self::Password(_) => AuthMethod::Password,
+            Self::Passkey => AuthMethod::Passkey,
+        }
+    }
+    pub(super) fn identity(&self) -> Option<&ConfigIdentity> {
+        match self {
+            Self::Password(identity) => Some(identity),
+            Self::Passkey => None,
+        }
+    }
+    pub(super) fn operation(&self) -> AuthOperationKind {
+        match self {
+            Self::Password(_) => AuthOperationKind::PasswordLogin,
+            Self::Passkey => AuthOperationKind::PasskeyLogin,
+        }
+    }
 }
 
 /// Live-process ownership proof for one exact durable auth intent.
@@ -146,9 +183,9 @@ pub(crate) struct AuthOperationIntentPermit {
 /// The source may intentionally have no profile, so it cannot reuse the
 /// refresh/logout profile permit. Like that permit this value is non-`Clone`
 /// and every transition checks the digest of the exact durable bytes.
-pub(crate) struct PasswordLoginIntentPermit {
-    pub(super) anchor: PasswordLoginAnchor,
-    pub(super) identity: ConfigIdentity,
+pub(crate) struct InteractiveLoginIntentPermit {
+    pub(super) anchor: InteractiveLoginAnchor,
+    pub(super) preflight: LoginPreflight,
     pub(super) reservation: AuthIntentLoginReservation,
     pub(super) operation_id: String,
     pub(super) journal_bytes_digest: String,

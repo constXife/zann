@@ -233,7 +233,7 @@ fn anonymous_reservation_reuses_the_atomic_slot_and_never_recycles_an_authentica
         .to_string();
     let store = TestCredentialStore::default();
     let old_anchor = repo
-        .resolve_password_login_anchor(&id, &first, &client_id("desktop"))
+        .resolve_login_anchor(&id, &first, &client_id("desktop"))
         .unwrap();
     authenticated_account(
         &repo,
@@ -246,7 +246,7 @@ fn anonymous_reservation_reuses_the_atomic_slot_and_never_recycles_an_authentica
     .unwrap();
     let current = repo.snapshot().unwrap();
     assert!(
-        ensure_password_login_anchor_matches(
+        ensure_login_anchor_matches(
             &old_anchor,
             &old_anchor.repository_binding_digest,
             current.config(),

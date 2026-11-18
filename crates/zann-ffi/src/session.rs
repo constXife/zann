@@ -133,6 +133,7 @@ pub enum AuthMethodFfi {
     Password,
     Oidc,
     ServiceAccount,
+    Passkey,
 }
 
 impl From<AuthMethod> for AuthMethodFfi {
@@ -141,6 +142,7 @@ impl From<AuthMethod> for AuthMethodFfi {
             AuthMethod::Password => Self::Password,
             AuthMethod::Oidc => Self::Oidc,
             AuthMethod::ServiceAccount => Self::ServiceAccount,
+            AuthMethod::Passkey => Self::Passkey,
         }
     }
 }

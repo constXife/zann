@@ -130,3 +130,25 @@
 /crates/zann-server/src/domains/auth/service.rs @constXife
 /crates/zann-server/src/domains/auth/service/ @constXife
 /crates/zann-server/src/domains/auth/helpers.rs @constXife
+
+# Account RP, PRF grant and restricted recovery flow (#30)
+/crates/zann-core/src/api/account_access.rs @constXife
+/crates/zann-core/src/api/account_access/ @constXife
+/crates/zann-db/src/repo/account_access.rs @constXife
+/crates/zann-db/src/repo/account_access/ @constXife
+/crates/zann-db/src/repo/users/ @constXife
+/crates/zann-db/src/repo/groups/ @constXife
+/crates/zann-db/src/repo/devices/ @constXife
+/crates/zann-db/src/repo/vaults/ @constXife
+/crates/zann-server/migrations/0005_account_passkeys.sql @constXife
+/crates/zann-server/src/domains/auth/account_access/ @constXife
+/crates/zann-server/src/config/passkey.rs @constXife
+/crates/zann-server/src/cli/admin.rs @constXife
+/crates/zann-server/tests/account_access.rs @constXife
+/crates/zann-server/tests/account_access_support/ @constXife
+/crates/zann-server/tests/account_recovery.rs @constXife
+/apps/extension/src/account-* @constXife
+
+/crates/zann-db/migrations/0011_account_passkey_auth.sql @constXife
+/crates/zann-db/tests/account_passkey_auth_migration.rs @constXife
+/crates/zann-integration-tests/tests/account_access.rs @constXife

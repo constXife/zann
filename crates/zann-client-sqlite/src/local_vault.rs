@@ -709,3 +709,6 @@ mod transition_tests;
 static MAINTENANCE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 mod passkey;
+
+mod account_access;
+mod recovery_codes;

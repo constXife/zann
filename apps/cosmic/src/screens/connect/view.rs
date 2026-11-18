@@ -10,6 +10,9 @@ use zann_core::AuthMethod;
 
 impl State {
     pub fn view(&self) -> Element<'_, Event> {
+        if let Some(recovery) = self.recovery_view() {
+            return recovery;
+        }
         let spacing = theme::spacing();
 
         let body = match &self.flow.snapshot().stage {
@@ -86,11 +89,21 @@ impl State {
                 AuthMethod::Password => widget::button::standard(t("auth.emailPassword"))
                     .width(Length::Fill)
                     .on_press(Message::ChoosePassword),
+                AuthMethod::Passkey => {
+                    column = column.push(self.browser_controls(true));
+                    continue;
+                }
                 AuthMethod::ServiceAccount => continue,
             };
             column = column.push(button);
         }
 
+        if self.flow.snapshot().methods.contains(&AuthMethod::Passkey) {
+            column = column.push(
+                widget::button::text(t("accountRecovery.title"))
+                    .on_press(Message::Recovery(super::recovery::Message::Open)),
+            );
+        }
         column.into()
     }
 
@@ -152,6 +165,12 @@ impl State {
                 .on_press(Message::SetRegistering(!register)),
             );
         }
+        if self.flow.snapshot().methods.contains(&AuthMethod::Passkey) {
+            column = column.push(
+                widget::button::text(t("accountRecovery.title"))
+                    .on_press(Message::Recovery(super::recovery::Message::Open)),
+            );
+        }
         column.into()
     }
 
@@ -184,5 +203,46 @@ impl State {
             .push(trust)
             .spacing(spacing.space_xxs)
             .into()
+    }
+}
+
+impl State {
+    pub(super) fn browser_controls(&self, allow_login: bool) -> Element<'_, Message> {
+        let mut column = widget::column::with_capacity(6)
+            .spacing(theme::spacing().space_s)
+            .push(widget::text::body(t("accountPasskey.signIn")));
+        if self.flow.snapshot().busy {
+            return column
+                .push(widget::text::body(t("accountPasskey.browserPrompt")))
+                .into();
+        }
+        for pairing in &self.pairings {
+            if !allow_login {
+                column = column.push(widget::text::caption(pairing.name.clone()));
+                continue;
+            }
+            column = column.push(
+                widget::button::standard(pairing.name.clone())
+                    .on_press(Message::StartPasskey(pairing.public_key.clone())),
+            );
+        }
+        column = column
+            .push(
+                widget::button::text(t("accountPasskey.refreshBrowsers"))
+                    .on_press(Message::RefreshBrowsers),
+            )
+            .push(
+                widget::button::text(t("accountPasskey.pairBrowser"))
+                    .on_press(Message::PairBrowser),
+            );
+        if let Some(code) = &self.pairing_code {
+            column = column
+                .push(widget::text::body(t("accountPasskey.pairHint")))
+                .push(widget::text::monotext(code.value.to_string()));
+        }
+        if let Some(error) = &self.browser_error {
+            column = column.push(widget::text::caption(error.clone()));
+        }
+        column.into()
     }
 }

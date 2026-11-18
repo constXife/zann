@@ -140,32 +140,45 @@ impl LocalVault {
         account_key: &SecretKey,
         origin: AccountKeyOrigin,
     ) -> LocalResult<VaultStatus> {
-        let storage = &enrollment.storage_id;
-        let id = Uuid::parse_str(storage)
-            .map_err(|_| LocalError::InvalidArgument("invalid storage id".into()))?;
-        let pool = self.pool();
-        let vaults = self
-            .runtime
-            .block_on(LocalVaultRepo::new(&pool).list_by_storage(id))
-            .map_err(|err| LocalError::Service(err.to_string()))?;
-        self.verify_storage_keys(account_key, &vaults)?;
         let keyring = self.device_unlock()?;
         let mut candidate = keyring.clone();
         candidate
             .insert_account(
                 root,
-                storage.to_owned(),
+                enrollment.storage_id.clone(),
                 enrollment.server_id.clone(),
                 enrollment.account_subject.clone(),
                 account_key,
                 origin,
             )
             .map_err(keyring_error)?;
+        self.publish_account_keyring(generation, root, enrollment, &keyring, &candidate)
+    }
+    pub(super) fn publish_account_keyring(
+        &self,
+        generation: u64,
+        root: &SecretKey,
+        enrollment: &zann_client::app::AccountKeyEnrollment,
+        keyring: &zann_client::app::unlock::DeviceUnlock,
+        candidate: &zann_client::app::unlock::DeviceUnlock,
+    ) -> LocalResult<VaultStatus> {
+        let storage = &enrollment.storage_id;
+        let id =
+            Uuid::parse_str(storage).map_err(|e| LocalError::InvalidArgument(e.to_string()))?;
+        let (account_key, _) = candidate
+            .account_key(root, storage)
+            .map_err(keyring_error)?;
+        let pool = self.pool();
+        let vaults = self
+            .runtime
+            .block_on(LocalVaultRepo::new(&pool).list_by_storage(id))
+            .map_err(|e| LocalError::Service(e.to_string()))?;
+        self.verify_storage_keys(&account_key, &vaults)?;
         let keys = candidate.account_keys(root).map_err(keyring_error)?;
         let vault = preferred_vault(&self.runtime, &pool, id, &vaults)?;
         let _context = self.context_gate.write().expect("lock poisoned");
         self.check_context_generation(generation)?;
-        self.commit_device_unlock(Some(&keyring), &candidate)?;
+        self.commit_device_unlock(Some(keyring), candidate)?;
         *self.account_keys.lock().expect("lock poisoned") = keys;
         *self.storage_id.lock().expect("lock poisoned") = Some(id);
         *self.vault_id.lock().expect("lock poisoned") = vault;

@@ -7,12 +7,12 @@ impl ConfigRepository {
     /// credential profile may be present or absent; this API never creates,
     /// pins, relocates or rebinds a connection.
     #[cfg_attr(not(feature = "session"), allow(dead_code))]
-    pub(crate) fn resolve_password_login_anchor(
+    pub(crate) fn resolve_login_anchor(
         &self,
         connection_id: &ConnectionId,
         profile_name: impl Into<String>,
         client_id: &ClientId,
-    ) -> Result<PasswordLoginAnchor, ConfigError> {
+    ) -> Result<InteractiveLoginAnchor, ConfigError> {
         let profile_name = profile_name.into();
         validate_string_len(
             "$.connections.*.credential_profiles.<name>",
@@ -31,7 +31,7 @@ impl ConfigRepository {
         let primary_bytes = read_file(&primary_path, "read config for password-login anchor")?;
         let config = parse_config(&primary_path, &primary_bytes)?;
         self.ensure_legacy_unchanged(&config)?;
-        resolve_password_login_anchor_from_config(
+        resolve_login_anchor_from_config(
             credential_profile_anchor_repository_binding(self.paths.root())?,
             byte_digest(&primary_bytes),
             &config,
@@ -45,14 +45,14 @@ impl ConfigRepository {
     /// login dispatch. The caller holds auth then credential operation locks.
     /// No credential-store call occurs while the config lock is held.
     #[cfg_attr(not(feature = "session"), allow(dead_code))]
-    pub(crate) fn prepare_password_login_intent_with_operation_locks(
+    pub(crate) fn prepare_login_intent_with_operation_locks(
         &self,
-        anchor: &PasswordLoginAnchor,
+        anchor: &InteractiveLoginAnchor,
         endpoint: &VerifiedEndpointBinding,
-        identity: ConfigIdentity,
+        preflight: LoginPreflight,
         operation_id: &str,
         credential_store: &dyn CredentialStore,
-    ) -> Result<PasswordLoginIntentPermit, ConfigError> {
+    ) -> Result<InteractiveLoginIntentPermit, ConfigError> {
         validate_string_len("$.authentication_intent.operation_id", operation_id, 128)?;
         if operation_id.is_empty() {
             return Err(ConfigError::InvalidConfig {
@@ -106,13 +106,13 @@ impl ConfigRepository {
         let config = parse_config(&primary_path, &primary_bytes)?;
         self.ensure_legacy_unchanged(&config)?;
         let repository_binding = credential_profile_anchor_repository_binding(self.paths.root())?;
-        ensure_password_login_anchor_matches(
+        ensure_login_anchor_matches(
             anchor,
             &repository_binding,
             &config,
             &byte_digest(&primary_bytes),
         )?;
-        let source_anchor = resolve_password_login_anchor_from_config(
+        let source_anchor = resolve_login_anchor_from_config(
             repository_binding.clone(),
             byte_digest(&primary_bytes),
             &config,
@@ -120,18 +120,20 @@ impl ConfigRepository {
             &anchor.profile_name,
             &anchor.client_id,
         )?;
-        let mut identity_candidate = config.clone();
-        apply_identity_commit(
-            &mut identity_candidate,
-            &anchor.connection_id,
-            &anchor.profile_name,
-            &IdentityCommit::InitializeOrMatch(identity.clone()),
-        )?;
+        if let Some(identity) = preflight.identity() {
+            let mut identity_candidate = config.clone();
+            apply_identity_commit(
+                &mut identity_candidate,
+                &anchor.connection_id,
+                &anchor.profile_name,
+                &IdentityCommit::InitializeOrMatch(identity.clone()),
+            )?;
+        }
         let source_profile = source_anchor.profile.as_ref();
         let intent = AuthOperationIntent {
             journal_version: AUTH_OPERATION_INTENT_VERSION,
             operation_id: operation_id.to_string(),
-            operation: AuthOperationKind::PasswordLogin,
+            operation: preflight.operation(),
             state: AuthOperationIntentState::Armed,
             repository_binding_digest: repository_binding,
             connection_id: source_anchor.connection_id.clone(),
@@ -164,9 +166,9 @@ impl ConfigRepository {
         };
         let bytes = serialize_auth_operation_intent(&intent, self.paths.root())?;
         atomic_write(&path, &bytes)?;
-        Ok(PasswordLoginIntentPermit {
+        Ok(InteractiveLoginIntentPermit {
             anchor: source_anchor,
-            identity,
+            preflight,
             reservation,
             operation_id: operation_id.to_string(),
             journal_bytes_digest: byte_digest(&bytes),

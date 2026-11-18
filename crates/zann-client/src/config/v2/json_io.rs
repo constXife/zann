@@ -45,6 +45,7 @@ pub(super) fn read_file(path: &Path, operation: &'static str) -> Result<Vec<u8>,
 
 pub(super) fn json_size_limit(path: &Path) -> u64 {
     match path.file_name().and_then(|name| name.to_str()) {
+        Some(ACCOUNT_REQUESTS_FILENAME) => ACCOUNT_REQUESTS_MAX_BYTES,
         Some(CONFIG_RESTORE_JOURNAL_FILENAME) => RESTORE_JOURNAL_MAX_BYTES,
         Some(CREDENTIAL_TRANSACTION_JOURNAL_FILENAME) => CREDENTIAL_TRANSACTION_JOURNAL_MAX_BYTES,
         Some(AUTH_OPERATION_INTENT_FILENAME) | Some(AUTH_RECOVERY_INTENTS_FILENAME) => {

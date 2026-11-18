@@ -1,3 +1,4 @@
+use crate::domains::auth::core::mutation;
 use axum::{
     extract::{Query, State},
     http::StatusCode,
@@ -196,7 +197,11 @@ async fn create_group(
         name: name.to_string(),
         created_at: Utc::now(),
     };
-    if let Err(err) = repo.create(&group).await {
+    let mut tx = match mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return mutation::response(error),
+    };
+    if let Err(err) = GroupRepo::create_in(&mut *tx, &group).await {
         tracing::error!(event = "group_create_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -205,6 +210,9 @@ async fn create_group(
             .into_response();
     }
 
+    if let Err(error) = tx.commit().await {
+        return mutation::response(mutation::database(error));
+    }
     tracing::info!(
         event = "group_created",
         group_id = %group.id,
@@ -349,7 +357,12 @@ async fn update_group(
             .into_response();
     }
 
-    let Ok(affected) = repo.update(group.id, &group.slug, &group.name).await else {
+    let mut tx = match mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return mutation::response(error),
+    };
+    let Ok(affected) = GroupRepo::update_in(&mut *tx, group.id, &group.slug, &group.name).await
+    else {
         tracing::error!(event = "group_update_failed", "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -361,6 +374,9 @@ async fn update_group(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    if let Err(error) = tx.commit().await {
+        return mutation::response(mutation::database(error));
+    }
     tracing::info!(
         event = "group_updated",
         group_id = %group.id,
@@ -402,7 +418,11 @@ async fn delete_group(
         }
     };
 
-    let Ok(affected) = repo.delete_by_id(group.id).await else {
+    let mut tx = match mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return mutation::response(error),
+    };
+    let Ok(affected) = GroupRepo::delete_by_id_in(&mut *tx, group.id).await else {
         tracing::error!(event = "group_delete_failed", "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -414,6 +434,9 @@ async fn delete_group(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    if let Err(error) = tx.commit().await {
+        return mutation::response(mutation::database(error));
+    }
     tracing::info!(
         event = "group_deleted",
         group_id = %group.id,
@@ -497,7 +520,11 @@ async fn add_member(
         user_id: payload.user_id,
         created_at: Utc::now(),
     };
-    if let Err(err) = member_repo.create(&member).await {
+    let mut tx = match mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return mutation::response(error),
+    };
+    if let Err(err) = GroupMemberRepo::create_in(&mut *tx, &member).await {
         tracing::error!(event = "group_member_add_failed", error = %err, "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -506,6 +533,9 @@ async fn add_member(
             .into_response();
     }
 
+    if let Err(error) = tx.commit().await {
+        return mutation::response(mutation::database(error));
+    }
     tracing::info!(
         event = "group_member_added",
         group_id = %group.id,
@@ -548,8 +578,11 @@ async fn remove_member(
         }
     };
 
-    let member_repo = GroupMemberRepo::new(&state.db);
-    let Ok(affected) = member_repo.delete(group.id, user_id).await else {
+    let mut tx = match mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return mutation::response(error),
+    };
+    let Ok(affected) = GroupMemberRepo::delete_in(&mut *tx, group.id, user_id).await else {
         tracing::error!(event = "group_member_remove_failed", "DB error");
         return (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -561,6 +594,9 @@ async fn remove_member(
         return StatusCode::NOT_FOUND.into_response();
     }
 
+    if let Err(error) = tx.commit().await {
+        return mutation::response(mutation::database(error));
+    }
     tracing::info!(
         event = "group_member_removed",
         group_id = %group.id,

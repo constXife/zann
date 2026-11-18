@@ -54,6 +54,7 @@ impl ConfigRepository {
             bundle_digest: digest,
             phase: RecoveryIntentPhase::Prepared,
             consume_digest: None,
+            consume_device: None,
             status: None,
         };
         let _config = self.exclusive_lock()?;
@@ -118,6 +119,7 @@ impl ConfigRepository {
         id: Uuid,
         observed: &VerifiedEndpointBinding,
         consume_digest: [u8; 32],
+        device: zann_core::api::account_access::DeviceDescriptor,
     ) -> Result<RecoveryIntent, ConfigError> {
         let _credentials = self.credential_operation_lock()?;
         let _config = self.exclusive_lock()?;
@@ -132,9 +134,11 @@ impl ConfigRepository {
         let digest = HEXLOWER.encode(&consume_digest);
         if intent.phase == RecoveryIntentPhase::Prepared {
             intent.consume_digest = Some(digest);
+            intent.consume_device = Some(device.clone());
             intent.phase = RecoveryIntentPhase::Dispatched;
         } else if intent.phase != RecoveryIntentPhase::Dispatched
             || intent.consume_digest.as_deref() != Some(digest.as_str())
+            || intent.consume_device.as_ref() != Some(&device)
         {
             return Err(conflict("consume body changed after dispatch"));
         }
@@ -166,6 +170,7 @@ impl ConfigRepository {
             if status.user_id != old.user_id
                 || status.auth_epoch != old.auth_epoch
                 || status.account_key_epoch != old.account_key_epoch
+                || status.successor_code_version != old.successor_code_version
                 || status.expires_at != old.expires_at
                 || status.revision < old.revision
                 || (status.revision == old.revision && status != *old)
@@ -208,5 +213,69 @@ impl ConfigRepository {
             credential
         };
         store.delete(&credential).map_err(store_error)
+    }
+}
+
+impl ConfigRepository {
+    pub(crate) fn recovery_dispatch_device(
+        &self,
+        id: Uuid,
+        observed: &VerifiedEndpointBinding,
+    ) -> Result<Option<zann_core::api::account_access::DeviceDescriptor>, ConfigError> {
+        let _config = self.exclusive_lock()?;
+        let intent = self
+            .read_recovery_intents()?
+            .operations
+            .remove(&id)
+            .ok_or(conflict("unknown recovery operation"))?;
+        if !intent.target.matches(observed) {
+            return Err(conflict("verified server binding changed"));
+        }
+        Ok(intent.consume_device)
+    }
+}
+
+impl ConfigRepository {
+    /// Called only after fresh ordinary passkey authentication and local key
+    /// publication/proof. Terminal receipts alone cannot release the bundle.
+    pub(crate) fn acknowledge_recovery_key_publication(
+        &self,
+        endpoint: &VerifiedEndpointBinding,
+        user: Uuid,
+        store: &dyn CredentialStore,
+    ) -> Result<(), ConfigError> {
+        let _credentials = self.credential_operation_lock()?;
+        let credentials = {
+            let _config = self.exclusive_lock()?;
+            let mut intents = self.read_recovery_intents()?;
+            let completed_epoch = intents
+                .operations
+                .values()
+                .filter(|i| i.target.matches(endpoint) && i.phase == RecoveryIntentPhase::Completed)
+                .filter_map(|i| i.status.as_ref())
+                .filter(|status| status.user_id == user)
+                .map(|status| status.auth_epoch)
+                .max();
+            let mut credentials = Vec::new();
+            intents.operations.retain(|_, intent| {
+                let complete = intent.target.matches(endpoint)
+                    && intent.status.as_ref().is_some_and(|status| {
+                        status.user_id == user
+                            && completed_epoch.is_some_and(|epoch| status.auth_epoch <= epoch)
+                    });
+                if complete {
+                    credentials.push(intent.credential_id.clone());
+                    false
+                } else {
+                    true
+                }
+            });
+            self.write_recovery_intents(&intents)?;
+            credentials
+        };
+        for credential in credentials {
+            store.delete(&credential).map_err(store_error)?;
+        }
+        Ok(())
     }
 }

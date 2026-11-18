@@ -1,10 +1,8 @@
 use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::get, Json, Router};
 use base64::Engine;
-use data_encoding::BASE32_NOPAD;
 use ed25519_dalek::Signer;
 use schemars::JsonSchema;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 use sqlx_core::query::query;
 use sqlx_postgres::Postgres;
 use std::collections::HashMap;
@@ -28,8 +26,7 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
     let verifying_key = state.identity_key.verifying_key();
     let public_key_bytes = verifying_key.to_bytes();
     let public_key = base64::engine::general_purpose::STANDARD.encode(public_key_bytes);
-    let hash = Sha256::digest(public_key_bytes);
-    let server_id = BASE32_NOPAD.encode(&hash).to_ascii_lowercase();
+    let server_id = crate::infra::server_identity::server_id(&verifying_key);
     let timestamp = chrono::Utc::now().timestamp();
     let message = format!("zann-id:v1:{server_id}:{timestamp}");
     let signature = state.identity_key.sign(message.as_bytes());
@@ -39,6 +36,9 @@ async fn info(State(state): State<AppState>) -> impl IntoResponse {
     if state.config.auth.internal.enabled && !matches!(state.config.auth.mode, AuthMode::Oidc) {
         auth_methods.push(AuthMethod::Password);
         auth_methods.push(AuthMethod::ServiceAccount);
+        if state.config.auth.passkey.is_some() {
+            auth_methods.push(AuthMethod::Passkey);
+        }
     }
     if state.config.auth.oidc.enabled && !matches!(state.config.auth.mode, AuthMode::Internal) {
         auth_methods.push(AuthMethod::Oidc);

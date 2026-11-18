@@ -111,6 +111,8 @@ pub(crate) fn create_session_for_user(
         user_id,
         device_id,
         auth_epoch,
+        passkey_credential_id: None,
+        passkey_session_epoch: None,
         access_token_hash,
         access_expires_at,
         refresh_token_hash,

@@ -105,42 +105,14 @@ impl<'a> DeviceRepo<'a> {
             .await
     }
 
-    /// Revokes the device and deletes its sessions in one transaction, so a
-    /// revoked device's access and refresh tokens stop working immediately
-    /// instead of surviving until their TTL lapses.
+    /// Revokes device authority in constant cardinality. Access/refresh admission
+    /// joins this tombstone; expired session retention is a separate lifecycle.
     pub async fn revoke(
         &self,
         device_id: Uuid,
         revoked_at: DateTime<Utc>,
     ) -> Result<u64, sqlx_core::Error> {
-        let mut tx = self.pool.begin().await?;
-        let revoked = query!(
-            r#"
-            UPDATE devices
-            SET revoked_at = $2
-            WHERE id = $1
-            "#,
-            device_id,
-            revoked_at
-        )
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
-        if revoked == 0 {
-            tx.commit().await?;
-            return Ok(0);
-        }
-        query!(
-            r#"
-            DELETE FROM sessions
-            WHERE device_id = $1
-            "#,
-            device_id
-        )
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(revoked)
+        Self::revoke_in(self.pool, device_id, revoked_at).await
     }
 }
 
@@ -154,33 +126,7 @@ impl<'a> ServiceAccountRepo<'a> {
     }
 
     pub async fn create(&self, account: &ServiceAccount) -> Result<(), sqlx_core::Error> {
-        query!(
-            r#"
-            INSERT INTO service_accounts (
-                id, owner_user_id, name, description, token_hash, token_prefix, scopes,
-                allowed_ips, expires_at, last_used_at, last_used_ip, last_used_user_agent, use_count, created_at, revoked_at
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
-            "#,
-            account.id,
-            account.owner_user_id,
-            account.name.as_str(),
-            account.description.as_deref(),
-            account.token_hash.as_str(),
-            account.token_prefix.as_str(),
-            sqlx_core::types::Json(&account.scopes),
-            account.allowed_ips.as_ref().map(sqlx_core::types::Json),
-            account.expires_at,
-            account.last_used_at,
-            account.last_used_ip.as_deref(),
-            account.last_used_user_agent.as_deref(),
-            account.use_count,
-            account.created_at,
-            account.revoked_at
-        )
-        .execute(self.pool)
-        .await
-        .map(|_| ())
+        Self::create_in(self.pool, account).await
     }
 
     pub async fn get_by_id(&self, id: Uuid) -> Result<Option<ServiceAccount>, sqlx_core::Error> {
@@ -359,57 +305,11 @@ impl<'a> ServiceAccountRepo<'a> {
         token_hash: &str,
         token_prefix: &str,
     ) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            UPDATE service_accounts
-            SET token_hash = $2,
-                token_prefix = $3
-            WHERE id = $1
-            "#,
-            id,
-            token_hash,
-            token_prefix
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        Self::update_token_in(self.pool, id, token_hash, token_prefix).await
     }
 
     pub async fn update(&self, account: &ServiceAccount) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            UPDATE service_accounts
-            SET name = $2,
-                description = $3,
-                token_hash = $4,
-                token_prefix = $5,
-                scopes = $6,
-                allowed_ips = $7,
-                expires_at = $8,
-                last_used_at = $9,
-                last_used_ip = $10,
-                last_used_user_agent = $11,
-                use_count = $12,
-                revoked_at = $13
-            WHERE id = $1
-            "#,
-            account.id,
-            account.name.as_str(),
-            account.description.as_deref(),
-            account.token_hash.as_str(),
-            account.token_prefix.as_str(),
-            sqlx_core::types::Json(&account.scopes),
-            account.allowed_ips.as_ref().map(sqlx_core::types::Json),
-            account.expires_at,
-            account.last_used_at,
-            account.last_used_ip.as_deref(),
-            account.last_used_user_agent.as_deref(),
-            account.use_count,
-            account.revoked_at
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        Self::update_in(self.pool, account).await
     }
 
     pub async fn revoke(
@@ -417,18 +317,7 @@ impl<'a> ServiceAccountRepo<'a> {
         id: Uuid,
         revoked_at: DateTime<Utc>,
     ) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            UPDATE service_accounts
-            SET revoked_at = $2
-            WHERE id = $1
-            "#,
-            id,
-            revoked_at
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        Self::revoke_in(self.pool, id, revoked_at).await
     }
 }
 
@@ -486,15 +375,9 @@ impl<'a> ServiceAccountSessionRepo<'a> {
         &self,
         service_account_id: Uuid,
     ) -> Result<u64, sqlx_core::Error> {
-        query!(
-            r#"
-            DELETE FROM service_account_sessions
-            WHERE service_account_id = $1
-            "#,
-            service_account_id
-        )
-        .execute(self.pool)
-        .await
-        .map(|result| result.rows_affected())
+        Self::revoke_by_service_account_in(self.pool, service_account_id).await
     }
 }
+
+mod mutations;
+mod service_account_mutations;

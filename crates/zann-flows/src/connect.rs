@@ -161,6 +161,13 @@ impl Connect {
                     register,
                 }]
             }
+            Action::StartPasskey
+                if self.snapshot.stage == Stage::Methods
+                    && self.snapshot.methods.contains(&AuthMethod::Passkey) =>
+            {
+                let id = self.start(Step::Passkey);
+                vec![Effect::Passkey { id }]
+            }
             Action::StartOidc if self.snapshot.stage == Stage::Methods => self.begin_oidc(),
             _ => vec![],
         }
@@ -187,7 +194,9 @@ impl Connect {
                 self.snapshot.stage = Stage::Browser { url: url.clone() };
                 vec![Effect::OpenBrowser { id, url }, Effect::FinishOidc { id }]
             }
-            Completion::Password(Ok(connected)) | Completion::OidcFinished(Ok(connected)) => {
+            Completion::Password(Ok(connected))
+            | Completion::Passkey(Ok(connected))
+            | Completion::OidcFinished(Ok(connected)) => {
                 self.snapshot.stage = Stage::Complete;
                 vec![
                     Effect::Cancel { id },
@@ -198,6 +207,7 @@ impl Connect {
             Completion::Probed(Err(error))
             | Completion::Trusted(Err(error))
             | Completion::Password(Err(error))
+            | Completion::Passkey(Err(error))
             | Completion::OidcStarted(Err(error))
             | Completion::OidcFinished(Err(error)) => {
                 let mut effects = vec![Effect::Cancel { id }];
@@ -218,12 +228,14 @@ impl Connect {
     }
 
     fn offer(&mut self, info: ServerInfo) -> Vec<Effect> {
-        // Auth methods are a set. Bound both native method lists to the two
+        // Auth methods are a set. Bound both native method lists to the three
         // interactive choices even if a remote advertisement repeats entries.
-        let mut methods = Vec::with_capacity(2);
+        let mut methods = Vec::with_capacity(3);
         for method in info.methods {
-            if matches!(method, AuthMethod::Password | AuthMethod::Oidc)
-                && !methods.contains(&method)
+            if matches!(
+                method,
+                AuthMethod::Password | AuthMethod::Oidc | AuthMethod::Passkey
+            ) && !methods.contains(&method)
             {
                 methods.push(method);
             }

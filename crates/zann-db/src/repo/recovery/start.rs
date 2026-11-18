@@ -21,6 +21,16 @@ impl RecoveryRepo<'_> {
         &self,
         input: RecoveryStart<'_>,
     ) -> Result<RecoveryStatus, RecoveryStoreError> {
+        let mut tx = self.pool.begin().await?;
+        let status = Self::start_in(&mut tx, input).await?;
+        tx.commit().await?;
+        Ok(status)
+    }
+
+    pub async fn start_in(
+        tx: &mut PgConnection,
+        input: RecoveryStart<'_>,
+    ) -> Result<RecoveryStatus, RecoveryStoreError> {
         if input.operation_id.get_version_num() != 4
             || input.expected_code_hash == input.successor_code_hash
             || !valid_hash(input.resume_token_hash)
@@ -31,8 +41,7 @@ impl RecoveryRepo<'_> {
         {
             return Err(RecoveryStoreError::InvalidInput);
         }
-        let mut tx = self.pool.begin().await?;
-        let account = lock_account(&mut tx, input.user_id).await?;
+        let account = lock_account(&mut *tx, input.user_id).await?;
         if let Some(row) = sqlx_core::query::query::<Postgres>(
             "SELECT * FROM account_recovery_operations WHERE id = $1 FOR UPDATE",
         )
@@ -87,7 +96,15 @@ impl RecoveryRepo<'_> {
         {
             return Err(RecoveryStoreError::Capacity);
         }
-        let account = sqlx_core::query::query::<Postgres>("UPDATE users SET auth_epoch = auth_epoch + 1, security_revision = security_revision + 1, recovery_key_version = recovery_key_version + 1, recovery_key_hash = $2, active_recovery_id = $3, row_version = row_version + 1 WHERE id = $1 RETURNING auth_epoch, recovery_key_version")
+        crate::repo::AccountAccessRepo::revoke_all_in(&mut *tx, input.user_id)
+            .await
+            .map_err(|error| match error {
+                crate::repo::AccountAccessStoreError::Database(error) => {
+                    RecoveryStoreError::Database(error)
+                }
+                _ => RecoveryStoreError::Conflict,
+            })?;
+        let account = sqlx_core::query::query::<Postgres>("UPDATE users SET auth_epoch = auth_epoch + 1, security_revision = security_revision + 1, recovery_key_version = recovery_key_version + 1, recovery_key_hash = $2, recovery_candidate_id=$3, active_recovery_id = $3, row_version = row_version + 1 WHERE id = $1 RETURNING auth_epoch, recovery_key_version")
             .bind(input.user_id).bind(input.successor_code_hash).bind(input.operation_id).fetch_one(&mut *tx).await?;
         let epoch: i64 = account.try_get("auth_epoch")?;
         let code_version: i64 = account.try_get("recovery_key_version")?;
@@ -113,7 +130,6 @@ impl RecoveryRepo<'_> {
         sqlx_core::query::query::<Postgres>("UPDATE account_recovery_quota SET active_count = $1, retained_count = retained_count + 1 WHERE singleton")
             .bind(i32::try_from(active + 1).map_err(|_| RecoveryStoreError::Capacity)?).execute(&mut *tx).await?;
         let status = decode_record(row)?.status;
-        tx.commit().await?;
         Ok(status)
     }
 }

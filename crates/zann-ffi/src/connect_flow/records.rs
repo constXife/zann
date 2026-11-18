@@ -6,6 +6,7 @@ pub enum ConnectStepFfi {
     Probe,
     Trust,
     Password,
+    Passkey,
     OidcStart,
     OidcFinish,
 }
@@ -108,6 +109,10 @@ pub enum ConnectEffectFfi {
         password: String,
         full_name: Option<String>,
         register: bool,
+        timeout_ms: u64,
+    },
+    Passkey {
+        id: FlowOperationFfi,
         timeout_ms: u64,
     },
     BeginOidc {

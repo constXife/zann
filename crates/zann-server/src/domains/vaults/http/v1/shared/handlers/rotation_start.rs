@@ -181,6 +181,10 @@ pub(crate) async fn rotate_start(
     let expires_at = now + chrono::Duration::seconds(state.config.rotation.lock_ttl_seconds);
     let recover_until =
         expires_at + chrono::Duration::seconds(state.config.rotation.stale_retention_seconds);
+    let mut tx = match crate::domains::auth::core::mutation::begin(&state, &identity).await {
+        Ok(tx) => tx,
+        Err(error) => return crate::domains::auth::core::mutation::response(error),
+    };
     let result = sqlx_core::query::query(
         r#"
         UPDATE items
@@ -207,7 +211,7 @@ pub(crate) async fn rotate_start(
     .bind(item.id)
     .bind(SyncStatus::ACTIVE)
     .bind(item.row_version)
-    .execute(&state.db)
+    .execute(&mut *tx)
     .await;
     match result {
         Ok(result) if result.rows_affected() > 0 => {}
@@ -235,6 +239,11 @@ pub(crate) async fn rotate_start(
         }
     }
 
+    if let Err(error) = tx.commit().await {
+        return crate::domains::auth::core::mutation::response(
+            crate::domains::auth::core::mutation::database(error),
+        );
+    }
     let response = RotationCandidateResponse {
         state: ROTATION_STATE_ROTATING.to_string(),
         candidate,

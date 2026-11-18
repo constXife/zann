@@ -43,7 +43,10 @@ tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 tower-http = { version = "0.5", features = ["catch-panic", "request-id", "trace", "util"] }
 uuid = { version = "1", features = ["v4", "v7"] }
+webauthn-rs-core = "=0.6.2"
+url = "2"
 zann-core = { path = "../zann-core", default-features = false }
+zann-autofill = { path = "../zann-autofill" }
 zann-crypto = { path = "../zann-crypto" }
 zann-db = { path = "../zann-db", default-features = false, features = ["postgres"] }
 zeroize = "1.7"
@@ -52,6 +55,7 @@ tikv-jemallocator = { version = "0.6", optional = true, features = ["profiling"]
 tikv-jemalloc-sys = { version = "0.6", optional = true, features = ["profiling"] }
 
 [dev-dependencies]
+zann-passkey = { path = "../zann-passkey" }
 proptest = "1.5.0"
 tower = "0.5"
 zann-db = { path = "../zann-db", default-features = false, features = ["sqlite"] }

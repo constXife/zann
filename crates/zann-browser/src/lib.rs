@@ -61,6 +61,38 @@ impl NativeClient {
         let request: Request = serde_json::from_str(&bytes)?;
         Ok(String::from_utf8(self.0.request(&request)?)?)
     }
+    pub fn account_response(
+        &mut self,
+        operation_id: String,
+        response: String,
+        prf: Vec<u8>,
+    ) -> Result<String, JsError> {
+        use zann_client::browser_ipc::{
+            AccountCeremonyCompletion, AccountCeremonyResult, PrfOutput,
+        };
+        let prf = Zeroizing::new(prf);
+        let prf = match prf.len() {
+            0 => None,
+            32 => Some(PrfOutput::new(
+                prf.as_slice()
+                    .try_into()
+                    .map_err(|_| JsError::new("PRF length"))?,
+            )),
+            _ => return Err(JsError::new("PRF length")),
+        };
+        let completion = AccountCeremonyCompletion::Completed {
+            result: AccountCeremonyResult {
+                response: serde_json::from_str(&response)?,
+                prf,
+            },
+        };
+        Ok(String::from_utf8(self.0.request(
+            &Request::AccountCeremonyFinish {
+                operation_id,
+                completion,
+            },
+        )?)?)
+    }
     pub fn reply(&mut self, packet: &str) -> Result<JsValue, JsError> {
         let bytes = Zeroizing::new(serde_json::to_string(&self.0.reply(packet.as_bytes())?)?);
         Ok(JsValue::from_str(&bytes))

@@ -64,6 +64,7 @@ impl TestApp {
             access_token_ttl_seconds: 3600,
             refresh_token_ttl_seconds: 3600,
             argon2_semaphore: std::sync::Arc::new(Semaphore::new(4)),
+            account_access: Default::default(),
             oidc_jwks_cache: OidcJwksCache::new(),
             config: config_for_state,
             policy_store: PolicyStore::new(PolicySet::from_rules(rules)),
@@ -236,7 +237,7 @@ async fn users_me_update_and_password_change() {
 
 #[tokio::test]
 #[cfg_attr(not(feature = "postgres-tests"), ignore = "requires TEST_DATABASE_URL")]
-async fn users_me_recovery_kit() {
+async fn immediate_recovery_kit_rotation_is_removed() {
     let app = TestApp::new().await;
     let email = "recovery@example.com";
     let password = "password-1";
@@ -251,8 +252,12 @@ async fn users_me_recovery_kit() {
             json!({}),
         )
         .await;
-    assert_eq!(status, StatusCode::OK, "recovery kit failed: {:?}", body);
-    assert!(body["recovery_key"].as_str().is_some());
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "legacy recovery route must be removed: {:?}",
+        body
+    );
 }
 
 #[tokio::test]

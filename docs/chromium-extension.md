@@ -218,11 +218,11 @@ bun install --frozen-lockfile
 bun run test
 node node_modules/playwright/cli.js install chromium
 bun run build
-# from the repository root, once:
-cargo build -p zann-native-host --locked
-# back in apps/extension:
 bun run test:browser
 ```
+
+`test:browser` first builds the native host and the daemon fixture, so the
+parallel test files never compile inside their startup window.
 
 The Chromium integration test runs real packaged WASM, the native host process,
 a Unix socket and a disposable daemon/vault. To avoid changing the developer's

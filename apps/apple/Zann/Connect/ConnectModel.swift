@@ -94,7 +94,7 @@ final class ConnectModel: ObservableObject {
                 connected(Connected(storageID: storageID, hasPersonalKeys: hasKeys))
             case .closed:
                 break // The shell's Back action observes the terminal snapshot.
-            case .probe, .trustFingerprint, .password, .beginOidc, .finishOidc:
+            case .probe, .trustFingerprint, .password, .passkey, .beginOidc, .finishOidc:
                 work.append(effect)
             }
         }
@@ -154,6 +154,8 @@ final class ConnectModel: ObservableObject {
                 self.browser = login
                 return .oidcStarted(id: id, url: login.authorizationUrl())
             }
+        case .passkey(let id, _):
+            await fail(id, .passkey, CoreError.InvalidArgument("account passkey provider is unavailable on this platform"))
         case .finishOidc(let id):
             guard flow.accepts(id: id, step: .oidcFinish) else { return }
             guard let browser, let connection else { await fail(id, .oidcFinish, CoreError.InvalidArgument("missing browser login")); return }

@@ -21,7 +21,7 @@ sha2 = "0.10"
 subtle = "2.6"
 unicode-normalization = "0.1"
 tracing = "0.1"
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v7", "serde"] }
 zeroize = { version = "1.7", features = ["derive"] }
 
 [dev-dependencies]

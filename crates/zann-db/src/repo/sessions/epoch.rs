@@ -41,6 +41,9 @@ pub(super) async fn create_in(
     connection: &mut PgConnection,
     session: &Session,
 ) -> Result<(), SessionWriteError> {
+    if session.passkey_credential_id.is_some() || session.passkey_session_epoch.is_some() {
+        return Err(SessionWriteError::Invalidated);
+    }
     lock_account(connection, session.user_id, session.auth_epoch).await?;
     let result = sqlx_core::query::query::<sqlx_postgres::Postgres>(
         r#"
@@ -107,6 +110,7 @@ pub(super) async fn rotate(
             AND u.status = 1 AND u.deleted_at IS NULL AND u.active_recovery_id IS NULL
             AND d.id = s.device_id AND d.user_id = u.id AND d.revoked_at IS NULL
             AND s.expires_at > CURRENT_TIMESTAMP
+            AND (s.passkey_credential_id IS NULL OR EXISTS (SELECT 1 FROM account_passkeys p WHERE p.credential_id=s.passkey_credential_id AND p.session_epoch=s.passkey_session_epoch))
     "#,
     )
     .bind(session.id)
@@ -122,5 +126,56 @@ pub(super) async fn rotate(
         return Err(SessionWriteError::Invalidated);
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// Constant-cardinality revocation for password/admin changes. Caller holds the
+/// target user lock as part of its mutation transaction. Active recovery is
+/// terminalized without restoring an old code or scanning interactive sessions.
+pub(super) async fn invalidate_user_in(
+    conn: &mut PgConnection,
+    user: Uuid,
+    keep: Option<Uuid>,
+) -> Result<(), sqlx_core::Error> {
+    let row = sqlx_core::query::query::<sqlx_postgres::Postgres>(
+        "SELECT active_recovery_id FROM users WHERE id=$1 FOR UPDATE",
+    )
+    .bind(user)
+    .fetch_one(&mut *conn)
+    .await?;
+    let active: Option<Uuid> = row.try_get("active_recovery_id")?;
+    if let Some(id) = active {
+        let changed=sqlx_core::query::query::<sqlx_postgres::Postgres>("UPDATE account_recovery_operations SET state=6,revision=revision+1,updated_at=CURRENT_TIMESTAMP WHERE id=$1 AND user_id=$2 AND state IN (1,2)").bind(id).bind(user).execute(&mut *conn).await?.rows_affected();
+        if changed == 1 {
+            sqlx_core::query::query::<sqlx_postgres::Postgres>(
+                "UPDATE account_recovery_quota SET active_count=active_count-1 WHERE singleton",
+            )
+            .execute(&mut *conn)
+            .await?;
+        }
+        sqlx_core::query::query::<sqlx_postgres::Postgres>(
+            "UPDATE account_access_slots SET expires_at=CURRENT_TIMESTAMP WHERE operation_id=$1",
+        )
+        .bind(id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    sqlx_core::query::query::<sqlx_postgres::Postgres>(
+        "DELETE FROM account_custody_nonces WHERE user_id=$1",
+    )
+    .bind(user)
+    .execute(&mut *conn)
+    .await?;
+    let row=sqlx_core::query::query::<sqlx_postgres::Postgres>("UPDATE users SET auth_epoch=auth_epoch+1,security_revision=security_revision+1,active_recovery_id=NULL,row_version=row_version+1 WHERE id=$1 RETURNING auth_epoch").bind(user).fetch_one(&mut *conn).await?;
+    if let Some(id) = keep {
+        sqlx_core::query::query::<sqlx_postgres::Postgres>(
+            "UPDATE sessions SET auth_epoch=$3 WHERE id=$1 AND user_id=$2",
+        )
+        .bind(id)
+        .bind(user)
+        .bind(row.try_get::<i64, _>("auth_epoch")?)
+        .execute(conn)
+        .await?;
+    }
     Ok(())
 }

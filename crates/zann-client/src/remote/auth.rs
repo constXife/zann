@@ -663,6 +663,22 @@ fn is_definitive_pre_dispatch_rejection(status: StatusCode) -> bool {
 fn allowlisted_server_code(body: &[u8]) -> Option<&'static str> {
     let response = serde_json::from_slice::<ApiErrorResponse>(body).ok()?;
     match response.error.as_str() {
+        "account_access_rejected" => Some("account_access_rejected"),
+        "account_security_forbidden" => Some("account_security_forbidden"),
+        "passkey_disabled" => Some("passkey_disabled"),
+        "account_access_conflict" => Some("account_access_conflict"),
+        "account_access_capacity" => Some("account_access_capacity"),
+        "account_access_rate_limit" => Some("account_access_rate_limit"),
+        "invalid_request" => Some("invalid_request"),
+        "account_access_timeout" => Some("account_access_timeout"),
+        "account_access_failed" => Some("account_access_failed"),
+        "recovery_rejected" => Some("recovery_rejected"),
+        "mutation_conflict" => Some("mutation_conflict"),
+        "recovery_rate_limit" => Some("recovery_rate_limit"),
+        "recovery_unavailable" => Some("recovery_unavailable"),
+        "recovery_disabled" => Some("recovery_disabled"),
+        "recovery_stopped" => Some("recovery_stopped"),
+        "recovery_failed" => Some("recovery_failed"),
         "db_error" => Some("db_error"),
         "device_required" => Some("device_required"),
         "email_taken" => Some("email_taken"),
@@ -1506,3 +1522,6 @@ mod network_tests {
         assert!(!format!("{header:?}").contains("access-token-secret"));
     }
 }
+
+#[cfg(feature = "app")]
+mod account_access;

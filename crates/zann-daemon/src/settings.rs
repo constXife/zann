@@ -100,6 +100,13 @@ impl DaemonControl {
         state.pairings = candidate;
         state.cursors.revoke(public_key);
         state.tickets.revoke(public_key);
+        if state
+            .account_ceremony
+            .as_ref()
+            .is_some_and(|p| p.pairing == public_key)
+        {
+            state.account_ceremony = None;
+        }
         // Revocation also cancels in-flight code enrollment: no pending proof
         // may restore authority after the user has revoked a browser.
         state.pairing = None;
