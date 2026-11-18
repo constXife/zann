@@ -1,6 +1,6 @@
 //! Ed25519 identities for authenticated local IPC; no vault keys or envelopes.
 use crate::signatures::Ed25519Secret;
-use rand::{rngs::OsRng, RngCore};
+use rand::{rngs::OsRng, Rng};
 
 pub struct IpcSigningKey(Ed25519Secret);
 
@@ -24,9 +24,7 @@ impl IpcSigningKey {
 }
 
 pub fn random_nonce() -> [u8; 32] {
-    let mut nonce = [0; 32];
-    OsRng.fill_bytes(&mut nonce);
-    nonce
+    OsRng.gen()
 }
 
 pub fn verify(public_key: &[u8; 32], message: &[u8], signature: &[u8]) -> bool {
