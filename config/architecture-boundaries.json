@@ -11,7 +11,7 @@
     "zann-core": ["zann-crypto"],
     "zann-cosmic": ["zann-client", "zann-client-sqlite", "zann-core", "zann-flows", "zann-ui-core", "zann-daemon"],
     "zann-crypto": [],
-    "zann-db": ["zann-core", "zann-crypto"],
+    "zann-db": ["zann-autofill", "zann-core", "zann-crypto"],
     "zann-ffi": ["zann-client", "zann-client-sqlite", "zann-flows", "zann-ui-core", "zann-daemon"],
     "zann-flows": ["zann-core", "zann-ui-core"],
     "zann-keystore": ["zann-crypto"],

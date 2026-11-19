@@ -36,6 +36,23 @@ impl From<MatchModeFfi> for MatchMode {
     }
 }
 
+#[derive(uniffi::Record)]
+pub struct MatchModeOptionFfi {
+    pub mode: MatchModeFfi,
+    pub label: String,
+}
+
+#[uniffi::export]
+pub fn login_match_modes() -> Vec<MatchModeOptionFfi> {
+    MatchMode::ALL
+        .into_iter()
+        .map(|mode| MatchModeOptionFfi {
+            mode: mode.into(),
+            label: mode.translation_key().into(),
+        })
+        .collect()
+}
+
 #[derive(Clone, uniffi::Record)]
 pub struct LoginMatchRulesFfi {
     pub mode: MatchModeFfi,

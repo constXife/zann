@@ -69,7 +69,7 @@ struct ItemList: View {
     private var items: some View {
         List(vault.visibleItems, id: \.id, selection: selection) { item in
             HStack(spacing: 10) {
-                ItemIcon(typeID: item.typeId)
+                ItemIcon(typeID: item.typeId, faviconRgba: item.faviconRgba)
                 // The title names the item; the caption says who or where it
                 // is for and where it lives.
                 VStack(alignment: .leading, spacing: 1) {

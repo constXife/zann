@@ -59,6 +59,23 @@ struct ItemEditorView: View {
     private var fieldList: some View {
         VStack(alignment: .leading, spacing: 16) {
             fieldRows(editor.mainFieldIndices, labeled: true)
+            if let rules = editor.matchRules {
+                Picker(strings("fields.match_rules"), selection: Binding(
+                    get: { rules.mode },
+                    set: { editor.setMatchRules(mode: $0, pattern: rules.pattern) }
+                )) {
+                    ForEach(ItemEditorModel.matchModes, id: \.mode) { option in
+                        Text(strings(option.label)).tag(option.mode)
+                    }
+                }
+                .pickerStyle(.menu)
+                if rules.mode == .regex {
+                    TextField(strings("autofill.pattern"), text: Binding(
+                        get: { rules.pattern },
+                        set: { editor.setMatchRules(mode: .regex, pattern: $0) }
+                    ))
+                }
+            }
             DisclosureGroup(isExpanded: $additionalExpanded) {
                 VStack(alignment: .leading, spacing: 8) {
                     fieldRows(editor.additionalFieldIndices, labeled: false)

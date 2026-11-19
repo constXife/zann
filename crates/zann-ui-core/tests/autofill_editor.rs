@@ -40,10 +40,7 @@ fn login_editor_preserves_rules_and_other_payload_data_across_reopen() {
 fn absent_rules_are_not_written_until_edited_and_invalid_rules_cannot_save() {
     let mut draft = ItemDraft::create("login").unwrap();
     draft.path = "site".into();
-    assert_eq!(
-        draft.login_match_rules().unwrap(),
-        Some(MatchRules::RegistrableDomain)
-    );
+    assert_eq!(draft.login_match_rules().unwrap(), Some(MatchRules::Host));
     let saved: serde_json::Value =
         serde_json::from_str(&draft.save().unwrap().payload_json).unwrap();
     assert!(saved["fields"].get(MATCH_RULES_KEY).is_none());

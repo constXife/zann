@@ -23,10 +23,7 @@ fn payload() -> EncryptedPayload {
 
 #[test]
 fn absent_rules_alone_get_the_documented_default_and_strict_rules_roundtrip() {
-    assert_eq!(
-        MatchRules::from_field(None).unwrap(),
-        MatchRules::RegistrableDomain
-    );
+    assert_eq!(MatchRules::from_field(None).unwrap(), MatchRules::Host);
     for rules in [
         MatchRules::RegistrableDomain,
         MatchRules::Host,
@@ -65,7 +62,15 @@ fn absent_rules_alone_get_the_documented_default_and_strict_rules_roundtrip() {
 #[test]
 fn payload_rules_fail_closed_and_only_logins_with_typed_urls_are_candidates() {
     let mut payload = payload();
-    let target = SiteUrl::parse("https://sub.example.com").unwrap();
+    let target = SiteUrl::parse("https://drone.p.example.com").unwrap();
+    payload.fields.get_mut("url").unwrap().value = "https://keycloak.p.example.com/login".into();
+    let matcher = LoginMatcher::from_payload(&payload).unwrap();
+    assert!(matcher.matches(&SiteUrl::parse("https://keycloak.p.example.com/realm").unwrap()));
+    assert!(!matcher.matches(&target));
+    payload.fields.insert(
+        MATCH_RULES_KEY.into(),
+        MatchRules::RegistrableDomain.field(),
+    );
     assert!(LoginMatcher::from_payload(&payload)
         .unwrap()
         .matches(&target));

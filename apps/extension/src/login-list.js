@@ -1,9 +1,18 @@
 // Shared DOM/keyboard adapter over the Rust-filtered metadata view. No matching,
 // text filtering, ranking, usage writes or secret requests live in this module.
+import { siteIcon } from './site-icons.js';
 export const LOGIN_ROW_HEIGHT = 48;
 export function visibleWindow(total, scrollTop, height, rowHeight, overscan) {
   const top = Math.min(Math.max(0, scrollTop), Math.max(0, total * rowHeight - height));
   return { start: Math.max(0, Math.floor(top / rowHeight) - overscan), end: Math.min(total, Math.ceil((top + height) / rowHeight) + overscan) };
+}
+// The observed host also identifies the saved site for an exact or same-origin match.
+export function inlineSubtitle({ username, title, match_quality }, host) {
+  const primary = username || title;
+  const suffix = ` (${username})`;
+  const label = username && title.endsWith(suffix) ? title.slice(0, -suffix.length) : title;
+  if (label && label !== primary) return label;
+  return (match_quality === 'exact' || match_quality === 'origin') && host !== primary ? host : '';
 }
 export class VirtualLoginList {
   constructor({ root, search, input, count, empty, maxHeight, messages, onError }) {
@@ -43,10 +52,10 @@ export class VirtualLoginList {
     this.input.value = ''; this.input.disabled = true; this.input.removeAttribute('aria-activedescendant'); this.root.removeAttribute('aria-activedescendant');
     this.input.setAttribute('aria-expanded', 'false'); this.search.hidden = true; this.root.hidden = true;
     this.empty.hidden = true; this.count.textContent = ''; this.layer.replaceChildren(); this.spacer.style.height = '0px';
-    this.onFill = null; this.failure = null;
+    this.icons = null; this.onFill = null; this.failure = null;
   }
-  setModel(model, onFill) {
-    this.clear(); this.model = model; this.onFill = onFill;
+  setModel(model, onFill, inlineHost, icons) {
+    this.clear(); this.model = model; this.onFill = onFill; this.inlineHost = inlineHost; this.icons = icons;
     this.selected = model.count() ? 0 : -1; this.input.maxLength = model.query_limit();
     this.search.hidden = model.total() * LOGIN_ROW_HEIGHT <= this.maxHeight;
     this.root.tabIndex = this.search.hidden ? 0 : -1;
@@ -97,13 +106,19 @@ export class VirtualLoginList {
       button.id = `${this.root.id}-row-${index}`; button.dataset.index = String(index); button.setAttribute('role', 'option');
       button.setAttribute('aria-posinset', String(index + 1)); button.setAttribute('aria-setsize', String(count));
       button.setAttribute('aria-selected', String(index === this.selected));
-      const avatar = document.createElement('span'); avatar.className = 'avatar'; avatar.setAttribute('aria-hidden', 'true');
-      avatar.textContent = Array.from(item.username || item.title)[0]?.toUpperCase() ?? '';
+      const pixels = this.icons.get(item.saved_host);
+      if (pixels) button.append(siteIcon(pixels));
+      else if (this.inlineHost === undefined) {
+        const avatar = document.createElement('span'); avatar.className = 'avatar'; avatar.setAttribute('aria-hidden', 'true');
+        avatar.textContent = Array.from(item.username || item.title)[0]?.toUpperCase() ?? '';
+        button.append(avatar);
+      }
       const copy = document.createElement('span'); copy.className = 'copy';
       const user = document.createElement('span'); user.className = 'user'; user.textContent = item.username || item.title;
-      const name = document.createElement('span'); name.className = 'name'; name.textContent = item.title; name.hidden = !item.username;
-      button.title = item.username ? `${item.username} — ${item.title}` : item.title;
-      copy.append(user, name); button.append(avatar, copy);
+      const subtitle = this.inlineHost === undefined ? (item.username ? item.title : '') : inlineSubtitle(item, this.inlineHost);
+      const name = document.createElement('span'); name.className = 'name'; name.textContent = subtitle; name.hidden = !subtitle;
+      button.title = subtitle ? `${user.textContent} — ${subtitle}` : user.textContent;
+      copy.append(user, name); button.append(copy);
       button.addEventListener('click', event => { if (event.isTrusted && this.revision === revision) this.fill(index); });
       return button;
     }));

@@ -22,7 +22,14 @@ Run these commands from the repository root so rustup uses its pinned toolchain.
 The local build requires only the macOS SDK and Rust target; iOS components are
 not needed.
 
-## Build and run
+## Install on this Mac
+
+From the repository root, run `just macos-install`. This builds the Release
+app from the current checkout, quits running copies of Zann, and opens
+`/Applications/Zann.app`. Use this copy in Finder or pin it to the Dock.
+After updating the checkout, run the same command to update the installed app.
+
+## Build and run in Xcode
 
 For a new account, first [start the development server](../../README.md#1-start-a-server)
 or use an existing server. From the repository root:

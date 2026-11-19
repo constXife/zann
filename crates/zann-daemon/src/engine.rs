@@ -117,7 +117,35 @@ impl Engine {
             return self.send(stream, nonce, request.sequence, &reply);
         }
         let delivery = |error: DaemonError| LocalError::BrowserDelivery(Box::new(error));
+        let icon_page = stream.icon_page.take();
         let result = match body {
+            Request::SiteIcons { captures } => {
+                let Some((scope, hosts)) = icon_page else {
+                    return self.send(
+                        stream,
+                        nonce,
+                        request.sequence,
+                        &Reply::Error {
+                            code: ErrorCode::Refused,
+                        },
+                    );
+                };
+                if !captures.keys().all(|host| hosts.contains(host)) {
+                    return self.send(
+                        stream,
+                        nonce,
+                        request.sequence,
+                        &Reply::Error {
+                            code: ErrorCode::Refused,
+                        },
+                    );
+                }
+                self.vault
+                    .browser_site_icons(scope, captures, &mut |icons| {
+                        self.send(stream, nonce, request.sequence, &Reply::SiteIcons { icons })
+                            .map_err(delivery)
+                    })
+            }
             Request::AccountCeremonyFinish { completion, .. } => {
                 let pending = state.account_ceremony.take().ok_or(DaemonError::Protocol)?;
                 let reply = if pending.deliver.try_send(completion).is_ok() {
@@ -226,6 +254,13 @@ impl Engine {
                 }
                 self.vault
                     .browser_query(context.clone(), after, &mut |page| {
+                        stream.icon_page = Some((
+                            page.scope.clone(),
+                            page.items
+                                .iter()
+                                .map(|item| item.saved_host.clone())
+                                .collect(),
+                        ));
                         let next_cursor = state
                             .cursors
                             .issue(page.next_cursor, &public, nonce, &context)

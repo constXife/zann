@@ -20,8 +20,8 @@ pub enum MatchMode {
 
 impl MatchMode {
     pub const ALL: [Self; 5] = [
-        Self::RegistrableDomain,
         Self::Host,
+        Self::RegistrableDomain,
         Self::Exact,
         Self::Regex,
         Self::Never,
@@ -42,8 +42,8 @@ impl MatchMode {
 #[serde(tag = "mode", rename_all = "kebab-case")]
 pub enum MatchRules {
     #[default]
-    RegistrableDomain,
     Host,
+    RegistrableDomain,
     Exact,
     Regex {
         pattern: String,
@@ -85,7 +85,7 @@ impl std::fmt::Debug for MatchRules {
 }
 
 impl MatchRules {
-    /// Absence alone means the documented domain default for existing logins.
+    /// Absence alone means the same-origin default for existing logins.
     /// Malformed, empty or future rules never downgrade to that default.
     pub fn from_field(field: Option<&FieldValue>) -> Result<Self, AutofillError> {
         let Some(field) = field else {

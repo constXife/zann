@@ -99,8 +99,8 @@
     "connected": "Подключён"
   },
   "autofill": {
-    "registrableDomain": "Основной домен",
-    "host": "Хост",
+    "registrableDomain": "Основной домен и его поддомены",
+    "host": "Только этот хост",
     "exact": "Точный URL",
     "regex": "Регулярное выражение",
     "never": "Не заполнять",

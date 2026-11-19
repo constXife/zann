@@ -11,7 +11,7 @@ use zann_ui_core::item_editor::{
 use crate::{CoreError, CoreResult, ItemCreate, ItemDetail, ItemUpdate};
 
 mod autofill;
-pub use autofill::{LoginMatchRulesFfi, MatchModeFfi};
+pub use autofill::{login_match_modes, LoginMatchRulesFfi, MatchModeFfi, MatchModeOptionFfi};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, uniffi::Enum)]
 pub enum FieldKindFfi {

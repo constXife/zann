@@ -140,6 +140,8 @@ pub struct ItemPreview {
     pub type_id: String,
     /// Who or where the item is for, from its payload; see `item_subtitle`.
     pub subtitle: Option<ItemSubtitle>,
+    #[serde(skip)]
+    pub favicon_rgba: Option<Vec<u8>>,
     pub sync_status: SyncStatus,
     pub updated_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,

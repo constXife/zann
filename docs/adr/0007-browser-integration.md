@@ -112,7 +112,7 @@ updated by an ordinary PR, the same idiom `docs/Architecture.md` already uses fo
 digest-pinned sources.
 
 **7. `login` gains explicit match rules.** A `match_rules` field with modes
-`registrable-domain` (default), `host`, `exact`, `regex` and `never`, plus an
+`host` (default), `registrable-domain` (explicit opt-in), `exact`, `regex` and `never`, plus an
 equivalent-domain list shipped as data. `never` matters as much as the rest: it
 is how a user says "this credential is not for autofill".
 
@@ -165,7 +165,7 @@ the equivalent-domain list has no obvious owner yet.
 | | Phase | Risk |
 |---|---|---|
 | 0 | `zann-autofill`: origins, public-suffix list, match rules, fill policy — pure functions, adversarial tests, no client | low |
-| 1 | `match_rules` on the `login` payload, security profile and UI in COSMIC; migration defaults to `registrable-domain` | low |
+| 1 | `match_rules` on the `login` payload, security profile and UI in COSMIC; absence of a rule defaults to `host` | low |
 | 2 | Daemon: socket, `SO_PEERCRED`, pairing, revocation UI, session ownership | **high** |
 | 3 | Native-messaging host: stdio framing, manifests for both browsers, nothing else | low |
 | 4 | Extension: password and TOTP autofill, save prompt, generator | **high** |
@@ -377,6 +377,19 @@ Measured before this change: the toolbar required a separate form selection,
 all matches. The user requested focus-triggered suggestions after manually
 checking fill/save/generation/TOTP. This extends this ADR, not another matcher,
 vault session, wire version or credential writer.
+
+### Amendment — optional all-HTTPS field suggestions (2026-11-19)
+
+In addition to the exact-host workflow below, a toolbar action can request
+`https://*/*` for field suggestions. This trades least privilege for a single
+consent prompt across sites. Chrome owns both grant scopes. Revoking the broad
+grant leaves individually enabled hosts available. The wildcard registers
+only the isolated, top-document field adapter. Both WebAuthn scripts and the
+worker’s admission and confirmation checks require the exact-host grant.
+Origin matching, explicit selection and native release checks still apply on
+each use. The same registration lock reconciles both scopes on restart.
+The Chromium inline test exercises the chooser on a second HTTPS hostname and
+checks that the page has its native passkey provider.
 
 ### Decision and lifecycle
 

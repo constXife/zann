@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "minimum_chrome_version": "122",
   "description": "Fill logins and confirm passkey requests with your unlocked Zann desktop vault.",
-  "permissions": ["activeTab", "scripting", "nativeMessaging", "storage", "webNavigation"],
+  "permissions": ["activeTab", "favicon", "scripting", "nativeMessaging", "storage", "webNavigation"],
   "optional_host_permissions": ["https://*/*", "http://localhost/*"],
   "background": { "service_worker": "background.js", "type": "module" },
   "web_accessible_resources": [{ "resources": ["inline.html"], "matches": ["https://*/*"], "use_dynamic_url": true }],

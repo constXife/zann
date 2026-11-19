@@ -238,7 +238,7 @@ feature of `zann-client`. Desktop-only FFI dependency selection leaves iOS and
 Android builds free of the native daemon. See [the IPC contract](browser-ipc.md).
 
 The Chromium extension (`apps/extension`, #25) is an MV3 toolbar popup and an
-opt-in per-site field chooser over the
+opt-in HTTPS field chooser over the
 `zann-browser` WASM edge. `zann-client::browser_ipc` owns the shared wire records,
 transcripts, serialized single-flight client state and bounded local autofill
 usage/ranking policy; the daemon no longer
@@ -246,7 +246,7 @@ maintains a parallel protocol module. `browser-ipc` compiles without remote,
 config, Tokio, SQLite or keystore features. WASM projects that owner, `zann-crypto`, and toolkit-neutral `zann-ui-core`
 login filtering/window projections. JS extracts document identity from Chrome APIs and implements
 bounded isolated-world DOM reads/writes; Rust retains URL/pairing/release rules.
-Chrome owns persistent HTTPS host grants and dynamic top-document registrations.
+Chrome owns the exact-host and optional all-HTTPS grants. The all-HTTPS grant enables top-document field suggestions. Passkey handling requires an exact-host grant.
 The inline chooser is an extension-origin iframe; its worker binds both ports to
 browser-observed top document identity and the iframe's read-only ancestor
 origins, and injects released secrets directly

@@ -15,7 +15,7 @@ fn chromium_fixture() {
     }
     fixture.login("Example", "https://example.test");
     for n in 32..64 {
-        fixture.login(&format!("Unrelated {n}"), "https://unrelated.test");
+        fixture.login(&format!("Sibling {n}"), "https://other.example.test");
     }
     fixture.login("Second login", "https://example.test");
     let count: usize = std::env::var("ZANN_CHROMIUM_MATCHES")

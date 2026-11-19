@@ -15,6 +15,8 @@ final class ItemEditorModel: ObservableObject, Identifiable {
     private static let schemas = itemTypeSchemas()
     static let typeIDs = schemas.map(\.typeId)
 
+    static let matchModes = loginMatchModes()
+
     /// Every kind the draft accepts, in the order COSMIC lists them.
     static let kinds: [FieldKindFfi] = [.text, .password, .url, .otp, .note]
 
@@ -23,6 +25,7 @@ final class ItemEditorModel: ObservableObject, Identifiable {
     @Published var folder: String
     @Published private(set) var typeID: String
     @Published private(set) var fields: [DraftFieldFfi]
+    @Published private(set) var matchRules: LoginMatchRulesFfi?
     @Published private(set) var busy = false
     /// The draft error's translation key, or a core error's own message.
     @Published private(set) var error: EditorError?
@@ -44,7 +47,9 @@ final class ItemEditorModel: ObservableObject, Identifiable {
 
     var additionalFieldIndices: [Int] {
         let main = Set(mainFieldIndices)
-        return fields.indices.filter { !main.contains($0) }
+        return fields.indices.filter {
+            !main.contains($0) && (matchRules == nil || fields[$0].key != "match_rules")
+        }
     }
 
     var missingMainFields: [FieldDefinitionFfi] {
@@ -62,6 +67,7 @@ final class ItemEditorModel: ObservableObject, Identifiable {
         folder = draft.folder() ?? ""
         typeID = draft.typeId()
         fields = draft.fields()
+        refreshMatchRules()
     }
 
     static func create(typeID: String) throws -> ItemEditorModel {
@@ -70,6 +76,10 @@ final class ItemEditorModel: ObservableObject, Identifiable {
 
     static func edit(_ item: ItemDetail) throws -> ItemEditorModel {
         ItemEditorModel(mode: .edit(id: item.id), draft: try ItemDraftFfi.edit(detail: item))
+    }
+
+    func setMatchRules(mode: MatchModeFfi, pattern: String) {
+        apply { try draft.setLoginMatchRules(rules: LoginMatchRulesFfi(mode: mode, pattern: pattern)) }
     }
 
     func setType(_ value: String) {
@@ -145,6 +155,16 @@ final class ItemEditorModel: ObservableObject, Identifiable {
         }
         typeID = draft.typeId()
         fields = draft.fields()
+        refreshMatchRules()
+    }
+
+    private func refreshMatchRules() {
+        do {
+            matchRules = try draft.loginMatchRules()
+        } catch {
+            matchRules = nil
+            self.error = Self.editorError(error)
+        }
     }
 
     private static func editorError(_ error: Error) -> EditorError {

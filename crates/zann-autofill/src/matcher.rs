@@ -31,15 +31,24 @@ impl LoginMatcher {
     }
 
     pub fn from_payload(payload: &EncryptedPayload) -> Result<Self, AutofillError> {
+        let site = Self::login_site(payload)?;
+        let rules = MatchRules::from_field(payload.fields.get(MATCH_RULES_KEY))?;
+        Self::new(site, rules)
+    }
+
+    pub fn saved_host(&self) -> &str {
+        self.site.host()
+    }
+
+    pub fn login_site(payload: &EncryptedPayload) -> Result<SiteUrl, AutofillError> {
         if payload.type_id != "login" {
             return Err(AutofillError::Login);
         }
-        let rules = MatchRules::from_field(payload.fields.get(MATCH_RULES_KEY))?;
         let field = payload.fields.get("url").ok_or(AutofillError::Login)?;
         if field.kind != FieldKind::Url {
             return Err(AutofillError::Login);
         }
-        Self::new(SiteUrl::parse(&field.value)?, rules)
+        SiteUrl::parse(&field.value)
     }
 
     pub fn matches(&self, target: &SiteUrl) -> bool {

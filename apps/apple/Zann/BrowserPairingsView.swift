@@ -5,8 +5,11 @@ import ZannCoreKit
 struct BrowserPairingsView: View {
     let core: CoreFacade?
     let strings: Strings
+    let preferences: DevicePreferencesFfi
+    @Environment(\.copyFeedbackDuration) private var copyFeedbackDuration
     @State private var settings: BrowserPairingSettingsFfi?
     @State private var code: BrowserPairingCodeFfi?
+    @State private var copiedCodeID: String?
     @State private var busy = false
     @State private var error: String?
 
@@ -16,8 +19,14 @@ struct BrowserPairingsView: View {
             Button(strings("browser.connect")) { Task { await begin() } }
                 .disabled(busy || core == nil)
             if let code {
-                Text("\(strings("browser.code")): \(code.value)")
-                    .font(.title.monospaced()).privacySensitive()
+                LabeledContent(strings("browser.code")) {
+                    Text(code.value)
+                        .font(.title.monospaced()).privacySensitive()
+                    Button(strings(copiedCodeID == code.id ? "common.copied" : "browser.copyCode")) {
+                        Task { await copyCode(id: code.id) }
+                    }
+                    .disabled(busy)
+                }
             }
             Button(strings("browser.refresh")) { Task { await refresh() } }
                 .disabled(busy || core == nil)
@@ -36,6 +45,13 @@ struct BrowserPairingsView: View {
             if let error { Text(error).foregroundStyle(.red) }
         }
         .task { await refresh() }
+        .task(id: copiedCodeID) {
+            guard copiedCodeID != nil else { return }
+            do { try await Task.sleep(for: copyFeedbackDuration) }
+            catch is CancellationError { return }
+            catch { self.error = describe(error); return }
+            copiedCodeID = nil
+        }
         .task(id: code?.id) {
             guard let current = code else { return }
             // Native settings decides whether the code is still active. Poll
@@ -53,8 +69,9 @@ struct BrowserPairingsView: View {
         .onDisappear { code = nil }
     }
 
-    @MainActor private func refresh() async {
-        guard let core, !busy else { return }
+    @discardableResult
+    @MainActor private func refresh() async -> BrowserPairingSettingsFfi? {
+        guard let core, !busy else { return nil }
         busy = true
         let result = await BlockingCore.run {
             Result { try core.browserPairings() }
@@ -65,8 +82,19 @@ struct BrowserPairingsView: View {
             settings = value
             if value.activeCodeId != code?.id { code = nil }
             error = nil
-        case .failure(let failure): error = describe(failure)
+            return value
+        case .failure(let failure):
+            error = describe(failure)
+            return nil
         }
+    }
+
+    @MainActor private func copyCode(id: String) async {
+        guard let current = await refresh(), current.activeCodeId == id,
+              let code, code.id == id else { return }
+        Clipboard.copy(code.value, clearAfter: preferences.clipboardClearSeconds,
+                       onlyIfUnchanged: preferences.clipboardClearIfUnchanged)
+        copiedCodeID = id
     }
 
     @MainActor private func begin() async {

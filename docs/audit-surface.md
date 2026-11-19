@@ -38,6 +38,10 @@ The current surface covers:
 
 - website origin parsing, PSL/equivalent-domain matching, login rules and fill
   admission in `crates/zann-autofill/**`, including the vendored data and pins;
+- Site icon handling in `crates/zann-db/src/services/site_icons.rs`,
+  `apps/extension/src/site-icons.js` and the browser IPC channel. A one-use
+  grant binds a page of admitted hosts to the channel and selected vault.
+  The local cache authenticates the scope and host tag with each ciphertext.
 - local IPC authorization, replay protection, Noise/signature binding,
   private identity/pairing persistence and lifecycle in `crates/zann-daemon/**`;
 - the stateless framing/registration bridge in `crates/zann-native-host/**`
@@ -132,8 +136,8 @@ shell Connect reducer shapes. Native executors do not abort canonical crash-safe
 credential commits or roll back a completed trust decision.
 ## Chromium extension (#25)
 
-- `apps/extension/**`: packaged MV3 permissions/CSP, toolbar, per-host grants and
-  registrations, isolated DOM adapter, worker port/document binding and
+- `apps/extension/**`: packaged MV3 permissions/CSP, toolbar, per-host grants, optional all-HTTPS field suggestions and
+  script registrations, isolated DOM adapter, worker port/document binding and
   extension-origin field chooser; identity storage and transient capture/fill lifecycle.
 - `crates/zann-browser/**`: WASM projection, browser entropy feature selection.
 - `crates/zann-client/src/browser_ipc{.rs,/**}`: canonical shared wire/signature and

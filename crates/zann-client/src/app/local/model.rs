@@ -36,6 +36,7 @@ pub struct ItemSummary {
     pub type_id: String,
     /// Who or where the item is for; see `zann_core::item_subtitle`.
     pub subtitle: Option<ItemSubtitle>,
+    pub favicon_rgba: Option<Vec<u8>>,
     pub deleted: bool,
 }
 

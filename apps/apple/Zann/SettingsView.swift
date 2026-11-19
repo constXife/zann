@@ -23,7 +23,7 @@ struct SettingsView: View {
                     .tabItem { Label(model.strings("settings.tabs.backups"), systemImage: "externaldrive") }
             }
             Form {
-                BrowserPairingsView(core: model.browserCore, strings: model.strings)
+                BrowserPairingsView(core: model.browserCore, strings: model.strings, preferences: model.preferences)
             }
             .formStyle(.grouped)
             .frame(height: 420)

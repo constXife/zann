@@ -17,8 +17,8 @@ export const loginList = new VirtualLoginList({
   messages: { empty: 'No matching logins for this website.', noResults: 'No logins match your search.', count: (found, total) => found === total ? `${total} logins` : `${found} of ${total} logins` },
   onError: error => notice(error.message, true)
 });
-export function matches(items, onFill) {
-  loginList.setModel(new NativeLoginList(JSON.stringify(items)), onFill);
+export function matches(items, onFill, icons) {
+  loginList.setModel(new NativeLoginList(JSON.stringify(items)), onFill, undefined, icons);
 }
 export function clearMatches() { loginList.clear(); }
 export function discard() { $('save-login').reset(); $('save-login').hidden = true; }

@@ -21,6 +21,7 @@ fn item(id: usize) -> BrowserMatch {
         item_id: id.to_string(),
         title: format!("Login {id}"),
         username: None,
+        saved_host: "example.com".into(),
         match_quality: zann_autofill::MatchQuality::Origin,
     }
 }

@@ -8,6 +8,10 @@ pub(crate) struct Channel<'a> {
     stream: &'a mut UnixStream,
     noise: IpcTransport,
     binding: [u8; 32],
+    pub icon_page: Option<(
+        zann_client::browser_ipc::BrowserScope,
+        std::collections::BTreeSet<String>,
+    )>,
     confirmation_pending: bool,
     account_pending: bool,
 }
@@ -21,6 +25,7 @@ impl<'a> Channel<'a> {
         let binding = handshake.binding()?;
         Ok(Self {
             binding,
+            icon_page: None,
             confirmation_pending: false,
             account_pending: false,
             stream,

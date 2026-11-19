@@ -87,6 +87,9 @@ pub enum Request {
     PairFinish {
         confirmation: String,
     },
+    SiteIcons {
+        captures: std::collections::BTreeMap<String, Option<String>>,
+    },
     Query {
         context: BrowserContext,
         cursor: Option<String>,
@@ -136,6 +139,9 @@ pub enum Reply {
         confirmation: String,
     },
     Paired {},
+    SiteIcons {
+        icons: std::collections::BTreeMap<String, String>,
+    },
     Matches {
         page: MatchPage,
     },

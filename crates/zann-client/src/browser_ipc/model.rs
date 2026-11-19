@@ -31,6 +31,7 @@ pub struct BrowserMatch {
     pub item_id: String,
     pub title: String,
     pub username: Option<String>,
+    pub saved_host: String,
     pub match_quality: zann_autofill::MatchQuality,
 }
 
