@@ -134,14 +134,18 @@ final class MobileWorkspaceTests: XCTestCase {
         confirmationPassword.typeText("synthetic mobile UI fixture")
         app.buttons["export.confirm"].tap()
         let save = app.descendants(matching: .any).matching(identifier: "Save").firstMatch
-        // A fresh CI simulator can take over 10 seconds to cold-start Files.
-        XCTAssertTrue(save.waitForExistence(timeout: 30))
+        // Files runs out of process. Its controls can arrive after the sheet is visible.
+        XCTAssertTrue(save.waitForExistence(timeout: 60), "Files did not present the export picker")
         capture(app, "maintenance-files-export")
         cancelExport(in: app, save: save)
-        expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: save)
-        expectation(for: NSPredicate { _, _ in self.fullyVisible(export, in: app) }, evaluatedWith: app)
-        waitForExpectations(timeout: 5)
-        XCTAssertTrue(export.isEnabled)
+        // During dismissal even the app's window can briefly disappear from
+        // the accessibility tree. Wait for Settings to return before asking
+        // for element geometry or checking that the Files controls are gone.
+        XCTAssertTrue(export.waitForExistence(timeout: 30), "Settings did not return after export cancellation")
+        expectation(for: NSPredicate { _, _ in
+            export.exists && export.isEnabled && self.fullyVisible(export, in: app) && !save.exists
+        }, evaluatedWith: app)
+        waitForExpectations(timeout: 30)
     }
 
     func testConnectAndUnlockFormsWithSoftwareKeyboard() {
@@ -185,7 +189,7 @@ final class MobileWorkspaceTests: XCTestCase {
         if UIDevice.current.userInterfaceIdiom == .pad {
             // The tablet picker supports explicit cancellation; dragging changes its detent.
             let cancel = app.buttons["Cancel"].firstMatch
-            XCTAssertTrue(cancel.waitForExistence(timeout: 5))
+            XCTAssertTrue(cancel.waitForExistence(timeout: 30))
             cancel.tap()
         } else {
             // Phone picker Cancel AX proxies can overlap Files' search controls.
