@@ -572,7 +572,7 @@ jobs:
     runs-on: macos-latest
     # Budget cold Rust builds, macOS tests, two serial mobile families and
     # Release slices on the hosted Apple runner.
-    timeout-minutes: 60
+    timeout-minutes: 80
     steps:
       - name: Checkout
         uses: actions/checkout@v4
