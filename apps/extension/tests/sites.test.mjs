@@ -43,6 +43,29 @@ test('global suggestions and exact passkey grants are independent through revoke
   }
 });
 
+test('installing stops when the tab closes or navigation removes the target document', async () => {
+  const frame = { url: 'https://example.test/login', documentId: 'original' };
+  const chrome = {
+    webNavigation: { getFrame: async () => { throw new Error('No tab with id: 5'); } },
+    permissions: { getAll: async () => ({ origins: ['https://example.test/*'] }) },
+    scripting: { executeScript: assert.fail }
+  };
+  await installInTab(chrome, 5);
+  chrome.webNavigation.getFrame = async () => frame;
+  const injections = [];
+  chrome.scripting.executeScript = async ({ target, files }) => {
+    assert.deepEqual(target.documentIds, ['original']);
+    injections.push(...files);
+    if (injections.length === 2) throw new Error('Frame with ID 0 was removed.');
+  };
+  await installInTab(chrome, 5);
+  assert.deepEqual(injections, ['passkey-isolated-content.js', 'passkey-main-content.js']);
+
+  const denied = new Error('Cannot access contents of the page.');
+  chrome.scripting.executeScript = async () => { throw denied; };
+  await assert.rejects(installInTab(chrome, 5), error => error === denied);
+});
+
 test('all-sites button requests only the optional HTTPS scope and reflects denial and revocation', async t => {
   const elements = new Map();
   const document = { getElementById(id) {

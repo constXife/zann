@@ -44,12 +44,19 @@ export async function syncSites(chrome, locks) {
 }
 
 export async function installInTab(chrome, tabId) {
-  const frame = await chrome.webNavigation.getFrame({ tabId, frameId: 0 });
-  if (!frame?.documentId) return;
-  const access = await siteAccess(chrome, frame.url);
-  if (!access.suggestions) return;
-  const target = { tabId, documentIds: [frame.documentId] };
-  // Existing documents need the isolated bridge ready before the page shim.
-  const scripts = access.passkeys ? [...passkeyScripts, inlineScript] : [inlineScript];
-  for (const { js: files, world } of scripts) await chrome.scripting.executeScript({ target, files, world });
+  try {
+    const frame = await chrome.webNavigation.getFrame({ tabId, frameId: 0 });
+    if (!frame?.documentId) return;
+    const access = await siteAccess(chrome, frame.url);
+    if (!access.suggestions) return;
+    const target = { tabId, documentIds: [frame.documentId] };
+    // Existing documents need the isolated bridge ready before the page shim.
+    const scripts = access.passkeys ? [...passkeyScripts, inlineScript] : [inlineScript];
+    for (const { js: files, world } of scripts) await chrome.scripting.executeScript({ target, files, world });
+  } catch (error) {
+    // Activation and navigation can outlive their target. Leave the replacement
+    // document to its own registration and keep all other API errors visible.
+    if (error?.message === `No tab with id: ${tabId}` || error?.message === 'Frame with ID 0 was removed.') return;
+    throw error;
+  }
 }
