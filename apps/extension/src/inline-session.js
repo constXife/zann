@@ -1,7 +1,8 @@
 import { NativeLoginSearch, generate_password } from './wasm/zann_browser.js';
+import { SiteIconSearch } from './site-icons.js';
 import { collectLogins } from './search.js';
 import { pairedConnection } from './paired.js';
-import { hasSite } from './sites.js';
+import { siteAccess } from './sites.js';
 import { identifyChooser } from './chooser-document.js';
 import { rankLogins, fillAndRemember } from './usage.js';
 
@@ -28,7 +29,7 @@ export class InlineSession {
   async current(epoch) {
     if (epoch !== this.epoch) throw new Error('Suggestions changed.');
     await this.page.assertCurrent(this.target);
-    if (!await hasSite(this.chrome, this.target.top.url)) throw new Error('Site permission was removed.');
+    if (!(await siteAccess(this.chrome, this.target.top.url)).suggestions) throw new Error('Site permission was removed.');
     if (epoch !== this.epoch) throw new Error('Suggestions changed.');
   }
   async open(message, epoch) {
@@ -86,12 +87,13 @@ export class InlineSession {
     this.picker.postMessage({ type: 'loading' });
     this.abort = new AbortController();
     const { native, identity } = await this.connection(epoch);
+    const siteIcons = new SiteIconSearch(this.target.top.url);
     const result = await collectLogins(native, new NativeLoginSearch(JSON.stringify(this.target.context)), {
-      assertCurrent: () => this.current(epoch), onProgress: () => {}, clock: () => performance.now(), signal: this.abort.signal
+      siteIcons, assertCurrent: () => this.current(epoch), onProgress: () => {}, clock: () => performance.now(), signal: this.abort.signal
     });
     const ranked = await rankLogins(this.chrome, identity, navigator.locks, result);
     await this.current(epoch); this.items = ranked.items; this.scope = ranked.scope;
-    this.picker.postMessage({ type: 'matches', items: this.items });
+    this.picker.postMessage({ type: 'matches', items: this.items, icons: [...siteIcons.icons] });
     native.close(); this.native = null;
   }
   async action(message, epoch) {

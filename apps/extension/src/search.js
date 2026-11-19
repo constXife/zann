@@ -1,5 +1,5 @@
 // Transport/browser effects only. Rust owns continuation, aggregation and bounds.
-export async function collectLogins(connection, search, { assertCurrent, onProgress, clock, signal }) {
+export async function collectLogins(connection, search, { assertCurrent, onProgress, clock, signal, siteIcons }) {
   const started = clock();
   try {
     let complete;
@@ -11,6 +11,7 @@ export async function collectLogins(connection, search, { assertCurrent, onProgr
       await assertCurrent();
       if (reply.status !== 'matches') throw new Error('Unexpected login query reply.');
       complete = search.accept_page(JSON.stringify(reply.page), clock() - started);
+      await siteIcons.collect(connection, reply.page.items, assertCurrent);
       onProgress(search.matches_found());
     } while (!complete);
     return JSON.parse(search.result(clock() - started));

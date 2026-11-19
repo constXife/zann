@@ -9,9 +9,10 @@ fn typed_match_rules_cross_ffi_and_survive_edit_without_losing_fields() {
     draft.set_field_value(1, "private-sentinel".into()).unwrap();
     assert_eq!(
         draft.login_match_rules().unwrap().unwrap().mode,
-        MatchModeFfi::RegistrableDomain
+        MatchModeFfi::Host
     );
     for mode in [
+        MatchModeFfi::RegistrableDomain,
         MatchModeFfi::Host,
         MatchModeFfi::Exact,
         MatchModeFfi::Never,

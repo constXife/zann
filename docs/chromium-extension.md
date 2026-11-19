@@ -5,7 +5,7 @@ description: Build, install and pair the Chromium browser extension.
 
 # Chromium extension (#25)
 
-`apps/extension` is a Manifest V3 toolbar popup with an optional per-site
+`apps/extension` is a Manifest V3 toolbar popup with an optional HTTPS
 field chooser. It connects only to the local
 `com.rlyeh.zann` native host from [#199](browser-ipc.md), never to a server.
 It implements password/TOTP fill, explicit review-and-save capture, and a local
@@ -44,9 +44,9 @@ Do not commit generated WASM/glue or the unpacked distribution.
    rebuild/moving a binary does not silently relocate an installed manifest.
 3. Open the native macOS/COSMIC client on that same root. In **Settings → Browser
    connections**, click **Connect browser** to display a one-time six-digit code.
-   COSMIC shows **Copy code** beside the code, a remaining-lifetime counter and
-   transient copied feedback. Copy uses the normal native clipboard clear policy;
-   the native owner is checked first so consumed/expired codes are not copied.
+   Click **Copy code** beside the code. Both desktop clients check that the code
+   is still active and use your clipboard clearing preferences. COSMIC also
+   shows the remaining time.
 4. Paste that code in the extension and click **Connect**. It expires in
    two minutes and permits five attempts total. A new native code replaces the
    previous one. Successful PAKE pairing consumes the code, saves native trust
@@ -72,9 +72,17 @@ are visible states with an explicit reconnect action, not a cloud fallback.
 
 ## Suggestions beside fields
 
-In the toolbar, expand **Suggestions beside fields** and select **Enable on this
-site**. Chrome asks for optional access to that exact HTTPS host (all ports,
-without subdomains). Focus a visible username/password field: Zann places its
+Open the Zann toolbar popup and select **Settings → Field suggestions → Enable
+on all HTTPS sites**. Accept Chrome’s permission prompt once. To limit access
+to a single HTTPS hostname, use **This site → Enable on this site** instead.
+Exact-host grants cover all ports on that hostname. Passkey handling requires
+an exact-host grant even when field suggestions are enabled globally.
+
+By default a login appears only on the host, scheme and port of its saved URL.
+For a login shared across sibling subdomains, edit the login in Zann, choose
+**Autofill matching → Domain including subdomains**, and save it.
+
+Focus a visible username/password field: Zann places its
 key button at the field and opens matching accounts above/below it. Click a
 login or use arrows and Enter; successful filling, Escape or an outside click
 closes the chooser. The compact chooser is 320 CSS pixels wide (clamped to the
@@ -98,8 +106,8 @@ to DOM. Neither value enters the chooser or persistent extension storage.
 Unlock/pair in the native application/toolbar if requested, then retry search.
 Save remains the existing toolbar review flow below.
 
-**Disable on this site** removes Chrome's grant, registered access and active
-chooser. Chrome's extension site settings can revoke it too. Grants and dynamic
+**Turn off all-sites suggestions** returns field suggestions to individually
+granted sites. **Disable on this site** removes the individual grant. Chrome's extension site settings can revoke it too. Grants and dynamic
 script registrations are Chrome-owned; extension storage has no duplicate host
 list. Top-document forms only are supported inline; the toolbar's explicit
 same-origin frame selection remains available. No default host access is granted.
@@ -135,7 +143,7 @@ The generated value remains transient until an explicit fill or save action.
 | --- | --- |
 | `activeTab` | Temporary page access following the toolbar action; independent of optional persistent grants. |
 | `scripting` | Shared bounded isolated-world inspection/insertion and dynamic top-document content registration on granted hosts. |
-| Optional `https://*/*` | Declares HTTPS capability only; the user grants one exact hostname at a time from the toolbar. No required host permission or subdomain wildcard. |
+| Optional `https://*/*` | The user can grant a single hostname or enable field suggestions on all HTTPS sites. The broad grant registers only the top-document isolated field adapter. |
 | `webNavigation` | Privileged frame URLs and stable document IDs; a page never supplies its claimed origin. |
 | `nativeMessaging` | Launch the one registered local framing bridge. |
 | `storage` | Persist versioned pairing identity/server pin and bounded opaque successful-fill MRU in `storage.local`, restricted to `TRUSTED_CONTEXTS`; never sync storage. |
@@ -151,7 +159,7 @@ invalidates the chooser; toolbar actions on stale references refuse.
 The inline iframe uses packaged extension code and its own internal runtime port,
 never a window `postMessage` bridge. The worker admits a content producer by
 extension ID, tab, top frame, stable document ID, current browser-observed URL
-and exact site grant. A transient random capability associates the chooser;
+and an effective field-suggestion grant. A transient random capability associates the chooser;
 its runtime sender must be an extension iframe in that same tab with a document
 ID, and its packaged code reports the read-only browser `ancestorOrigins` (one
 ancestor, the expected top origin). Chrome excludes extension-origin subframes
@@ -187,8 +195,12 @@ or cached in storage. WASM-owned plaintext input/output temporaries are zeroized
 edge. JS/browser message copies cannot promise forensic memory
 erasure; the profile's client signing seed is itself authority for an approved
 pairing and must be revoked if the browser profile is compromised. Vault/master
-keys and raw payloads never enter this boundary. Site favicons are not fetched;
-local branded icons and initials avoid adding network requests or permissions.
+keys and raw payloads never enter this boundary. The extension uses Chrome’s `favicon` permission to read local site icons.
+Each authenticated matches page authorizes one icon exchange for its saved hosts.
+Chrome pixel data is sampled to 16×16 RGBA8. Missing icons leave any stored
+copy intact. Zann stores encrypted pixels under a vault-keyed host tag and
+projects the same icon to the desktop list and the extension. The exchange
+carries no remote image URLs or encoded image files.
 
 An idle native connection expires after five seconds. Inline search closes its
 channel after returning complete metadata and reconnects only for a new fill. A new explicit popup
@@ -241,7 +253,7 @@ password+TOTP insertion, explicit save, generator, complete automatic search acr
 empty/matching native pages, URL-change cancellation, storage
 contents, no window/external message entry points, synthetic inline click refusal,
 keyboard selection, inline TOTP/generation, detached nodes and SPA reattachment,
-exact-host grant/revocation and registration unit tests, no replay after disconnect, selection
+global and exact-host grant/revocation and registration unit tests, no replay after disconnect, selection
 changes, and transaction rollback when pending-change insertion fails. CI builds
 and uploads the unpacked artifact and runs the browser test on Linux.
 

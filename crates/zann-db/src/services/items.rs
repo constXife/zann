@@ -142,27 +142,48 @@ impl<'a> ItemsService for LocalServices<'a> {
         // row without a subtitle, and opening the item reports the error, so
         // one damaged item never hides the rest.
         let keys = self.vault_payload_keys(storage_id, vault_id).await?;
+        let mut hosts = Vec::with_capacity(items.len());
+        let mut previews: Vec<_> = items
+            .into_iter()
+            .map(|item| {
+                let payload = self.open_payload(&keys, item.id, &item.payload_enc).ok();
+                let subtitle = payload
+                    .as_ref()
+                    .and_then(|p| item_subtitle(&item.type_id, p));
+                hosts.push(
+                    payload
+                        .as_ref()
+                        .and_then(|p| zann_autofill::LoginMatcher::login_site(p).ok())
+                        .map(|url| url.host().to_owned()),
+                );
+                ItemPreview {
+                    id: item.id,
+                    vault_id: item.vault_id,
+                    path: item.path,
+                    name: item.name,
+                    type_id: item.type_id,
+                    subtitle,
+                    favicon_rgba: None,
+                    sync_status: item.sync_status,
+                    updated_at: item.updated_at,
+                    deleted_at: item.deleted_at,
+                }
+            })
+            .collect();
+        let icons = self
+            .read_site_icons(
+                storage_id,
+                vault_id,
+                &keys.primary,
+                hosts.iter().flatten().map(String::as_str),
+            )
+            .await
+            .map_err(|e| ServiceError::new("site_icon_read", e.to_string()))?;
+        for (item, host) in previews.iter_mut().zip(hosts) {
+            item.favicon_rgba = host.and_then(|host| icons.get(&host).cloned());
+        }
         Ok(ItemPreviewPage {
-            items: items
-                .into_iter()
-                .map(|item| {
-                    let subtitle = self
-                        .open_payload(&keys, item.id, &item.payload_enc)
-                        .ok()
-                        .and_then(|payload| item_subtitle(&item.type_id, &payload));
-                    ItemPreview {
-                        id: item.id,
-                        vault_id: item.vault_id,
-                        path: item.path,
-                        name: item.name,
-                        type_id: item.type_id,
-                        subtitle,
-                        sync_status: item.sync_status,
-                        updated_at: item.updated_at,
-                        deleted_at: item.deleted_at,
-                    }
-                })
-                .collect(),
+            items: previews,
             next_cursor,
             total_count: total_count as usize,
             counts: ItemCounts {

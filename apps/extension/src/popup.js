@@ -1,5 +1,6 @@
 import { showPendingAccount } from './account-launch.js';
 import init, { NativePairing, NativeLoginSearch, create_identity, checked_context, generate_password } from './wasm/zann_browser.js';
+import { SiteIconSearch } from './site-icons.js';
 import { collectLogins } from './search.js';
 import { NativeConnection } from './native.js';
 import { BrowserPage, PageError } from './browser.js';
@@ -63,15 +64,16 @@ async function query() {
   const selected = target;
   searchAbort = new AbortController();
   notice('Searching all logins for this website…');
+  const siteIcons = new SiteIconSearch(selected.top.url);
   const result = await collectLogins(native, new NativeLoginSearch(JSON.stringify(selected.context)), {
-    assertCurrent: () => page.assertCurrent(selected),
+    siteIcons, assertCurrent: () => page.assertCurrent(selected),
     onProgress: found => notice(`Searching logins… ${found} matches found.`),
     clock: () => performance.now(), signal: searchAbort.signal
   });
   const ranked = await rankLogins(chrome, identity, navigator.locks, result);
   searchAbort.signal.throwIfAborted(); await page.assertCurrent(selected);
   scope = ranked.scope;
-  matches(ranked.items, item => { void action(() => fill(item)); });
+  matches(ranked.items, item => { void action(() => fill(item)); }, siteIcons.icons);
   view.formReady(scan);
   notice('');
 }

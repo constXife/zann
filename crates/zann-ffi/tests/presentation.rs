@@ -12,6 +12,7 @@ fn item(title: &str, type_id: &str, path: &str, deleted: bool) -> ItemSummary {
         title: title.into(),
         path: path.into(),
         type_id: type_id.into(),
+        favicon_rgba: None,
         caption: None,
         deleted,
     }

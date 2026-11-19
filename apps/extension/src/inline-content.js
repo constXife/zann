@@ -48,7 +48,11 @@ export function installInline(fields, keyIcon) {
       // owned UI/listeners; a new packaged instance owns future interactions.
       destroy(); return false;
     }
-    pagePort.onDisconnect.addListener(() => { pagePort = null; close(); host?.remove(); host = null; anchor = null; });
+    const port = pagePort;
+    port.onDisconnect.addListener(() => {
+      if (pagePort !== port) return;
+      pagePort = null; navigated();
+    });
     pagePort.onMessage.addListener(message => {
       if (message.type === 'disabled') { destroy(); return; }
       if (message.type === 'hide') { close(); return; }
@@ -90,7 +94,12 @@ export function installInline(fields, keyIcon) {
       event.preventDefault(); pagePort?.postMessage({ type: 'key', key: event.key });
     }
   }
-  function hidden() { if (document.visibilityState !== 'visible') close(); }
+  function hidden() {
+    if (document.visibilityState === 'visible') return;
+    // Release the worker's bounded document slot. A fresh focus reconnects.
+    navigated();
+    pagePort?.disconnect(); pagePort = null;
+  }
   function navigated() { close(); host?.remove(); host = null; anchor = null; }
   function destroy() {
     close(); pagePort?.disconnect(); pagePort = null; host?.remove(); host = null;

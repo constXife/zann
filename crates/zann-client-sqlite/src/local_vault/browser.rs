@@ -82,6 +82,7 @@ impl LocalVault {
                     item_id: row.id.to_string(),
                     title: row.name,
                     username,
+                    saved_host: matcher.saved_host().to_owned(),
                     match_quality,
                 });
             }
@@ -136,5 +137,51 @@ impl LocalVault {
         )
         .map_err(policy)?;
         sink(&payload)
+    }
+}
+
+impl LocalVault {
+    pub fn browser_site_icons(
+        &self,
+        scope: BrowserScope,
+        captures: std::collections::BTreeMap<String, Option<String>>,
+        sink: &mut dyn FnMut(std::collections::BTreeMap<String, String>) -> LocalResult<()>,
+    ) -> LocalResult<()> {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let _lease = self.context_gate.read().expect("lock poisoned");
+        let key = self.account_key()?;
+        let storage = self.storage_id()?;
+        let vault = self.vault_id()?;
+        self.check_context_generation(scope.generation)?;
+        if scope.storage_id != storage.to_string() || scope.vault_id != vault.to_string() {
+            return Err(LocalError::InvalidArgument(
+                "browser selection changed".into(),
+            ));
+        }
+        let mut decoded = std::collections::BTreeMap::new();
+        for (host, capture) in captures {
+            let pixels = capture
+                .map(|encoded| STANDARD.decode(encoded))
+                .transpose()
+                .map_err(policy)?;
+            decoded.insert(host, pixels);
+        }
+        let pool = self.pool();
+        let service = LocalServices::new(&pool, key.as_ref());
+        let icons = self.runtime.block_on(async {
+            tokio::time::timeout(
+                std::time::Duration::from_secs(2),
+                service.browser_site_icons(storage, vault, decoded),
+            )
+            .await
+            .map_err(|_| LocalError::DeadlineExceeded)?
+            .map_err(LocalError::BrowserPolicy)
+        })?;
+        sink(
+            icons
+                .into_iter()
+                .map(|(host, pixels)| (host, STANDARD.encode(pixels)))
+                .collect(),
+        )
     }
 }

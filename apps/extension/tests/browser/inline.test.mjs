@@ -3,11 +3,15 @@ import assert from 'node:assert/strict';
 import { fixture, chooser, closed } from './fixture.mjs';
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 test('document-bound inline chooser uses real Rust search/fill and refuses page-script gestures', { timeout: 90000 }, async () => {
-  const env = await fixture(); const { site, popup } = env;
+  const env = await fixture({ allSuggestions: true }); const { site, popup } = env;
   try {
     await popup.locator('#pairing-code').fill(env.info.code);
     await popup.locator('#pair').click();
     await popup.locator('.match').first().waitFor();
+    await popup.locator('#settings-toggle').click();
+    assert.equal(await popup.locator('#all-sites-toggle').textContent(), 'Turn off all-sites suggestions');
+    assert.equal(await popup.locator('#site-toggle').textContent(), 'Enable passkeys on this site');
+    await popup.locator('#settings-toggle').click();
     await popup.evaluate(async () => {
       const { syncSites, installInTab } = await import('./sites.js');
       await syncSites(chrome, navigator.locks);
@@ -22,6 +26,15 @@ test('document-bound inline chooser uses real Rust search/fill and refuses page-
     await frame.waitForFunction(() => document.body.getBoundingClientRect().height < 180);
     await frame.waitForFunction(() => innerWidth === 320 && innerHeight === Math.ceil(document.body.getBoundingClientRect().height));
     assert.equal(await frame.locator('#brand svg').count(), 1);
+    assert.equal((await frame.locator('header').innerText()).includes('example.test'), false);
+    assert.equal(await frame.locator('.match .avatar').count(), 0);
+    const example = frame.locator('.match').filter({ hasText: 'Example' });
+    assert.equal(await example.locator('.user').textContent(), 'alice');
+    assert.equal(await example.locator('.name').textContent(), 'Example');
+    const icon = example.locator('canvas.site-icon');
+    assert.equal(await icon.count(), 1, 'the cached fixture favicon appears next to the login');
+    assert.equal(await icon.evaluate(canvas => canvas.width === 16 && canvas.height === 16 &&
+      canvas.getContext('2d').getImageData(0, 0, 16, 16).data.some(byte => byte !== 0)), true);
     await site.setViewportSize({ width: 320, height: 640 });
     await frame.waitForFunction(() => innerWidth === 304 && document.documentElement.scrollWidth <= innerWidth);
     await site.setViewportSize({ width: 736, height: 720 });
@@ -101,6 +114,13 @@ test('document-bound inline chooser uses real Rust search/fill and refuses page-
     await frame.locator('#retry').click(); await frame.locator('.match').first().waitFor();
     const stored = await popup.evaluate(() => chrome.storage.local.get(null));
     assert.deepEqual(Object.keys(stored).sort(), ['autofillUsage', 'identity']);
+    // A fresh hostname gets the isolated chooser from Chrome's registration.
+    await site.goto('https://another.test/login');
+    await site.waitForFunction(() => document.readyState === 'complete');
+    await site.locator('[name=username]').click();
+    frame = await chooser(site);
+    assert.equal(await site.evaluate(() => Boolean(globalThis.__zannPasskeys)), false);
+    assert.equal(await site.locator('[name=password]').inputValue(), '');
     assert.deepEqual(env.errors, []);
   } finally { await env.close(); }
 });

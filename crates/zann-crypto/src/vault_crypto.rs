@@ -274,3 +274,13 @@ pub fn cache_key_fingerprint(key: &SecretKey) -> String {
     let hex = blake3::hash(key.as_bytes()).to_hex().to_string();
     hex[..12].to_string()
 }
+
+/// Private index key and AEAD binding for one local, vault-scoped site icon.
+pub fn site_icon_tag(key: &SecretKey, storage: Uuid, vault: Uuid, host: &str) -> String {
+    let mut mac = blake3::Hasher::new_keyed(key.as_bytes());
+    mac.update(b"zann.site-icon.v1\0");
+    mac.update(storage.as_bytes());
+    mac.update(vault.as_bytes());
+    mac.update(host.as_bytes());
+    mac.finalize().to_hex().to_string()
+}

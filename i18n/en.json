@@ -99,8 +99,8 @@
     "connected": "Connected"
   },
   "autofill": {
-    "registrableDomain": "Registrable domain",
-    "host": "Host",
+    "registrableDomain": "Domain including subdomains",
+    "host": "This host only",
     "exact": "Exact URL",
     "regex": "Regular expression",
     "never": "Never fill",

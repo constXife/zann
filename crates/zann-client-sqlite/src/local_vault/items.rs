@@ -42,6 +42,7 @@ impl LocalVault {
                     path: item.path,
                     type_id: item.type_id,
                     subtitle: item.subtitle,
+                    favicon_rgba: item.favicon_rgba,
                     deleted: item.deleted_at.is_some(),
                 })
                 .collect(),

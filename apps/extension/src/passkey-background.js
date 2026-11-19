@@ -33,7 +33,7 @@ export function passkeyBroker(broker, initialized, checkedContext, checkedReques
           if (sender.id !== chrome.runtime.id || !sender.documentId || !Number.isInteger(sender.tab?.id) || !Number.isInteger(sender.frameId)) throw new Error('Untrusted passkey document.');
           const page = new BrowserPage(chrome, checkedContext, sender.tab.id);
           const snapshot = await page.frames(), target = page.select(snapshot, sender.frameId);
-          if (target.frame.documentId !== sender.documentId || !await broker.hasSite(target.top.url)) throw new Error('Site is not enabled.');
+          if (target.frame.documentId !== sender.documentId || !await broker.hasPasskeyAccess(target.top.url)) throw new Error('Site is not enabled.');
           // Every ancestor must be same-origin; top == requester alone is
           // insufficient when a hostile intermediate frame embeds this site.
           let ancestor = target.frame;
@@ -71,7 +71,7 @@ export function passkeyBroker(broker, initialized, checkedContext, checkedReques
         session.confirming = true;
         void (async () => {
           await session.page.assertCurrent(session.target);
-          if (!await broker.hasSite(session.target.top.url)) throw new Error('Site permission was removed.');
+          if (!await broker.hasPasskeyAccess(session.target.top.url)) throw new Error('Site permission was removed.');
           if (session.done) return;
           const request = session.kind === 'create' ? { method: 'make_credential', ticket: session.ticket, gesture: true }
             : { method: 'get_assertion', ticket: session.ticket, item_id: message.item_id, gesture: true };

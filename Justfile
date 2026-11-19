@@ -43,6 +43,14 @@ cosmic-build:
 cosmic-test:
     cd apps/cosmic && cargo test
 
+# Build the current checkout and install the Release app for Finder and the Dock.
+[working-directory: 'apps/apple']
+macos-install:
+    ./ZannCoreKit/build-xcframework.sh release
+    xcodegen --spec project.yml
+    xcodebuild -quiet -project Zann.xcodeproj -scheme Zann -configuration Release -destination 'platform=macOS,arch=arm64' -derivedDataPath build/macos-install build
+    bash install-macos.sh build/macos-install/Build/Products/Release/Zann.app
+
 # Install into ~/.local so the COSMIC launcher can start it like any other app
 cosmic-install:
     #!/usr/bin/env bash

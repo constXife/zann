@@ -268,6 +268,9 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(editor.folder, "Work")
         XCTAssertEqual(editor.mainFieldIndices.map { editor.fields[$0].key }, ["username", "password", "url"])
         XCTAssertEqual(editor.additionalFieldIndices.map { editor.fields[$0].key }, ["totp"])
+        XCTAssertEqual(editor.matchRules?.mode, .host)
+        editor.setMatchRules(mode: .registrableDomain, pattern: "")
+        XCTAssertEqual(editor.additionalFieldIndices.map { editor.fields[$0].key }, ["totp"])
         editor.name = "GitHub Enterprise"
         editor.folder = "Work/Accounts"
         editor.setValue(try index(of: "username", in: editor), "alice2")
@@ -277,6 +280,8 @@ final class VaultModelTests: XCTestCase {
         XCTAssertNil(model.editor)
         XCTAssertEqual(model.selectedItemID, github.id)
         let detail = try await loadedDetail(model)
+        await model.startEditing()
+        XCTAssertEqual(model.editor?.matchRules?.mode, .registrableDomain)
         XCTAssertEqual(detail.title, "GitHub Enterprise")
         XCTAssertEqual(detail.path, "Work/Accounts/GitHub Enterprise")
         let values = Dictionary(uniqueKeysWithValues: detail.fields.map { ($0.key, $0.value) })

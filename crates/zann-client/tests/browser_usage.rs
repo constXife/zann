@@ -17,6 +17,7 @@ fn item(id: &str, quality: MatchQuality) -> BrowserMatch {
         item_id: id.into(),
         title: "title never stored".into(),
         username: Some("username never stored".into()),
+        saved_host: "example.com".into(),
         match_quality: quality,
     }
 }

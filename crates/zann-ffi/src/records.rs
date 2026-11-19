@@ -34,6 +34,7 @@ pub struct ItemSummary {
     /// The line under the title in a list, from `zann_ui_core::item_caption`:
     /// who or where the item is for, then its folder.
     pub caption: Option<String>,
+    pub favicon_rgba: Option<Vec<u8>>,
     pub deleted: bool,
 }
 

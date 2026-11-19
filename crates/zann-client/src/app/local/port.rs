@@ -22,6 +22,12 @@ pub trait LocalVaultService: Send + Sync {
 
     /// Sink runs under the context read lease: lock/selection cannot complete
     /// before a bounded IPC response has finished or failed.
+    fn browser_site_icons(
+        &self,
+        scope: BrowserScope,
+        captures: std::collections::BTreeMap<String, Option<String>>,
+        sink: &mut dyn FnMut(std::collections::BTreeMap<String, String>) -> LocalResult<()>,
+    ) -> LocalResult<()>;
     fn browser_query(
         &self,
         context: BrowserContext,

@@ -4,7 +4,7 @@ import { VirtualLoginList } from './login-list.js';
 await init();
 const $ = id => document.getElementById(id);
 $('brand').prepend(keyIcon(document));
-let port, busy = true, refused, kind;
+let port, busy = true, refused, host;
 const loginList = new VirtualLoginList({
   root: $('items'), search: $('login-search'), input: $('login-filter'), count: $('login-count'), empty: $('login-empty'), maxHeight: 192,
   messages: { empty: 'Для этого сайта нет сохранённых логинов.', noResults: 'Нет логинов по этому запросу.', count: (found, total) => found === total ? `Логинов: ${total}` : `${found} из ${total}` },
@@ -26,12 +26,12 @@ function receive(message) {
   if (message.type === 'identify') { send({ type: 'ancestry', origins: Array.from(location.ancestorOrigins) }); return; }
   if (message.type === 'refused') { refused = message.message; return; }
   if (message.type === 'key') { key(message.key); return; }
-  if (message.type === 'context') { kind = message.kind; $('host').textContent = message.host; $('mode').hidden = kind !== 'otp'; }
+  if (message.type === 'context') { host = message.host; $('mode').hidden = message.kind !== 'otp'; }
   if (message.type === 'new-password') { clear(); $('status').textContent = 'Надёжный пароль для нового аккаунта'; $('generate').hidden = false; buttons(false); }
   if (message.type === 'loading') { clear(); $('status').textContent = 'Ищем все подходящие логины…'; buttons(true); }
   if (message.type === 'matches') {
     clear(); $('status').textContent = '';
-    loginList.setModel(new NativeLoginList(JSON.stringify(message.items)), fill);
+    loginList.setModel(new NativeLoginList(JSON.stringify(message.items)), fill, host, new Map(message.icons));
     buttons(false);
   }
   if (message.type === 'error') { clear(); $('status').textContent = message.code === 'locked' ? 'Разблокируйте хранилище в приложении Zann.' : message.message; $('retry').hidden = false; buttons(false); }

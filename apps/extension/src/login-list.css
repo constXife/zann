@@ -6,6 +6,7 @@
 .login-window { position:absolute; top:0; left:0; right:0; }
 .login-list .match { display:flex; box-sizing:border-box; align-items:center; width:100%; height:var(--login-row-height); gap:8px; margin:0; padding:6px 8px; text-align:left; background:transparent; border:0; border-radius:6px; }
 .login-list .match:hover,.login-list .match[aria-selected=true] { background:var(--selected); }
+.login-list .site-icon { width:18px; height:18px; flex:none; object-fit:contain; }
 .login-list .avatar { width:26px; height:26px; display:grid; place-items:center; border-radius:7px; flex-shrink:0; background:var(--selected); color:var(--accent); font-size:11px; }
 .login-list .copy { min-width:0; flex:1; }
 .login-list .user,.login-list .name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.3; }

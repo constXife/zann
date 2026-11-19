@@ -16,8 +16,8 @@ text-kind `match_rules` field contains one strict JSON object:
 
 | Mode | Object | Meaning |
 |---|---|---|
+| Host (default) | `{"mode":"host"}` | Same canonical scheme, host and effective port |
 | Domain | `{"mode":"registrable-domain"}` | Same registrable domain, including PRIVATE PSL boundaries; reviewed equivalent groups also apply |
-| Host | `{"mode":"host"}` | Same canonical scheme, host and effective port |
 | Exact | `{"mode":"exact"}` | Same canonical URL including path/query, excluding fragment |
 | Regex | `{"mode":"regex","pattern":"https://example\\.com/login"}` | Full canonical URL must match the bounded Rust regex |
 | Never | `{"mode":"never"}` | Never a matching autofill candidate |
@@ -31,12 +31,11 @@ different. Ambiguous separators, credentials, control characters, trailing
 DNS dots and non-HTTP(S) URLs are rejected. HTTP URLs may be compared, but
 fill admission requires HTTPS. No insecure-fill exception is implemented.
 
-Only absence of `match_rules` means domain mode, as explicitly specified by
-#198. Present empty, malformed, oversized, duplicate-key or unknown rules fail
-closed. No payload/envelope version, crypto fixture or database migration is
-needed: this is a normal encrypted field. COSMIC offers a mode selector and
-regex input; FFI projects typed mode/pattern operations over the same shared
-draft. Existing editors that preserve fields preserve these rules.
+A login without `match_rules` uses host mode, including previously saved logins.
+To suggest one login across sibling subdomains, select **Domain including
+subdomains** for that login in the Apple or COSMIC item editor. Explicit rules
+keep their stored meaning. Empty, malformed, oversized, duplicate-key or
+unknown rules fail closed. Changing the default requires no database migration.
 
 `LoginMatcher` is compiled once per candidate. Input URLs are limited to 8192
 bytes; rules to 4096 bytes; regex source to 2048 bytes; regex compilation and
@@ -52,5 +51,4 @@ even when both frames match the same registrable domain.
 
 The PSL source, license, update process and intentionally empty initial
 equivalence dataset are documented [next to the data](../crates/zann-autofill/data/README.md).
-Favicon retrieval/cache is a separate presentation capability, outside #198;
-icons do not participate in matching or trust decisions.
+The [local site icon cache](chromium-extension.md) decorates already admitted matches by saved host. Icons do not participate in matching or trust decisions.

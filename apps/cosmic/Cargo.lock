@@ -8813,6 +8813,7 @@ dependencies = [
  "tracing",
  "url",
  "uuid",
+ "zann-autofill",
  "zann-core",
  "zann-crypto",
  "zeroize",

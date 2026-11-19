@@ -4,7 +4,7 @@ import { passkeyBroker } from './passkey-background.js';
 import { BrowserPage } from './browser.js';
 import { loadIdentity } from './identity.js';
 import { InlineSession } from './inline-session.js';
-import { hasSite, syncSites, installInTab } from './sites.js';
+import { siteAccess, syncSites, installInTab } from './sites.js';
 
 const initialized = init();
 accountWindows(chrome);
@@ -12,7 +12,7 @@ const broker = {
   chrome, pages: new Set(), tokens: new Map(),
   async identity() { await initialized; return loadIdentity(chrome, create_identity, navigator.locks); }
 };
-passkeyBroker({ ...broker, hasSite: url => hasSite(chrome, url) }, initialized, checked_context, checked_passkey_request);
+passkeyBroker({ ...broker, hasPasskeyAccess: async url => (await siteAccess(chrome, url)).passkeys }, initialized, checked_context, checked_passkey_request);
 async function authorize(sender) {
   await initialized;
   if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0 || !sender.documentId) throw new Error('Untrusted field document.');
@@ -20,7 +20,7 @@ async function authorize(sender) {
   const target = page.select(await page.frames(), 0);
   // sender.url can retain the committed URL after history.pushState. The stable
   // document ID authenticates the producer; current URL comes from navigation.
-  if (target.top.documentId !== sender.documentId || !await hasSite(chrome, target.top.url)) throw new Error('Site is not enabled.');
+  if (target.top.documentId !== sender.documentId || !(await siteAccess(chrome, target.top.url)).suggestions) throw new Error('Site is not enabled.');
   return { page, target };
 }
 chrome.runtime.onConnect.addListener(port => {
@@ -51,31 +51,27 @@ for (const event of [chrome.webNavigation.onHistoryStateUpdated, chrome.webNavig
   if (details.frameId !== 0) return;
   invalidate(details);
   if (!details.url.startsWith('https:')) return;
-  void (async () => { if (await hasSite(chrome, details.url)) await installInTab(chrome, details.tabId); })();
+  void installInTab(chrome, details.tabId);
 });
-async function activateSite(tabId) {
-  const frame = await chrome.webNavigation.getFrame({ tabId, frameId: 0 });
-  if (frame?.url.startsWith('https:') && await hasSite(chrome, frame.url)) await installInTab(chrome, tabId);
-}
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   for (const session of broker.pages) if (session.port.sender.tab?.id !== tabId) session.hide();
-  void activateSite(tabId);
+  void installInTab(chrome, tabId);
 });
 chrome.tabs.onRemoved.addListener(tabId => { for (const session of broker.pages) if (session.port.sender.tab?.id === tabId) { session.reset(); broker.pages.delete(session); } });
 chrome.storage.onChanged.addListener((changes, area) => { if (area === 'local' && changes.identity) for (const session of broker.pages) session.hide(); });
 chrome.permissions.onRemoved.addListener(() => {
   for (const session of broker.pages) session.hide();
-  void (async () => { for (const session of broker.pages) if (!await hasSite(chrome, session.port.sender.url)) session.disable(); })();
+  void (async () => { for (const session of broker.pages) if (!(await siteAccess(chrome, session.port.sender.url)).suggestions) session.disable(); })();
   void syncSites(chrome, navigator.locks);
 });
 chrome.permissions.onAdded.addListener(() => {
   void (async () => {
     await syncSites(chrome, navigator.locks);
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (Number.isInteger(tab?.id)) await activateSite(tab.id);
+    if (Number.isInteger(tab?.id)) await installInTab(chrome, tab.id);
   })();
 });
 // Permission events outlive the toolbar popup/Chrome consent sheet. Chrome
-// retains registrations across restarts; no second grant database or broad grant.
+// retains registrations across restarts; no second grant database.
 chrome.runtime.onStartup.addListener(() => { void syncSites(chrome, navigator.locks); });
 chrome.runtime.onInstalled.addListener(() => { void syncSites(chrome, navigator.locks); });

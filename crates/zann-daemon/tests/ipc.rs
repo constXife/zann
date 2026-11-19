@@ -42,7 +42,7 @@ fn unpaired_query_and_fill_return_no_metadata_or_secrets() {
 fn pairing_scopes_query_fill_gesture_totp_lock_and_revocation() {
     let fixture = Fixture::new();
     let id = fixture.login("Example", "https://example.com");
-    fixture.login("Other", "https://other.com");
+    fixture.login("Other", "https://sibling.example.com");
     let daemon = fixture.daemon();
     let mut client = Client::connect(&fixture, &daemon, 2);
     client.pair(&daemon);
@@ -105,6 +105,7 @@ fn origin_mismatch_and_cross_origin_frames_never_release_values() {
     let daemon = fixture.daemon();
     for (seed, context) in [
         (3, context("https://example.com.evil.org")),
+        (5, context("https://sibling.example.com")),
         (
             4,
             zann_client::app::local::BrowserContext {

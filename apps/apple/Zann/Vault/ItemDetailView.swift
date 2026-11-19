@@ -15,7 +15,7 @@ struct ItemDetailView: View {
         Group {
             if let detail = vault.detail {
                 ItemDetailContent(
-                    detail: detail, strings: strings, preferences: preferences,
+                    detail: detail, faviconRgba: vault.visibleItems.first { $0.id == detail.id }?.faviconRgba, strings: strings, preferences: preferences,
                     revealAll: revealAll && detail.id == vault.selectedItemID,
                     selectionGeneration: vault.detailSelectionGeneration
                 )
@@ -56,6 +56,7 @@ struct ItemDetailView: View {
 
 private struct ItemDetailContent: View {
     let detail: VaultModel.Detail
+    let faviconRgba: Data?
     let strings: Strings
     let preferences: DevicePreferencesFfi
     let revealAll: Bool
@@ -77,7 +78,7 @@ private struct ItemDetailContent: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 HStack(spacing: 14) {
-                    ItemIcon(typeID: detail.typeId, size: 52)
+                    ItemIcon(typeID: detail.typeId, size: 52, faviconRgba: faviconRgba)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(detail.title).font(.title2.bold()).textSelection(.enabled)
                         Text(subtitle).foregroundStyle(.secondary)

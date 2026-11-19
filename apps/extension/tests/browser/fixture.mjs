@@ -7,7 +7,7 @@ import { createHash, generateKeyPairSync } from 'node:crypto';
 import { chromium } from 'playwright';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../..');
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-export async function fixture({ matches = 2 } = {}) {
+export async function fixture({ matches = 2, allSuggestions = false } = {}) {
   const temporary = await mkdtemp(path.join(tmpdir(), 'zann-chromium-'));
   const ready = path.join(temporary, 'ready.json');
   const daemon = spawn('cargo', ['test', '-p', 'zann-daemon', '--test', 'chromium_fixture', '--', '--ignored', '--exact', 'chromium_fixture'], {
@@ -31,7 +31,7 @@ export async function fixture({ matches = 2 } = {}) {
   const { publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const key = publicKey.export({ type: 'spki', format: 'der' });
   manifest.key = key.toString('base64');
-  manifest.host_permissions = ['https://example.test/*', 'https://evil.test/*'];
+  manifest.host_permissions = allSuggestions ? ['https://*/*'] : ['https://example.test/*', 'https://evil.test/*'];
   await writeFile(path.join(extension, 'manifest.json'), JSON.stringify(manifest));
   const id = [...createHash('sha256').update(key).digest().subarray(0, 16)].flatMap(byte => [byte >> 4, byte & 15]).map(value => String.fromCharCode(97 + value)).join('');
   context = await chromium.launchPersistentContext(path.join(temporary, 'profile'), {
@@ -73,7 +73,9 @@ export async function fixture({ matches = 2 } = {}) {
     const query = chrome.tabs.query.bind(chrome.tabs);
     chrome.tabs.query = () => query({ url: 'https://example.test/*' });
   });
-  await context.route('https://**/*', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><title>Login fixture</title><form><label>Username<input name="username" autocomplete="username"></label><input name="password" type="password" autocomplete="current-password"><input name="otp" autocomplete="one-time-code"><button>Log in</button></form><iframe src="https://evil.test/frame"></iframe>` }));
+  await context.route('https://**/*', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html><title>Login fixture</title><link rel="icon" type="image/png" href="/fixture-icon.png"><form><label>Username<input name="username" autocomplete="username"></label><input name="password" type="password" autocomplete="current-password"><input name="otp" autocomplete="one-time-code"><button>Log in</button></form><iframe src="https://evil.test/frame"></iframe>` }));
+  await context.route('https://example.test/fixture-icon.png', route =>
+    route.fulfill({ contentType: 'image/png', path: path.join(root, 'assets/icons/32x32.png') }));
   const site = await context.newPage(); await site.goto('https://example.test/login');
   const popup = await context.newPage();
   const errors = []; popup.on('pageerror', error => errors.push(error.message));

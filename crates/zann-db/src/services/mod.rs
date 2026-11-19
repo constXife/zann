@@ -678,6 +678,7 @@ mod app;
 mod browser;
 mod items;
 mod passkey;
+mod site_icons;
 pub use browser::BrowserReadError;
 mod storages;
 mod vaults;

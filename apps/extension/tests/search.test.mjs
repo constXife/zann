@@ -8,7 +8,7 @@ function setup() {
   const controller = new AbortController();
   const search = { request: () => JSON.stringify({ method: 'query', cursor: accepted || null }), accept_page: () => ++accepted === 3, matches_found: () => accepted, result: () => '{"items":[],"scope":{}}', free: () => freed++ };
   const connection = { request: async () => { calls++; return { status: 'matches', page: {} }; }, close: () => closed++ };
-  const effects = { assertCurrent: async () => { checked++; }, onProgress: () => {}, clock: () => 0, signal: controller.signal };
+  const effects = { siteIcons: { collect: async () => {} }, assertCurrent: async () => { checked++; }, onProgress: () => {}, clock: () => 0, signal: controller.signal };
   return { search, connection, effects, controller, stats: () => ({ accepted, freed, calls, closed, checked }) };
 }
 test('automatic search waits for every page and checks browser context on both sides of each reply', async () => {

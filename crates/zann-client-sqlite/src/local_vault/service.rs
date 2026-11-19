@@ -50,6 +50,14 @@ impl LocalVaultService for LocalVault {
     fn backup_capabilities(&self) -> LocalResult<BackupCapabilities> {
         LocalVault::backup_capabilities(self)
     }
+    fn browser_site_icons(
+        &self,
+        scope: BrowserScope,
+        captures: std::collections::BTreeMap<String, Option<String>>,
+        sink: &mut dyn FnMut(std::collections::BTreeMap<String, String>) -> LocalResult<()>,
+    ) -> LocalResult<()> {
+        LocalVault::browser_site_icons(self, scope, captures, sink)
+    }
     fn browser_query(
         &self,
         context: BrowserContext,

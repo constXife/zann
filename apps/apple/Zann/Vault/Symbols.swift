@@ -63,9 +63,24 @@ enum Symbols {
 struct ItemIcon: View {
     let typeID: String
     var size: CGFloat = 28
+    var faviconRgba: Data?
+
+    private var favicon: CGImage? {
+        guard let faviconRgba, faviconRgba.count == 16 * 16 * 4,
+              let provider = CGDataProvider(data: faviconRgba as CFData) else { return nil }
+        return CGImage(width: 16, height: 16, bitsPerComponent: 8, bitsPerPixel: 32,
+                       bytesPerRow: 64, space: CGColorSpaceCreateDeviceRGB(),
+                       bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+    }
 
     var body: some View {
-        RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
+        if let favicon {
+            Image(decorative: favicon, scale: 1)
+                .resizable().scaledToFit().padding(size * 0.12)
+                .frame(width: size, height: size)
+        } else {
+            RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
             .fill(Symbols.tint(typeID).gradient)
             .frame(width: size, height: size)
             .overlay {
@@ -73,5 +88,6 @@ struct ItemIcon: View {
                     .font(.system(size: size * 0.5, weight: .semibold))
                     .foregroundStyle(.white)
             }
+        }
     }
 }

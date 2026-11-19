@@ -80,6 +80,7 @@ impl From<native::ItemSummary> for ItemSummary {
             path: value.path,
             type_id: value.type_id,
             caption,
+            favicon_rgba: value.favicon_rgba,
             deleted: value.deleted,
         }
     }

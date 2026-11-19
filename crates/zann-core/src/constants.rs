@@ -11,3 +11,6 @@ pub mod system_users {
 pub const BROWSER_PAGE_LIMIT: u32 = 32;
 /// Keeps worst-case JSON-escaped metadata pages below the IPC body bound.
 pub const BROWSER_MAX_USERNAME_BYTES: usize = 256;
+
+/// Browser supplies decoded RGBA8, never an image container or remote URL.
+pub const SITE_ICON_RGBA_BYTES: usize = 16 * 16 * 4;
