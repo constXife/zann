@@ -111,6 +111,30 @@ struct VaultSidebar: View {
         .safeAreaInset(edge: .top) {
             VaultContextHeader(vault: vault, strings: strings)
         }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(alignment: .leading, spacing: 0) {
+                Divider()
+                settingsButton
+                    .buttonStyle(.borderless)
+                    .controlSize(.regular)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
+            .background(.bar)
+        }
+    }
+
+    @ViewBuilder private var settingsButton: some View {
+        let label = Label(strings("common.settings") + "…", systemImage: "gearshape")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        if #available(macOS 14, *) {
+            SettingsLink { label }
+        } else {
+            Button {
+                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            } label: { label }
+        }
     }
 
     private var selection: Binding<Selection?> {

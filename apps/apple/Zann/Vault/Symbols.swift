@@ -64,6 +64,7 @@ struct ItemIcon: View {
     let typeID: String
     var size: CGFloat = 28
     var faviconRgba: Data?
+    var loginTitle: String?
 
     private var favicon: CGImage? {
         guard let faviconRgba, faviconRgba.count == 16 * 16 * 4,
@@ -79,6 +80,12 @@ struct ItemIcon: View {
             Image(decorative: favicon, scale: 1)
                 .resizable().scaledToFit().padding(size * 0.12)
                 .frame(width: size, height: size)
+        } else if typeID == "login", let initial = loginTitle?.first(where: { !$0.isWhitespace }) {
+            Text(String(initial).localizedUppercase.prefix(1))
+                .font(.system(size: size * 0.58, weight: .medium))
+                .foregroundStyle(.primary)
+                .frame(width: size, height: size)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
         } else {
             RoundedRectangle(cornerRadius: size * 0.24, style: .continuous)
             .fill(Symbols.tint(typeID).gradient)

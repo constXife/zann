@@ -69,20 +69,24 @@ struct ItemList: View {
     private var items: some View {
         List(vault.visibleItems, id: \.id, selection: selection) { item in
             HStack(spacing: 10) {
-                ItemIcon(typeID: item.typeId, faviconRgba: item.faviconRgba)
+                ItemIcon(typeID: item.typeId, faviconRgba: item.faviconRgba,
+                         loginTitle: item.title)
+                    .accessibilityHidden(true)
                 // The title names the item; the caption says who or where it
                 // is for and where it lives.
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(item.title).lineLimit(1)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.title)
+                        .font(.body.weight(.semibold))
+                        .lineLimit(1)
                     if let caption = item.caption {
                         Text(caption)
-                            .font(.caption)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
                 }
             }
-            .padding(.vertical, 3)
+            .padding(.vertical, 5)
             .tag(item.id)
             // Rows near the end load the next page, so scrolling reaches
             // every item.
