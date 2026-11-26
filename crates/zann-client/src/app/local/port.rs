@@ -116,8 +116,13 @@ pub trait LocalVaultService: Send + Sync {
     fn item_create(&self, create: ItemCreate) -> LocalResult<ItemDetail>;
     fn item_update(&self, id: String, update: ItemUpdate) -> LocalResult<ItemDetail>;
     fn item_history_list(&self, id: String, limit: u32) -> LocalResult<Vec<ItemHistorySummary>>;
-    fn item_history_get(&self, id: String, version: i64) -> LocalResult<ItemHistoryDetail>;
-    fn item_history_restore(&self, id: String, version: i64) -> LocalResult<ItemDetail>;
+    fn item_history_get(&self, id: String, entry_id: String) -> LocalResult<ItemHistoryDetail>;
+    fn item_history_restore(
+        &self,
+        id: String,
+        entry_id: String,
+        checksum: String,
+    ) -> LocalResult<ItemDetail>;
     /// Import exactly one explicitly identified backup storage into the selected destination.
     /// Source UUID belongs to the file; destination UUID belongs to this client root.
     fn backup_import_file(

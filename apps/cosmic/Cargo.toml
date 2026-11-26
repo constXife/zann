@@ -16,7 +16,8 @@ path = "src/main.rs"
 [dependencies]
 zeroize = "1"
 zann-flows = { path = "../../crates/zann-flows" }
-chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+jiff = "0.2"
+libc = "0.2"
 dirs = "5"
 # libcosmic is not published on crates.io; pin the revision so the PoC builds
 # reproducibly. Default features bring winit + wayland + tokio; `wgpu` puts the

@@ -51,8 +51,10 @@
 /crates/zann-db/src/domain_row.rs @constXife
 /crates/zann-db/src/local/vault_repo.rs @constXife
 /crates/zann-core/src/item_subtitle.rs @constXife
+/crates/zann-core/src/vault_search.rs @constXife
 /crates/zann-db/src/services/mod.rs @constXife
 /crates/zann-db/src/services/items.rs @constXife
+/crates/zann-db/src/services/item_list.rs @constXife
 /crates/zann-db/migrations/0002_sync_cursor_last_seq.sql @constXife
 /crates/zann-db/migrations/0004_server_replicas.sql @constXife
 /crates/zann-db/tests/local_sqlite_path.rs @constXife

@@ -16,6 +16,7 @@ pub mod models;
 pub mod security_profile;
 pub mod services;
 pub mod unlock;
+pub mod vault_search;
 
 pub use crate::api::*;
 pub use crate::auth::*;

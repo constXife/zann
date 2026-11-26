@@ -91,6 +91,7 @@ fn has_note(core: &LocalVault) {
     let page = core
         .items_list(
             zann_client::app::local::ItemsFilter {
+                updated: None,
                 query: None,
                 include_deleted: false,
             },

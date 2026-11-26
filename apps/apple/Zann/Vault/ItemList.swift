@@ -37,7 +37,7 @@ struct ItemList: View {
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                     if hasSearchQuery {
-                        Button(strings("items.clearSearch")) { vault.query = "" }
+                        Button(strings("items.clearSearch")) { vault.clearListFilters() }
                     } else if let action = createAction {
                         Button(strings(action.labelKey)) { vault.startCreating(typeID: action.typeId) }
                             .buttonStyle(.borderedProminent)
@@ -45,6 +45,9 @@ struct ItemList: View {
                 }
                 .padding(24)
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UpdatedRangeControl(vault: vault, strings: strings)
         }
         .disabled(vault.switching || !vault.contextReady)
         .navigationTitle(categoryTitle)
@@ -59,7 +62,7 @@ struct ItemList: View {
     }
 
     private var hasSearchQuery: Bool {
-        !vault.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        vault.updatedRange != nil || !vault.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var createAction: CategoryCreateActionFfi? {
@@ -97,6 +100,7 @@ struct ItemList: View {
     /// Says the list shows search matches, not the whole category.
     private var searchSubtitle: String {
         guard let count = vault.searchMatchCount else { return "" }
+        if vault.searchedQuery.isEmpty { return strings("items.filteredCount", ["count": String(count)]) }
         return strings("items.searchMatches", ["count": String(count), "query": vault.searchedQuery])
     }
 

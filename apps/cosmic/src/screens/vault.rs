@@ -42,6 +42,8 @@ fn category_icon(schema_icon: &str) -> &'static str {
 }
 
 /// Native list/detail geometry implementing docs/ux/Layout-Responsive-Spec.md.
+pub mod dates;
+
 mod layout {
     pub const LIST_MIN: f32 = 320.0;
     pub const LIST_MAX: f32 = 560.0;
@@ -91,6 +93,8 @@ pub struct State {
     /// The query that produced `items`. While a newer query is waiting for the
     /// backend, the old page is narrowed locally for responsive typing.
     applied_query: String,
+    dates: dates::Filter,
+    applied_dates: Option<zann_core::UpdatedRange>,
     list_generation: u64,
     searching: bool,
     nav: nav_bar::Model,
@@ -124,7 +128,7 @@ pub struct State {
     workspace: context::Workspace,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Message {
     VaultsLoaded {
         request: u64,
@@ -138,6 +142,8 @@ pub enum Message {
     },
     QueryInput(String),
     ClearQuery,
+    DateFilter(dates::Action),
+    ClearFilters,
     EscapeClearQuery,
     FocusSearch,
     ListScrolled {
@@ -214,6 +220,12 @@ pub enum Message {
     SyncIndicatorPressed,
 }
 
+impl std::fmt::Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("VaultMessage(<redacted>)")
+    }
+}
+
 pub enum Outcome {
     None,
     Task(Task<Message>),
@@ -240,6 +252,8 @@ impl State {
             query: String::new(),
             search_id: cosmic::iced::widget::Id::unique(),
             applied_query: String::new(),
+            dates: Default::default(),
+            applied_dates: None,
             list_generation: 0,
             searching: false,
             nav: nav_bar::Model::default(),
@@ -297,8 +311,13 @@ impl State {
         }
     }
 
-    pub fn refresh_translations(&mut self) {
+    pub fn refresh_translations(&mut self) -> Task<Message> {
         self.rebuild_nav();
+        if self.query.trim().is_empty() || self.switching_context {
+            Task::none()
+        } else {
+            self.request_search(Duration::ZERO)
+        }
     }
 
     /// Replace the visible projection after a settings workflow changed the
@@ -308,6 +327,8 @@ impl State {
         self.searching = false;
         self.query.clear();
         self.applied_query.clear();
+        self.dates = Default::default();
+        self.applied_dates = None;
         self.clear_selection();
         self.editor = None;
         self.history = None;
@@ -327,6 +348,9 @@ impl State {
 
     /// The items the current category, folder and search leave visible.
     pub fn visible(&self) -> Vec<&ItemSummary> {
+        if self.dates.range() != self.applied_dates {
+            return Vec::new();
+        }
         filtered_indices(
             &self.items.iter().map(ItemSummaryView).collect::<Vec<_>>(),
             &self.filter(),
@@ -415,6 +439,8 @@ impl State {
             }
 
             message @ (Message::QueryInput(_)
+            | Message::DateFilter(_)
+            | Message::ClearFilters
             | Message::ClearQuery
             | Message::EscapeClearQuery
             | Message::ListScrolled { .. }

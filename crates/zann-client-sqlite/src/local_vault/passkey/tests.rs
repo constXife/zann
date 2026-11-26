@@ -34,6 +34,7 @@ fn payloads(core: &LocalVault) -> Vec<EncryptedPayload> {
     let page = core
         .items_list(
             ItemsFilter {
+                updated: None,
                 query: None,
                 include_deleted: false,
             },
@@ -160,6 +161,7 @@ fn external_import_step_up_cxf_plain_encrypted_verify_and_snapshot_preserve_pass
     let row = core
         .items_list(
             ItemsFilter {
+                updated: None,
                 query: None,
                 include_deleted: false,
             },

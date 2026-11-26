@@ -1,4 +1,25 @@
+import Foundation
 import ZannCoreKit
+
+struct VaultListFilter: Equatable {
+    let text: String
+    let updated: DateInterval?
+    static let all = Self(text: "", updated: nil)
+}
+
+struct VaultListRequest {
+    let filter: VaultListFilter
+    let query: VaultSearchFfi?
+    static let all = Self(filter: .all, query: nil)
+
+    var ffi: ItemsFilter {
+        let range = filter.updated.map {
+            UpdatedRangeFfi(startSeconds: Int64($0.start.timeIntervalSince1970),
+                            endSeconds: Int64($0.end.timeIntervalSince1970))
+        }
+        return ItemsFilter(updated: range, query: query, includeDeleted: true)
+    }
+}
 
 /// Blocking adapter reads kept off the UI actor. The core owns selection,
 /// key checks, storage/account binding and preferred-vault policy.
@@ -16,15 +37,15 @@ enum VaultContextLoader {
             return .refused(error)
         }
         do {
-            return .loaded(try load(core, query: "", keeping: 0))
+            return .loaded(try load(core, request: .all, keeping: 0))
         } catch {
             return .unreadable(error)
         }
     }
 
-    static func load(_ core: CoreFacade, query: String, keeping: Int) throws -> VaultModel.Contents {
+    static func load(_ core: CoreFacade, request: VaultListRequest, keeping: Int) throws -> VaultModel.Contents {
         let storageID = core.currentStorageId()
-        let page = try page(core, query: query, cursor: nil, limit: UInt32(max(Int(itemsPageLimit), keeping)))
+        let page = try page(core, request: request, cursor: nil, limit: UInt32(max(Int(itemsPageLimit), keeping)))
         let vaults = try core.listVaults()
         let storages = try core.listStorages()
         let syncState = try storageID.map { try core.storageSyncState(storageId: $0) }
@@ -37,13 +58,13 @@ enum VaultContextLoader {
         guard (storageID == nil || storage != nil), (core.currentVaultId() == nil || vault != nil) else {
             throw CoreError.Sync(kind: "context_changed", message: "The open vault changed while loading its contents.")
         }
-        return VaultModel.Contents(page: page, query: query, vaults: vaults, vault: vault,
+        return VaultModel.Contents(page: page, filter: request.filter, vaults: vaults, vault: vault,
             storages: storages, storage: storage, syncState: syncState, serverConnected: serverConnected)
     }
 
-    static func page(_ core: CoreFacade, query: String, cursor: String?, limit: UInt32) throws -> ItemPage {
+    static func page(_ core: CoreFacade, request: VaultListRequest, cursor: String?, limit: UInt32) throws -> ItemPage {
         try core.itemsList(
-            filter: ItemsFilter(query: query.isEmpty ? nil : query, includeDeleted: true),
+            filter: request.ffi,
             page: Page(limit: limit, cursor: cursor)
         )
     }

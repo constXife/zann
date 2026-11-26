@@ -46,6 +46,7 @@ fn icons_are_page_scoped_persistent_and_shared_by_the_desktop_list() {
         .vault
         .items_list(
             ItemsFilter {
+                updated: None,
                 query: None,
                 include_deleted: false,
             },

@@ -96,6 +96,16 @@ fn passkeys_project_public_fields_and_do_not_offer_a_raw_key_editor() {
         .fields
         .iter()
         .all(|field| !field.value.contains("sentinel")));
+    let entries = core.item_history_list(item.id.clone(), 20).unwrap();
+    let snapshot = core
+        .item_history_get(item.id.clone(), entries[0].id.clone())
+        .unwrap();
+    assert_eq!(snapshot.type_id, detail.type_id);
+    assert_eq!(snapshot.fields.len(), 2);
+    assert!(snapshot
+        .fields
+        .iter()
+        .all(|field| matches!(field.key.as_str(), "rp_id" | "user_name")));
     assert!(matches!(
         zann_ffi::ItemDraftFfi::edit(item),
         Err(CoreError::Draft {

@@ -873,22 +873,18 @@ impl App {
             zann_cosmic::i18n::set_language(self.preferences.language.as_deref());
         }
         if let Shell::Ready { screen, .. } = &mut self.shell {
-            match screen {
-                Screen::Vault(vault) => {
-                    if language_changed {
-                        vault.refresh_translations();
-                    }
-                    vault.set_reveal_seconds(self.preferences.auto_hide_reveal_seconds);
-                }
+            let vault = match screen {
+                Screen::Vault(vault) => vault,
                 Screen::Settings { state, vault } => {
                     state.preferences_changed(self.preferences.clone());
                     state.close_to_tray_changed(self.close_to_tray);
-                    if language_changed {
-                        vault.refresh_translations();
-                    }
-                    vault.set_reveal_seconds(self.preferences.auto_hide_reveal_seconds);
+                    vault
                 }
-                _ => {}
+                _ => return Task::none(),
+            };
+            vault.set_reveal_seconds(self.preferences.auto_hide_reveal_seconds);
+            if language_changed {
+                return lift(vault.refresh_translations(), Message::Vault);
             }
         }
         Task::none()

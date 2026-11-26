@@ -173,6 +173,7 @@ mod tests {
         let page = core
             .items_list(
                 ItemsFilter {
+                    updated: None,
                     query: None,
                     include_deleted: false,
                 },

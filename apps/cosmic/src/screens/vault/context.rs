@@ -179,6 +179,8 @@ impl State {
         self.counts = ItemCounts::default();
         self.query.clear();
         self.applied_query.clear();
+        self.dates = Default::default();
+        self.applied_dates = None;
         self.clear_selection();
     }
 

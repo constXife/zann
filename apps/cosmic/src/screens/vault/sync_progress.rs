@@ -66,7 +66,8 @@ impl State {
         );
         let facade = session.facade();
         let query = (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
-        let keeping = self.items.len() as u32;
+        let dates = self.applied_dates;
+        let keeping = (self.items.len() as u32).max(local::PAGE_LIMIT);
         cosmic::task::future(async move {
             Message::ProgressWorkspaceLoaded {
                 run,
@@ -75,7 +76,7 @@ impl State {
                 result: off_thread(move || {
                     Ok((
                         local::vault_context(&facade)?,
-                        local::refresh_items(&facade, query, keeping)?,
+                        local::items_page(&facade, None, query, dates, keeping)?,
                     ))
                 })
                 .await,

@@ -25,6 +25,7 @@ fn local_unlock_password_needs_no_server_account() {
     let page = core
         .items_list(
             zann_client::app::local::ItemsFilter {
+                updated: None,
                 query: None,
                 include_deleted: false,
             },

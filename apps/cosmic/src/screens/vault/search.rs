@@ -4,6 +4,26 @@ use super::*;
 impl State {
     pub(super) fn update_search(&mut self, message: Message, session: &Session) -> Outcome {
         match message {
+            Message::DateFilter(action) => {
+                if !self.can_focus_search() {
+                    return Outcome::None;
+                }
+                let previous = self.dates.range();
+                if let Err(error) = self.dates.update(action) {
+                    self.list_error = Some(error.to_string());
+                    return Outcome::None;
+                }
+                if previous != self.dates.range() {
+                    self.reconcile_selection();
+                    return Outcome::Task(self.request_search(Duration::ZERO));
+                }
+            }
+            Message::ClearFilters => {
+                self.dates = Default::default();
+                self.query.clear();
+                self.reconcile_selection();
+                return Outcome::Task(self.request_search(Duration::ZERO));
+            }
             Message::QueryInput(value) => return self.schedule_search(value),
 
             Message::ClearQuery => return self.schedule_search(String::new()),
@@ -35,14 +55,23 @@ impl State {
                     return Outcome::None;
                 }
                 let query = self.query.trim().to_string();
+                let dates = self.dates.range();
                 let backend_query = (!query.is_empty()).then(|| query.clone());
                 let facade = session.facade();
                 return Outcome::Task(cosmic::task::future(async move {
                     Message::SearchLoaded {
                         generation,
                         query,
-                        result: off_thread(move || local::items(&facade, None, backend_query))
-                            .await,
+                        result: off_thread(move || {
+                            local::items_page(
+                                &facade,
+                                None,
+                                backend_query,
+                                dates,
+                                local::PAGE_LIMIT,
+                            )
+                        })
+                        .await,
                     }
                 }));
             }
@@ -59,6 +88,7 @@ impl State {
                 match result {
                     Ok(page) => {
                         self.applied_query = query;
+                        self.applied_dates = self.dates.range();
                         self.apply_page(page, true);
                         self.rebuild_nav();
                         self.reconcile_selection();
@@ -105,28 +135,33 @@ impl State {
         {
             return Outcome::None;
         }
-        self.busy = false; // Superseded pagination no longer owns the list.
         self.query = value;
         self.reconcile_selection();
-        self.list_generation = self.list_generation.wrapping_add(1);
-        let generation = self.list_generation;
-        self.searching = true;
-        self.list_error = None;
         let delay = if self.query.trim().is_empty() {
             Duration::ZERO
         } else {
             SEARCH_DEBOUNCE
         };
-        Outcome::Task(cosmic::task::future(async move {
+        Outcome::Task(self.request_search(delay))
+    }
+
+    pub(super) fn request_search(&mut self, delay: Duration) -> Task<Message> {
+        self.busy = false; // Superseded pagination no longer owns the list.
+        self.list_generation = self.list_generation.wrapping_add(1);
+        let generation = self.list_generation;
+        self.searching = true;
+        self.list_error = None;
+        cosmic::task::future(async move {
             if !delay.is_zero() {
                 tokio::time::sleep(delay).await;
             }
             Message::SearchReady(generation)
-        }))
+        })
     }
 
     pub(super) fn can_load_more(&self) -> bool {
         self.next_cursor.is_some()
+            && self.applied_dates == self.dates.range()
             && !self.busy
             && !self.searching
             && self.editor.is_none()
@@ -144,11 +179,15 @@ impl State {
         let facade = session.facade();
         let generation = self.list_generation;
         let query = (!self.applied_query.is_empty()).then(|| self.applied_query.clone());
+        let dates = self.applied_dates;
         self.busy = true;
         Outcome::Task(cosmic::task::future(async move {
             Message::MoreLoaded {
                 generation,
-                result: off_thread(move || local::items(&facade, Some(cursor), query)).await,
+                result: off_thread(move || {
+                    local::items_page(&facade, Some(cursor), query, dates, local::PAGE_LIMIT)
+                })
+                .await,
             }
         }))
     }

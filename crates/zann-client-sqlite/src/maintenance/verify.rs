@@ -151,7 +151,7 @@ pub async fn run(
             let mut cursor = None;
             loop {
                 let items = item_repo
-                    .list_by_vault_paged(storage.id, vault.id, true, 200, cursor)
+                    .list_by_vault_paged(storage.id, vault.id, None, true, 200, cursor)
                     .await
                     .map_err(|err| VerifyError::new("verify_failed", err.to_string()))?;
                 if items.is_empty() {

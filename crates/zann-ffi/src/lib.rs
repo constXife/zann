@@ -199,9 +199,29 @@ impl CoreFacade {
             .map_err(Into::into)
     }
     pub fn items_list(&self, filter: ItemsFilter, page: Page) -> CoreResult<ItemPage> {
+        let catalogue = filter.query.as_ref().map(|q| &q.catalogue.0);
+        let native_filter = zann_client::app::local::ItemsFilter {
+            updated: filter
+                .updated
+                .map(|range| {
+                    zann_client::app::local::UpdatedRange::from_unix_seconds(
+                        range.start_seconds,
+                        range.end_seconds,
+                    )
+                    .ok_or_else(|| {
+                        CoreError::InvalidArgument("invalid modification date range".into())
+                    })
+                })
+                .transpose()?,
+            query: filter
+                .query
+                .as_ref()
+                .and_then(|q| q.catalogue.0.vault_query(&q.text)),
+            include_deleted: filter.include_deleted,
+        };
         self.inner
-            .items_list(filter.into(), page.into())
-            .map(|value| value.into())
+            .items_list(native_filter, page.into())
+            .map(|value| ItemPage::project(value, catalogue))
             .map_err(Into::into)
     }
     pub fn item_get(&self, id: String) -> CoreResult<ItemDetail> {
@@ -232,16 +252,31 @@ impl CoreFacade {
             .map(|value| value.into_iter().map(|value| value.into()).collect())
             .map_err(Into::into)
     }
-    pub fn item_history_get(&self, id: String, version: i64) -> CoreResult<ItemHistoryDetailFfi> {
-        self.inner
-            .item_history_get(id, version)
-            .map(|value| value.into())
-            .map_err(Into::into)
+    pub fn item_history_get(
+        &self,
+        id: String,
+        entry_id: String,
+    ) -> CoreResult<ItemHistoryDetailFfi> {
+        let detail = self.inner.item_history_get(id, entry_id)?;
+        let (type_id, fields) =
+            zann_ui_core::item_detail::project_history_payload(&detail.payload_json)
+                .map_err(|err| CoreError::Service(err.to_string()))?;
+        Ok(ItemHistoryDetailFfi {
+            version: detail.version,
+            checksum: detail.checksum,
+            type_id,
+            fields: fields.into_iter().map(Into::into).collect(),
+        })
     }
-    pub fn item_history_restore(&self, id: String, version: i64) -> CoreResult<ItemDetail> {
+    pub fn item_history_restore(
+        &self,
+        id: String,
+        entry_id: String,
+        checksum: String,
+    ) -> CoreResult<()> {
         self.inner
-            .item_history_restore(id, version)
-            .map(|value| value.into())
+            .item_history_restore(id, entry_id, checksum)
+            .map(|_| ())
             .map_err(Into::into)
     }
     pub fn backup_import_file(

@@ -50,6 +50,9 @@ struct MobileItemList: View {
             }
         }
         .overlay { emptyState }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            UpdatedRangeControl(vault: vault, strings: strings)
+        }
         .disabled(vault.switching || !vault.contextReady)
         .navigationTitle(title)
         .navigationBarTitleDisplayMode(.inline)
@@ -70,7 +73,7 @@ struct MobileItemList: View {
                     ProgressView()
                 } else if vault.searchMatchCount != nil {
                     Text(strings("items.noSearchResults")).foregroundStyle(.secondary)
-                    Button { vault.query = "" } label: { Text(strings("items.clearSearch")).appleTouchTarget() }
+                    Button { vault.clearListFilters() } label: { Text(strings("items.clearSearch")).appleTouchTarget() }
                 } else {
                     Text(strings("workspace.emptyBody")).foregroundStyle(.secondary)
                     if let action = vault.categories.first(where: { $0.id == vault.categoryID })?.createAction {

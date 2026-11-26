@@ -67,10 +67,12 @@ The current surface covers:
   including its pinned existing-file opener, exact Config v2 generation lease,
   bounded projection readers, initial personal-key publication and atomic
   storage/catalog/item/checkpoint CAS seams in `zann-db`;
-- local payload decryption in `crates/zann-db/src/services/{mod,items}.rs`,
-  including the list page's subtitle decryption, and the rule in
-  `crates/zann-core/src/item_subtitle.rs` that picks which non-secret
-  payload field a list row shows;
+- local payload decryption in `crates/zann-db/src/services/{mod,items,item_list}.rs`,
+  including the selected-vault search and list projections. Date bounds in
+  `crates/zann-db/src/local/item_repo/listing.rs` filter the existing modification
+  timestamp before payload matching. The rules in
+  `crates/zann-core/src/{item_subtitle,vault_search}.rs` select displayable
+  subtitles and restrict search evidence to metadata, field labels and a note marker;
 - payload-version admission in `zann-crypto/src/secrets/codec.rs`, local
   exact-source edit/history/pending transactions in
   `zann-db/src/local/item_repo/edit.rs`, and shared-server payload admission

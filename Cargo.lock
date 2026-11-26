@@ -7342,6 +7342,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "chrono",
+ "futures-util",
  "same-file",
  "serde_json",
  "sqlx-core",

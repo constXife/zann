@@ -66,6 +66,7 @@ fn fixture_with_password(password: String) -> (tempfile::TempDir, Arc<LocalVault
 fn page(core: &LocalVault) -> ItemPage {
     core.items_list(
         ItemsFilter {
+            updated: None,
             query: None,
             include_deleted: false,
         },
@@ -127,6 +128,24 @@ fn selection_round_trips_storage_with_personal_and_server_wrapped_shared_vaults(
     let item = core
         .debug_create_kv_item("Shared".into(), "key".into(), "fixture value".into())
         .expect("shared item");
+    let search_by_label = || {
+        core.items_list(
+            ItemsFilter {
+                updated: None,
+                query: VaultQuery::new("key", Default::default()),
+                include_deleted: false,
+            },
+            Page {
+                limit: 1,
+                cursor: None,
+            },
+        )
+        .expect("search selected vault")
+    };
+    assert_eq!(search_by_label().items[0].id, item);
+    core.set_current_vault(personal.to_string())
+        .expect("personal in the same replica");
+    assert_eq!(search_by_label().total_count, 0);
     core.set_current_storage(first.to_string()).expect("local");
     assert!(page(&core).items.is_empty());
     core.set_current_storage(remote.to_string())
@@ -312,4 +331,67 @@ fn one_password_change_keeps_both_independent_accounts_readable_after_restart() 
         .expect("multi-account export");
     assert_eq!(report.items_count, 2);
     assert_eq!(core.verify().expect("verify").items_ok, 2);
+}
+
+#[test]
+fn modification_range_scopes_counts_and_search_before_paging() {
+    let (_dir, core, storage, _) = fixture();
+    let pool = core.pool();
+    let repo = LocalItemRepo::new(&pool);
+    for (name, second, nanos, trash) in [
+        ("before", 99, 999_999_999, false),
+        ("first", 100, 0, false),
+        ("last", 199, 999_999_999, false),
+        ("trash", 150, 0, true),
+        ("after", 200, 0, false),
+    ] {
+        let id = core
+            .debug_create_kv_item(name.into(), "label".into(), "fixture".into())
+            .expect("create dated fixture");
+        core.runtime.block_on(async {
+            let mut item = repo
+                .get_by_id(storage, Uuid::parse_str(&id).expect("fixture UUID"))
+                .await
+                .expect("read fixture")
+                .expect("present fixture");
+            item.updated_at =
+                chrono::DateTime::from_timestamp(second, nanos).expect("fixture timestamp");
+            item.deleted_at = trash.then_some(item.updated_at);
+            repo.update(&item).await.expect("write fixture timestamp");
+        });
+    }
+    let updated = zann_core::UpdatedRange::from_unix_seconds(100, 200);
+    assert!(updated.is_some());
+    for query in [None, VaultQuery::new("key", Default::default())] {
+        let filter = ItemsFilter {
+            updated,
+            query,
+            include_deleted: false,
+        };
+        let first = core
+            .items_list(
+                filter.clone(),
+                Page {
+                    limit: 1,
+                    cursor: None,
+                },
+            )
+            .expect("list first ranged page");
+        assert_eq!(
+            (first.total_count, first.counts.all, first.counts.trash),
+            (2, 2, 1)
+        );
+        assert_eq!(first.items[0].path, "last");
+        let next = core
+            .items_list(
+                filter,
+                Page {
+                    limit: 1,
+                    cursor: Some(first.next_cursor.expect("next ranged cursor")),
+                },
+            )
+            .expect("list second ranged page");
+        assert_eq!(next.items[0].path, "first");
+        assert!(next.next_cursor.is_none());
+    }
 }

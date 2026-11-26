@@ -32,24 +32,6 @@ impl From<native::VaultSummary> for VaultSummaryFfi {
     }
 }
 
-impl From<native::ItemsFilter> for ItemsFilter {
-    fn from(value: native::ItemsFilter) -> Self {
-        Self {
-            query: value.query,
-            include_deleted: value.include_deleted,
-        }
-    }
-}
-
-impl From<ItemsFilter> for native::ItemsFilter {
-    fn from(value: ItemsFilter) -> Self {
-        Self {
-            query: value.query,
-            include_deleted: value.include_deleted,
-        }
-    }
-}
-
 impl From<native::Page> for Page {
     fn from(value: native::Page) -> Self {
         Self {
@@ -68,12 +50,19 @@ impl From<Page> for native::Page {
     }
 }
 
-impl From<native::ItemSummary> for ItemSummary {
-    fn from(value: native::ItemSummary) -> Self {
-        let caption = zann_ui_core::item_caption(
-            value.subtitle.as_ref().map(native::ItemSubtitle::as_str),
-            &value.path,
-        );
+impl ItemSummary {
+    fn project(value: native::ItemSummary, catalogue: Option<&zann_ui_core::Catalogue>) -> Self {
+        let caption = value
+            .search_match
+            .as_ref()
+            .zip(catalogue)
+            .map(|(reason, c)| c.search_caption(reason))
+            .or_else(|| {
+                zann_ui_core::item_caption(
+                    value.subtitle.as_ref().map(native::ItemSubtitle::as_str),
+                    &value.path,
+                )
+            });
         Self {
             id: value.id,
             title: value.title,
@@ -132,10 +121,17 @@ impl From<ItemTypeCount> for native::ItemTypeCount {
     }
 }
 
-impl From<native::ItemPage> for ItemPage {
-    fn from(value: native::ItemPage) -> Self {
+impl ItemPage {
+    pub(crate) fn project(
+        value: native::ItemPage,
+        catalogue: Option<&zann_ui_core::Catalogue>,
+    ) -> Self {
         Self {
-            items: value.items.into_iter().map(|value| value.into()).collect(),
+            items: value
+                .items
+                .into_iter()
+                .map(|item| ItemSummary::project(item, catalogue))
+                .collect(),
             next_cursor: value.next_cursor,
             total_count: value.total_count,
             counts: value.counts.into(),
@@ -216,43 +212,16 @@ impl From<native::ItemHistorySummary> for ItemHistorySummaryFfi {
         Self {
             version: value.version,
             checksum: value.checksum,
-            change_type: value.change_type,
-            changed_by_name: value.changed_by_name,
-            changed_by_email: value.changed_by_email,
+            id: value.id,
+            change_label_key: zann_ui_core::item_detail::history_change_label(value.change_type)
+                .into(),
+            author: zann_ui_core::item_detail::history_author(
+                value.changed_by_name.as_deref(),
+                &value.changed_by_email,
+            )
+            .into(),
             created_at: value.created_at,
             pending: value.pending,
-        }
-    }
-}
-
-impl From<ItemHistorySummaryFfi> for native::ItemHistorySummary {
-    fn from(value: ItemHistorySummaryFfi) -> Self {
-        Self {
-            version: value.version,
-            checksum: value.checksum,
-            change_type: value.change_type,
-            changed_by_name: value.changed_by_name,
-            changed_by_email: value.changed_by_email,
-            created_at: value.created_at,
-            pending: value.pending,
-        }
-    }
-}
-
-impl From<native::ItemHistoryDetail> for ItemHistoryDetailFfi {
-    fn from(value: native::ItemHistoryDetail) -> Self {
-        Self {
-            version: value.version,
-            payload_json: value.payload_json,
-        }
-    }
-}
-
-impl From<ItemHistoryDetailFfi> for native::ItemHistoryDetail {
-    fn from(value: ItemHistoryDetailFfi) -> Self {
-        Self {
-            version: value.version,
-            payload_json: value.payload_json,
         }
     }
 }

@@ -15,7 +15,7 @@ pub struct State {
     title: String,
     path: String,
     entries: Vec<ItemHistorySummary>,
-    selected_version: Option<i64>,
+    selected_entry: Option<String>,
     version_request: u64,
     detail: Option<Detail>,
     loading: bool,
@@ -29,7 +29,7 @@ pub struct State {
 pub enum Message {
     EntriesLoaded(Result<Vec<ItemHistorySummary>, String>),
     EntriesRefreshed(Result<Vec<ItemHistorySummary>, String>),
-    Select(i64),
+    Select(String),
     VersionLoaded {
         version: i64,
         request: u64,
@@ -45,8 +45,15 @@ pub enum Message {
 
 pub enum Outcome {
     None,
-    LoadVersion { version: i64, request: u64 },
-    Restore(i64),
+    LoadVersion {
+        entry_id: String,
+        version: i64,
+        request: u64,
+    },
+    Restore {
+        entry_id: String,
+        checksum: String,
+    },
     Restored(Detail),
     Copy(String),
     Close,
@@ -59,7 +66,7 @@ impl State {
             title: detail.title.clone(),
             path: detail.path.clone(),
             entries: Vec::new(),
-            selected_version: None,
+            selected_entry: None,
             version_request: crate::backend::next_view_request(),
             detail: None,
             loading: true,
@@ -112,27 +119,25 @@ impl State {
                 if self.restoring {
                     return Outcome::None;
                 }
-                let selected = self.selected_version;
-                let unchanged = selected.is_some_and(|version| {
-                    let old = self.entries.iter().find(|entry| entry.version == version);
-                    let new = entries.iter().find(|entry| entry.version == version);
+                let selected = self.selected_entry.clone();
+                let unchanged = selected.as_ref().is_some_and(|id| {
+                    let old = self.entries.iter().find(|entry| &entry.id == id);
+                    let new = entries.iter().find(|entry| &entry.id == id);
                     matches!((old, new), (Some(old), Some(new)) if old.checksum == new.checksum)
                 });
                 self.entries = entries;
                 // Metadata-only updates keep the selected preview and masking.
                 // A different payload must discard the stale preview first.
                 if !unchanged {
-                    self.selected_version = None;
+                    self.selected_entry = None;
                     self.detail = None;
                     self.version_loading = false;
                     self.confirming_restore = false;
-                    if let Some(version) = selected
-                        .filter(|version| {
-                            self.entries.iter().any(|entry| entry.version == *version)
-                        })
-                        .or_else(|| self.entries.first().map(|entry| entry.version))
+                    if let Some(entry_id) = selected
+                        .filter(|id| self.entries.iter().any(|entry| &entry.id == id))
+                        .or_else(|| self.entries.first().map(|entry| entry.id.clone()))
                     {
-                        return self.select(version);
+                        return self.select(entry_id);
                     }
                 }
             }
@@ -141,25 +146,34 @@ impl State {
                 self.loading = false;
                 self.entries = entries;
                 self.error = None;
-                if let Some(version) = self.entries.first().map(|entry| entry.version) {
-                    return self.select(version);
+                if let Some(entry_id) = self.entries.first().map(|entry| entry.id.clone()) {
+                    return self.select(entry_id);
                 }
             }
             Message::EntriesLoaded(Err(error)) => {
                 self.loading = false;
                 self.error = Some(error);
             }
-            Message::Select(version) => return self.select(version),
+            Message::Select(entry_id) => return self.select(entry_id),
             Message::VersionLoaded {
                 version,
                 request,
                 result,
             } => {
-                if self.selected_version != Some(version) || self.version_request != request {
+                if self.version_request != request || self.selected_entry.is_none() {
                     return Outcome::None;
                 }
                 self.version_loading = false;
-                match result.and_then(|history| self.parse_detail(history)) {
+                match result.and_then(|history| {
+                    if !self.entries.iter().any(|entry| {
+                        Some(&entry.id) == self.selected_entry.as_ref()
+                            && entry.version == version
+                            && entry.checksum == history.checksum
+                    }) {
+                        return Err(t("errors.history_changed"));
+                    }
+                    self.parse_detail(history)
+                }) {
                     Ok(detail) => {
                         self.detail = Some(detail);
                         self.error = None;
@@ -176,22 +190,28 @@ impl State {
                 }
             }
             Message::AskRestore => {
-                if self.selected_version.is_some() && !self.restoring {
+                if self.selected_entry.is_some() && !self.restoring {
                     self.confirming_restore = true;
                 }
             }
             Message::CancelRestore => self.confirming_restore = false,
             Message::ConfirmRestore => {
-                let Some(version) = self.selected_version else {
+                let Some(id) = self.selected_entry.as_ref() else {
                     return Outcome::None;
                 };
-                if self.restoring {
+                let Some(entry) = self.entries.iter().find(|entry| &entry.id == id) else {
+                    return Outcome::None;
+                };
+                if self.restoring || !self.confirming_restore || self.detail.is_none() {
                     return Outcome::None;
                 }
                 self.confirming_restore = false;
                 self.restoring = true;
                 self.error = None;
-                return Outcome::Restore(version);
+                return Outcome::Restore {
+                    entry_id: entry.id.clone(),
+                    checksum: entry.checksum.clone(),
+                };
             }
             Message::Restored(Ok(detail)) => return Outcome::Restored(detail),
             Message::Restored(Err(error)) => {
@@ -204,18 +224,22 @@ impl State {
         Outcome::None
     }
 
-    fn select(&mut self, version: i64) -> Outcome {
-        if self.loading || self.restoring || self.selected_version == Some(version) {
+    fn select(&mut self, id: String) -> Outcome {
+        if self.loading || self.restoring || self.selected_entry.as_ref() == Some(&id) {
             return Outcome::None;
         }
-        self.selected_version = Some(version);
+        let Some(entry) = self.entries.iter().find(|entry| entry.id == id) else {
+            return Outcome::None;
+        };
+        self.selected_entry = Some(id.clone());
         self.version_request = crate::backend::next_view_request();
         self.detail = None;
         self.version_loading = true;
         self.confirming_restore = false;
         self.error = None;
         Outcome::LoadVersion {
-            version,
+            entry_id: id,
+            version: entry.version,
             request: self.version_request,
         }
     }
@@ -258,19 +282,24 @@ impl State {
             for entry in &self.entries {
                 versions = versions.add(
                     widget::list::button(history_row(entry))
-                        .selected(self.selected_version == Some(entry.version))
-                        .on_press(Message::Select(entry.version)),
+                        .selected(self.selected_entry.as_ref() == Some(&entry.id))
+                        .on_press(Message::Select(entry.id.clone())),
                 );
             }
 
             let version_detail: Element<'_, Message> = if self.version_loading {
                 super::centered(widget::text::body(t("items.historyVersionLoading")))
-            } else if let Some(detail) = self.detail.as_ref() {
+            } else if let (Some(detail), Some(entry)) = (
+                self.detail.as_ref(),
+                self.entries
+                    .iter()
+                    .find(|entry| Some(&entry.id) == self.selected_entry.as_ref()),
+            ) {
                 let mut content = widget::column::with_capacity(4)
                     .push(widget::text::heading(format!(
                         "{} v{}",
                         t("items.historyVersionTitle"),
-                        self.selected_version.unwrap_or_default()
+                        entry.version
                     )))
                     .push(detail.view(false).map(Message::Detail))
                     .spacing(spacing.space_s);
@@ -333,17 +362,13 @@ impl State {
 
 fn history_row(entry: &ItemHistorySummary) -> Element<'_, Message> {
     let spacing = theme::spacing();
-    let author = entry
-        .changed_by_name
-        .as_deref()
-        .filter(|name| !name.trim().is_empty())
-        .unwrap_or(&entry.changed_by_email);
-    let change = t(match entry.change_type {
-        1 => "items.historyChangeCreate",
-        3 => "items.historyChangeDelete",
-        4 => "items.historyChangeRestore",
-        _ => "items.historyChangeUpdate",
-    });
+    let author = zann_ui_core::item_detail::history_author(
+        entry.changed_by_name.as_deref(),
+        &entry.changed_by_email,
+    );
+    let change = t(zann_ui_core::item_detail::history_change_label(
+        entry.change_type,
+    ));
     let status = if entry.pending {
         format!(" · {}", t("items.historyLocalVersion"))
     } else {

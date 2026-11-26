@@ -103,10 +103,15 @@ async fn local_history_records_payload_updates() {
 
     let history_repo = LocalItemHistoryRepo::new(&pool);
     let history = history_repo
-        .list_by_item_limit(storage_id, item_id, 5)
+        .list_by_item_limit(storage_id, vault_id, item_id, 5)
         .await
         .expect("history list");
     assert_eq!(history.len(), 2, "expected create + update history entries");
+    assert!(history_repo
+        .list_by_item_limit(storage_id, Uuid::now_v7(), item_id, 5)
+        .await
+        .expect("history in a different vault")
+        .is_empty());
     assert!(
         history
             .iter()
@@ -160,7 +165,7 @@ async fn local_history_skips_metadata_only_updates() {
 
     let history_repo = LocalItemHistoryRepo::new(&pool);
     let history = history_repo
-        .list_by_item_limit(storage_id, item_id, 5)
+        .list_by_item_limit(storage_id, vault_id, item_id, 5)
         .await
         .expect("history list");
     assert_eq!(
@@ -190,19 +195,35 @@ async fn local_history_restore_replaces_payload() {
         .await
         .expect("put item");
 
+    let mut replacement = login_payload("pw-2");
+    replacement.type_id = "card".into();
     services
         .update_item_by_id(
             storage_id,
             item_id,
             "login".to_string(),
-            "login".to_string(),
-            login_payload("pw-2"),
+            "card".to_string(),
+            replacement,
         )
         .await
         .expect("update item");
 
+    let version = LocalItemHistoryRepo::new(&pool)
+        .list_by_item_limit(storage_id, vault_id, item_id, 1)
+        .await
+        .expect("history lookup")
+        .pop()
+        .expect("first version");
+    assert_eq!(
+        services
+            .restore_item_version(storage_id, item_id, version.id, "superseded")
+            .await
+            .expect_err("stale confirmation")
+            .kind,
+        "history_changed"
+    );
     services
-        .restore_item_version(storage_id, item_id, 1)
+        .restore_item_version(storage_id, item_id, version.id, &version.checksum)
         .await
         .expect("restore history");
 
@@ -210,6 +231,8 @@ async fn local_history_restore_replaces_payload() {
         .get_item(storage_id, item_id)
         .await
         .expect("get item");
+    assert_eq!(restored.type_id, "login");
+    assert_eq!(restored.payload.type_id, "login");
     assert_eq!(
         restored.payload.fields["password"].value, "pw-1",
         "restore should return previous payload"
@@ -217,7 +240,7 @@ async fn local_history_restore_replaces_payload() {
 
     let history_repo = LocalItemHistoryRepo::new(&pool);
     let history = history_repo
-        .list_by_item_limit(storage_id, item_id, 5)
+        .list_by_item_limit(storage_id, vault_id, item_id, 5)
         .await
         .expect("history list");
     assert_eq!(history.len(), 3, "restore should add history snapshot");

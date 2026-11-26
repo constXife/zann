@@ -2,9 +2,10 @@ use super::*;
 
 fn entry(version: i64, pending: bool) -> ItemHistorySummary {
     ItemHistorySummary {
+        id: format!("row-{version}"),
         version,
         checksum: format!("checksum-{version}"),
-        change_type: 1,
+        change_type: zann_core::ChangeType::Create,
         changed_by_name: None,
         changed_by_email: String::new(),
         created_at: "2026-08-26T12:30:00.948547+00:00".into(),
@@ -46,7 +47,7 @@ fn metadata_refresh_preserves_selected_version_preview_and_masking() {
             ]))),
             Outcome::None
         ));
-        assert_eq!(state.selected_version, Some(2));
+        assert_eq!(state.selected_entry.as_deref(), Some("row-2"));
         assert!(!state.entries[1].pending);
         assert_eq!(state.detail.as_ref().unwrap().fields[0].revealed, revealed);
         assert!(!state.version_loading);
@@ -77,7 +78,7 @@ fn changed_or_removed_version_discards_its_preview_before_reloading() {
 fn failed_metadata_refresh_keeps_the_preview_and_reports_the_error() {
     let mut state = state_with_preview();
     state.update(Message::EntriesRefreshed(Err("history read failed".into())));
-    assert_eq!(state.selected_version, Some(2));
+    assert_eq!(state.selected_entry.as_deref(), Some("row-2"));
     assert!(state.detail.is_some());
     assert_eq!(state.error.as_deref(), Some("history read failed"));
 }

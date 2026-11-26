@@ -1,43 +1,15 @@
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use uuid::Uuid;
 
 use zann_core::{
-    item_subtitle, ChangeType, EncryptedPayload, ItemCounts, ItemDetail, ItemListParams,
-    ItemPreview, ItemPreviewPage, ItemsService, ServiceError, ServiceResult, SyncStatus,
+    ChangeType, EncryptedPayload, ItemDetail, ItemListParams, ItemPreviewPage, ItemsService,
+    ServiceError, ServiceResult, SyncStatus,
 };
 
-use crate::local::{LocalItem, LocalItemRepo, LocalPendingChange, PendingChangeRepo};
+use crate::local::{LocalItemRepo, LocalPendingChange, PendingChangeRepo};
 
 use super::LocalServices;
-
-fn build_fts_query(input: &str) -> Option<String> {
-    let mut tokens = Vec::new();
-    for token in input.split_whitespace() {
-        let trimmed = token.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        let escaped = trimmed.replace('"', "\"\"");
-        tokens.push(format!("\"{}\"*", escaped));
-    }
-    if tokens.is_empty() {
-        None
-    } else {
-        Some(tokens.join(" "))
-    }
-}
-
-fn encode_cursor(item: &LocalItem) -> String {
-    format!("{}|{}", item.updated_at.to_rfc3339(), item.id)
-}
-
-fn parse_cursor(cursor: &str) -> Option<(DateTime<Utc>, Uuid)> {
-    let (ts, id) = cursor.split_once('|')?;
-    let ts = DateTime::parse_from_rfc3339(ts).ok()?.with_timezone(&Utc);
-    let id = Uuid::parse_str(id).ok()?;
-    Some((ts, id))
-}
 
 #[async_trait]
 impl<'a> ItemsService for LocalServices<'a> {
@@ -47,151 +19,7 @@ impl<'a> ItemsService for LocalServices<'a> {
         vault_id: Uuid,
         params: ItemListParams,
     ) -> ServiceResult<ItemPreviewPage> {
-        let limit = params.limit.unwrap_or(200).clamp(1, 1000) as i64;
-        let search_query = params
-            .query
-            .as_deref()
-            .and_then(|query| build_fts_query(query.trim()));
-        let cursor = match params.cursor.as_deref() {
-            Some(cursor) => Some(
-                parse_cursor(cursor)
-                    .ok_or_else(|| ServiceError::new("invalid_cursor", "invalid cursor"))?,
-            ),
-            None => None,
-        };
-        let repo = LocalItemRepo::new(self.pool);
-        let total_count = match search_query.as_deref() {
-            Some(query) => repo
-                .count_by_vault_with_query(storage_id, vault_id, params.include_deleted, query)
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-            None => repo
-                .count_by_vault_all(storage_id, vault_id, params.include_deleted)
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-        };
-        let active_count = match search_query.as_deref() {
-            Some(query) => repo
-                .count_by_vault_with_query(storage_id, vault_id, false, query)
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-            None => repo
-                .count_by_vault(storage_id, vault_id)
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-        };
-        let trash_count = match search_query.as_deref() {
-            Some(query) => repo
-                .count_deleted_by_vault_with_query(storage_id, vault_id, query)
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-            None => repo
-                .count_deleted_by_vault(storage_id, vault_id)
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-        };
-        let type_counts = match search_query.as_deref() {
-            Some(query) => repo
-                .count_by_vault_grouped_with_query(storage_id, vault_id, query)
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-            None => repo
-                .count_by_vault_grouped(storage_id, vault_id)
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-        };
-        let mut by_type = std::collections::HashMap::new();
-        for (type_id, count) in type_counts {
-            by_type.insert(type_id, count as usize);
-        }
-        let mut items = match search_query.as_deref() {
-            Some(query) => repo
-                .list_by_vault_paged_with_query(
-                    storage_id,
-                    vault_id,
-                    params.include_deleted,
-                    query,
-                    limit + 1,
-                    cursor,
-                )
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-            None => repo
-                .list_by_vault_paged(
-                    storage_id,
-                    vault_id,
-                    params.include_deleted,
-                    limit + 1,
-                    cursor,
-                )
-                .await
-                .map_err(|err| ServiceError::new("item_list_failed", err.to_string()))?,
-        };
-        let next_cursor = if items.len() > limit as usize {
-            items.pop();
-            // The cursor is exclusive (`< updated_at, id`), so it must point
-            // at the last item we actually return. Pointing at the lookahead
-            // row would skip that row on the next page.
-            items.last().map(encode_cursor)
-        } else {
-            None
-        };
-        // Subtitles decrypt only the page returned, with the vault key
-        // unwrapped once; a vault whose key does not open fails the list, as
-        // it fails every item. A single payload that does not open leaves its
-        // row without a subtitle, and opening the item reports the error, so
-        // one damaged item never hides the rest.
-        let keys = self.vault_payload_keys(storage_id, vault_id).await?;
-        let mut hosts = Vec::with_capacity(items.len());
-        let mut previews: Vec<_> = items
-            .into_iter()
-            .map(|item| {
-                let payload = self.open_payload(&keys, item.id, &item.payload_enc).ok();
-                let subtitle = payload
-                    .as_ref()
-                    .and_then(|p| item_subtitle(&item.type_id, p));
-                hosts.push(
-                    payload
-                        .as_ref()
-                        .and_then(|p| zann_autofill::LoginMatcher::login_site(p).ok())
-                        .map(|url| url.host().to_owned()),
-                );
-                ItemPreview {
-                    id: item.id,
-                    vault_id: item.vault_id,
-                    path: item.path,
-                    name: item.name,
-                    type_id: item.type_id,
-                    subtitle,
-                    favicon_rgba: None,
-                    sync_status: item.sync_status,
-                    updated_at: item.updated_at,
-                    deleted_at: item.deleted_at,
-                }
-            })
-            .collect();
-        let icons = self
-            .read_site_icons(
-                storage_id,
-                vault_id,
-                &keys.primary,
-                hosts.iter().flatten().map(String::as_str),
-            )
-            .await
-            .map_err(|e| ServiceError::new("site_icon_read", e.to_string()))?;
-        for (item, host) in previews.iter_mut().zip(hosts) {
-            item.favicon_rgba = host.and_then(|host| icons.get(&host).cloned());
-        }
-        Ok(ItemPreviewPage {
-            items: previews,
-            next_cursor,
-            total_count: total_count as usize,
-            counts: ItemCounts {
-                all: active_count as usize,
-                trash: trash_count as usize,
-                by_type,
-            },
-        })
+        self.list_page(storage_id, vault_id, params).await
     }
 
     async fn get_item_by_path(

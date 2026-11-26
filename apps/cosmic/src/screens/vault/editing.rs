@@ -154,7 +154,11 @@ impl State {
                             }));
                         }
                     }
-                    history::Outcome::LoadVersion { version, request } => {
+                    history::Outcome::LoadVersion {
+                        entry_id,
+                        version,
+                        request,
+                    } => {
                         let item_id = history.item_id().to_string();
                         let facade = session.facade();
                         return Outcome::Task(cosmic::task::future(async move {
@@ -164,14 +168,14 @@ impl State {
                                     version,
                                     request,
                                     result: off_thread(move || {
-                                        local::item_history_get(&facade, item_id, version)
+                                        local::item_history_get(&facade, item_id, entry_id)
                                     })
                                     .await,
                                 },
                             )
                         }));
                     }
-                    history::Outcome::Restore(version) => {
+                    history::Outcome::Restore { entry_id, checksum } => {
                         let item_id = history.item_id().to_string();
                         let facade = session.facade();
                         return Outcome::Task(cosmic::task::future(async move {
@@ -179,7 +183,9 @@ impl State {
                                 generation,
                                 history::Message::Restored(
                                     off_thread(move || {
-                                        local::item_history_restore(&facade, item_id, version)
+                                        local::item_history_restore(
+                                            &facade, item_id, entry_id, checksum,
+                                        )
                                     })
                                     .await
                                     .and_then(Detail::parse),
@@ -192,6 +198,8 @@ impl State {
                         self.install_detail(detail);
                         self.query.clear();
                         self.applied_query.clear();
+                        self.dates = Default::default();
+                        self.applied_dates = None;
                         self.list_generation = self.list_generation.wrapping_add(1);
                         self.searching = false;
                         self.error = None;
@@ -225,6 +233,8 @@ impl State {
                 self.install_detail(detail);
                 self.query.clear();
                 self.applied_query.clear();
+                self.dates = Default::default();
+                self.applied_dates = None;
                 self.list_generation = self.list_generation.wrapping_add(1);
                 self.searching = false;
                 self.error = None;

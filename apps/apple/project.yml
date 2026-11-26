@@ -106,6 +106,7 @@ targets:
       - Zann/Keychain.swift
       - Zann/Connect
       - Zann/Platform/ClipboardController.swift
+      - Zann/Platform/RegionalDates.swift
       - Zann/Platform/Colors.swift
       - Zann/Platform/MobileNavigation.swift
       - Zann/Platform/FieldRevealState.swift
@@ -118,8 +119,10 @@ targets:
           - ItemEditorLocation.swift
           - FieldEditorRow.swift
           - GeneratorView.swift
+          - ItemHistoryModel.swift
           - ItemDetailLoader.swift
           - VaultContextLoader.swift
+          - UpdatedRangeControl.swift
           - SyncCommitRelay.swift
           - SyncRecoveryActions.swift
           - SyncIndicatorButton.swift
@@ -173,6 +176,7 @@ targets:
       - ZannTests/MobileNavigationTests.swift
       - ZannTests/ItemDetailLoaderTests.swift
       - ZannTests/VaultModelTests.swift
+      - ZannTests/RegionalDatesTests.swift
       - ZannTests/MaintenanceTests.swift
       - ZannTests/OfflineLifecycleTests.swift
       - ZannTests/BackgroundUXTests.swift

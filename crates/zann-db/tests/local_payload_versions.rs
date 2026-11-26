@@ -73,11 +73,13 @@ async fn future_payloads_are_read_only_and_refused_before_any_history_or_pending
     .expect("future ciphertext");
     let history_repo = LocalItemHistoryRepo::new(&pool);
     let mut future_history = history_repo
-        .list_by_item_limit(storage, id, 10)
+        .list_by_item_limit(storage, vault, id, 10)
         .await
         .expect("history")
         .pop()
         .expect("initial history");
+    let first_id = future_history.id;
+    let first_checksum = future_history.checksum.clone();
     future_history.id = Uuid::now_v7();
     future_history.version = 2;
     future_history.payload_enc = future.clone();
@@ -87,7 +89,7 @@ async fn future_payloads_are_read_only_and_refused_before_any_history_or_pending
         .await
         .expect("future history");
     let before_history = history_repo
-        .list_by_item_limit(storage, id, 10)
+        .list_by_item_limit(storage, vault, id, 10)
         .await
         .expect("history")
         .len();
@@ -98,7 +100,7 @@ async fn future_payloads_are_read_only_and_refused_before_any_history_or_pending
         .len();
     assert_eq!(
         services
-            .restore_item_version(storage, id, 2)
+            .restore_item_version(storage, id, future_history.id, &future_history.checksum)
             .await
             .expect_err("future history is read-only")
             .kind,
@@ -189,7 +191,7 @@ async fn future_payloads_are_read_only_and_refused_before_any_history_or_pending
     // Requesting older history must not overwrite a future current payload.
     assert_eq!(
         services
-            .restore_item_version(storage, id, 1)
+            .restore_item_version(storage, id, first_id, &first_checksum)
             .await
             .expect_err("future current item")
             .kind,
@@ -207,7 +209,7 @@ async fn future_payloads_are_read_only_and_refused_before_any_history_or_pending
     assert!(after.deleted_at.is_none());
     assert_eq!(
         history_repo
-            .list_by_item_limit(storage, id, 10)
+            .list_by_item_limit(storage, vault, id, 10)
             .await
             .expect("history")
             .len(),

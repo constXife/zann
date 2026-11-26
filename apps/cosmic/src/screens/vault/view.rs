@@ -21,7 +21,7 @@ impl State {
             Some(ListEmptyState::Failed)
         } else if self.category_needs_prefetch() {
             Some(ListEmptyState::Loading)
-        } else if !self.query.trim().is_empty() {
+        } else if !self.query.trim().is_empty() || self.dates.range().is_some() {
             Some(ListEmptyState::NoSearchResults)
         } else {
             Some(ListEmptyState::EmptyCategory)
@@ -194,7 +194,7 @@ impl State {
                         .push(widget::text::body(t("items.noSearchResults")))
                         .push(
                             widget::button::standard(t("items.clearSearch"))
-                                .on_press(Message::ClearQuery),
+                                .on_press(Message::ClearFilters),
                         );
                 }
                 ListEmptyState::EmptyCategory => {
@@ -253,6 +253,7 @@ impl State {
 
         let mut content = widget::column::with_capacity(5)
             .push(search)
+            .push(self.dates.view())
             .push(toolbar)
             .push(
                 widget::scrollable(list)
@@ -310,7 +311,12 @@ fn item_row(item: &ItemSummary) -> Element<'_, Message> {
         widget::tooltip::Position::Bottom,
     ));
     let subtitle = item.subtitle.as_ref().map(|subtitle| subtitle.as_str());
-    if let Some(caption) = zann_ui_core::item_caption(subtitle, &item.path) {
+    if let Some(caption) = item
+        .search_match
+        .as_ref()
+        .map(crate::i18n::search_caption)
+        .or_else(|| zann_ui_core::item_caption(subtitle, &item.path))
+    {
         text = text.push(widget::text::caption(caption));
     }
     widget::row::with_capacity(2)

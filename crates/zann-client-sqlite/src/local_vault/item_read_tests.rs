@@ -27,7 +27,7 @@ fn cancelled_and_expired_reads_stop_before_opening_an_item() {
 
 #[test]
 fn waiting_read_cancels_and_releases_key_without_waiting_for_sqlite() {
-    for locking in [false, true] {
+    for (locking, searching) in [(false, false), (true, false), (true, true)] {
         let (_dir, core, _, _) = context_tests::fixture();
         let id = core
             .debug_create_kv_item("Example".into(), "key".into(), "fixture value".into())
@@ -46,7 +46,26 @@ fn waiting_read_cancels_and_releases_key_without_waiting_for_sqlite() {
         let (op, cancel) = operation();
         let (tx, rx) = std::sync::mpsc::channel();
         let other = core.clone();
-        let worker = std::thread::spawn(move || tx.send(other.item_read(id, op)).expect("result"));
+        let worker = std::thread::spawn(move || {
+            let result = if searching {
+                other
+                    .items_list(
+                        ItemsFilter {
+                            updated: None,
+                            query: VaultQuery::new("PIN PUK", Default::default()),
+                            include_deleted: false,
+                        },
+                        Page {
+                            limit: 10,
+                            cursor: None,
+                        },
+                    )
+                    .map(drop)
+            } else {
+                other.item_read(id, op).map(drop)
+            };
+            tx.send(result).expect("result");
+        });
         let until = Instant::now() + Duration::from_secs(2);
         while core.item_reads.len() == 0 && Instant::now() < until {
             std::thread::sleep(Duration::from_millis(1));

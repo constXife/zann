@@ -112,13 +112,10 @@ struct SyncIndicatorButton<Recovery: View>: View {
     }
 
     private var lastSynced: String {
-        guard let value = syncState?.lastSyncedAt,
-              let date = ISO8601DateFormatter().date(from: value) else {
-            return strings("sync.neverSynced")
+        guard let value = syncState?.lastSyncedAt else { return strings("sync.neverSynced") }
+        guard let time = RegionalDates().timestamp(value, omittingDateOn: Date()) else {
+            return strings("common.dateUnavailable")
         }
-        let time = Calendar.current.isDateInToday(date)
-            ? date.formatted(date: .omitted, time: .shortened)
-            : date.formatted(date: .abbreviated, time: .shortened)
         return strings("sync.lastSynced", ["time": time])
     }
 }

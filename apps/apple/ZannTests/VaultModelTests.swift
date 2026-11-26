@@ -152,6 +152,57 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(model.totalCount, 254)
     }
 
+    func testVaultSearchFindsCustomLabelsAndNotesPastTheFirstPage() async throws {
+        try createItem("card", path: "Carrier", values: ["PIN": "451028", "PUK": "984677"])
+        try createItem("note", path: "Letter", values: ["text": "By the lake"])
+        try createVaultPastTheFirstPage()
+        let model = try makeModel()
+        XCTAssertFalse(model.visibleItems.contains { $0.title == "Carrier" })
+        model.query = "pin PUK"
+        try await settled(model)
+        XCTAssertEqual(model.visibleItems.map(\.title), ["Carrier"])
+        XCTAssertEqual(model.visibleItems.first?.caption, "Matched fields PIN and PUK")
+        model.query = "lake"
+        try await settled(model)
+        XCTAssertEqual(model.visibleItems.map(\.title), ["Letter"])
+        XCTAssertEqual(model.visibleItems.first?.caption, "Match in note")
+        model.query = "451028"
+        try await settled(model)
+        XCTAssertTrue(model.visibleItems.isEmpty)
+    }
+
+    func testDateFilterCombinesWithTextAndClearsIndependently() async throws {
+        let model = try makeModel()
+        let calendar = Calendar.current
+        let today = Date()
+        let yesterday = try XCTUnwrap(calendar.date(byAdding: .day, value: -1, to: today))
+        model.updatedRange = try XCTUnwrap(UpdatedRangeControl.interval(from: yesterday, through: yesterday, calendar: calendar))
+        try await settled(model)
+        XCTAssertEqual(model.searchMatchCount, 0)
+        model.query = "Bank"
+        try await settled(model)
+        XCTAssertTrue(model.visibleItems.isEmpty)
+        model.updatedRange = try XCTUnwrap(UpdatedRangeControl.interval(from: yesterday, through: today, calendar: calendar))
+        try await settled(model)
+        XCTAssertEqual(model.visibleItems.map(\.title), ["Bank"])
+        model.updatedRange = nil
+        try await settled(model)
+        XCTAssertEqual(model.searchedQuery, "Bank")
+        model.clearListFilters()
+        try await settled(model)
+        XCTAssertEqual(model.totalCount, 3)
+    }
+
+    func testDateFilterIncludesTheWholeLocalDayAcrossClockChanges() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try XCTUnwrap(TimeZone(identifier: "America/New_York"))
+        let spring = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 12)))
+        let autumn = try XCTUnwrap(calendar.date(from: DateComponents(year: 2026, month: 11, day: 1, hour: 12)))
+        XCTAssertEqual(UpdatedRangeControl.interval(from: spring, through: spring, calendar: calendar)?.duration, 23 * 3600)
+        XCTAssertEqual(UpdatedRangeControl.interval(from: autumn, through: autumn, calendar: calendar)?.duration, 25 * 3600)
+        XCTAssertNil(UpdatedRangeControl.interval(from: autumn, through: spring, calendar: calendar))
+    }
+
     func testASparseCategoryLoadsPagesUntilItsItemsShow() async throws {
         try createVaultPastTheFirstPage()
         let model = try makeModel()
@@ -289,6 +340,52 @@ final class VaultModelTests: XCTestCase {
         XCTAssertEqual(values["password"], "hunter2")
         XCTAssertEqual(values["totp"], "JBSWY3DPEHPK3PXP")
         XCTAssertEqual(model.visibleItems.count, 3)
+    }
+
+    func testHistoryPreviewsAndRestoresTheConfirmedEvent() async throws {
+        let model = try makeModel()
+        let bank = try XCTUnwrap(model.visibleItems.first { $0.title == "Bank" })
+        model.select(bank.id)
+        _ = try await loadedDetail(model)
+        await model.startEditing()
+        let editor = try XCTUnwrap(model.editor)
+        editor.setValue(try index(of: "password", in: editor), "updated-fixture")
+        await model.saveEditor()
+        let live = try await loadedDetail(model)
+        XCTAssertEqual(live.fields.first { $0.key == "password" }?.value, "updated-fixture")
+
+        model.openHistory()
+        let history = try XCTUnwrap(model.history)
+        await history.refresh()
+        let created = try XCTUnwrap(history.entries.first { $0.changeLabelKey == "items.historyChangeCreate" })
+        let edited = try XCTUnwrap(history.entries.first { $0.changeLabelKey == "items.historyChangeUpdate" })
+        XCTAssertNotEqual(created.id, edited.id)
+        await history.select(created)
+        let password = try XCTUnwrap(history.preview?.fields.first { $0.key == "password" })
+        XCTAssertEqual(password.value, "s3cret")
+        XCTAssertTrue(password.masked)
+        let generation = history.previewGeneration
+        await history.refresh()
+        XCTAssertEqual(history.previewGeneration, generation)
+
+        await model.restoreHistory(edited)
+        XCTAssertTrue(model.history === history)
+        await model.restoreHistory(created)
+        XCTAssertNil(model.history)
+        XCTAssertNil(history.preview)
+        let restored = try await loadedDetail(model)
+        XCTAssertEqual(restored.id, bank.id)
+        XCTAssertEqual(restored.fields.first { $0.key == "password" }?.value, "s3cret")
+
+        model.openHistory()
+        let reopened = try XCTUnwrap(model.history)
+        await reopened.refresh()
+        XCTAssertTrue(reopened.entries.contains { $0.changeLabelKey == "items.historyChangeRestore" && $0.pending })
+        model.stopAutoSync()
+        await reopened.refresh()
+        XCTAssertNil(model.history)
+        XCTAssertNil(reopened.preview)
+        XCTAssertTrue(reopened.entries.isEmpty)
     }
 
     func testInvalidDraftStaysOpenWithTheTranslatedError() async throws {

@@ -8736,9 +8736,10 @@ dependencies = [
 name = "zann-cosmic"
 version = "0.1.0"
 dependencies = [
- "chrono",
  "dirs 5.0.1",
+ "jiff",
  "ksni",
+ "libc",
  "libcosmic",
  "open",
  "serde_json",
@@ -8803,6 +8804,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "chrono",
+ "futures-util",
  "same-file",
  "serde_json",
  "sqlx-core",

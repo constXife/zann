@@ -34,7 +34,10 @@ impl State {
             if let Some(url) = &state.server_url {
                 content = content.push(widget::text::caption(url.clone()));
             }
-            let last_synced = state.last_synced_at.as_deref().and_then(local_time_label);
+            let last_synced = state
+                .last_synced_at
+                .as_deref()
+                .map(crate::i18n::format_sync_timestamp);
             content = content.push(widget::text::caption(match last_synced {
                 Some(time) => t_args("sync.lastSynced", &[("time", &time)]),
                 None => t("sync.neverSynced"),
