@@ -30,6 +30,7 @@ fn ffi_projects_local_commands_results_and_errors() {
     let page = core
         .items_list(
             ItemsFilter {
+                updated: None,
                 query: None,
                 include_deleted: false,
             },
@@ -76,7 +77,11 @@ fn a_listed_item_carries_its_caption_from_non_secret_fields() {
     let list = |query: Option<&str>| {
         core.items_list(
             ItemsFilter {
-                query: query.map(str::to_string),
+                updated: None,
+                query: query.map(|text| zann_ffi::VaultSearchFfi {
+                    text: text.into(),
+                    catalogue: zann_ffi::TranslationCatalogue::new("en".into()),
+                }),
                 include_deleted: false,
             },
             Page {

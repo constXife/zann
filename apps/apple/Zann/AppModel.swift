@@ -200,6 +200,7 @@ final class AppModel: ObservableObject {
         settingsError = nil
         if next.language != preferences.language {
             strings = Strings(language: next.language ?? systemLanguage)
+            vault?.updateStrings(strings)
             keystore?.setPromptReason(strings("unlock.touchIdReason"))
         }
         preferences = next

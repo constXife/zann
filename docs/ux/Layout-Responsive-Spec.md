@@ -60,6 +60,15 @@ ownership.
 - Item selection updates immediately. Replacement reads cancel superseded work;
   late successes and failures cannot change a newer selection or context.
   Leaving the selected item's category or search results clears its detail.
+- After unlock, search covers the selected vault, including items beyond the loaded
+  page. Terms can match different field labels on one item. Results show the
+  title and matching labels, or a generic note marker for a note-text match.
+- Native screens use the device's regional short date and clock settings for displayed
+  dates, including item history, security-key enrollment and snapshots. Sync details
+  show only the time for a sync on the current local day. Other syncs include the date.
+- The optional Date modified filter includes both selected calendar days in the device's
+  time zone. The vault applies it to browsing, search, counts and pagination. Clearing
+  the dates preserves the search text. Opening another vault resets both.
 - Empty lists distinguish loading, no search matches and an empty category.
   Search offers Clear search; an empty category offers its canonical creation
   action when available (never in Trash). A pending page is not an empty vault.
@@ -193,6 +202,9 @@ VoiceOver/device pass remain acceptance work when no local iOS runtime exists.
 - Create/edit and history occupy the detail workspace while preserving the
   navigation and list columns. COSMIC and Apple render native forms and
   history controls in the same semantic region.
+- On macOS, the History button in the selected card’s toolbar opens up to 20
+  events. The preview sits beside the list when there is room and below it
+  in a narrow detail column. Event timestamps use the system’s regional format.
 - COSMIC field editors put key/type/delete controls above the full-width value;
   generator controls use a compact action beside the value. Inputs must remain
   usable at 1200×700 logical pixels with all three columns visible.

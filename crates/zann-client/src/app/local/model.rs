@@ -1,6 +1,7 @@
 //! Local vault read models and commands.
 
-pub use zann_core::{ItemSubtitle, VaultKind};
+pub use zann_core::vault_search::{SearchMatch, VaultQuery};
+pub use zann_core::{ItemSubtitle, UpdatedRange, VaultKind};
 
 #[derive(Debug, Clone)]
 pub struct VaultStatus {
@@ -18,7 +19,8 @@ pub struct VaultSummary {
 
 #[derive(Debug, Clone)]
 pub struct ItemsFilter {
-    pub query: Option<String>,
+    pub updated: Option<UpdatedRange>,
+    pub query: Option<VaultQuery>,
     pub include_deleted: bool,
 }
 
@@ -36,6 +38,7 @@ pub struct ItemSummary {
     pub type_id: String,
     /// Who or where the item is for; see `zann_core::item_subtitle`.
     pub subtitle: Option<ItemSubtitle>,
+    pub search_match: Option<SearchMatch>,
     pub favicon_rgba: Option<Vec<u8>>,
     pub deleted: bool,
 }
@@ -106,9 +109,10 @@ impl std::fmt::Debug for ItemUpdate {
 
 #[derive(Debug, Clone)]
 pub struct ItemHistorySummary {
+    pub id: String,
     pub version: i64,
     pub checksum: String,
-    pub change_type: i32,
+    pub change_type: zann_core::ChangeType,
     pub changed_by_name: Option<String>,
     pub changed_by_email: String,
     pub created_at: String,
@@ -118,6 +122,7 @@ pub struct ItemHistorySummary {
 #[derive(Clone)]
 pub struct ItemHistoryDetail {
     pub version: i64,
+    pub checksum: String,
     pub payload_json: String,
 }
 

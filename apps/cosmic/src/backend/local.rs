@@ -187,28 +187,21 @@ pub fn items(
     cursor: Option<String>,
     query: Option<String>,
 ) -> Result<ItemsPage, String> {
-    items_page(facade, cursor, query, PAGE_LIMIT)
+    items_page(facade, cursor, query, None, PAGE_LIMIT)
 }
 
-/// Keep the loaded window when committed sync pages refresh the current list.
-pub fn refresh_items(
-    facade: &Facade,
-    query: Option<String>,
-    keeping: u32,
-) -> Result<ItemsPage, String> {
-    items_page(facade, None, query, keeping.max(PAGE_LIMIT))
-}
-
-fn items_page(
+pub fn items_page(
     facade: &Facade,
     cursor: Option<String>,
     query: Option<String>,
+    updated: Option<zann_core::UpdatedRange>,
     limit: u32,
 ) -> Result<ItemsPage, String> {
     let page = facade
         .items_list(
             ItemsFilter {
-                query,
+                updated,
+                query: query.as_deref().and_then(crate::i18n::vault_query),
                 // The trash category filters client-side, so deleted items have
                 // to be part of the page.
                 include_deleted: true,
@@ -272,20 +265,21 @@ pub fn item_history(facade: &Facade, id: String) -> Result<Vec<ItemHistorySummar
 pub fn item_history_get(
     facade: &Facade,
     id: String,
-    version: i64,
+    entry_id: String,
 ) -> Result<ItemHistoryDetail, String> {
     facade
-        .item_history_get(id, version)
+        .item_history_get(id, entry_id)
         .map_err(|err| err.to_string())
 }
 
 pub fn item_history_restore(
     facade: &Facade,
     id: String,
-    version: i64,
+    entry_id: String,
+    checksum: String,
 ) -> Result<ItemDetail, String> {
     facade
-        .item_history_restore(id, version)
+        .item_history_restore(id, entry_id, checksum)
         .map_err(|err| err.to_string())
 }
 

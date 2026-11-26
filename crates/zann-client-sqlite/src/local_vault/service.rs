@@ -220,11 +220,16 @@ impl LocalVaultService for LocalVault {
     fn item_history_list(&self, id: String, limit: u32) -> LocalResult<Vec<ItemHistorySummary>> {
         LocalVault::item_history_list(self, id, limit)
     }
-    fn item_history_get(&self, id: String, version: i64) -> LocalResult<ItemHistoryDetail> {
-        LocalVault::item_history_get(self, id, version)
+    fn item_history_get(&self, id: String, entry_id: String) -> LocalResult<ItemHistoryDetail> {
+        LocalVault::item_history_get(self, id, entry_id)
     }
-    fn item_history_restore(&self, id: String, version: i64) -> LocalResult<ItemDetail> {
-        LocalVault::item_history_restore(self, id, version)
+    fn item_history_restore(
+        &self,
+        id: String,
+        entry_id: String,
+        checksum: String,
+    ) -> LocalResult<ItemDetail> {
+        LocalVault::item_history_restore(self, id, entry_id, checksum)
     }
     fn backup_import_file(
         &self,

@@ -41,6 +41,7 @@ fn payloads(core: &LocalVault) -> Vec<zann_core::EncryptedPayload> {
     let mut items = core
         .items_list(
             ItemsFilter {
+                updated: None,
                 query: None,
                 include_deleted: false,
             },

@@ -55,7 +55,7 @@ fn counts(core: &LocalVault) -> (i64, i64, i64, i64) {
         let mut versions = 0;
         for item in &items {
             history += LocalItemHistoryRepo::new(&pool)
-                .list_by_item_limit(storage, item.id, 100)
+                .list_by_item_limit(storage, vault, item.id, 100)
                 .await
                 .expect("passkey fixture operation")
                 .len() as i64;

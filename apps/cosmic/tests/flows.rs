@@ -297,14 +297,19 @@ fn facade_creates_and_edits_items_for_cosmic() {
     let history = local::item_history(&facade, updated.id.clone()).expect("list history");
     assert!(!history.is_empty());
     assert_eq!(history[0].version, 1);
-    let previous = local::item_history_get(&facade, updated.id.clone(), history[0].version)
+    let previous = local::item_history_get(&facade, updated.id.clone(), history[0].id.clone())
         .expect("get history version");
     let previous_payload: serde_json::Value =
         serde_json::from_str(&previous.payload_json).expect("history payload");
     assert_eq!(previous_payload["fields"]["token"]["value"], "first");
 
-    let restored = local::item_history_restore(&facade, updated.id, history[0].version)
-        .expect("restore history version");
+    let restored = local::item_history_restore(
+        &facade,
+        updated.id,
+        history[0].id.clone(),
+        previous.checksum.clone(),
+    )
+    .expect("restore history version");
     let restored_payload: serde_json::Value =
         serde_json::from_str(&restored.payload_json).expect("restored payload");
     assert_eq!(restored_payload["fields"]["token"]["value"], "first");
@@ -395,6 +400,7 @@ fn infinite_scroll_prefetches_and_caps_the_summary_cache() {
                 type_id: "login".to_string(),
                 favicon_rgba: None,
                 subtitle: None,
+                search_match: None,
                 deleted: false,
             })
             .collect(),

@@ -19,12 +19,19 @@ struct VaultView: View {
                 // Creating adds to the list, so it sits over the list.
                 .toolbar { createMenu }
         } detail: {
-            ItemDetailView(
-                vault: vault,
-                strings: app.strings,
-                preferences: app.preferences,
-                revealAll: reveal.isHeld
-            )
+            Group {
+                if let history = vault.history {
+                    ItemHistoryView(history: history, strings: app.strings, preferences: app.preferences,
+                                    revealAll: reveal.isHeld, close: vault.closeHistory) { entry in
+                        guard vault.history === history else { return }
+                        await vault.restoreHistory(entry)
+                    }
+                    .id(ObjectIdentifier(history))
+                } else {
+                    ItemDetailView(vault: vault, strings: app.strings, preferences: app.preferences,
+                                   revealAll: reveal.isHeld)
+                }
+            }
             .toolbar { detailToolbar }
         }
         .sheet(item: editor) { editor in
@@ -48,13 +55,20 @@ struct VaultView: View {
                 vault.startCreating()
             }
             .help("\(app.strings("common.create")) (⌘N)")
-            .disabled(vault.switching || !vault.contextReady || vault.vaultID == nil)
+            .disabled(vault.history != nil || vault.switching || !vault.contextReady || vault.vaultID == nil)
         }
     }
 
     /// Item editing stays with the detail pane; locking uses app commands.
     private var detailToolbar: some ToolbarContent {
-        ToolbarItem {
+        ToolbarItemGroup {
+            Button(action: vault.openHistory) {
+                Label(app.strings("items.historyOpen"), systemImage: "clock.arrow.circlepath")
+            }
+            .help(app.strings("items.historyOpen"))
+            .accessibilityIdentifier("item.history")
+            .disabled(!vault.canEdit || vault.editor != nil)
+
             Button {
                 Task { await vault.startEditing() }
             } label: {

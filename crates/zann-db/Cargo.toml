@@ -5,6 +5,7 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
+futures-util = { version = "0.3", default-features = false, optional = true }
 zann-autofill = { path = "../zann-autofill", optional = true }
 thiserror = "1"
 chrono = "0.4"
@@ -27,7 +28,7 @@ zeroize = "1"
 [features]
 default = []
 postgres = ["dep:sqlx-postgres"]
-sqlite = ["dep:zann-autofill", "dep:same-file", "dep:sqlx-sqlite"]
+sqlite = ["dep:futures-util", "dep:zann-autofill", "dep:same-file", "dep:sqlx-sqlite"]
 postgres-tests = []
 
 [dev-dependencies]

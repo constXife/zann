@@ -13,9 +13,22 @@ pub struct VaultSummaryFfi {
     pub item_count: u64,
 }
 
-#[derive(Debug, Clone, uniffi::Record)]
+#[derive(Clone, uniffi::Record)]
+pub struct VaultSearchFfi {
+    pub text: String,
+    pub catalogue: std::sync::Arc<crate::TranslationCatalogue>,
+}
+
+#[derive(Clone, uniffi::Record)]
+pub struct UpdatedRangeFfi {
+    pub start_seconds: i64,
+    pub end_seconds: i64,
+}
+
+#[derive(Clone, uniffi::Record)]
 pub struct ItemsFilter {
-    pub query: Option<String>,
+    pub updated: Option<UpdatedRangeFfi>,
+    pub query: Option<VaultSearchFfi>,
     pub include_deleted: bool,
 }
 
@@ -100,11 +113,11 @@ pub struct ItemUpdate {
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ItemHistorySummaryFfi {
+    pub id: String,
     pub version: i64,
     pub checksum: String,
-    pub change_type: i32,
-    pub changed_by_name: Option<String>,
-    pub changed_by_email: String,
+    pub change_label_key: String,
+    pub author: String,
     pub created_at: String,
     pub pending: bool,
 }
@@ -112,7 +125,9 @@ pub struct ItemHistorySummaryFfi {
 #[derive(Clone, uniffi::Record)]
 pub struct ItemHistoryDetailFfi {
     pub version: i64,
-    pub payload_json: String,
+    pub checksum: String,
+    pub type_id: String,
+    pub fields: Vec<crate::ItemDetailFieldFfi>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]

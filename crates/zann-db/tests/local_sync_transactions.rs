@@ -2706,7 +2706,12 @@ async fn commit_pull_page_updates_and_inserts_full_item_history_then_cursor() {
             .expect("projected item exists");
         assert_eq!(stored.checksum, canonical_checksum(checksum));
         let stored_history = LocalItemHistoryRepo::new(&fixture.pool)
-            .list_by_item_limit(fixture.scope.storage_id, item_id, 10)
+            .list_by_item_limit(
+                fixture.scope.storage_id,
+                fixture.scope.vault_id,
+                item_id,
+                10,
+            )
             .await
             .expect("read projected history");
         assert_eq!(stored_history.len(), 1);
@@ -3092,7 +3097,12 @@ async fn stale_item_rolls_back_page_and_cursor() {
     assert_eq!(stored.version, 3);
     assert_eq!(stored.checksum, canonical_checksum("checksum-current"));
     assert!(LocalItemHistoryRepo::new(&fixture.pool)
-        .list_by_item_limit(fixture.scope.storage_id, item_id, 10)
+        .list_by_item_limit(
+            fixture.scope.storage_id,
+            fixture.scope.vault_id,
+            item_id,
+            10
+        )
         .await
         .expect("read history")
         .is_empty());
@@ -3562,7 +3572,12 @@ async fn pull_cursor_failpoint_rolls_back_items_and_history() {
     assert_eq!(stored.version, 1);
     assert_eq!(stored.checksum, canonical_checksum("checksum-1"));
     let stored_history = LocalItemHistoryRepo::new(&fixture.pool)
-        .list_by_item_limit(fixture.scope.storage_id, item_id, 10)
+        .list_by_item_limit(
+            fixture.scope.storage_id,
+            fixture.scope.vault_id,
+            item_id,
+            10,
+        )
         .await
         .expect("read history");
     assert_eq!(stored_history.len(), 1);

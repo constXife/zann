@@ -84,6 +84,39 @@ impl Catalogue {
         }
     }
 
+    /// Resolve localized built-in labels once per query. Custom labels use their field key.
+    pub fn vault_query(&self, text: &str) -> Option<zann_core::vault_search::VaultQuery> {
+        let labels = self
+            .strings
+            .keys()
+            .filter_map(|name| name.strip_prefix("fields."))
+            .chain(["totp"])
+            .map(|key| (key.to_owned(), self.field_label(key)))
+            .collect();
+        zann_core::vault_search::VaultQuery::new(text, labels)
+    }
+
+    pub fn search_caption(&self, reason: &zann_core::vault_search::SearchMatch) -> String {
+        use zann_core::vault_search::SearchMatch;
+        match reason {
+            SearchMatch::Metadata => self.get("items.matchMetadata").to_owned(),
+            SearchMatch::Note => self.get("items.matchNote").to_owned(),
+            SearchMatch::Fields(keys) => {
+                let labels: Vec<_> = keys.iter().map(|key| self.field_label(key)).collect();
+                match labels.as_slice() {
+                    [prefix @ .., last] if !prefix.is_empty() => {
+                        let first = prefix.join(", ");
+                        let joined = format!("{first} {} {last}", self.get("items.fieldListAnd"));
+                        self.get("items.matchFields").replace("{fields}", &joined)
+                    }
+                    _ => self
+                        .get("items.matchField")
+                        .replace("{fields}", &labels.join("")),
+                }
+            }
+        }
+    }
+
     /// The label for an item type id: the `types.*` translation, or the id
     /// itself for a type this catalogue does not know.
     #[must_use]

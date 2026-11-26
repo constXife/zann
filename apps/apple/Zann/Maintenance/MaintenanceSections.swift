@@ -27,7 +27,7 @@ struct MaintenanceSections: View {
                 .font(.caption).foregroundStyle(.secondary)
             // Read-only results remain labels, without native text-selection focus.
             ForEach(maintenance.snapshots, id: \.path) { row in
-                Text(row.createdAt).font(.caption)
+                Text(RegionalDates().timestamp(row.createdAt) ?? strings("common.dateUnavailable")).font(.caption)
                     .accessibilityIdentifier("maintenance.snapshotResult")
             }
         }

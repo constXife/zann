@@ -50,7 +50,7 @@ final class VaultModel: ObservableObject {
     /// loaded together so the picker and the list never disagree.
     struct Contents {
         let page: ItemPage
-        let query: String
+        let filter: VaultListFilter
         let vaults: [VaultSummaryFfi]
         let vault: VaultSummaryFfi?
         let storages: [StorageSummaryFfi]
@@ -76,7 +76,7 @@ final class VaultModel: ObservableObject {
     @Published private(set) var detail: Detail?
     @Published private(set) var detailLoading = false
 
-    var canEdit: Bool { detail != nil && detail?.id == selectedItemID && !switching && contextReady }
+    var canEdit: Bool { history == nil && detail != nil && detail?.id == selectedItemID && !switching && contextReady }
     @Published private(set) var error: String?
 
     @Published var categoryID: String {
@@ -93,6 +93,15 @@ final class VaultModel: ObservableObject {
         didSet { if query != oldValue { queryChanged() } }
     }
 
+    @Published var updatedRange: DateInterval? {
+        didSet { if updatedRange != oldValue { queryChanged() } }
+    }
+
+    func clearListFilters() {
+        updatedRange = nil
+        query = ""
+    }
+
     /// The core is searching for a query typed after the list loaded.
     @Published private(set) var searching = false
     /// The next page is loading.
@@ -100,6 +109,7 @@ final class VaultModel: ObservableObject {
 
     @Published private(set) var selectedItemID: String?
     /// The open create or edit form; at most one at a time.
+    @Published private(set) var history: ItemHistoryModel?
     @Published private(set) var editor: ItemEditorModel?
     /// Whether a server holds this vault's storage, so syncing means something.
     @Published private(set) var canSync: Bool
@@ -138,7 +148,7 @@ final class VaultModel: ObservableObject {
 
     private let detailLoader: ItemDetailLoader
     private let core: CoreFacade
-    private let strings: Strings
+    private var strings: Strings
     /// The core decides when to sync and admits one sync at a time, manual
     /// or automatic; this type only runs the timer and the sync.
     private let schedule = AutoSyncScheduleFfi()
@@ -153,12 +163,12 @@ final class VaultModel: ObservableObject {
     private struct SyncRefresh { let storageID: String? }
     private var syncRefreshContext: SyncRefresh?
     private var refreshingSync = false
-    /// The loaded pages of the list for `appliedQuery`.
+    /// The loaded pages of the list for `appliedFilter`.
     private var items: [ItemSummary] = []
     private var nextCursor: String?
     /// The trimmed query whose results `items` holds. While a newer one waits
     /// for the core, the loaded items narrow locally.
-    private var appliedQuery = ""
+    private var appliedFilter = VaultListFilter.all
     /// Bumped whenever `items` is replaced, so a page loaded for an older list
     /// is dropped.
     private var listGeneration = 0
@@ -230,6 +240,7 @@ final class VaultModel: ObservableObject {
     /// The vault is locking: nothing more is due, and a sync still running
     /// (which the core's lock cancels) schedules nothing.
     func stopAutoSync() {
+        discardHistory()
         contextGeneration += 1
         syncRunID = nil
         syncRelay?.cancel()
@@ -368,18 +379,20 @@ final class VaultModel: ObservableObject {
             let generation = contextGeneration
             let revision = listGeneration
             let core = core
-            let shown = trimmedQuery
+            let shown = wantedFilter
+            let request = listRequest(shown)
             let loaded = items.count
             let result = await BlockingCore.run {
-                Result { try VaultContextLoader.load(core, query: shown, keeping: loaded) }
+                Result { try VaultContextLoader.load(core, request: request, keeping: loaded) }
             }
             guard generation == contextGeneration else { continue }
             guard !switching else { return }
             switch result {
             case .success(let contents):
-                if revision == listGeneration, shown == trimmedQuery {
+                if revision == listGeneration, shown == wantedFilter {
                     apply(contents)
                     if reloadDetail, let selectedItemID { loadDetail(selectedItemID) }
+                    await history?.refresh()
                 } else {
                     // Keep the first catalog usable, then read for the latest
                     // list revision instead of losing the committed update.
@@ -417,14 +430,14 @@ final class VaultModel: ObservableObject {
 
     /// The first page of the current vault and the storage's vaults.
     nonisolated static func load(_ core: CoreFacade) throws -> Contents {
-        try VaultContextLoader.load(core, query: "", keeping: 0)
+        try VaultContextLoader.load(core, request: .all, keeping: 0)
     }
 
     /// Opens another vault of this storage with nothing filtered or
     /// selected. If its items cannot load, the core goes back to the vault
     /// on screen, so the picker and the list keep agreeing.
     func selectVault(_ id: String) async {
-        guard id != vaultID, editor == nil, !switching, contextReady else { return }
+        guard id != vaultID, editor == nil, history?.restoring != true, !switching, contextReady else { return }
         contextGeneration += 1
         switching = true
         listGeneration += 1
@@ -455,7 +468,7 @@ final class VaultModel: ObservableObject {
         case .success(let contents):
             error = nil
             select(nil)
-            query = ""
+            clearListFilters()
             folder = .any
             categoryID = "all"
             apply(contents)
@@ -467,7 +480,7 @@ final class VaultModel: ObservableObject {
     /// Switches only registered storage contexts. A refused switch keeps the
     /// current list; a committed context whose reads fail never shows old data.
     func selectStorage(_ id: String) async {
-        guard id != storageID, editor == nil, !switching else { return }
+        guard id != storageID, editor == nil, history?.restoring != true, !switching else { return }
         guard let target = storages.first(where: { $0.id == id }) else { return }
         contextGeneration += 1
         switching = true
@@ -490,7 +503,7 @@ final class VaultModel: ObservableObject {
         case .refused(let failure):
             error = strings.message(for: failure)
         case .loaded(let contents):
-            query = ""
+            clearListFilters()
             folder = .any
             categoryID = "all"
             syncError = nil
@@ -499,7 +512,7 @@ final class VaultModel: ObservableObject {
             apply(contents)
             error = nil
         case .unreadable(let failure):
-            query = ""
+            clearListFilters()
             folder = .any
             categoryID = "all"
             canSync = false
@@ -508,7 +521,7 @@ final class VaultModel: ObservableObject {
             nextCursor = nil
             loadingMore = false
             totalCount = 0
-            appliedQuery = ""
+            appliedFilter = .all
             storageID = target.id
             vaultID = nil
             vaults = []
@@ -524,14 +537,14 @@ final class VaultModel: ObservableObject {
     }
 
     func select(_ id: String?) {
-        guard !switching || id == nil, contextReady || id == nil, id != selectedItemID else { return }
+        guard history?.restoring != true, !switching || id == nil, contextReady || id == nil, id != selectedItemID else { return }
         show(id)
     }
 
     /// A new item of `typeID`, or of the type zann-ui-core picks for the
     /// selected category.
     func startCreating(typeID: String? = nil) {
-        guard editor == nil, !switching, contextReady, vaultID != nil else { return }
+        guard history == nil, editor == nil, !switching, contextReady, vaultID != nil else { return }
         let type = typeID ?? createTypeForCategory(categoryId: categoryID)
         open { try ItemEditorModel.create(typeID: type) }
     }
@@ -544,8 +557,29 @@ final class VaultModel: ObservableObject {
         let result = await BlockingCore.run {
             Result { try core.itemGet(id: id) }
         }
-        guard wanted == storageID, token == selection, !switching else { return }
+        guard wanted == storageID, token == selection, !switching, history == nil else { return }
         open { try ItemEditorModel.edit(try result.get()) }
+    }
+
+    func openHistory() {
+        guard canEdit, editor == nil, let detail else { return }
+        history = ItemHistoryModel(item: detail, core: core)
+    }
+
+    func closeHistory() {
+        guard history?.restoring != true else { return }
+        discardHistory()
+    }
+
+    private func discardHistory() {
+        history?.close()
+        history = nil
+    }
+
+    func restoreHistory(_ confirmed: ItemHistorySummaryFfi) async {
+        guard let opened = history, await opened.restore(confirmed), history === opened else { return }
+        discardHistory()
+        await didWriteItem(opened.itemID)
     }
 
     func cancelEditing() {
@@ -556,33 +590,38 @@ final class VaultModel: ObservableObject {
     func saveEditor() async {
         guard let editor, let item = await editor.save(with: core) else { return }
         self.editor = nil
+        await didWriteItem(item.id)
+    }
+
+    private func didWriteItem(_ id: String) async {
         schedule.localChange()
         Task { await refreshSyncState() }
-        guard await reload(query: trimmedQuery) else { return }
+        guard await reload(filter: wantedFilter) else { return }
         // A saved item can fall outside the current category, folder or
         // search; the newest change heads the unfiltered first page.
-        if !visibleItems.contains(where: { $0.id == item.id }) {
-            if !appliedQuery.isEmpty {
-                guard await reload(query: "") else { return }
+        if !visibleItems.contains(where: { $0.id == id }) {
+            if appliedFilter != .all {
+                guard await reload(filter: .all) else { return }
             }
-            query = ""
+            clearListFilters()
             folder = .any
             categoryID = "all"
         }
-        show(item.id)
+        show(id)
     }
 
     /// Replaces the list with its start for `query`, as many items as are
     /// loaded now; a failure shows its error and keeps the list.
-    func refreshLocalContents() async { _ = await reload(query: trimmedQuery) }
+    func refreshLocalContents() async { _ = await reload(filter: wantedFilter) }
 
-    private func reload(query: String) async -> Bool {
+    private func reload(filter: VaultListFilter) async -> Bool {
+        let request = listRequest(filter)
         let core = core
         let loaded = items.count
         let wanted = storageID
         let generation = contextGeneration
         let result = await BlockingCore.run {
-            Result { try VaultContextLoader.load(core, query: query, keeping: loaded) }
+            Result { try VaultContextLoader.load(core, request: request, keeping: loaded) }
         }
         guard wanted == storageID, generation == contextGeneration, !switching else { return false }
         switch result {
@@ -606,6 +645,7 @@ final class VaultModel: ObservableObject {
     /// Loads `id` into the detail pane even when it is already selected, so a
     /// save shows the stored version.
     private func show(_ id: String?) {
+        discardHistory()
         selectedItemID = id
         error = nil
         selection += 1
@@ -663,15 +703,15 @@ final class VaultModel: ObservableObject {
         search?.cancel()
         search = nil
         searching = false
-        replace(with: contents.page, query: contents.query)
-        if trimmedQuery != appliedQuery { searchFor(trimmedQuery) }
+        replace(with: contents.page, filter: contents.filter)
+        if wantedFilter != appliedFilter { searchFor(wantedFilter) }
     }
 
     /// Starts the list over at `page`, the first one for `query`.
-    private func replace(with page: ItemPage, query: String) {
+    private func replace(with page: ItemPage, filter: VaultListFilter) {
         listGeneration += 1
         loadingMore = false
-        appliedQuery = query
+        appliedFilter = filter
         items = page.items
         take(page)
     }
@@ -685,17 +725,17 @@ final class VaultModel: ObservableObject {
         counts = page.counts
         totalCount = page.totalCount
         categories = scope.map { categoryViews(counts: counts, scope: $0) } ?? []
-        if appliedQuery.isEmpty { folders = buildFolderTree(items: items) }
+        if appliedFilter == .all { folders = buildFolderTree(items: items) }
         refreshVisible()
     }
 
     /// The query the list now answers.
-    var searchedQuery: String { appliedQuery }
+    var searchedQuery: String { appliedFilter.text }
 
     /// How many items match the search in the open category or folder; nil
     /// while browsing, or while a newer query is on its way to the core.
     var searchMatchCount: Int? {
-        guard !appliedQuery.isEmpty, trimmedQuery == appliedQuery, !searching else { return nil }
+        guard appliedFilter != .all, wantedFilter == appliedFilter, !searching else { return nil }
         if folder == .any {
             return categories.first { $0.id == categoryID }.map { Int($0.count) }
         }
@@ -704,42 +744,56 @@ final class VaultModel: ObservableObject {
         return nextCursor == nil ? visibleItems.count : nil
     }
 
-    private var trimmedQuery: String {
-        query.trimmingCharacters(in: .whitespacesAndNewlines)
+    private var wantedFilter: VaultListFilter {
+        VaultListFilter(text: query.trimmingCharacters(in: .whitespacesAndNewlines), updated: updatedRange)
+    }
+
+    func updateStrings(_ next: Strings) {
+        strings = next
+        if contextReady, !switching, !wantedFilter.text.isEmpty {
+            searchFor(wantedFilter)
+        }
     }
 
     /// A query the loaded items do not answer goes to the core after a pause;
     /// one they do drops any search still waiting.
     private func queryChanged() {
         guard !switching, contextReady else { return }
-        if trimmedQuery == appliedQuery {
+        if wantedFilter == appliedFilter {
             search?.cancel()
             search = nil
             searching = false
         } else {
-            searchFor(trimmedQuery)
+            searchFor(wantedFilter)
         }
         refreshVisible()
     }
 
     /// Replaces the list with the core's first page for `wanted`, unless the
     /// query changes again first. Clearing the query reloads at once.
-    private func searchFor(_ wanted: String) {
+    private func listRequest(_ filter: VaultListFilter) -> VaultListRequest {
+        VaultListRequest(filter: filter, query: strings.vaultSearch(filter.text))
+    }
+
+    private func searchFor(_ wanted: VaultListFilter) {
         search?.cancel()
         searching = true
-        let delay: UInt64 = wanted.isEmpty ? 0 : searchDebounceNanoseconds
+        listGeneration += 1
+        loadingMore = false
+        let delay: UInt64 = wanted.text == appliedFilter.text || wanted.text.isEmpty ? 0 : searchDebounceNanoseconds
+        let request = listRequest(wanted)
         let core = core
         search = Task { [weak self] in
             if delay > 0 { try? await Task.sleep(nanoseconds: delay) }
             guard !Task.isCancelled else { return }
             let result = await BlockingCore.run {
-                Result { try VaultContextLoader.page(core, query: wanted, cursor: nil, limit: itemsPageLimit) }
+                Result { try VaultContextLoader.page(core, request: request, cursor: nil, limit: itemsPageLimit) }
             }
             guard let self, !Task.isCancelled else { return }
             self.search = nil
             self.searching = false
             switch result {
-            case .success(let page): self.replace(with: page, query: wanted)
+            case .success(let page): self.replace(with: page, filter: wanted)
             case .failure(let failure): self.error = describe(failure)
             }
         }
@@ -755,16 +809,16 @@ final class VaultModel: ObservableObject {
     /// Appends the next page of the list on screen, up to `itemCacheLimit`
     /// items. A page that lands after the list was replaced is dropped.
     private func loadMore() {
-        guard !switching, contextReady, let cursor = nextCursor, !loadingMore, !searching, items.count < itemCacheLimit else {
+        guard !switching, contextReady, let cursor = nextCursor, !loadingMore, !searching, appliedFilter == wantedFilter, items.count < itemCacheLimit else {
             return
         }
         loadingMore = true
         let generation = listGeneration
-        let query = appliedQuery
+        let request = listRequest(appliedFilter)
         let core = core
         Task { [weak self] in
             let result = await BlockingCore.run {
-                Result { try VaultContextLoader.page(core, query: query, cursor: cursor, limit: itemsPageLimit) }
+                Result { try VaultContextLoader.page(core, request: request, cursor: cursor, limit: itemsPageLimit) }
             }
             guard let self, generation == self.listGeneration else { return }
             self.loadingMore = false
@@ -781,9 +835,9 @@ final class VaultModel: ObservableObject {
     private func refreshVisible() {
         // The core's matches already answer the applied query; a newer one
         // narrows them until the core answers it.
-        let narrowing = trimmedQuery == appliedQuery ? "" : query
+        let narrowing = wantedFilter.text == appliedFilter.text ? "" : query
         let filter = ItemFilterFfi(categoryId: categoryID, folder: folder, query: narrowing)
-        visibleItems = filterItems(items: items, filter: filter).map { items[Int($0)] }
+        visibleItems = updatedRange != appliedFilter.updated ? [] : filterItems(items: items, filter: filter).map { items[Int($0)] }
         if let selectedItemID, !visibleItems.contains(where: { $0.id == selectedItemID }) {
             select(nil)
         }

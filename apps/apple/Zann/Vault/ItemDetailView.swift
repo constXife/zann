@@ -54,7 +54,7 @@ struct ItemDetailView: View {
     }
 }
 
-private struct ItemDetailContent: View {
+struct ItemDetailContent: View {
     let detail: VaultModel.Detail
     let faviconRgba: Data?
     let strings: Strings

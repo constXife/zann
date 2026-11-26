@@ -29,7 +29,7 @@ async fn encrypted_archive_restores_through_the_canonical_server_importer_and_pu
         let restored=tempdir();let other=open(restored.path());connect(&other,&url,&login);let target=other.current_storage_id().unwrap();
         let handle=other.backup_open_encrypted(path.display().to_string(),0,phrase(),account_replicas::operation()).unwrap();let inspection=other.backup_inspect_encrypted(handle.clone()).unwrap();assert_eq!(inspection.items_count,1);let source=inspection.storages[0].id.clone();
         let report=other.backup_import_encrypted(handle,source,BackupImportOptions{target_storage_id:Some(target.clone())}).unwrap();assert_eq!(report.imported_items,1);assert_eq!(other.pending_change_count(target).unwrap(),0);assert!(other.verify().unwrap().problems.is_empty());
-        let clean=tempdir();let pulled=open(clean.path());connect(&pulled,&url,&login);let page=pulled.items_list(ItemsFilter{query:None,include_deleted:false},Page{limit:10,cursor:None}).unwrap();assert_eq!(page.items.len(),1);let detail=pulled.item_get(page.items[0].id.clone()).unwrap();let actual:Value=serde_json::from_str(&detail.payload_json).unwrap();assert_eq!(actual,payload);
+        let clean=tempdir();let pulled=open(clean.path());connect(&pulled,&url,&login);let page=pulled.items_list(ItemsFilter{updated:None,query:None,include_deleted:false},Page{limit:10,cursor:None}).unwrap();assert_eq!(page.items.len(),1);let detail=pulled.item_get(page.items[0].id.clone()).unwrap();let actual:Value=serde_json::from_str(&detail.payload_json).unwrap();assert_eq!(actual,payload);
         assert!(!std::fs::read_dir(root.path()).unwrap().any(|entry|entry.unwrap().file_name().to_string_lossy().starts_with(".zann-export-")));
     }).await.unwrap();
     server.abort();

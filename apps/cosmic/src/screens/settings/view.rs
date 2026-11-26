@@ -1,5 +1,5 @@
 use super::*;
-use crate::i18n::{minutes_label, seconds_label};
+use crate::i18n::{format_timestamp, minutes_label, seconds_label};
 
 impl State {
     pub fn view(&self) -> Element<'_, Message> {
@@ -313,7 +313,7 @@ impl State {
             column = column
                 .push(widget::text::body(format!(
                     "Restore the snapshot from {}? Everything added or changed since then is removed from this device.",
-                    confirming.created_at
+                    format_timestamp(&confirming.created_at)
                 )))
                 .push(widget::text::caption(
                     "The current vault is snapshotted first, so this restore can be undone.",
@@ -341,7 +341,7 @@ impl State {
                         .push(
                             widget::text::caption(format!(
                                 "{} · {} KiB",
-                                entry.created_at,
+                                format_timestamp(&entry.created_at),
                                 entry.size_bytes / 1024
                             ))
                             .width(Length::Fill),

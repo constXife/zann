@@ -440,14 +440,9 @@ impl<'a> LocalServices<'a> {
         &self,
         storage_id: Uuid,
         item_id: Uuid,
-        version: i64,
+        entry_id: Uuid,
+        expected_checksum: &str,
     ) -> ServiceResult<()> {
-        if version < 1 {
-            return Err(ServiceError::new(
-                "invalid_version",
-                "version must be positive",
-            ));
-        }
         let repo = LocalItemRepo::new(self.pool);
         let Some(mut item) = repo
             .get_by_id(storage_id, item_id)
@@ -459,11 +454,17 @@ impl<'a> LocalServices<'a> {
 
         let history_repo = LocalItemHistoryRepo::new(self.pool);
         let history = history_repo
-            .get_by_item_version(storage_id, item_id, version)
+            .get_by_item_entry(storage_id, item_id, entry_id)
             .await
             .map_err(|err| ServiceError::new("history_get_failed", err.to_string()))?
             .ok_or_else(|| ServiceError::new("history_not_found", "history not found"))?;
 
+        if history.checksum != expected_checksum || history.vault_id != item.vault_id {
+            return Err(ServiceError::new(
+                "history_changed",
+                "The selected history version changed.",
+            ));
+        }
         if history.checksum == item.checksum {
             return Err(ServiceError::new("history_no_changes", "no changes"));
         }
@@ -472,7 +473,8 @@ impl<'a> LocalServices<'a> {
         // writing history, replacing ciphertext, or publishing a pending edit.
         self.decrypt_payload(storage_id, item.vault_id, item.id, &item.payload_enc)
             .await?;
-        self.decrypt_payload(storage_id, item.vault_id, item.id, &history.payload_enc)
+        let restored = self
+            .decrypt_payload(storage_id, item.vault_id, item.id, &history.payload_enc)
             .await?;
 
         let expected = item.clone();
@@ -499,6 +501,7 @@ impl<'a> LocalServices<'a> {
 
         let key = self.payload_key_for_id(storage_id, item.vault_id).await?;
         let key_fp = Self::key_fingerprint(&key);
+        item.type_id = restored.type_id.clone();
         item.payload_enc = history.payload_enc;
         item.checksum = history.checksum;
         item.cache_key_fp = Some(key_fp);
@@ -676,6 +679,7 @@ impl<'a> LocalServices<'a> {
 
 mod app;
 mod browser;
+mod item_list;
 mod items;
 mod passkey;
 mod site_icons;

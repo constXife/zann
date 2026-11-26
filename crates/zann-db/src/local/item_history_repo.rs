@@ -64,6 +64,7 @@ impl<'a> LocalItemHistoryRepo<'a> {
     pub async fn list_by_item_limit(
         &self,
         storage_id: Uuid,
+        vault_id: Uuid,
         item_id: Uuid,
         limit: i64,
     ) -> Result<Vec<LocalItemHistory>, sqlx_core::Error> {
@@ -87,23 +88,24 @@ impl<'a> LocalItemHistoryRepo<'a> {
                 sync_status as "sync_status",
                 created_at as "created_at"
             FROM item_history
-            WHERE storage_id = ?1 AND item_id = ?2
+            WHERE storage_id = ?1 AND item_id = ?2 AND vault_id = ?4
             ORDER BY sync_status ASC, version DESC, created_at DESC
             LIMIT ?3
             "#,
             storage_id,
             item_id,
-            limit
+            limit,
+            vault_id
         )
         .fetch_all(self.pool)
         .await
     }
 
-    pub async fn get_by_item_version(
+    pub async fn get_by_item_entry(
         &self,
         storage_id: Uuid,
         item_id: Uuid,
-        version: i64,
+        entry_id: Uuid,
     ) -> Result<Option<LocalItemHistory>, sqlx_core::Error> {
         query_as!(
             LocalItemHistory,
@@ -125,11 +127,11 @@ impl<'a> LocalItemHistoryRepo<'a> {
                 sync_status as "sync_status",
                 created_at as "created_at"
             FROM item_history
-            WHERE storage_id = ?1 AND item_id = ?2 AND version = ?3
+            WHERE storage_id = ?1 AND item_id = ?2 AND id = ?3
             "#,
             storage_id,
             item_id,
-            version
+            entry_id
         )
         .fetch_optional(self.pool)
         .await

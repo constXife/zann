@@ -21,6 +21,10 @@ struct Strings {
         }
     }
 
+    func vaultSearch(_ text: String) -> VaultSearchFfi? {
+        text.isEmpty ? nil : VaultSearchFfi(text: text, catalogue: catalogue)
+    }
+
     func fieldLabel(_ key: String) -> String {
         catalogue.fieldLabel(key: key)
     }

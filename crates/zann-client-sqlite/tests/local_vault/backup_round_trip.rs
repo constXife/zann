@@ -178,6 +178,7 @@ fn apple_passwords_preflight_and_import_keep_distinct_duplicate_titles() {
     let page = core
         .items_list(
             ItemsFilter {
+                updated: None,
                 query: None,
                 include_deleted: false,
             },

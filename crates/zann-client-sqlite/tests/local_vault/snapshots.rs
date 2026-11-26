@@ -24,6 +24,7 @@ fn db_url(root: &std::path::Path) -> String {
 fn all_items() -> (ItemsFilter, Page) {
     (
         ItemsFilter {
+            updated: None,
             query: None,
             include_deleted: false,
         },

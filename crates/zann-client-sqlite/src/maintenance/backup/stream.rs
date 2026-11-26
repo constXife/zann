@@ -107,7 +107,14 @@ impl<'a> ExportItemStreamer<'a> {
 
             let items = self
                 .item_repo
-                .list_by_vault_paged(storage_id, vault_id, true, EXPORT_PAGE_LIMIT, self.cursor)
+                .list_by_vault_paged(
+                    storage_id,
+                    vault_id,
+                    None,
+                    true,
+                    EXPORT_PAGE_LIMIT,
+                    self.cursor,
+                )
                 .await?;
             if items.is_empty() {
                 self.current_vault = None;

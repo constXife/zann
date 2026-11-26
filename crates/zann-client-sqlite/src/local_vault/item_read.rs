@@ -39,22 +39,36 @@ impl LocalVault {
             )
         };
         let services = LocalServices::new(&pool, master_key.as_ref());
-        let item = self.runtime.block_on(async {
-            tokio::select! {
-                biased;
-                _ = operation.cancelled() => Err(LocalError::Cancelled),
-                _ = tokio::time::sleep_until(operation.deadline().into()) => Err(LocalError::DeadlineExceeded),
-                result = services.get_item(storage_id, item_id) => result.map_err(LocalError::ItemRead),
-            }
-        })?;
-        check_active(&operation)?;
-        let _context = self.context_gate.read().expect("lock poisoned");
-        self.check_context_generation(generation)?;
+        let item = self.finish_item_read(
+            &operation,
+            generation,
+            services.get_item(storage_id, item_id),
+        )?;
         if item.vault_id != vault_id {
             return Err(LocalError::InvalidArgument(
                 "item is not in the current vault".into(),
             ));
         }
         Ok(item)
+    }
+
+    pub(super) fn finish_item_read<T>(
+        &self,
+        operation: &SessionOperation,
+        generation: u64,
+        read: impl std::future::Future<Output = zann_core::ServiceResult<T>>,
+    ) -> LocalResult<T> {
+        let result = self.runtime.block_on(async {
+            tokio::select! {
+                biased;
+                _ = operation.cancelled() => Err(LocalError::Cancelled),
+                _ = tokio::time::sleep_until(operation.deadline().into()) => Err(LocalError::DeadlineExceeded),
+                result = read => result.map_err(LocalError::ItemRead),
+            }
+        })?;
+        check_active(operation)?;
+        let _context = self.context_gate.read().expect("lock poisoned");
+        self.check_context_generation(generation)?;
+        Ok(result)
     }
 }

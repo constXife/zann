@@ -1,5 +1,9 @@
 //! Process-wide view of the shared translation catalogue.
 
+mod regional_date;
+pub use regional_date::format_timestamp;
+pub(crate) use regional_date::{format_sync_timestamp, short_date};
+
 use std::sync::{OnceLock, RwLock};
 
 use zann_ui_core::Catalogue;
@@ -31,6 +35,20 @@ pub fn t_args(key: &str, args: &[(&str, &str)]) -> String {
     text
 }
 
+pub fn vault_query(text: &str) -> Option<zann_core::vault_search::VaultQuery> {
+    catalogue()
+        .read()
+        .expect("catalogue lock poisoned")
+        .vault_query(text)
+}
+
+pub fn search_caption(reason: &zann_core::vault_search::SearchMatch) -> String {
+    catalogue()
+        .read()
+        .expect("catalogue lock poisoned")
+        .search_caption(reason)
+}
+
 pub fn field_label(key: &str) -> String {
     catalogue()
         .read()
@@ -60,15 +78,4 @@ pub fn seconds_label(seconds: u32) -> String {
 
 pub fn has(key: &str) -> bool {
     catalogue().read().is_ok_and(|catalogue| catalogue.has(key))
-}
-
-/// Native display uses the desktop's local timezone; stored timestamps stay RFC3339.
-pub fn format_timestamp(timestamp: &str) -> String {
-    match chrono::DateTime::parse_from_rfc3339(timestamp) {
-        Ok(date) => date
-            .with_timezone(&chrono::Local)
-            .format("%Y-%m-%d %H:%M")
-            .to_string(),
-        Err(error) => format!("{timestamp} ({error})"),
-    }
 }

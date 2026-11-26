@@ -1,7 +1,6 @@
 //! Storage-scoped sync feedback. State/action policy stays in zann-ui-core;
 //! this adapter owns the native nonmodal popover and metadata read requests.
 use super::*;
-use chrono::{DateTime, Local};
 use std::collections::HashMap;
 use zann_client::app::local::StorageLink;
 use zann_ui_core::{sync_indicator, SyncAction, SyncIndicator, SyncLink, SyncStatusInput};
@@ -254,13 +253,4 @@ pub(super) fn sync_icon(indicator: &SyncIndicator) -> &'static str {
         SyncIndicator::Synced { .. } => "emblem-ok-symbolic",
     }
 }
-pub(super) fn local_time_label(at: &str) -> Option<String> {
-    let at = DateTime::parse_from_rfc3339(at).ok()?.with_timezone(&Local);
-    Some(if at.date_naive() == Local::now().date_naive() {
-        at.format("%H:%M").to_string()
-    } else {
-        at.format("%Y-%m-%d %H:%M").to_string()
-    })
-}
-
 mod details;

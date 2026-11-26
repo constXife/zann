@@ -141,6 +141,8 @@ pub struct ItemPreview {
     /// Who or where the item is for, from its payload; see `item_subtitle`.
     pub subtitle: Option<ItemSubtitle>,
     #[serde(skip)]
+    pub search_match: Option<crate::vault_search::SearchMatch>,
+    #[serde(skip)]
     pub favicon_rgba: Option<Vec<u8>>,
     pub sync_status: SyncStatus,
     pub updated_at: DateTime<Utc>,
@@ -181,9 +183,36 @@ pub struct AppStatus {
     pub storages_count: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+/// Half-open UTC interval for an item's last modification.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct UpdatedRange {
+    start: DateTime<Utc>,
+    end: DateTime<Utc>,
+}
+
+impl UpdatedRange {
+    pub fn from_unix_seconds(start: i64, end: i64) -> Option<Self> {
+        if start >= end {
+            return None;
+        }
+        Some(Self {
+            start: DateTime::from_timestamp(start, 0)?,
+            end: DateTime::from_timestamp(end, 0)?,
+        })
+    }
+
+    pub fn start(self) -> DateTime<Utc> {
+        self.start
+    }
+    pub fn end(self) -> DateTime<Utc> {
+        self.end
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct ItemListParams {
-    pub query: Option<String>,
+    pub updated: Option<UpdatedRange>,
+    pub query: Option<crate::vault_search::VaultQuery>,
     pub limit: Option<u32>,
     pub cursor: Option<String>,
     pub include_deleted: bool,

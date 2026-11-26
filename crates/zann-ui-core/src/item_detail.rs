@@ -42,9 +42,30 @@ impl fmt::Debug for ItemDetailField {
 /// Parse the canonical payload schema and project fields in reading order.
 /// Explicit metadata overrides the field-kind masking and multiline policy.
 pub fn project_item_fields(payload_json: &str) -> Result<Vec<ItemDetailField>, PayloadError> {
-    Ok(project_payload_fields(EncryptedPayload::from_bytes(
-        payload_json.as_bytes(),
-    )?))
+    let payload = EncryptedPayload::from_bytes(payload_json.as_bytes())?;
+    Ok(project_payload_fields(payload))
+}
+
+pub fn history_change_label(change: zann_core::ChangeType) -> &'static str {
+    use zann_core::ChangeType;
+    match change {
+        ChangeType::Create => "items.historyChangeCreate",
+        ChangeType::Update => "items.historyChangeUpdate",
+        ChangeType::Delete => "items.historyChangeDelete",
+        ChangeType::Restore => "items.historyChangeRestore",
+    }
+}
+
+pub fn history_author<'a>(name: Option<&'a str>, email: &'a str) -> &'a str {
+    name.filter(|name| !name.trim().is_empty()).unwrap_or(email)
+}
+
+/// Historical payloads carry their own type, which can differ from the live card.
+pub fn project_history_payload(
+    payload_json: &str,
+) -> Result<(String, Vec<ItemDetailField>), PayloadError> {
+    let payload = EncryptedPayload::from_bytes(payload_json.as_bytes())?;
+    Ok((payload.type_id.clone(), project_payload_fields(payload)))
 }
 
 /// Consumes a decrypted payload, transferring field values to presentation.
@@ -52,7 +73,7 @@ pub fn project_item_fields(payload_json: &str) -> Result<Vec<ItemDetailField>, P
 pub fn project_payload_fields(mut payload: EncryptedPayload) -> Vec<ItemDetailField> {
     let mut fields: Vec<_> = std::mem::take(&mut payload.fields)
         .into_iter()
-        .filter(|(key, _)| crate::item_policy::ceremony_field_visible(&payload.type_id, key))
+        .filter(|(key, _)| zann_core::item_policy::ceremony_field_visible(&payload.type_id, key))
         .map(|(key, mut field)| {
             let meta = field.meta.as_ref();
             let is_otp = matches!(field.kind, FieldKind::Otp);
@@ -66,11 +87,7 @@ pub fn project_payload_fields(mut payload: EncryptedPayload) -> Vec<ItemDetailFi
                 None
             };
             ItemDetailField {
-                label_key: if is_otp {
-                    "otp".to_string()
-                } else {
-                    key.clone()
-                },
+                label_key: zann_core::item_policy::field_label_key(field.kind, &key).to_owned(),
                 key,
                 value: std::mem::take(&mut field.value),
                 masked,

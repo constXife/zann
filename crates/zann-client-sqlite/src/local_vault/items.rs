@@ -2,8 +2,8 @@ use super::*;
 
 impl LocalVault {
     pub fn items_list(&self, filter: ItemsFilter, page: Page) -> LocalResult<ItemPage> {
-        let _context = self.context_gate.read().expect("lock poisoned");
-        let _root = self.root_key()?;
+        let context = self.context_gate.read().expect("lock poisoned");
+        self.root_key()?;
         let pool = self.pool();
         let Some(storage_id) = *self.storage_id.lock().expect("lock poisoned") else {
             return Ok(empty_page());
@@ -25,13 +25,23 @@ impl LocalVault {
         };
         let services = LocalServices::new(&pool, master_key.as_ref());
         let params = ItemListParams {
+            updated: filter.updated,
             query: filter.query,
             limit: Some(page.limit),
             cursor: page.cursor,
             include_deleted: filter.include_deleted,
         };
-        let result =
-            self.runtime_block_on(services.list_items(self.storage_id()?, vault_id, params))?;
+        // A full-vault read must yield its keys on lock or context change.
+        let (operation, cancel) =
+            SessionOperation::new(std::time::Instant::now() + std::time::Duration::from_secs(60));
+        let _in_flight = self.item_reads.register(operation.operation_id(), cancel);
+        let generation = self.context_generation.load(Ordering::SeqCst);
+        drop(context);
+        let result = self.finish_item_read(
+            &operation,
+            generation,
+            services.list_items(storage_id, vault_id, params),
+        )?;
         Ok(ItemPage {
             items: result
                 .items
@@ -42,6 +52,7 @@ impl LocalVault {
                     path: item.path,
                     type_id: item.type_id,
                     subtitle: item.subtitle,
+                    search_match: item.search_match,
                     favicon_rgba: item.favicon_rgba,
                     deleted: item.deleted_at.is_some(),
                 })
@@ -154,6 +165,7 @@ impl LocalVault {
             .runtime
             .block_on(LocalItemHistoryRepo::new(&pool).list_by_item_limit(
                 self.storage_id()?,
+                vault_id,
                 item_id,
                 limit,
             ))
@@ -161,9 +173,10 @@ impl LocalVault {
         Ok(history
             .into_iter()
             .map(|entry| ItemHistorySummary {
+                id: entry.id.to_string(),
                 version: entry.version,
                 checksum: entry.checksum,
-                change_type: entry.change_type.as_i32(),
+                change_type: entry.change_type,
                 changed_by_name: entry.changed_by_name,
                 changed_by_email: entry.changed_by_email,
                 created_at: entry.created_at.to_rfc3339(),
@@ -172,19 +185,21 @@ impl LocalVault {
             .collect())
     }
 
-    pub fn item_history_get(&self, id: String, version: i64) -> LocalResult<ItemHistoryDetail> {
+    pub fn item_history_get(&self, id: String, entry_id: String) -> LocalResult<ItemHistoryDetail> {
         let _context = self.context_gate.read().expect("lock poisoned");
         let master_key = self.account_key()?;
         let vault_id = self.vault_id()?;
         let item_id = Uuid::parse_str(&id)
             .map_err(|_| LocalError::InvalidArgument("invalid item id".to_string()))?;
+        let entry_id = Uuid::parse_str(&entry_id)
+            .map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
         let pool = self.pool();
         let history = self
             .runtime
-            .block_on(LocalItemHistoryRepo::new(&pool).get_by_item_version(
+            .block_on(LocalItemHistoryRepo::new(&pool).get_by_item_entry(
                 self.storage_id()?,
                 item_id,
-                version,
+                entry_id,
             ))
             .map_err(|err| LocalError::Service(err.to_string()))?
             .ok_or_else(|| LocalError::InvalidArgument("history not found".to_string()))?;
@@ -203,17 +218,25 @@ impl LocalVault {
         let payload_json =
             serde_json::to_string(&payload).map_err(|err| LocalError::Service(err.to_string()))?;
         Ok(ItemHistoryDetail {
-            version,
+            version: history.version,
+            checksum: history.checksum,
             payload_json,
         })
     }
 
-    pub fn item_history_restore(&self, id: String, version: i64) -> LocalResult<ItemDetail> {
+    pub fn item_history_restore(
+        &self,
+        id: String,
+        entry_id: String,
+        checksum: String,
+    ) -> LocalResult<ItemDetail> {
         let _context = self.context_gate.read().expect("lock poisoned");
         let master_key = self.account_key()?;
         let vault_id = self.vault_id()?;
         let item_id = Uuid::parse_str(&id)
             .map_err(|_| LocalError::InvalidArgument("invalid item id".to_string()))?;
+        let entry_id = Uuid::parse_str(&entry_id)
+            .map_err(|err| LocalError::InvalidArgument(err.to_string()))?;
         let pool = self.pool();
         let item = self
             .runtime
@@ -226,7 +249,12 @@ impl LocalVault {
             ));
         }
         let services = LocalServices::new(&pool, master_key.as_ref());
-        self.runtime_block_on(services.restore_item_version(self.storage_id()?, item_id, version))?;
+        self.runtime_block_on(services.restore_item_version(
+            self.storage_id()?,
+            item_id,
+            entry_id,
+            &checksum,
+        ))?;
         self.item_detail_in(&services, self.storage_id()?, item_id)
     }
 }

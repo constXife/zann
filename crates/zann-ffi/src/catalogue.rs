@@ -6,7 +6,7 @@ use std::sync::Arc;
 use zann_ui_core::Catalogue;
 
 #[derive(uniffi::Object)]
-pub struct TranslationCatalogue(Catalogue);
+pub struct TranslationCatalogue(pub(crate) Catalogue);
 
 #[uniffi::export]
 impl TranslationCatalogue {
